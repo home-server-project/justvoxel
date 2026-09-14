@@ -3,6 +3,20 @@ set -Eeuo pipefail
 
 readonly config_file="/etc/justvoxel/minecraft-backup.env"
 readonly lock_file="/run/justvoxel-minecraft-maintenance.lock"
+leave_stopped=0
+
+while (( $# > 0 )); do
+    case "$1" in
+        --leave-stopped)
+            leave_stopped=1
+            ;;
+        *)
+            echo "ERROR: unknown minecraft-backup option: $1" >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
 
 if [[ ${EUID} -ne 0 ]]; then
     echo "ERROR: minecraft-backup must run as root." >&2
@@ -54,10 +68,6 @@ if [[ ! -d "${minecraft_data_path}" ]]; then
     exit 1
 fi
 
-# A configured mount point can represent a dedicated disk, a dedicated
-# partition, NFS, SMB/CIFS, or another administrator-selected filesystem.
-# Validate it before creating the backup directory so a missing mount can never
-# silently redirect backups onto the system filesystem.
 if [[ -n "${BACKUP_MOUNT_POINT}" ]]; then
     if [[ "${BACKUP_MOUNT_POINT}" != /* ]]; then
         echo "ERROR: BACKUP_MOUNT_POINT must be absolute." >&2
@@ -101,10 +111,12 @@ if [[ ! -w "${minecraft_backup_path}" ]]; then
     exit 1
 fi
 
-exec 9>"${lock_file}"
-if ! flock -n 9; then
-    echo "ERROR: another JustVoxel Minecraft maintenance operation is already running." >&2
-    exit 1
+if [[ ${JUSTVOXEL_MAINTENANCE_LOCK_HELD:-0} != 1 ]]; then
+    exec 9>"${lock_file}"
+    if ! flock -n 9; then
+        echo "ERROR: another JustVoxel Minecraft maintenance operation is already running." >&2
+        exit 1
+    fi
 fi
 
 minecraft_source_parent="$(dirname -- "${minecraft_data_path}")"
@@ -175,9 +187,14 @@ if (( ${#minecraft_archives[@]} > BACKUP_KEEP )); then
 fi
 
 if (( minecraft_restart_required )); then
-    echo "Starting ${MINECRAFT_SERVICE}"
-    systemctl start "${MINECRAFT_SERVICE}"
-    minecraft_restart_required=0
+    if (( leave_stopped )); then
+        echo "Backup completed; leaving ${MINECRAFT_SERVICE} stopped for the calling maintenance operation"
+        minecraft_restart_required=0
+    else
+        echo "Starting ${MINECRAFT_SERVICE}"
+        systemctl start "${MINECRAFT_SERVICE}"
+        minecraft_restart_required=0
+    fi
 fi
 
 echo "Backup completed successfully"

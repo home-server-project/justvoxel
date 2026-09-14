@@ -38,9 +38,11 @@ The Minecraft data path is configurable independently from backups. This support
 
 ## mjust
 
-The initial management layer includes first setup, safe configuration changes, status/start/stop/restart, online player checks, Java and Floodgate whitelist operations, verified cold backup, player-safe Minecraft container updates, logs, and appliance validation.
+The management layer includes first setup, safe configuration changes, status/start/stop/restart, online player checks, Java and Floodgate whitelist operations, verified cold backup, player-aware Minecraft maintenance, logs, and appliance validation.
 
-The Minecraft game version is pinned during setup. Container-image updates do not silently upgrade the world version.
+The container image tag and Minecraft/Paper game version are independent administrator choices. The container can use upstream `stable`, upstream `latest`, or a validated custom/exact tag. Minecraft can stay pinned to an exact stable Paper-supported version or deliberately follow `VERSION=LATEST`.
+
+Moving container tags are refreshed only when mjust explicitly pulls them. Pre-update backups use the same retention policy as timer/manual backups. JustVoxel tracks one previous Minecraft image for rollback and never performs a broad Podman image prune.
 
 Disk partitioning, formatting, fstab generation, and storage migration are represented in the design but intentionally perform no destructive action yet. Those safeguards belong to the next storage implementation step.
 

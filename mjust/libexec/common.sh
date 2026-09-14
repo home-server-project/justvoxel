@@ -10,6 +10,10 @@ readonly JV_QUADLET=/etc/containers/systemd/minecraft.container
 readonly JV_BACKUP_SERVICE=/etc/systemd/system/minecraft-backup.service
 readonly JV_BACKUP_TIMER=/etc/systemd/system/minecraft-backup.timer
 readonly JV_MAINTENANCE_LOCK=/run/justvoxel-minecraft-maintenance.lock
+readonly JV_STATE_DIR=/var/lib/justvoxel/state
+readonly JV_PREVIOUS_IMAGE_STATE=${JV_STATE_DIR}/minecraft-previous-image-id
+readonly JV_MINECRAFT_IMAGE_REPO=docker.io/itzg/minecraft-server
+readonly JV_ITZG_IMAGES_URL=https://raw.githubusercontent.com/itzg/docker-minecraft-server/refs/heads/master/images.json
 readonly JV_PAPER_USER_AGENT='JustVoxel/0.1 (https://github.com/home-server-project/justvoxel)'
 
 require_root() {
@@ -26,6 +30,17 @@ require_config() {
     fi
     # shellcheck disable=SC1090
     source "${JV_CONFIG}"
+
+    # Compatibility defaults for configurations created before image/version
+    # policy became administrator-configurable.
+    MINECRAFT_IMAGE_TAG="${MINECRAFT_IMAGE_TAG:-latest}"
+    if [[ -z ${MINECRAFT_VERSION_MODE:-} ]]; then
+        if [[ ${MINECRAFT_VERSION:-} == LATEST ]]; then
+            MINECRAFT_VERSION_MODE=latest
+        else
+            MINECRAFT_VERSION_MODE=pinned
+        fi
+    fi
 }
 
 prompt_default() {
@@ -76,6 +91,22 @@ memory_to_mib() {
     fi
 }
 
+suggest_memory_values() {
+    local total_mib
+    total_mib=$(( $(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0) / 1024 ))
+    if (( total_mib >= 32768 )); then
+        printf '8G 12G\n'
+    elif (( total_mib >= 16384 )); then
+        printf '6G 8G\n'
+    elif (( total_mib >= 8192 )); then
+        printf '4G 6G\n'
+    elif (( total_mib >= 4096 )); then
+        printf '2G 3G\n'
+    else
+        printf '1G 2G\n'
+    fi
+}
+
 validate_positive_int() {
     [[ $1 =~ ^[1-9][0-9]*$ ]]
 }
@@ -94,6 +125,34 @@ shell_quote_assignment() {
     printf '%s=' "${key}"
     printf '%q' "${value}"
     printf '\n'
+}
+
+minecraft_image_ref() {
+    printf '%s:%s' "${JV_MINECRAFT_IMAGE_REPO}" "${MINECRAFT_IMAGE_TAG}"
+}
+
+validate_minecraft_image_tag() {
+    local tag="$1" catalog
+    [[ ${tag} =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || return 1
+
+    skopeo inspect "docker://${JV_MINECRAFT_IMAGE_REPO}:${tag}" >/dev/null 2>&1 || return 1
+
+    # Upstream publishes a machine-readable list of moving Java/image tags.
+    # Reject entries upstream explicitly marks deprecated. Exact release tags are
+    # not in this catalog and are accepted when the registry confirms they exist.
+    catalog="$(curl -fsSL "${JV_ITZG_IMAGES_URL}" 2>/dev/null || true)"
+    if [[ -n ${catalog} ]] && jq -e --arg tag "${tag}" \
+        '.[] | select(.tag == $tag and (.deprecated // false) == true)' \
+        <<< "${catalog}" >/dev/null 2>&1; then
+        return 2
+    fi
+    return 0
+}
+
+resolve_latest_itzg_release() {
+    curl -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" \
+        https://api.github.com/repos/itzg/docker-minecraft-server/releases/latest 2>/dev/null \
+        | jq -r '.tag_name // empty'
 }
 
 write_main_config() {
@@ -121,6 +180,8 @@ write_main_config() {
         shell_quote_assignment BEDROCK_PORT "${BEDROCK_PORT}"
         shell_quote_assignment JAVA_MEMORY "${JAVA_MEMORY}"
         shell_quote_assignment CONTAINER_MEMORY "${CONTAINER_MEMORY}"
+        shell_quote_assignment MINECRAFT_IMAGE_TAG "${MINECRAFT_IMAGE_TAG}"
+        shell_quote_assignment MINECRAFT_VERSION_MODE "${MINECRAFT_VERSION_MODE}"
         shell_quote_assignment MINECRAFT_VERSION "${MINECRAFT_VERSION}"
         shell_quote_assignment MINECRAFT_UID "${MINECRAFT_UID}"
         shell_quote_assignment MINECRAFT_GID "${MINECRAFT_GID}"
@@ -218,7 +279,7 @@ render_runtime() {
     install -d -m0700 -o root -g root "${JV_CONFIG_DIR}"
     install -d -m0755 -o root -g root /etc/containers/systemd
 
-    local rcon_password env_tmp quadlet_tmp backup_tmp service_tmp timer_tmp
+    local rcon_password env_tmp quadlet_tmp backup_tmp service_tmp timer_tmp image_ref
     if [[ -r ${JV_MC_ENV} ]]; then
         rcon_password="$(sed -n 's/^RCON_PASSWORD=//p' "${JV_MC_ENV}" | head -n1)"
     else
@@ -245,8 +306,10 @@ render_runtime() {
     install -o root -g root -m0600 "${env_tmp}" "${JV_MC_ENV}"
     rm -f "${env_tmp}"
 
+    image_ref="$(minecraft_image_ref)"
     quadlet_tmp="$(mktemp /etc/containers/systemd/.minecraft.container.XXXXXX)"
     cp "${JV_TEMPLATE_ROOT}/quadlets/minecraft.container.in" "${quadlet_tmp}"
+    replace_token "${quadlet_tmp}" MINECRAFT_IMAGE "${image_ref}"
     replace_token "${quadlet_tmp}" DATA_PATH "${DATA_PATH}"
     replace_token "${quadlet_tmp}" JAVA_PORT "${JAVA_PORT}"
     replace_token "${quadlet_tmp}" CONTAINER_MEMORY "${CONTAINER_MEMORY^^}"

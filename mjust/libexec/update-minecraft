@@ -1,19 +1,42 @@
 #!/usr/bin/bash
-set -euo pipefail
+set -Eeuo pipefail
 source /usr/libexec/justvoxel/mjust/common.sh
 require_root
 require_config
 
-readonly image='docker.io/itzg/minecraft-server:latest'
+image="$(minecraft_image_ref)"
+latest_mc=''
+latest_image_release=''
+
+printf 'Minecraft container image: %s\n' "${image}"
+printf 'Minecraft game version policy: %s (%s)\n' "${MINECRAFT_VERSION_MODE}" "${MINECRAFT_VERSION}"
+
+if [[ ${MINECRAFT_VERSION_MODE} == pinned ]]; then
+    latest_mc="$(resolve_latest_stable_paper_version || true)"
+    if [[ -n ${latest_mc} && ${latest_mc} != "${MINECRAFT_VERSION}" ]]; then
+        echo "Newer stable Paper-supported Minecraft version available: ${latest_mc}"
+        echo "Current pinned Minecraft version: ${MINECRAFT_VERSION}"
+        echo 'Use mjust configure when you intentionally want to change the game version.'
+    fi
+else
+    echo 'Minecraft VERSION=LATEST is enabled; a future start/restart can upgrade the game version.'
+fi
+
+if [[ ${MINECRAFT_IMAGE_TAG} != stable && ${MINECRAFT_IMAGE_TAG} != latest ]]; then
+    latest_image_release="$(resolve_latest_itzg_release || true)"
+    echo "Container image tag is pinned/custom: ${MINECRAFT_IMAGE_TAG}"
+    [[ -n ${latest_image_release} ]] && echo "Latest upstream itzg image release: ${latest_image_release}"
+    echo 'mjust will still check this exact tag for a rebuilt digest; use mjust configure to change tags.'
+fi
 
 remote_digest="$(skopeo inspect --format '{{.Digest}}' "docker://${image}" 2>/dev/null || true)"
-local_digest="$(podman image inspect "${image}" --format '{{.Digest}}' 2>/dev/null || true)"
-local_id="$(podman image inspect "${image}" --format '{{.Id}}' 2>/dev/null || true)"
-
-if [[ ! ${remote_digest} =~ ^sha256:[0-9a-f]{64}$ || ! ${local_digest} =~ ^sha256:[0-9a-f]{64}$ || -z ${local_id} ]]; then
-    echo 'ERROR: could not safely determine Minecraft image update state.' >&2
+if [[ ! ${remote_digest} =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    echo "ERROR: could not inspect configured Minecraft image: ${image}" >&2
     exit 1
 fi
+
+local_digest="$(podman image inspect "${image}" --format '{{.Digest}}' 2>/dev/null || true)"
+local_id="$(podman image inspect "${image}" --format '{{.Id}}' 2>/dev/null || true)"
 
 was_active=no
 running_id=''
@@ -23,85 +46,145 @@ if systemctl is-active --quiet minecraft.service; then
     [[ -n ${running_id} ]] || { echo 'ERROR: Minecraft service is active but running image identity is unknown.' >&2; exit 1; }
 fi
 
-if [[ ${remote_digest} != ${local_digest} ]]; then
+if [[ -z ${local_id} ]]; then
+    state=image_missing
+    echo 'Minecraft container: configured image is not local and must be pulled'
+elif [[ ! ${local_digest} =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    echo 'ERROR: local Minecraft image exists but its registry digest is unknown.' >&2
+    exit 1
+elif [[ ${remote_digest} != ${local_digest} ]]; then
     state=update_available
-    echo 'Minecraft container: UPDATE AVAILABLE'
+    echo 'Minecraft container: UPDATE AVAILABLE for the configured tag'
 elif [[ ${was_active} == yes && ${running_id} != ${local_id} ]]; then
     state=restart_needed
-    echo 'Minecraft container: newer image is already pulled; restart is needed'
+    echo 'Minecraft container: selected local image differs from the running image; restart is needed'
 else
     state=current
-    echo 'Minecraft container: current'
+    echo 'Minecraft container: current for the configured tag'
 fi
 
 echo "Remote digest: ${remote_digest}"
-echo "Local digest:  ${local_digest}"
+[[ -n ${local_digest} ]] && echo "Local digest:  ${local_digest}"
 [[ -n ${running_id} ]] && echo "Running image: ${running_id}"
 
 if [[ ${state} == current ]]; then
     exit 0
 fi
 
+players_override=no
+query_players() {
+    podman exec minecraft rcon-cli 'list' 2>/dev/null || true
+}
+
+approve_online_players() {
+    local players="$1"
+    echo "${players}"
+    if grep -q 'There are 0 of' <<< "${players}"; then
+        return 0
+    fi
+    echo 'Players appear to be online.'
+    echo 'If you continue, the normal Minecraft stop path will announce the shutdown and wait 60 seconds before stopping.'
+    if confirm 'Continue with maintenance anyway?'; then
+        players_override=yes
+        return 0
+    fi
+    echo 'Update cancelled; Minecraft was left untouched.'
+    exit 0
+}
+
 if [[ ${was_active} == yes ]]; then
     echo 'Checking players through RCON.'
-    players="$(podman exec minecraft rcon-cli 'list' 2>/dev/null || true)"
+    players="$(query_players)"
     if [[ -z ${players} ]]; then
         echo 'ERROR: could not confirm player status. Leaving Minecraft untouched.' >&2
         exit 1
     fi
-    echo "${players}"
-    if ! grep -q 'There are 0 of' <<< "${players}"; then
-        echo 'Update refused because someone appears to be playing.' >&2
-        exit 1
-    fi
+    approve_online_players "${players}"
 fi
 
-if ! confirm 'Create a cold backup and apply this Minecraft container update?'; then
+if ! confirm 'Create a cold backup and apply this Minecraft container maintenance?'; then
     echo 'Update cancelled.'
     exit 0
 fi
 
-if [[ ${was_active} == yes ]]; then
-    echo 'Rechecking players immediately before maintenance.'
-    players="$(podman exec minecraft rcon-cli 'list' 2>/dev/null || true)"
-    if [[ -z ${players} ]] || ! grep -q 'There are 0 of' <<< "${players}"; then
-        echo 'ERROR: player state changed or became unknown. Update cancelled.' >&2
-        exit 1
-    fi
-fi
-
-echo 'Creating pre-update cold backup.'
-/usr/libexec/justvoxel/minecraft-backup
-
 exec 9>"${JV_MAINTENANCE_LOCK}"
 if ! flock -n 9; then
-    echo 'ERROR: another JustVoxel maintenance operation started after the backup. Update cancelled.' >&2
+    echo 'ERROR: another JustVoxel maintenance operation is already running.' >&2
     exit 1
 fi
 
 if [[ ${was_active} == yes ]]; then
-    if ! wait_for_rcon 900; then
-        echo 'ERROR: Minecraft did not return after the pre-update backup.' >&2
+    echo 'Final player check immediately before the graceful stop.'
+    players="$(query_players)"
+    if [[ -z ${players} ]]; then
+        echo 'ERROR: player state became unknown. Update cancelled.' >&2
         exit 1
     fi
-    echo 'Final player check before image change.'
-    players="$(podman exec minecraft rcon-cli 'list' 2>/dev/null || true)"
-    if [[ -z ${players} ]] || ! grep -q 'There are 0 of' <<< "${players}"; then
-        echo 'ERROR: a player joined or RCON became unavailable. Update cancelled; backup was kept.' >&2
-        exit 1
+    echo "${players}"
+    if ! grep -q 'There are 0 of' <<< "${players}" && [[ ${players_override} != yes ]]; then
+        echo 'A player joined after the first check.'
+        echo 'Continuing will use the normal 60-second shutdown warning.'
+        if confirm 'Continue anyway?'; then
+            players_override=yes
+        else
+            echo 'Update cancelled; Minecraft was left untouched.'
+            exit 0
+        fi
     fi
 fi
 
-if [[ ${state} == update_available ]]; then
+old_local_id="${local_id}"
+old_running_id="${running_id}"
+restart_if_pull_fails=0
+
+cleanup() {
+    local result=$?
+    trap - EXIT
+    if (( result != 0 )) && (( restart_if_pull_fails )) && [[ ${was_active} == yes ]] && ! systemctl is-active --quiet minecraft.service; then
+        echo 'Maintenance failed before the new image was selected; attempting to restart the previous server.' >&2
+        systemctl start minecraft.service || true
+    fi
+    exit "${result}"
+}
+trap cleanup EXIT
+
+echo 'Creating pre-update cold backup.'
+# The updater already owns the shared maintenance lock. A successful backup
+# leaves Minecraft stopped so there is only one shutdown/start cycle.
+JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 \
+    /usr/libexec/justvoxel/minecraft-backup --leave-stopped
+
+if [[ ${was_active} == yes ]]; then
+    restart_if_pull_fails=1
+fi
+
+if [[ ${state} == update_available || ${state} == image_missing ]]; then
+    echo "Pulling ${image}"
     podman pull "${image}"
 fi
 
+# From this point the configured image may have changed. Do not automatically
+# loop a failed start; preserve the previous image for administrator rollback.
+restart_if_pull_fails=0
+
+new_local_id="$(podman image inspect "${image}" --format '{{.Id}}' 2>/dev/null || true)"
+new_local_digest="$(podman image inspect "${image}" --format '{{.Digest}}' 2>/dev/null || true)"
+[[ -n ${new_local_id} ]] || { echo 'ERROR: selected Minecraft image is still not available locally.' >&2; exit 1; }
+
 if [[ ${was_active} == yes ]]; then
-    systemctl restart minecraft.service
+    systemctl start minecraft.service
     if ! wait_for_rcon 900; then
         echo 'ERROR: Minecraft did not become ready after the update.' >&2
+        echo "Previous image ID retained for rollback: ${old_running_id:-${old_local_id:-unknown}}" >&2
         exit 1
     fi
+
+    new_running_id="$(podman inspect minecraft --format '{{.Image}}' 2>/dev/null || true)"
+    if [[ ${new_running_id} != ${new_local_id} ]]; then
+        echo 'ERROR: Minecraft is not running the newly selected local image.' >&2
+        exit 1
+    fi
+
     echo 'Minecraft version:'
     podman exec minecraft rcon-cli 'version'
     echo 'Plugins:'
@@ -110,15 +193,41 @@ if [[ ${was_active} == yes ]]; then
         echo 'Geyser:'
         podman exec minecraft rcon-cli 'geyser version'
     fi
-
-    new_local_id="$(podman image inspect "${image}" --format '{{.Id}}')"
-    new_running_id="$(podman inspect minecraft --format '{{.Image}}')"
-    if [[ ${new_running_id} != ${new_local_id} ]]; then
-        echo 'ERROR: Minecraft is not running the newly selected local image.' >&2
-        exit 1
-    fi
-    echo 'Minecraft container update completed and verified.'
 else
     echo 'Minecraft was stopped before maintenance, so it remains stopped.'
     echo 'The selected image is ready for the next start.'
 fi
+
+candidate_previous_id=''
+if [[ -n ${old_running_id} && ${old_running_id} != ${new_local_id} ]]; then
+    candidate_previous_id="${old_running_id}"
+elif [[ -n ${old_local_id} && ${old_local_id} != ${new_local_id} ]]; then
+    candidate_previous_id="${old_local_id}"
+fi
+
+if [[ -n ${candidate_previous_id} ]]; then
+    install -d -m0700 -o root -g root "${JV_STATE_DIR}"
+    older_previous_id=''
+    if [[ -r ${JV_PREVIOUS_IMAGE_STATE} ]]; then
+        older_previous_id="$(head -n1 "${JV_PREVIOUS_IMAGE_STATE}" 2>/dev/null || true)"
+    fi
+
+    if [[ -n ${older_previous_id} && ${older_previous_id} != ${candidate_previous_id} && ${older_previous_id} != ${new_local_id} ]]; then
+        if [[ -n $(podman ps -a --filter "ancestor=${older_previous_id}" -q 2>/dev/null || true) ]]; then
+            echo "Older Minecraft image ${older_previous_id} is still used by a container; leaving it in place."
+        elif podman image exists "${older_previous_id}" 2>/dev/null; then
+            echo "Removing Minecraft image older than the one-generation rollback copy: ${older_previous_id}"
+            podman image rm "${older_previous_id}" >/dev/null || \
+                echo "WARNING: could not remove older Minecraft image ${older_previous_id}; no broad image prune was attempted." >&2
+        fi
+    fi
+
+    tmp_state="$(mktemp "${JV_STATE_DIR}/.minecraft-previous-image.XXXXXX")"
+    printf '%s\n' "${candidate_previous_id}" > "${tmp_state}"
+    chmod 0600 "${tmp_state}"
+    mv -f "${tmp_state}" "${JV_PREVIOUS_IMAGE_STATE}"
+    echo "Previous Minecraft image retained for rollback: ${candidate_previous_id}"
+fi
+
+trap - EXIT
+echo "Minecraft container maintenance completed and verified. Local digest: ${new_local_digest:-unknown}"

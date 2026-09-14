@@ -6,25 +6,96 @@ require_config
 
 show_configuration() {
     echo "Minecraft data: ${DATA_PATH}"
-    echo "Minecraft version: ${MINECRAFT_VERSION}"
+    echo "Container image: $(minecraft_image_ref)"
+    echo "Minecraft version policy: ${MINECRAFT_VERSION_MODE} (${MINECRAFT_VERSION})"
     echo "Java heap / container limit: ${JAVA_MEMORY} / ${CONTAINER_MEMORY}"
     echo "Java port: ${JAVA_PORT}/tcp"
     echo "Bedrock: ${BEDROCK_ENABLED} (${BEDROCK_PORT}/udp)"
     echo "Backup type: ${BACKUP_TYPE}"
     echo "Backup path: ${BACKUP_PATH}"
     echo "Backup mount: ${BACKUP_MOUNT_POINT:-none}"
+    echo "Backup retention: ${BACKUP_KEEP}"
     echo "Backup schedule: ${BACKUP_SCHEDULE}"
     echo "Backup timer enabled: ${BACKUP_TIMER_ENABLED}"
     echo "Maximum players: ${MAX_PLAYERS}"
     echo "MOTD: ${MOTD}"
 }
 
+configure_runtime_policy() {
+    local image_choice version_choice candidate rc latest_stable
+
+    image_choice="$(choose 'Container image tag' \
+        "keep current (${MINECRAFT_IMAGE_TAG})" \
+        'stable - newest released container image' \
+        'latest - newest main-branch container image' \
+        'custom/exact tag')"
+    case "${image_choice}" in
+        1) candidate="${MINECRAFT_IMAGE_TAG}" ;;
+        2) candidate=stable ;;
+        3) candidate=latest ;;
+        4) candidate="$(prompt_default 'Container image tag' "${MINECRAFT_IMAGE_TAG}")" ;;
+    esac
+
+    if validate_minecraft_image_tag "${candidate}"; then
+        MINECRAFT_IMAGE_TAG="${candidate}"
+    else
+        rc=$?
+        if (( rc == 2 )); then
+            echo "ERROR: upstream marks container image tag '${candidate}' deprecated." >&2
+        else
+            echo "ERROR: container image tag '${candidate}' could not be validated in the upstream registry." >&2
+        fi
+        exit 1
+    fi
+
+    version_choice="$(choose 'Minecraft/Paper game version' \
+        "keep current (${MINECRAFT_VERSION_MODE}: ${MINECRAFT_VERSION})" \
+        'pin newest Minecraft version with a stable Paper build' \
+        'pin another exact Minecraft version with a stable Paper build' \
+        'LATEST - follow the latest Minecraft release on container start')"
+    case "${version_choice}" in
+        1)
+            ;;
+        2)
+            latest_stable="$(resolve_latest_stable_paper_version || true)"
+            [[ -n ${latest_stable} ]] || { echo 'ERROR: could not resolve the newest stable Paper-supported Minecraft version.' >&2; exit 1; }
+            MINECRAFT_VERSION_MODE=pinned
+            MINECRAFT_VERSION="${latest_stable}"
+            ;;
+        3)
+            read -r -p 'Exact Minecraft version: ' candidate
+            [[ ${candidate} =~ ^[0-9A-Za-z._-]+$ && ${candidate} != LATEST ]] || { echo 'ERROR: invalid exact Minecraft version.' >&2; exit 1; }
+            if ! paper_version_has_stable_build "${candidate}"; then
+                echo "ERROR: PaperMC did not confirm a stable build for ${candidate}." >&2
+                exit 1
+            fi
+            MINECRAFT_VERSION_MODE=pinned
+            MINECRAFT_VERSION="${candidate}"
+            ;;
+        4)
+            echo 'WARNING: VERSION=LATEST can upgrade the Minecraft game version on a future container start/restart.'
+            if ! confirm 'Use the LATEST Minecraft release channel?'; then
+                echo 'Minecraft version policy unchanged.'
+            else
+                MINECRAFT_VERSION_MODE=latest
+                MINECRAFT_VERSION=LATEST
+            fi
+            ;;
+    esac
+
+    write_main_config
+    render_runtime
+    echo "Runtime policy updated: $(minecraft_image_ref), Minecraft ${MINECRAFT_VERSION_MODE} (${MINECRAFT_VERSION})."
+    echo 'The running server is not restarted automatically. Use mjust restart to apply game/config changes; use mjust update-minecraft to check or pull the configured image tag.'
+}
+
 choice="$(choose 'Safe configuration changes' \
     'Show current configuration' \
+    'Change container image / Minecraft version policy' \
     'Change memory limits' \
     'Change Java/Bedrock host ports' \
     'Change MOTD and maximum players' \
-    'Change backup schedule/timer' \
+    'Change backup retention/schedule/timer' \
     'Storage/data migration (planned, not implemented yet)' \
     'Cancel')"
 
@@ -34,6 +105,11 @@ case "${choice}" in
         exit 0
         ;;
     2)
+        configure_runtime_policy
+        ;;
+    3)
+        read -r suggested_java suggested_container < <(suggest_memory_values)
+        echo "Suggested for this host: Java ${suggested_java}, container ${suggested_container}."
         JAVA_MEMORY="$(prompt_default 'Java heap' "${JAVA_MEMORY}")"
         CONTAINER_MEMORY="$(prompt_default 'Container memory limit' "${CONTAINER_MEMORY}")"
         validate_memory "${JAVA_MEMORY}" && validate_memory "${CONTAINER_MEMORY}" || {
@@ -48,7 +124,7 @@ case "${choice}" in
         render_runtime
         echo 'Memory configuration updated. Restart Minecraft when it is safe to apply it.'
         ;;
-    3)
+    4)
         old_java="${JAVA_PORT}"
         old_bedrock_enabled="${BEDROCK_ENABLED}"
         old_bedrock="${BEDROCK_PORT}"
@@ -63,7 +139,7 @@ case "${choice}" in
         update_firewall_ports "${old_java}" "${old_bedrock_enabled}" "${old_bedrock}"
         echo 'Port configuration updated. Restart Minecraft when it is safe to apply it.'
         ;;
-    4)
+    5)
         MOTD="$(prompt_default 'Server message (MOTD)' "${MOTD}")"
         validate_simple_text "${MOTD}" || { echo 'ERROR: MOTD must be one line.' >&2; exit 1; }
         MAX_PLAYERS="$(prompt_default 'Maximum players' "${MAX_PLAYERS}")"
@@ -72,7 +148,9 @@ case "${choice}" in
         render_runtime
         echo 'Server settings updated. Restart Minecraft when it is safe to apply them.'
         ;;
-    5)
+    6)
+        BACKUP_KEEP="$(prompt_default 'Number of backups to keep' "${BACKUP_KEEP}")"
+        validate_positive_int "${BACKUP_KEEP}" || { echo 'ERROR: backup retention must be positive.' >&2; exit 1; }
         BACKUP_SCHEDULE="$(prompt_default 'Backup systemd calendar schedule' "${BACKUP_SCHEDULE}")"
         systemd-analyze calendar "${BACKUP_SCHEDULE}" >/dev/null 2>&1 || {
             echo 'ERROR: invalid systemd calendar schedule.' >&2
@@ -85,13 +163,13 @@ case "${choice}" in
         fi
         write_main_config
         render_runtime
-        echo 'Backup timer configuration updated.'
+        echo 'Backup retention/timer configuration updated.'
         ;;
-    6)
+    7)
         echo 'Storage migration and destructive disk/partition provisioning are reserved for the next storage implementation step.'
         echo 'No changes were made.'
         ;;
-    7)
+    8)
         echo 'Cancelled.'
         ;;
 esac

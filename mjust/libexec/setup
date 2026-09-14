@@ -36,9 +36,10 @@ if confirm 'Is the Minecraft data path on a separate mounted filesystem (for exa
     [[ -n ${DATA_EXPECTED_UUID} || -n ${DATA_EXPECTED_SOURCE} ]] || { echo 'ERROR: could not identify the selected data mount.' >&2; exit 1; }
 fi
 
-JAVA_MEMORY="$(prompt_default 'Java heap' '4G')"
+read -r suggested_java suggested_container < <(suggest_memory_values)
+JAVA_MEMORY="$(prompt_default 'Java heap' "${suggested_java}")"
 validate_memory "${JAVA_MEMORY}" || { echo 'ERROR: use a value such as 4G or 4096M.' >&2; exit 1; }
-CONTAINER_MEMORY="$(prompt_default 'Container memory limit' '6G')"
+CONTAINER_MEMORY="$(prompt_default 'Container memory limit' "${suggested_container}")"
 validate_memory "${CONTAINER_MEMORY}" || { echo 'ERROR: use a value such as 6G or 6144M.' >&2; exit 1; }
 (( $(memory_to_mib "${CONTAINER_MEMORY}") > $(memory_to_mib "${JAVA_MEMORY}") )) || { echo 'ERROR: container memory limit must be larger than the Java heap.' >&2; exit 1; }
 
@@ -66,28 +67,61 @@ MINECRAFT_UID="$(prompt_default 'Minecraft data UID' '1000')"
 MINECRAFT_GID="$(prompt_default 'Minecraft data GID' '1000')"
 [[ ${MINECRAFT_UID} =~ ^[1-9][0-9]*$ && ${MINECRAFT_GID} =~ ^[1-9][0-9]*$ ]] || { echo 'ERROR: UID and GID must be positive numeric IDs.' >&2; exit 1; }
 
-resolved_version=''
-echo 'Checking PaperMC for the newest Minecraft version with a stable Paper build...'
-resolved_version="$(resolve_latest_stable_paper_version || true)"
-if [[ -n ${resolved_version} ]]; then
-    echo "Stable Paper-supported Minecraft version found: ${resolved_version}"
-    MINECRAFT_VERSION="$(prompt_default 'Minecraft version to pin' "${resolved_version}")"
+echo
+echo 'Container image policy'
+echo 'The container image tag and Minecraft/Paper game version are independent settings.'
+image_choice="$(choose 'Choose the itzg/minecraft-server image tag policy' \
+    'latest - newest main-branch container image (default; matches the proven deployment)' \
+    'stable - newest released container image' \
+    'custom/exact tag - advanced or pinned container image release')"
+case "${image_choice}" in
+    1) MINECRAFT_IMAGE_TAG=latest ;;
+    2) MINECRAFT_IMAGE_TAG=stable ;;
+    3) MINECRAFT_IMAGE_TAG="$(prompt_default 'Container image tag' 'latest')" ;;
+esac
+if validate_minecraft_image_tag "${MINECRAFT_IMAGE_TAG}"; then
+    :
 else
-    echo 'WARNING: PaperMC stable-version lookup failed. Enter the exact Minecraft version to pin.' >&2
-    read -r -p 'Minecraft version: ' MINECRAFT_VERSION
-fi
-[[ ${MINECRAFT_VERSION} =~ ^[0-9A-Za-z._-]+$ && ${MINECRAFT_VERSION} != LATEST ]] || { echo 'ERROR: JustVoxel requires a safe explicit Minecraft version, not LATEST.' >&2; exit 1; }
-if paper_version_has_stable_build "${MINECRAFT_VERSION}"; then
-    echo "Confirmed stable Paper build availability for ${MINECRAFT_VERSION}."
-else
-    paper_check_rc=$?
-    if (( paper_check_rc == 1 )); then
-        echo "ERROR: PaperMC reports no stable Paper build for ${MINECRAFT_VERSION}." >&2
+    image_tag_rc=$?
+    if (( image_tag_rc == 2 )); then
+        echo "ERROR: upstream marks container image tag '${MINECRAFT_IMAGE_TAG}' deprecated." >&2
     else
-        echo 'ERROR: could not verify the selected Minecraft version with PaperMC.' >&2
+        echo "ERROR: container image tag '${MINECRAFT_IMAGE_TAG}' could not be validated in the upstream registry." >&2
     fi
     exit 1
 fi
+
+echo
+echo 'Minecraft/Paper version policy'
+version_choice="$(choose 'Choose the Minecraft game version policy' \
+    'pin the newest Minecraft version with a stable Paper build (recommended)' \
+    'LATEST - follow the latest Minecraft release when the container starts' \
+    'pin another exact Minecraft version that has a stable Paper build')"
+case "${version_choice}" in
+    1)
+        echo 'Checking PaperMC for the newest Minecraft version with a stable Paper build...'
+        MINECRAFT_VERSION="$(resolve_latest_stable_paper_version || true)"
+        [[ -n ${MINECRAFT_VERSION} ]] || { echo 'ERROR: could not resolve a stable Paper-supported Minecraft version.' >&2; exit 1; }
+        MINECRAFT_VERSION_MODE=pinned
+        echo "Selected stable Paper-supported Minecraft version: ${MINECRAFT_VERSION}"
+        ;;
+    2)
+        MINECRAFT_VERSION_MODE=latest
+        MINECRAFT_VERSION=LATEST
+        echo 'WARNING: VERSION=LATEST can upgrade the Minecraft game version on a future container start/restart.'
+        ;;
+    3)
+        MINECRAFT_VERSION_MODE=pinned
+        read -r -p 'Exact Minecraft version: ' MINECRAFT_VERSION
+        [[ ${MINECRAFT_VERSION} =~ ^[0-9A-Za-z._-]+$ && ${MINECRAFT_VERSION} != LATEST ]] || { echo 'ERROR: invalid exact Minecraft version.' >&2; exit 1; }
+        if paper_version_has_stable_build "${MINECRAFT_VERSION}"; then
+            echo "Confirmed stable Paper build availability for ${MINECRAFT_VERSION}."
+        else
+            echo "ERROR: PaperMC did not confirm a stable build for ${MINECRAFT_VERSION}." >&2
+            exit 1
+        fi
+        ;;
+esac
 
 backup_choice="$(choose 'Backup target type' \
     'Directory on the system filesystem' \
@@ -163,7 +197,9 @@ echo
 echo 'Planned configuration:'
 echo "  Minecraft data: ${DATA_PATH}"
 [[ -n ${DATA_MOUNT_POINT} ]] && echo "  Minecraft data mount: ${DATA_MOUNT_POINT}"
-echo "  Minecraft version: ${MINECRAFT_VERSION}"
+echo "  Container image: $(minecraft_image_ref)"
+echo "  Minecraft version policy: ${MINECRAFT_VERSION_MODE} (${MINECRAFT_VERSION})"
+echo "  Java heap / container limit: ${JAVA_MEMORY} / ${CONTAINER_MEMORY}"
 echo "  Java: ${JAVA_PORT}/tcp"
 if [[ ${BEDROCK_ENABLED} == yes ]]; then
     echo "  Bedrock: ${BEDROCK_PORT}/udp"
@@ -173,6 +209,7 @@ fi
 echo "  Backup type: ${BACKUP_TYPE}"
 echo "  Backup path: ${BACKUP_PATH}"
 [[ -n ${BACKUP_MOUNT_POINT} ]] && echo "  Backup mount: ${BACKUP_MOUNT_POINT}"
+echo "  Backup retention: ${BACKUP_KEEP}"
 echo "  Backup schedule: ${BACKUP_SCHEDULE} (${BACKUP_TIMER_ENABLED})"
 echo
 if ! confirm 'Create this JustVoxel configuration?'; then
@@ -220,5 +257,7 @@ echo "Java address: $(hostname -f 2>/dev/null || hostname):${JAVA_PORT}"
 if [[ ${BEDROCK_ENABLED} == yes ]]; then
     echo "Bedrock address: $(hostname -f 2>/dev/null || hostname):${BEDROCK_PORT}"
 fi
+echo "Minecraft image: $(minecraft_image_ref)"
+echo "Minecraft version policy: ${MINECRAFT_VERSION_MODE} (${MINECRAFT_VERSION})"
 echo "Minecraft data: ${DATA_PATH}"
 echo "Backups: ${BACKUP_PATH}"

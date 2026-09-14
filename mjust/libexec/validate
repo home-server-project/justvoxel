@@ -35,11 +35,32 @@ else
     pass 'active runtime files are local copies under /etc'
 fi
 
-if grep -Fq 'VERSION=LATEST' "${JV_MC_ENV}" 2>/dev/null; then
-    fail 'Minecraft game version is not pinned'
+expected_image="$(minecraft_image_ref)"
+if grep -Fqx "Image=${expected_image}" "${JV_QUADLET}" 2>/dev/null; then
+    pass "Minecraft container image policy is rendered as ${expected_image}"
 else
-    pass "Minecraft game version is pinned to ${MINECRAFT_VERSION}"
+    fail "Quadlet does not contain configured image ${expected_image}"
 fi
+
+case "${MINECRAFT_VERSION_MODE}" in
+    pinned)
+        if [[ ${MINECRAFT_VERSION} == LATEST ]] || grep -Fq 'VERSION=LATEST' "${JV_MC_ENV}" 2>/dev/null; then
+            fail 'Minecraft version policy says pinned but runtime uses LATEST'
+        else
+            pass "Minecraft game version is pinned to ${MINECRAFT_VERSION}"
+        fi
+        ;;
+    latest)
+        if [[ ${MINECRAFT_VERSION} == LATEST ]] && grep -Fqx 'VERSION=LATEST' "${JV_MC_ENV}" 2>/dev/null; then
+            pass 'Minecraft game version intentionally follows the LATEST release channel'
+        else
+            fail 'Minecraft version policy says latest but runtime is not VERSION=LATEST'
+        fi
+        ;;
+    *)
+        fail "unknown Minecraft version policy: ${MINECRAFT_VERSION_MODE}"
+        ;;
+esac
 
 if grep -Eq '(^|[=:])25575([/:]|$)|podman\.sock' "${JV_QUADLET}" 2>/dev/null; then
     fail 'Quadlet exposes RCON or Podman socket access'
