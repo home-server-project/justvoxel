@@ -1,0 +1,3 @@
+#!/usr/bin/bash
+set -euo pipefail
+exec /usr/bin/just --justfile /usr/share/justvoxel/mjust/justfile "$@"
