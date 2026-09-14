@@ -43,19 +43,30 @@ dnf --setopt=tsflags=noscripts --enablerepo=netbird install -y "${NETBIRD_PACKAG
 systemctl disable netbird.service 2>/dev/null || true
 
 systemctl enable NetworkManager.service 2>/dev/null || true
+systemctl enable systemd-resolved.service
 systemctl enable firewalld.service 2>/dev/null || true
 systemctl enable sshd.service 2>/dev/null || true
 
 install -d -m0755 /usr/share/doc/justvoxel
 cp -avf /ctx/docs/. /usr/share/doc/justvoxel/
 
+install -d -m0755 /usr/share/justvoxel/templates
+cp -avf /ctx/templates/. /usr/share/justvoxel/templates/
+
+install -d -m0755 /usr/libexec/justvoxel
+install -m0755 /ctx/runtime/minecraft-backup /usr/libexec/justvoxel/minecraft-backup
+
 install -d -m0755 /usr/libexec/justvoxel/health
 install -m0755 /ctx/build_files/validate/common.sh /usr/libexec/justvoxel/health/common
 install -m0755 /ctx/build_files/validate/vm.sh /usr/libexec/justvoxel/health/vm
 install -m0755 /ctx/build_files/validate/baremetal.sh /usr/libexec/justvoxel/health/baremetal
 
-for cmd in bootc podman skopeo nmcli nmtui firewall-cmd sshd sudo just tailscale netbird curl jq; do
+for cmd in \
+    bootc podman skopeo nmcli nmtui resolvectl firewall-cmd sshd sudo just \
+    tailscale netbird curl jq findmnt mountpoint flock mkfs.xfs mount.nfs mount.cifs \
+    qemu-ga vmtoolsd iperf3; do
     command -v "${cmd}"
 done
 
+bash -n /usr/libexec/justvoxel/minecraft-backup
 semodule -l >/dev/null

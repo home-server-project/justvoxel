@@ -1,0 +1,25 @@
+[Unit]
+Description=JustVoxel Paper Minecraft Java and Bedrock Cross-Play Server
+Wants=network-online.target
+After=network-online.target
+RequiresMountsFor=@@DATA_PATH@@
+
+[Container]
+Image=docker.io/itzg/minecraft-server:latest
+ContainerName=minecraft
+PublishPort=@@JAVA_PORT@@:25565/tcp
+@@BEDROCK_PUBLISH_PORT@@
+Volume=@@DATA_PATH@@:/data:Z
+EnvironmentFile=/etc/justvoxel/minecraft.env
+Memory=@@CONTAINER_MEMORY@@
+StopTimeout=180
+LogDriver=journald
+
+[Service]
+Restart=always
+RestartSec=10
+TimeoutStartSec=900
+TimeoutStopSec=240
+
+[Install]
+WantedBy=multi-user.target

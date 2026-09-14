@@ -34,6 +34,8 @@ FROM scratch AS ctx
 COPY build_files /build_files
 COPY system_files /system_files
 COPY docs /docs
+COPY templates /templates
+COPY runtime /runtime
 COPY cosign.pub /cosign.pub
 
 FROM scratch AS justvoxel-common

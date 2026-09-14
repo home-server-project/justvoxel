@@ -7,13 +7,24 @@ JustVoxel composes an AlmaLinux 10 minimal-plus bootc root filesystem using Alma
 - AlmaLinux: https://almalinux.org/
 - bootc: https://github.com/bootc-dev/bootc
 
-## Passive Black Box build reference
+## Passive Black Box / Home Server Rose build references
 
-The repository/build layout is adapted from the proven Home Server Project / Highway to IT Passive Black Box AlmaLinux bootc build pattern:
+The repository/build layout is adapted from proven Home Server Project / Highway to IT AlmaLinux bootc patterns:
 
 - https://github.com/highwaytoit/pasiv-black-box
+- https://github.com/home-server-project/home-server-rose
 
-JustVoxel intentionally removes the monitoring/Cockpit stack and keeps only patterns useful to this Minecraft appliance.
+JustVoxel reuses only patterns useful to this purpose-built Minecraft appliance rather than the broader Rose/Cockpit/HCI stack.
+
+## Minecraft runtime projects
+
+JustVoxel ships configuration templates that reference upstream runtime projects. Their Minecraft/Paper/Geyser/Floodgate/ViaVersion artifacts are fetched from their proper upstream sources at runtime; those server binaries are not redistributed in the bootc image.
+
+- itzg/minecraft-server: https://github.com/itzg/docker-minecraft-server
+- Paper: https://papermc.io/
+- Geyser: https://geysermc.org/
+- Floodgate: https://geysermc.org/wiki/floodgate/
+- ViaVersion: https://viaversion.com/
 
 ## Universal Blue `ujust` / `ugum`
 
@@ -21,4 +32,4 @@ The planned `mjust` user interaction model is inspired by Universal Blue's `ujus
 
 - https://github.com/ublue-os/packages/tree/main/packages/ublue-os-just
 
-The current Step 1 foundation contains no copied `ujust` or `ugum` source code. If future JustVoxel work directly reuses or adapts Universal Blue source, the applicable Apache-2.0 license and attribution will be retained with those files.
+The current implementation contains no copied `ujust` or `ugum` source code. If future JustVoxel work directly reuses or adapts Universal Blue source, the applicable Apache-2.0 license and attribution will be retained with those files.
