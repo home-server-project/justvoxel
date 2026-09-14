@@ -1,0 +1,306 @@
+---
+name: Build signed JustVoxel stable images
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/README.md'
+      - 'docs/**'
+  workflow_dispatch:
+  schedule:
+    - cron: '20 4 * * 6'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  CURRENT_TAG: '10'
+  RECHUNK_MAX_LAYERS: '127'
+  OCI_LAYER_LIMIT: '128'
+  ALMA_REPOS_IMAGE: quay.io/almalinuxorg/10-base:10
+  BOOTC_IMAGECTL_IMAGE: quay.io/centos-bootc/centos-bootc:stream10
+  ALMA_BUILDER_IMAGE: quay.io/almalinuxorg/10-kitten-base:10-kitten
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: vm
+            target: justvoxel-vm
+            repository: justvoxel-vm
+          - variant: baremetal
+            target: justvoxel-baremetal
+            repository: justvoxel-baremetal
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y podman skopeo jq
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: 'v3.1.2'
+
+      - name: Resolve Alma build inputs
+        id: inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          resolve_ref() {
+            local image="$1" digest
+            digest="$(skopeo inspect --override-arch amd64 --format '{{.Digest}}' "docker://${image}")"
+            [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
+            printf '%s@%s' "${image%:*}" "${digest}"
+          }
+          echo "repos_ref=$(resolve_ref "${ALMA_REPOS_IMAGE}")" >> "${GITHUB_OUTPUT}"
+          echo "imagectl_ref=$(resolve_ref "${BOOTC_IMAGECTL_IMAGE}")" >> "${GITHUB_OUTPUT}"
+          echo "builder_ref=$(resolve_ref "${ALMA_BUILDER_IMAGE}")" >> "${GITHUB_OUTPUT}"
+
+      - name: Build ${{ matrix.variant }} image
+        shell: bash
+        env:
+          ALMA_REPOS_REF: ${{ steps.inputs.outputs.repos_ref }}
+          BOOTC_IMAGECTL_REF: ${{ steps.inputs.outputs.imagectl_ref }}
+          ALMA_BUILDER_REF: ${{ steps.inputs.outputs.builder_ref }}
+          TARGET: ${{ matrix.target }}
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          set -euo pipefail
+          image_repo="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ matrix.repository }}"
+          sudo podman build \
+            --pull=always \
+            --security-opt=label=disable \
+            --cap-add=all \
+            --device /dev/fuse \
+            --build-arg "ALMA_REPOS_IMAGE=${ALMA_REPOS_REF}" \
+            --build-arg "BOOTC_IMAGECTL_IMAGE=${BOOTC_IMAGECTL_REF}" \
+            --build-arg "ALMA_BUILDER_IMAGE=${ALMA_BUILDER_REF}" \
+            --build-arg "JUSTVOXEL_VM_REPOSITORY=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/justvoxel-vm" \
+            --build-arg "JUSTVOXEL_BAREMETAL_REPOSITORY=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/justvoxel-baremetal" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --target "${TARGET}" \
+            --tag "justvoxel-${VARIANT}:unrechunked" \
+            --file Containerfile \
+            .
+          echo "IMAGE_REPOSITORY=${image_repo}" >> "${GITHUB_ENV}"
+
+      - name: Rechunk ${{ matrix.variant }} image
+        id: rechunk
+        shell: bash
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          set -euo pipefail
+          rechunk_tmp="${RUNNER_TEMP}/justvoxel-${VARIANT}-rechunk"
+          sudo mkdir -p "${rechunk_tmp}"
+          sudo chmod 1777 "${rechunk_tmp}"
+          sudo podman run --rm --privileged \
+            -v /var/lib/containers:/var/lib/containers \
+            -v "${rechunk_tmp}:/var/tmp" \
+            --entrypoint /usr/libexec/bootc-base-imagectl \
+            "localhost/justvoxel-${VARIANT}:unrechunked" \
+            rechunk \
+            --max-layers "${RECHUNK_MAX_LAYERS}" \
+            "localhost/justvoxel-${VARIANT}:unrechunked" \
+            "localhost/justvoxel-${VARIANT}:test"
+          layer_count="$(sudo skopeo inspect --raw "containers-storage:localhost/justvoxel-${VARIANT}:test" | jq -r '.layers | length')"
+          [[ "${layer_count}" =~ ^[0-9]+$ ]]
+          (( layer_count <= OCI_LAYER_LIMIT ))
+          echo "layers=${layer_count}" >> "${GITHUB_OUTPUT}"
+
+      - name: Validate completed image
+        shell: bash
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          set -euo pipefail
+          sudo podman run --rm \
+            --entrypoint /bin/bash \
+            "justvoxel-${VARIANT}:test" \
+            -c "/usr/libexec/justvoxel/health/common && /usr/libexec/justvoxel/health/${VARIANT} && bootc container lint --fatal-warnings"
+
+      - name: Prepare stable tag
+        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "BUILD_TAG=10-$(date -u +%Y%m%d)-${GITHUB_SHA:0:7}" >> "${GITHUB_ENV}"
+
+      - name: Login to GHCR
+        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${HOME}/.docker"
+          printf '%s' "${GHCR_TOKEN}" | podman login \
+            --authfile "${HOME}/.docker/config.json" \
+            ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+          chmod 600 "${HOME}/.docker/config.json"
+
+      - name: Push stable image
+        id: push
+        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        shell: bash
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          set -euo pipefail
+          sudo podman tag "justvoxel-${VARIANT}:test" "${IMAGE_REPOSITORY}:${BUILD_TAG}"
+          sudo podman tag "justvoxel-${VARIANT}:test" "${IMAGE_REPOSITORY}:${CURRENT_TAG}"
+          sudo podman push \
+            --authfile "${HOME}/.docker/config.json" \
+            --digestfile /tmp/digest \
+            "${IMAGE_REPOSITORY}:${BUILD_TAG}"
+          sudo podman push \
+            --authfile "${HOME}/.docker/config.json" \
+            "${IMAGE_REPOSITORY}:${CURRENT_TAG}"
+          digest="$(cat /tmp/digest)"
+          [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+
+      - name: Sign stable image digest
+        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        shell: bash
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cosign sign -y \
+            --new-bundle-format=false \
+            --use-signing-config=false \
+            --key env://COSIGN_PRIVATE_KEY \
+            "${IMAGE_REPOSITORY}@${DIGEST}"
+
+      - name: Verify stable signature
+        if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        shell: bash
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cosign verify \
+            --new-bundle-format=false \
+            --key cosign.pub \
+            "${IMAGE_REPOSITORY}@${DIGEST}"
+
+      - name: Build summary
+        if: always()
+        shell: bash
+        env:
+          VARIANT: ${{ matrix.variant }}
+          LAYERS: ${{ steps.rechunk.outputs.layers }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          {
+            echo "## JustVoxel ${VARIANT}"
+            echo
+            echo "- Base: AlmaLinux 10 minimal-plus"
+            echo "- Rechunked layers: ${LAYERS:-unknown} / ${OCI_LAYER_LIMIT}"
+            echo "- Image: ${IMAGE_REPOSITORY:-not-published}"
+            echo "- Digest: ${DIGEST:-not-published}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  release:
+    name: Publish GitHub release
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install release tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y jq skopeo
+
+      - name: Login to GHCR
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "${GHCR_TOKEN}" | skopeo login ghcr.io \
+            --username "${GITHUB_ACTOR}" --password-stdin
+
+      - name: Publish release for both variants
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          registry="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
+          short_sha="${GITHUB_SHA:0:7}"
+          pattern="^10-[0-9]{8}-${short_sha}$"
+          release_tag="$(skopeo list-tags "docker://${registry}/justvoxel-vm" | jq -r --arg pattern "${pattern}" '.Tags[]? | select(test($pattern))' | sort | tail -n 1)"
+          [[ -n "${release_tag}" ]]
+
+          vm_image="${registry}/justvoxel-vm:${release_tag}"
+          baremetal_image="${registry}/justvoxel-baremetal:${release_tag}"
+          vm_digest="$(skopeo inspect --format '{{.Digest}}' "docker://${vm_image}")"
+          baremetal_digest="$(skopeo inspect --format '{{.Digest}}' "docker://${baremetal_image}")"
+          [[ "${vm_digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "${baremetal_digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
+
+          build_date="${release_tag#10-}"
+          build_date="${build_date%-${short_sha}}"
+          release_date="${build_date:0:4}-${build_date:4:2}-${build_date:6:2}"
+
+          cat > /tmp/release-notes.md <<EOF_NOTES
+          ## JustVoxel 10
+
+          Signed AlmaLinux 10 minimal-plus bootc images.
+
+          ### VM
+
+          \`\`\`text
+          ${registry}/justvoxel-vm:10
+          ${vm_image}
+          ${vm_digest}
+          \`\`\`
+
+          ### Bare Metal
+
+          \`\`\`text
+          ${registry}/justvoxel-baremetal:10
+          ${baremetal_image}
+          ${baremetal_digest}
+          \`\`\`
+
+          Minecraft runtime and mjust are developed in later implementation stages; this release workflow is intentionally main-only.
+          EOF_NOTES
+
+          title="JustVoxel 10 - ${release_date}"
+          if gh release view "${release_tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release edit "${release_tag}" --repo "${GITHUB_REPOSITORY}" --title "${title}" --notes-file /tmp/release-notes.md --latest
+          else
+            gh release create "${release_tag}" --repo "${GITHUB_REPOSITORY}" --target "${GITHUB_SHA}" --title "${title}" --notes-file /tmp/release-notes.md --latest
+          fi
