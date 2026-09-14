@@ -1,0 +1,64 @@
+set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+
+default:
+    @/usr/libexec/justvoxel/mjust/menu
+
+setup:
+    @sudo /usr/libexec/justvoxel/mjust/setup
+
+configure:
+    @sudo /usr/libexec/justvoxel/mjust/configure
+
+status:
+    @sudo /usr/libexec/justvoxel/mjust/service status
+
+start:
+    @sudo /usr/libexec/justvoxel/mjust/service start
+
+stop:
+    @sudo /usr/libexec/justvoxel/mjust/service stop
+
+restart:
+    @sudo /usr/libexec/justvoxel/mjust/service restart
+
+players:
+    @sudo /usr/libexec/justvoxel/mjust/players
+
+whitelist-list:
+    @sudo /usr/libexec/justvoxel/mjust/whitelist list
+
+whitelist-add-java name:
+    @sudo /usr/libexec/justvoxel/mjust/whitelist add-java "{{name}}"
+
+whitelist-remove-java name:
+    @sudo /usr/libexec/justvoxel/mjust/whitelist remove-java "{{name}}"
+
+whitelist-add-bedrock gamertag:
+    @sudo /usr/libexec/justvoxel/mjust/whitelist add-bedrock "{{gamertag}}"
+
+whitelist-remove-bedrock gamertag:
+    @sudo /usr/libexec/justvoxel/mjust/whitelist remove-bedrock "{{gamertag}}"
+
+backup:
+    @sudo /usr/libexec/justvoxel/minecraft-backup
+
+update-minecraft:
+    @sudo /usr/libexec/justvoxel/mjust/update-minecraft
+
+logs:
+    @sudo journalctl -u minecraft.service -f
+
+validate:
+    @sudo /usr/libexec/justvoxel/mjust/validate
+
+storage-plan:
+    @sudo /usr/libexec/justvoxel/mjust/storage-plan
+
+storage-disk:
+    @sudo /usr/libexec/justvoxel/mjust/storage-provision disk
+
+storage-partition:
+    @sudo /usr/libexec/justvoxel/mjust/storage-provision partition
+
+storage-migrate:
+    @sudo /usr/libexec/justvoxel/mjust/storage-provision migrate
