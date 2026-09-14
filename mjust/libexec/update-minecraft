@@ -1,0 +1,124 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/common.sh
+require_root
+require_config
+
+readonly image='docker.io/itzg/minecraft-server:latest'
+
+remote_digest="$(skopeo inspect --format '{{.Digest}}' "docker://${image}" 2>/dev/null || true)"
+local_digest="$(podman image inspect "${image}" --format '{{.Digest}}' 2>/dev/null || true)"
+local_id="$(podman image inspect "${image}" --format '{{.Id}}' 2>/dev/null || true)"
+
+if [[ ! ${remote_digest} =~ ^sha256:[0-9a-f]{64}$ || ! ${local_digest} =~ ^sha256:[0-9a-f]{64}$ || -z ${local_id} ]]; then
+    echo 'ERROR: could not safely determine Minecraft image update state.' >&2
+    exit 1
+fi
+
+was_active=no
+running_id=''
+if systemctl is-active --quiet minecraft.service; then
+    was_active=yes
+    running_id="$(podman inspect minecraft --format '{{.Image}}' 2>/dev/null || true)"
+    [[ -n ${running_id} ]] || { echo 'ERROR: Minecraft service is active but running image identity is unknown.' >&2; exit 1; }
+fi
+
+if [[ ${remote_digest} != ${local_digest} ]]; then
+    state=update_available
+    echo 'Minecraft container: UPDATE AVAILABLE'
+elif [[ ${was_active} == yes && ${running_id} != ${local_id} ]]; then
+    state=restart_needed
+    echo 'Minecraft container: newer image is already pulled; restart is needed'
+else
+    state=current
+    echo 'Minecraft container: current'
+fi
+
+echo "Remote digest: ${remote_digest}"
+echo "Local digest:  ${local_digest}"
+[[ -n ${running_id} ]] && echo "Running image: ${running_id}"
+
+if [[ ${state} == current ]]; then
+    exit 0
+fi
+
+if [[ ${was_active} == yes ]]; then
+    echo 'Checking players through RCON.'
+    players="$(podman exec minecraft rcon-cli 'list' 2>/dev/null || true)"
+    if [[ -z ${players} ]]; then
+        echo 'ERROR: could not confirm player status. Leaving Minecraft untouched.' >&2
+        exit 1
+    fi
+    echo "${players}"
+    if ! grep -q 'There are 0 of' <<< "${players}"; then
+        echo 'Update refused because someone appears to be playing.' >&2
+        exit 1
+    fi
+fi
+
+if ! confirm 'Create a cold backup and apply this Minecraft container update?'; then
+    echo 'Update cancelled.'
+    exit 0
+fi
+
+if [[ ${was_active} == yes ]]; then
+    echo 'Rechecking players immediately before maintenance.'
+    players="$(podman exec minecraft rcon-cli 'list' 2>/dev/null || true)"
+    if [[ -z ${players} ]] || ! grep -q 'There are 0 of' <<< "${players}"; then
+        echo 'ERROR: player state changed or became unknown. Update cancelled.' >&2
+        exit 1
+    fi
+fi
+
+echo 'Creating pre-update cold backup.'
+/usr/libexec/justvoxel/minecraft-backup
+
+exec 9>"${JV_MAINTENANCE_LOCK}"
+if ! flock -n 9; then
+    echo 'ERROR: another JustVoxel maintenance operation started after the backup. Update cancelled.' >&2
+    exit 1
+fi
+
+if [[ ${was_active} == yes ]]; then
+    if ! wait_for_rcon 900; then
+        echo 'ERROR: Minecraft did not return after the pre-update backup.' >&2
+        exit 1
+    fi
+    echo 'Final player check before image change.'
+    players="$(podman exec minecraft rcon-cli 'list' 2>/dev/null || true)"
+    if [[ -z ${players} ]] || ! grep -q 'There are 0 of' <<< "${players}"; then
+        echo 'ERROR: a player joined or RCON became unavailable. Update cancelled; backup was kept.' >&2
+        exit 1
+    fi
+fi
+
+if [[ ${state} == update_available ]]; then
+    podman pull "${image}"
+fi
+
+if [[ ${was_active} == yes ]]; then
+    systemctl restart minecraft.service
+    if ! wait_for_rcon 900; then
+        echo 'ERROR: Minecraft did not become ready after the update.' >&2
+        exit 1
+    fi
+    echo 'Minecraft version:'
+    podman exec minecraft rcon-cli 'version'
+    echo 'Plugins:'
+    podman exec minecraft rcon-cli 'plugins'
+    if [[ ${BEDROCK_ENABLED} == yes ]]; then
+        echo 'Geyser:'
+        podman exec minecraft rcon-cli 'geyser version'
+    fi
+
+    new_local_id="$(podman image inspect "${image}" --format '{{.Id}}')"
+    new_running_id="$(podman inspect minecraft --format '{{.Image}}')"
+    if [[ ${new_running_id} != ${new_local_id} ]]; then
+        echo 'ERROR: Minecraft is not running the newly selected local image.' >&2
+        exit 1
+    fi
+    echo 'Minecraft container update completed and verified.'
+else
+    echo 'Minecraft was stopped before maintenance, so it remains stopped.'
+    echo 'The selected image is ready for the next start.'
+fi

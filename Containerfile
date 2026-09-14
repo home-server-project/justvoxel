@@ -36,6 +36,7 @@ COPY system_files /system_files
 COPY docs /docs
 COPY templates /templates
 COPY runtime /runtime
+COPY mjust /mjust
 COPY cosign.pub /cosign.pub
 
 FROM scratch AS justvoxel-common

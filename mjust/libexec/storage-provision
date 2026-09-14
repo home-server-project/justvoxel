@@ -1,0 +1,24 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/common.sh
+require_root
+
+action="${1:-}"
+case "${action}" in
+    disk)
+        echo 'Dedicated-disk provisioning skeleton is present but intentionally disabled in Step 3.'
+        ;;
+    partition)
+        echo 'Dedicated-partition provisioning skeleton is present but intentionally disabled in Step 3.'
+        ;;
+    migrate)
+        echo 'Minecraft data migration skeleton is present but intentionally disabled in Step 3.'
+        ;;
+    *)
+        echo 'Usage: storage-provision {disk|partition|migrate}' >&2
+        exit 2
+        ;;
+esac
+
+echo 'No disk, partition, filesystem, mount table, or Minecraft data was changed.'
+exit 3

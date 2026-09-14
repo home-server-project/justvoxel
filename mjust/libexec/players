@@ -1,0 +1,15 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/common.sh
+require_root
+require_config
+
+if ! systemctl is-active --quiet minecraft.service; then
+    echo 'Minecraft is not running.'
+    exit 1
+fi
+
+if ! podman exec minecraft rcon-cli 'list'; then
+    echo 'ERROR: RCON player query failed.' >&2
+    exit 1
+fi

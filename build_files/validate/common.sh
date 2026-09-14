@@ -2,32 +2,16 @@
 set -euo pipefail
 
 for cmd in \
-    bootc podman skopeo nmcli nmtui resolvectl firewall-cmd sshd sudo just \
+    bootc podman skopeo nmcli nmtui resolvectl firewall-cmd sshd sudo just mjust \
     tailscale netbird curl jq openssl tar gzip rsync ping dig traceroute nc tcpdump lsof \
     findmnt mountpoint flock mkfs.xfs mount.nfs mount.cifs qemu-ga vmtoolsd iperf3; do
     command -v "${cmd}" >/dev/null
 done
 
 rpm -q \
-    NetworkManager \
-    NetworkManager-tui \
-    systemd-resolved \
-    firewalld \
-    openssh-server \
-    sudo \
-    podman \
-    skopeo \
-    just \
-    container-selinux \
-    policycoreutils-python-utils \
-    selinux-policy-extra \
-    util-linux \
-    xfsprogs \
-    iperf3 \
-    nfs-utils \
-    cifs-utils \
-    qemu-guest-agent \
-    open-vm-tools \
+    NetworkManager NetworkManager-tui systemd-resolved firewalld openssh-server sudo \
+    podman skopeo just container-selinux policycoreutils-python-utils selinux-policy-extra \
+    util-linux xfsprogs iperf3 nfs-utils cifs-utils qemu-guest-agent open-vm-tools \
     hyperv-daemons >/dev/null
 
 semodule -l >/dev/null
@@ -68,11 +52,19 @@ for template in \
     test -f "${template}"
 done
 
-# Step 2 ships runtime templates but does not create an active server or accept
-# the Minecraft EULA. mjust will render mutable configuration in the next stage.
+test -x /usr/bin/mjust
+test -f /usr/share/justvoxel/mjust/justfile
+for script in /usr/libexec/justvoxel/mjust/*; do
+    [[ -f "${script}" ]] || continue
+    bash -n "${script}"
+done
+/usr/bin/mjust --list >/dev/null
+
+# The bootc image ships only immutable source templates and management logic.
+# Active, administrator-owned runtime files are created later by `mjust setup`.
 test ! -e /etc/containers/systemd/minecraft.container
 test ! -e /etc/justvoxel/minecraft.env
-test ! -e /usr/bin/mjust
+test ! -e /etc/justvoxel/justvoxel.conf
 
 if dnf repolist --enabled | grep -Eiq 'epel|tailscale|netbird'; then
     echo "ERROR: external package repository enabled in completed image" >&2

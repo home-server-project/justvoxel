@@ -9,7 +9,7 @@ JustVoxel composes an AlmaLinux 10 minimal-plus bootc root filesystem using Alma
 
 ## Passive Black Box / Home Server Rose build references
 
-The repository/build layout is adapted from proven Home Server Project / Highway to IT AlmaLinux bootc patterns:
+The repository/build layout and immutable-template-to-local-configuration model are adapted from proven Home Server Project / Highway to IT AlmaLinux bootc patterns:
 
 - https://github.com/highwaytoit/pasiv-black-box
 - https://github.com/home-server-project/home-server-rose
@@ -28,8 +28,8 @@ JustVoxel ships configuration templates that reference upstream runtime projects
 
 ## Universal Blue `ujust` / `ugum`
 
-The planned `mjust` user interaction model is inspired by Universal Blue's `ujust` / `ugum` implementation:
+The `mjust` interaction model is inspired by Universal Blue's `ujust` / `ugum` implementation:
 
 - https://github.com/ublue-os/packages/tree/main/packages/ublue-os-just
 
-The current implementation contains no copied `ujust` or `ugum` source code. If future JustVoxel work directly reuses or adapts Universal Blue source, the applicable Apache-2.0 license and attribution will be retained with those files.
+JustVoxel currently uses its own wrapper, justfile, menus, and administration scripts and does not copy `ujust` or `ugum` source code. If future JustVoxel work directly reuses or adapts Universal Blue source, the applicable Apache-2.0 license and attribution will be retained with those files.

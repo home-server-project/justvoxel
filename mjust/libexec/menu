@@ -1,0 +1,42 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+while true; do
+    echo
+    echo 'JustVoxel mjust'
+    echo '--------------'
+    echo '  1. First setup'
+    echo '  2. Status'
+    echo '  3. Players'
+    echo '  4. Start Minecraft'
+    echo '  5. Stop Minecraft'
+    echo '  6. Restart Minecraft'
+    echo '  7. Configure'
+    echo '  8. Run backup'
+    echo '  9. Update Minecraft container'
+    echo ' 10. Whitelist'
+    echo ' 11. Validate appliance'
+    echo ' 12. Follow logs'
+    echo ' 13. Storage provisioning plan'
+    echo '  0. Exit'
+    read -r -p 'Selection: ' choice
+    case "${choice}" in
+        1) /usr/bin/mjust setup ;;
+        2) /usr/bin/mjust status ;;
+        3) /usr/bin/mjust players ;;
+        4) /usr/bin/mjust start ;;
+        5) /usr/bin/mjust stop ;;
+        6) /usr/bin/mjust restart ;;
+        7) /usr/bin/mjust configure ;;
+        8) /usr/bin/mjust backup ;;
+        9) /usr/bin/mjust update-minecraft ;;
+        10)
+            echo 'Use one of: whitelist-list, whitelist-add-java, whitelist-remove-java, whitelist-add-bedrock, whitelist-remove-bedrock'
+            ;;
+        11) /usr/bin/mjust validate ;;
+        12) /usr/bin/mjust logs ;;
+        13) /usr/bin/mjust storage-plan ;;
+        0) exit 0 ;;
+        *) echo 'Invalid selection.' >&2 ;;
+    esac
+done

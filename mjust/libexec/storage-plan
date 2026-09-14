@@ -1,0 +1,17 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/common.sh
+require_root
+
+echo 'JustVoxel storage provisioning skeleton'
+echo '----------------------------------------'
+echo 'Supported configuration model:'
+echo '  - Minecraft data directory on the system filesystem'
+echo '  - Minecraft data directory on another already-mounted filesystem, such as NVMe'
+echo '  - Backups on the system filesystem'
+echo '  - Backups on an existing dedicated disk'
+echo '  - Backups on an existing dedicated partition'
+echo '  - Backups on an existing NFS or SMB/CIFS mount'
+echo
+echo 'Automatic disk partitioning, formatting, fstab creation, and data migration are intentionally not implemented yet.'
+echo 'This command performs no destructive action.'

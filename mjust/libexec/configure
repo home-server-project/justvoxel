@@ -1,0 +1,97 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/common.sh
+require_root
+require_config
+
+show_configuration() {
+    echo "Minecraft data: ${DATA_PATH}"
+    echo "Minecraft version: ${MINECRAFT_VERSION}"
+    echo "Java heap / container limit: ${JAVA_MEMORY} / ${CONTAINER_MEMORY}"
+    echo "Java port: ${JAVA_PORT}/tcp"
+    echo "Bedrock: ${BEDROCK_ENABLED} (${BEDROCK_PORT}/udp)"
+    echo "Backup type: ${BACKUP_TYPE}"
+    echo "Backup path: ${BACKUP_PATH}"
+    echo "Backup mount: ${BACKUP_MOUNT_POINT:-none}"
+    echo "Backup schedule: ${BACKUP_SCHEDULE}"
+    echo "Backup timer enabled: ${BACKUP_TIMER_ENABLED}"
+    echo "Maximum players: ${MAX_PLAYERS}"
+    echo "MOTD: ${MOTD}"
+}
+
+choice="$(choose 'Safe configuration changes' \
+    'Show current configuration' \
+    'Change memory limits' \
+    'Change Java/Bedrock host ports' \
+    'Change MOTD and maximum players' \
+    'Change backup schedule/timer' \
+    'Storage/data migration (planned, not implemented yet)' \
+    'Cancel')"
+
+case "${choice}" in
+    1)
+        show_configuration
+        exit 0
+        ;;
+    2)
+        JAVA_MEMORY="$(prompt_default 'Java heap' "${JAVA_MEMORY}")"
+        CONTAINER_MEMORY="$(prompt_default 'Container memory limit' "${CONTAINER_MEMORY}")"
+        validate_memory "${JAVA_MEMORY}" && validate_memory "${CONTAINER_MEMORY}" || {
+            echo 'ERROR: memory values must look like 4G or 4096M.' >&2
+            exit 1
+        }
+        (( $(memory_to_mib "${CONTAINER_MEMORY}") > $(memory_to_mib "${JAVA_MEMORY}") )) || {
+            echo 'ERROR: container memory limit must be larger than the Java heap.' >&2
+            exit 1
+        }
+        write_main_config
+        render_runtime
+        echo 'Memory configuration updated. Restart Minecraft when it is safe to apply it.'
+        ;;
+    3)
+        old_java="${JAVA_PORT}"
+        old_bedrock_enabled="${BEDROCK_ENABLED}"
+        old_bedrock="${BEDROCK_PORT}"
+        JAVA_PORT="$(prompt_default 'Java host TCP port' "${JAVA_PORT}")"
+        validate_port "${JAVA_PORT}" || { echo 'ERROR: invalid Java port.' >&2; exit 1; }
+        if [[ ${BEDROCK_ENABLED} == yes ]]; then
+            BEDROCK_PORT="$(prompt_default 'Bedrock host UDP port' "${BEDROCK_PORT}")"
+            validate_port "${BEDROCK_PORT}" || { echo 'ERROR: invalid Bedrock port.' >&2; exit 1; }
+        fi
+        write_main_config
+        render_runtime
+        update_firewall_ports "${old_java}" "${old_bedrock_enabled}" "${old_bedrock}"
+        echo 'Port configuration updated. Restart Minecraft when it is safe to apply it.'
+        ;;
+    4)
+        MOTD="$(prompt_default 'Server message (MOTD)' "${MOTD}")"
+        validate_simple_text "${MOTD}" || { echo 'ERROR: MOTD must be one line.' >&2; exit 1; }
+        MAX_PLAYERS="$(prompt_default 'Maximum players' "${MAX_PLAYERS}")"
+        validate_positive_int "${MAX_PLAYERS}" || { echo 'ERROR: maximum players must be positive.' >&2; exit 1; }
+        write_main_config
+        render_runtime
+        echo 'Server settings updated. Restart Minecraft when it is safe to apply them.'
+        ;;
+    5)
+        BACKUP_SCHEDULE="$(prompt_default 'Backup systemd calendar schedule' "${BACKUP_SCHEDULE}")"
+        systemd-analyze calendar "${BACKUP_SCHEDULE}" >/dev/null 2>&1 || {
+            echo 'ERROR: invalid systemd calendar schedule.' >&2
+            exit 1
+        }
+        if confirm 'Enable the scheduled backup timer?'; then
+            BACKUP_TIMER_ENABLED=yes
+        else
+            BACKUP_TIMER_ENABLED=no
+        fi
+        write_main_config
+        render_runtime
+        echo 'Backup timer configuration updated.'
+        ;;
+    6)
+        echo 'Storage migration and destructive disk/partition provisioning are reserved for the next storage implementation step.'
+        echo 'No changes were made.'
+        ;;
+    7)
+        echo 'Cancelled.'
+        ;;
+esac

@@ -1,0 +1,52 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/common.sh
+require_root
+require_config
+
+action="${1:-status}"
+
+player_check_before_interrupt() {
+    local players
+    if ! systemctl is-active --quiet minecraft.service; then
+        return 0
+    fi
+    players="$(podman exec minecraft rcon-cli 'list' 2>/dev/null || true)"
+    if [[ -z ${players} ]]; then
+        echo 'ERROR: could not confirm player status through RCON. Refusing to interrupt Minecraft.' >&2
+        return 1
+    fi
+    echo "${players}"
+    if grep -q 'There are 0 of' <<< "${players}"; then
+        return 0
+    fi
+    confirm 'Players appear to be online. Interrupt the server anyway?'
+}
+
+case "${action}" in
+    status)
+        systemctl --no-pager --full status minecraft.service || true
+        echo
+        if podman container exists minecraft 2>/dev/null; then
+            podman ps -a --filter name='^minecraft$'
+        fi
+        ;;
+    start)
+        systemctl start minecraft.service
+        echo 'Minecraft start requested.'
+        ;;
+    stop)
+        player_check_before_interrupt
+        systemctl stop minecraft.service
+        echo 'Minecraft stopped.'
+        ;;
+    restart)
+        player_check_before_interrupt
+        systemctl restart minecraft.service
+        echo 'Minecraft restarted.'
+        ;;
+    *)
+        echo 'Usage: service {status|start|stop|restart}' >&2
+        exit 2
+        ;;
+esac

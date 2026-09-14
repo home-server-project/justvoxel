@@ -16,6 +16,7 @@ StopTimeout=180
 LogDriver=journald
 
 [Service]
+ExecStartPre=/usr/libexec/justvoxel/mjust/validate-data-mount
 Restart=always
 RestartSec=10
 TimeoutStartSec=900
