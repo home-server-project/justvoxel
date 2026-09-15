@@ -55,16 +55,43 @@ confirm() {
     [[ ${answer,,} == y || ${answer,,} == yes ]]
 }
 
+# Menu/help text is deliberately written to stderr. Many callers use command
+# substitution and stdout must contain only the selected value.
 choose() {
     local prompt="$1"
     shift
     local options=("$@") choice index
-    echo "${prompt}"
+    printf '%s\n' "${prompt}" >&2
     for index in "${!options[@]}"; do
-        printf '  %d. %s\n' "$((index + 1))" "${options[index]}"
+        printf '  %d. %s\n' "$((index + 1))" "${options[index]}" >&2
     done
     while true; do
         read -r -p 'Selection: ' choice
+        if [[ ${choice} =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#options[@]} )); then
+            printf '%s' "${choice}"
+            return 0
+        fi
+        echo 'Please enter a valid number.' >&2
+    done
+}
+
+# Defaults are opt-in and limited to menus where pressing Enter is safe.
+# Destructive/storage menus continue to use choose(), which has no default.
+choose_default() {
+    local prompt="$1" default="$2"
+    shift 2
+    local options=("$@") choice index
+    [[ ${default} =~ ^[0-9]+$ ]] && (( default >= 1 && default <= ${#options[@]} )) || {
+        echo 'ERROR: invalid menu default.' >&2
+        return 2
+    }
+    printf '%s\n' "${prompt}" >&2
+    for index in "${!options[@]}"; do
+        printf '  %d. %s\n' "$((index + 1))" "${options[index]}" >&2
+    done
+    while true; do
+        read -r -p "Selection [${default}]: " choice
+        choice="${choice:-${default}}"
         if [[ ${choice} =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#options[@]} )); then
             printf '%s' "${choice}"
             return 0
@@ -109,6 +136,32 @@ suggest_memory_values() {
 
 validate_positive_int() {
     [[ $1 =~ ^[1-9][0-9]*$ ]]
+}
+
+validate_nonroot_id() {
+    local value="${1:-}"
+    [[ ${value} =~ ^[0-9]+$ ]] || return 1
+    (( 10#${value} > 0 && 10#${value} <= 4294967294 ))
+}
+
+resolve_minecraft_ids() {
+    local uid gid
+
+    if validate_nonroot_id "${SUDO_UID:-}" && validate_nonroot_id "${SUDO_GID:-}"; then
+        printf '%s %s sudo\n' "${SUDO_UID}" "${SUDO_GID}"
+        return 0
+    fi
+
+    if id voxel >/dev/null 2>&1; then
+        uid="$(id -u voxel)"
+        gid="$(id -g voxel)"
+        if validate_nonroot_id "${uid}" && validate_nonroot_id "${gid}"; then
+            printf '%s %s voxel\n' "${uid}" "${gid}"
+            return 0
+        fi
+    fi
+
+    printf '1000 1000 fallback\n'
 }
 
 validate_storage_path() {
