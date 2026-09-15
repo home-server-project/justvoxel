@@ -20,6 +20,14 @@ ghcr.io/home-server-project/justvoxel-baremetal:10
 
 Development images use the `:testing` tag.
 
+## Installation
+
+The JustVoxel operating-system repository intentionally stays focused on the appliance image and runtime.
+
+For installer ISO creation, installation layout, disk-size guidance, VM recommendations, and hardware/system requirements, use the dedicated [JustVoxel ISO Builder](https://github.com/home-server-project/justvoxel-iso) repository.
+
+The ISO builder is being developed as a lightweight unattended bootc installer rather than a desktop-based interactive installer.
+
 ## Foundation
 
 Both variants include bootc, Podman/Quadlet support, NetworkManager with systemd-resolved, OpenSSH, SELinux tooling, firewalld, upstream `just`, Tailscale and NetBird clients, NFS/SMB client support, XFS/partition tooling, and lightweight QEMU/Proxmox, VMware, and Hyper-V guest integration. Tailscale and NetBird remain disabled and unconfigured by default.
