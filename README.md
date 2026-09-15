@@ -78,6 +78,14 @@ The interaction model is inspired by Universal Blue's `ujust` / `ugum` work in [
 
 For the complete interface and command reference, see [`docs/MJUST.md`](docs/MJUST.md).
 
+## Web management
+
+JustVoxel WebUI is intended for administration from a trusted local network. By default, Web management uses plain HTTP on TCP port `8099`, allowing direct access from the appliance LAN address without a self-signed certificate warning.
+
+Because the default local WebUI does not use TLS, administrator credentials and sessions should only be used on a network you trust. Do not forward TCP port `8099` directly to the public Internet.
+
+For the local-access and security model, see [`docs/WEBUI.md`](docs/WEBUI.md).
+
 ## Storage, backups, and recovery
 
 JustVoxel separates Minecraft data from backup storage so users can choose a layout that fits their machine or hypervisor.
