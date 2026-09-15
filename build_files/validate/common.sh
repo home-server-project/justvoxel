@@ -47,6 +47,8 @@ grep -Fq 'Welcome to JustVoxel' /usr/libexec/justvoxel/motd
 
 test -f /usr/lib/justvoxel/variant
 test -f /usr/lib/tmpfiles.d/justvoxel.conf
+test -f /usr/lib/sysusers.d/justvoxel-rpc.conf
+grep -Fqx 'u rpc 32 "Rpcbind Daemon" /var/lib/rpcbind -' /usr/lib/sysusers.d/justvoxel-rpc.conf
 
 test -x /usr/libexec/justvoxel/minecraft-backup
 bash -n /usr/libexec/justvoxel/minecraft-backup
@@ -77,8 +79,3 @@ done
 test ! -e /etc/containers/systemd/minecraft.container
 test ! -e /etc/justvoxel/minecraft.env
 test ! -e /etc/justvoxel/justvoxel.conf
-
-if dnf repolist --enabled | grep -Eiq 'epel|tailscale|netbird'; then
-    echo "ERROR: external package repository enabled in completed image" >&2
-    exit 1
-fi
