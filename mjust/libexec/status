@@ -1,6 +1,7 @@
 #!/usr/bin/bash
 set -euo pipefail
 source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/status-lib.sh
 require_root
 
 details=no
@@ -13,15 +14,14 @@ if (( $# > 0 )); then
     exit 2
 fi
 
+unknown='Unknown'
+not_running='Not running'
 configured=no
 if [[ -r ${JV_CONFIG} ]]; then
     # shellcheck disable=SC1090
     source "${JV_CONFIG}"
     configured=yes
 fi
-
-unknown='Unknown'
-not_running='Not running'
 
 primary_ipv4() {
     local ipv4
@@ -32,21 +32,68 @@ primary_ipv4() {
     printf '%s' "${ipv4:-Unknown}"
 }
 
-format_duration() {
-    local total="${1:-0}" days hours minutes
-    (( total >= 0 )) || total=0
-    days=$((total / 86400))
-    hours=$(((total % 86400) / 3600))
-    minutes=$(((total % 3600) / 60))
-    if (( days > 0 )); then
-        printf '%dd %dh %dm' "${days}" "${hours}" "${minutes}"
-    elif (( hours > 0 )); then
-        printf '%dh %dm' "${hours}" "${minutes}"
-    else
-        printf '%dm' "${minutes}"
-    fi
+filesystem_source() {
+    findmnt -n -o SOURCE --target "$1" 2>/dev/null | head -n1
 }
 
+filesystem_target() {
+    findmnt -n -o TARGET --target "$1" 2>/dev/null | head -n1
+}
+
+filesystem_available() {
+    local path="$1" value
+    value="$(df -Pk --output=avail -- "${path}" 2>/dev/null | tail -n1 | tr -d ' ' || true)"
+    [[ ${value} =~ ^[0-9]+$ ]] || return 1
+    jv_status_format_kib "${value}"
+}
+
+filesystem_used_percent() {
+    local path="$1"
+    df -Pk --output=pcent -- "${path}" 2>/dev/null | tail -n1 | tr -d ' '
+}
+
+latest_backup_summary() {
+    local dir="$1" record epoch path now age
+    [[ -d ${dir} ]] || { printf 'Unknown'; return 0; }
+    record="$(find "${dir}" -maxdepth 1 -type f -name 'minecraft-*.tar.gz' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n1 || true)"
+    [[ -n ${record} ]] || { printf 'None found'; return 0; }
+    epoch="${record%%.*}"
+    path="${record#* }"
+    [[ ${epoch} =~ ^[0-9]+$ ]] || { printf 'Unknown'; return 0; }
+    now="$(date +%s)"
+    (( now >= epoch )) && age=$((now - epoch)) || age=0
+    printf '%s ago (%s)' "$(jv_status_format_duration "${age}")" "$(basename -- "${path}")"
+}
+
+# System identity and host health.
+hostname_value="$(hostname -s 2>/dev/null || hostname 2>/dev/null || true)"
+[[ -n ${hostname_value} ]] || hostname_value="${unknown}"
+variant_raw="$(cat /usr/lib/justvoxel/variant 2>/dev/null || true)"
+case "${variant_raw}" in
+    vm) variant='VM' ;;
+    baremetal) variant='Bare Metal' ;;
+    *) variant="${variant_raw:-Unknown}" ;;
+esac
+host_uptime_s="$(awk '{print int($1)}' /proc/uptime 2>/dev/null || echo 0)"
+host_uptime="$(jv_status_format_duration "${host_uptime_s}")"
+mem_kib="$(awk '/^MemTotal:/ {print $2; exit}' /proc/meminfo 2>/dev/null || true)"
+if [[ ${mem_kib} =~ ^[0-9]+$ ]]; then
+    physical_ram="$(jv_status_format_kib "${mem_kib}")"
+else
+    physical_ram="${unknown}"
+fi
+
+mapfile -t failed_units < <(systemctl --failed --type=service --no-legend --plain 2>/dev/null | awk '{print $1}' || true)
+failed_count="${#failed_units[@]}"
+if (( failed_count == 0 )); then
+    services_summary='Healthy - no failed services'
+else
+    services_summary="Attention needed - ${failed_count} failed"
+fi
+system_state="$(systemctl is-system-running 2>/dev/null || true)"
+[[ -n ${system_state} ]] || system_state='unknown'
+
+# Minecraft state.
 service_active=no
 service_state='Stopped'
 if systemctl is-failed --quiet minecraft.service 2>/dev/null; then
@@ -58,28 +105,9 @@ elif [[ ${configured} != yes ]]; then
     service_state='Not configured'
 fi
 
-system_state="$(systemctl is-system-running 2>/dev/null || true)"
-case "${system_state}" in
-    running) overall='Healthy' ;;
-    degraded) overall='Attention needed' ;;
-    maintenance|stopping|offline) overall='Attention needed' ;;
-    *)
-        if [[ ${service_state} == Failed ]]; then
-            overall='Attention needed'
-        else
-            overall="${unknown}"
-        fi
-        ;;
-esac
-if [[ ${service_state} == Failed ]]; then
-    overall='Attention needed'
-fi
-
-if [[ ${service_state} == Stopped ]]; then
-    players="${not_running}"
-else
-    players="${unknown}"
-fi
+players="${unknown}"
+[[ ${service_state} == Stopped ]] && players="${not_running}"
+[[ ${service_state} == 'Not configured' ]] && players='Not configured'
 running_max=''
 version="${unknown}"
 bedrock_state='Disabled'
@@ -102,11 +130,10 @@ if [[ ${service_active} == yes ]]; then
     fi
 
     active_us="$(systemctl show minecraft.service -p ActiveEnterTimestampMonotonic --value 2>/dev/null || true)"
-    boot_s="$(awk '{print int($1)}' /proc/uptime 2>/dev/null || echo 0)"
     if [[ ${active_us} =~ ^[0-9]+$ ]] && (( active_us > 0 )); then
         active_s=$((active_us / 1000000))
-        if (( boot_s >= active_s )); then
-            service_uptime="$(format_duration $((boot_s - active_s)))"
+        if (( host_uptime_s >= active_s )); then
+            service_uptime="$(jv_status_format_duration $((host_uptime_s - active_s)))"
         else
             service_uptime="${unknown}"
         fi
@@ -115,16 +142,37 @@ if [[ ${service_active} == yes ]]; then
     fi
 fi
 
+# Network summary.
+default_route="$(ip -4 route show default 2>/dev/null | head -n1 || true)"
+network_interface="$(awk '{for (i=1; i<=NF; i++) if ($i == "dev") {print $(i+1); exit}}' <<< "${default_route}")"
+gateway="$(awk '{for (i=1; i<=NF; i++) if ($i == "via") {print $(i+1); exit}}' <<< "${default_route}")"
 host_ip="$(primary_ipv4)"
+[[ -n ${network_interface} ]] || network_interface="${unknown}"
+[[ -n ${gateway} ]] || gateway="${unknown}"
+if [[ ${network_interface} != Unknown ]]; then
+    dns_servers="$(resolvectl dns "${network_interface}" 2>/dev/null | sed -n 's/^[^:]*:[[:space:]]*//p' | head -n1 || true)"
+else
+    dns_servers=''
+fi
+[[ -n ${dns_servers} ]] || dns_servers="${unknown}"
+if [[ ${host_ip} == Unknown || ${gateway} == Unknown ]]; then
+    network_state=problem
+else
+    network_state=healthy
+fi
+
+# Config-derived Minecraft, image and backup values.
 java_address="${unknown}"
 bedrock_address='Disabled'
 java_heap="${unknown}"
 container_max="${unknown}"
 image_channel="${unknown}"
 image_ref="${unknown}"
-backup_state="${unknown}"
-backup_next="${unknown}"
 configured_max="${unknown}"
+backup_enabled='Unknown'
+backup_next="${unknown}"
+backup_last="${unknown}"
+backup_state=healthy
 
 if [[ ${configured} == yes ]]; then
     java_address="${host_ip}:${JAVA_PORT:-Unknown}"
@@ -148,50 +196,161 @@ if [[ ${configured} == yes ]]; then
         fi
     fi
 
+    backup_last="$(latest_backup_summary "${BACKUP_PATH:-}")"
     if [[ ${BACKUP_TIMER_ENABLED:-no} == yes ]]; then
-        backup_state='Enabled'
-        backup_next="$(systemctl show minecraft-backup.timer -p NextElapseUSecRealtime --value 2>/dev/null || true)"
-        [[ -n ${backup_next} && ${backup_next} != n/a ]] || backup_next="${unknown}"
+        backup_enabled='Enabled'
+        if systemctl is-active --quiet minecraft-backup.timer 2>/dev/null; then
+            backup_next="$(systemctl show minecraft-backup.timer -p NextElapseUSecRealtime --value 2>/dev/null || true)"
+            [[ -n ${backup_next} && ${backup_next} != n/a ]] || backup_next="${unknown}"
+        else
+            backup_next='Timer not active'
+            backup_state=problem
+        fi
     else
-        backup_state='Disabled'
+        backup_enabled='Disabled'
         backup_next='Disabled'
     fi
 fi
 
+# Purpose-aware storage summary.
+system_storage_path=/var
+[[ -d /var/lib/containers ]] && system_storage_path=/var/lib/containers
+system_source="$(filesystem_source "${system_storage_path}" || true)"
+system_mount="$(filesystem_target "${system_storage_path}" || true)"
+system_available="$(filesystem_available "${system_storage_path}" || true)"
+system_used="$(filesystem_used_percent "${system_storage_path}" || true)"
+storage_state=healthy
+[[ -n ${system_source} && -n ${system_available} ]] || storage_state=problem
+
+if [[ ${configured} == yes ]]; then
+    data_source="$(filesystem_source "${DATA_PATH:-}" || true)"
+    data_mount="$(filesystem_target "${DATA_PATH:-}" || true)"
+    data_available="$(filesystem_available "${DATA_PATH:-}" || true)"
+    data_used="$(filesystem_used_percent "${DATA_PATH:-}" || true)"
+    backup_source="$(filesystem_source "${BACKUP_PATH:-}" || true)"
+    backup_mount="$(filesystem_target "${BACKUP_PATH:-}" || true)"
+    backup_available="$(filesystem_available "${BACKUP_PATH:-}" || true)"
+    backup_used="$(filesystem_used_percent "${BACKUP_PATH:-}" || true)"
+    [[ -n ${data_source} && -n ${data_available} ]] || storage_state=problem
+    [[ -n ${backup_source} && -n ${backup_available} ]] || storage_state=problem
+else
+    data_source=''
+    data_mount=''
+    data_available=''
+    data_used=''
+    backup_source=''
+    backup_mount=''
+    backup_available=''
+    backup_used=''
+fi
+
+overall="$(jv_status_overall "${service_state}" "${failed_count}" "${system_state}" "${network_state}" "${storage_state}" "${backup_state}")"
+
 printf 'JustVoxel status\n'
 printf '%s\n\n' '----------------'
-printf '  %-20s %s\n' 'Overall:' "${overall}"
-printf '  %-20s %s\n' 'Minecraft:' "${service_state}"
-printf '  %-20s %s\n' 'Players:' "${players}"
-if [[ ${configured} == yes ]]; then
-    if [[ -z ${running_max} || ${running_max} != "${configured_max}" ]]; then
-        if [[ -n ${running_max} && ${configured_max} != Unknown ]]; then
-            printf '  %-20s %s (restart needed)\n' 'Configured maximum:' "${configured_max}"
-        else
-            printf '  %-20s %s\n' 'Configured maximum:' "${configured_max}"
-        fi
+printf '  %-22s %s\n' 'Overall:' "${overall}"
+
+echo
+echo 'System'
+printf '  %-22s %s\n' 'Hostname:' "${hostname_value}"
+printf '  %-22s %s\n' 'Variant:' "${variant}"
+printf '  %-22s %s\n' 'Uptime:' "${host_uptime}"
+printf '  %-22s %s\n' 'Physical RAM:' "${physical_ram}"
+printf '  %-22s %s\n' 'System services:' "${services_summary}"
+if (( failed_count > 0 )); then
+    shown=0
+    for unit in "${failed_units[@]}"; do
+        description="$(systemctl show "${unit}" -p Description --value 2>/dev/null || true)"
+        result="$(systemctl show "${unit}" -p Result --value 2>/dev/null || true)"
+        printf '    %s\n' "${unit}"
+        [[ -n ${description} ]] && printf '      %s\n' "${description}"
+        printf '      Result: %s\n' "${result:-Unknown}"
+        shown=$((shown + 1))
+        (( shown >= 3 )) && break
+    done
+    if (( failed_count > shown )); then
+        printf '    ... and %d more. Use mjust status --details.\n' "$((failed_count - shown))"
     fi
 fi
-printf '  %-20s %s\n' 'Minecraft/Paper:' "${version}"
-printf '  %-20s %s\n' 'Bedrock cross-play:' "${bedrock_state}"
-printf '\n'
-printf '  %-20s %s\n' 'Java:' "${java_address}"
-printf '  %-20s %s\n' 'Bedrock:' "${bedrock_address}"
-printf '\n'
-printf '  %-20s %s / %s\n' 'Minecraft memory:' "${memory_current}" "${container_max}"
-printf '  %-20s %s\n' 'Java heap:' "${java_heap}"
-printf '  %-20s %s\n' 'Minecraft uptime:' "${service_uptime}"
-printf '\n'
-printf '  %-20s %s\n' 'Container channel:' "${image_channel}"
-printf '  %-20s %s\n' 'Container image:' "${image_ref}"
-printf '  %-20s %s\n' 'Backups:' "${backup_state}"
-printf '  %-20s %s\n' 'Next backup:' "${backup_next}"
+
+echo
+echo 'Minecraft'
+printf '  %-22s %s\n' 'State:' "${service_state}"
+printf '  %-22s %s\n' 'Players:' "${players}"
+if [[ ${configured} == yes && ( -z ${running_max} || ${running_max} != "${configured_max}" ) ]]; then
+    if [[ -n ${running_max} && ${configured_max} != Unknown ]]; then
+        printf '  %-22s %s (restart needed)\n' 'Configured maximum:' "${configured_max}"
+    else
+        printf '  %-22s %s\n' 'Configured maximum:' "${configured_max}"
+    fi
+fi
+printf '  %-22s %s\n' 'Minecraft/Paper:' "${version}"
+printf '  %-22s %s\n' 'Bedrock cross-play:' "${bedrock_state}"
+printf '  %-22s %s\n' 'Java:' "${java_address}"
+printf '  %-22s %s\n' 'Bedrock:' "${bedrock_address}"
+printf '  %-22s %s / %s\n' 'Minecraft memory:' "${memory_current}" "${container_max}"
+printf '  %-22s %s\n' 'Java heap:' "${java_heap}"
+printf '  %-22s %s\n' 'Minecraft uptime:' "${service_uptime}"
+
+echo
+echo 'Network'
+printf '  %-22s %s\n' 'Interface:' "${network_interface}"
+printf '  %-22s %s\n' 'IPv4:' "${host_ip}"
+printf '  %-22s %s\n' 'Gateway:' "${gateway}"
+printf '  %-22s %s\n' 'DNS:' "${dns_servers}"
+
+echo
+echo 'Storage'
+if [[ -n ${system_source} ]]; then
+    printf '  System/container: %s at %s - %s available (%s used)\n' "${system_source}" "${system_mount:-Unknown}" "${system_available:-Unknown}" "${system_used:-Unknown}"
+else
+    echo '  System/container: Unknown'
+fi
+if [[ ${configured} == yes ]]; then
+    printf '  Minecraft data:    %s\n' "${DATA_PATH:-Unknown}"
+    if [[ -n ${data_source} && ${data_source} == "${system_source}" ]]; then
+        echo '    Shares the system/container filesystem.'
+    elif [[ -n ${data_source} ]]; then
+        printf '    %s at %s - %s available (%s used)\n' "${data_source}" "${data_mount:-Unknown}" "${data_available:-Unknown}" "${data_used:-Unknown}"
+    else
+        echo '    Filesystem: Unknown'
+    fi
+    printf '  Backup storage:    %s\n' "${BACKUP_PATH:-Unknown}"
+    if [[ -n ${backup_source} && -n ${data_source} && ${backup_source} == "${data_source}" ]]; then
+        echo '    Shares the same filesystem as Minecraft data.'
+        echo '    Same-filesystem backups help with world/configuration recovery, not physical disk failure.'
+    elif [[ -n ${backup_source} ]]; then
+        printf '    %s at %s - %s available (%s used)\n' "${backup_source}" "${backup_mount:-Unknown}" "${backup_available:-Unknown}" "${backup_used:-Unknown}"
+    else
+        echo '    Filesystem: Unknown'
+    fi
+else
+    echo '  Minecraft data:    Not configured'
+    echo '  Backup storage:    Not configured'
+fi
+
+echo
+echo 'Backups'
+printf '  %-22s %s\n' 'Automatic backups:' "${backup_enabled}"
+printf '  %-22s %s\n' 'Last backup:' "${backup_last}"
+printf '  %-22s %s\n' 'Next backup:' "${backup_next}"
+
+echo
+echo 'Container'
+printf '  %-22s %s\n' 'Channel:' "${image_channel}"
+printf '  %-22s %s\n' 'Image:' "${image_ref}"
 
 if [[ ${details} == yes ]]; then
     echo
-    echo 'Systemd detail'
-    echo '--------------'
+    echo 'Failed service detail'
+    echo '---------------------'
+    systemctl --failed --type=service --no-pager --full || true
+
+    echo
+    echo 'Minecraft systemd detail'
+    echo '------------------------'
     systemctl --no-pager --full status minecraft.service || true
+
     echo
     echo 'Podman detail'
     echo '-------------'
@@ -202,6 +361,7 @@ if [[ ${details} == yes ]]; then
     else
         echo 'Minecraft container does not currently exist.'
     fi
+
     echo
     echo 'Storage detail'
     echo '--------------'
@@ -210,6 +370,16 @@ if [[ ${details} == yes ]]; then
         findmnt --target "${BACKUP_PATH}" 2>/dev/null || true
         df -h "${DATA_PATH}" "${BACKUP_PATH}" 2>/dev/null || true
     else
-        echo 'JustVoxel is not configured.'
+        findmnt --target /var 2>/dev/null || true
+        df -h /var 2>/dev/null || true
     fi
+
+    echo
+    echo 'Network detail'
+    echo '--------------'
+    ip -brief address 2>/dev/null || true
+    echo
+    ip route 2>/dev/null || true
+    echo
+    resolvectl status 2>/dev/null || true
 fi
