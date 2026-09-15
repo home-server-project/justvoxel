@@ -52,7 +52,7 @@ update-minecraft:
     @sudo /usr/libexec/justvoxel/mjust/update-minecraft
 
 logs:
-    @sudo journalctl -u minecraft.service -f
+    @/usr/libexec/justvoxel/mjust/logs
 
 validate:
     @sudo /usr/libexec/justvoxel/mjust/validate
