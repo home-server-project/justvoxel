@@ -19,6 +19,12 @@ host="$(cat /proc/sys/kernel/hostname 2>/dev/null || true)"
 host="${host%%.*}"
 [[ -n ${host} ]] || host='unknown'
 
+ipv4="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i == "src") {print $(i+1); exit}}')"
+if [[ -z ${ipv4} ]]; then
+    ipv4="$(ip -o -4 addr show scope global up 2>/dev/null | awk '{split($4,a,"/"); print a[1]; exit}')"
+fi
+[[ -n ${ipv4} ]] || ipv4='Not assigned'
+
 if [[ -f /etc/containers/systemd/minecraft.container ]]; then
     minecraft_state='Configured'
     needs_setup=no
@@ -42,15 +48,17 @@ printf 'Minecraft Server Appliance\n\n'
 printf '  System:     %s\n' "${pretty_name}"
 printf '  Variant:    %s\n' "${variant}"
 printf '  Host:       %s\n' "${host}"
+printf '  IPv4:       %s\n' "${ipv4}"
 printf '  Minecraft:  %s\n\n' "${minecraft_state}"
 
 if [[ ${needs_setup} == yes ]]; then
-    printf '  First setup:      %smjust setup%s\n' "${green}" "${reset}"
+    printf '  Normal setup:      %smjust setup%s\n' "${green}" "${reset}"
+    printf '  Advanced setup:    %smjust setup-advanced%s\n' "${green}" "${reset}"
 fi
-printf '  Admin menu:       %smjust%s\n' "${green}" "${reset}"
-printf '  List commands:    %smjust --list%s\n' "${green}" "${reset}"
-printf '  Server status:    %smjust status%s\n' "${green}" "${reset}"
-printf '  Validate system:  %smjust validate%s\n' "${green}" "${reset}"
+printf '  Admin menu:        %smjust%s\n' "${green}" "${reset}"
+printf '  List commands:     %smjust --list%s\n' "${green}" "${reset}"
+printf '  Server status:     %smjust status%s\n' "${green}" "${reset}"
+printf '  Validate system:   %smjust validate%s\n' "${green}" "${reset}"
 printf '\n'
 printf '  Documentation: https://github.com/home-server-project/justvoxel\n'
 printf '  Report an issue: https://github.com/home-server-project/justvoxel/issues\n'
