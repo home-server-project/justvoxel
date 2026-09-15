@@ -395,3 +395,204 @@ These are intentional safety boundaries, not missing automatic steps.
 The management and storage flows are implemented on `testing`, but they still require destructive VM testing and physical-hardware validation before stable promotion.
 
 The safest validation order is VM first: one system disk, one disposable secondary virtual disk, then dedicated-disk provisioning, partition adoption, free-space partition creation, network backup targets, backup/retention, and Minecraft data migration. Bare Metal validation should follow only after the VM paths are proven.
+
+# Future mjust system-management roadmap
+
+The next major mjust expansion is intended to make JustVoxel easier to administer for people who do not want to interpret raw Linux command output.
+
+The planned direction is a new `mjust system` area that presents short, readable appliance information and wraps common bootc/systemd/power operations with the same safety model already used for Minecraft maintenance.
+
+These features are roadmap items only. They are **not implemented yet**.
+
+## Future `mjust system` overview
+
+The system area should provide a compact appliance summary rather than dumping raw command output.
+
+A future overview should include information such as:
+
+- hostname
+- uptime
+- JustVoxel variant and image/version
+- CPU and memory summary
+- Minecraft service health
+- latest backup status and age
+- storage capacity/free-space summary
+- network state and active addresses
+- failed systemd services
+- current bootc deployment state
+- whether an OS update is staged
+
+The goal is output that can be understood without Linux-administration experience.
+
+A future convenience command such as `mjust health` may provide the same information as a short health dashboard, for example:
+
+- Minecraft: healthy
+- Backups: healthy / last successful backup age
+- Storage: healthy / free space
+- Network: connected / active address
+- Failed services: none or summarized failures
+- OS deployment: current / staged update available
+
+## Future network status
+
+The planned network view should summarize useful information instead of reproducing the full output of `ip address` or NetworkManager diagnostics.
+
+Useful fields include:
+
+- detected Ethernet/Wi-Fi interfaces
+- interface up/down state
+- link/carrier state
+- current IPv4 and IPv6 addresses
+- default-route interface and gateway
+- active DNS configuration
+- current hostname
+
+The output should make common problems obvious, such as an interface being down, no address being assigned, or no default route being present.
+
+## Future storage health
+
+Storage health should be variant-aware.
+
+### Bare Metal
+
+When supported by the hardware, mjust may summarize:
+
+- physical disk identity
+- mounted filesystem health/state
+- capacity and free space
+- SMART overall health
+- NVMe health status
+- media/data-integrity error counters
+- device temperature
+- remaining-life/wear indicators when the drive exposes them
+
+The user-facing result should be concise: healthy, warning, or problem, with the important reason shown when attention is required.
+
+Raw SMART/NVMe reports should remain available for troubleshooting but should not be the normal user interface.
+
+### VM
+
+The VM variant cannot reliably report the health of the physical device behind a virtual disk.
+
+It should report virtual-disk capacity, filesystem/mount status, and local I/O/filesystem problems, while clearly stating that physical storage health is managed by the hypervisor/storage platform.
+
+## Future failed-service view
+
+A future system-health option should summarize `systemctl --failed` in a readable form.
+
+When nothing has failed, it should simply report that there are no failed system services.
+
+When failures exist, it should show the affected unit name, description, and a short state/result summary rather than forcing the administrator to interpret the full systemd output immediately.
+
+Detailed journal output can remain a separate troubleshooting action.
+
+## Future bootc deployment status
+
+JustVoxel should use bootc's machine-readable status output for program logic rather than parsing the human-formatted command output.
+
+The mjust view should translate deployment state into simple concepts such as:
+
+- **Running image** — deployment currently booted
+- **Staged image** — deployment already downloaded and ready for the next boot
+- **Rollback image** — previous deployment retained by bootc
+
+The user should not need to understand bootc deployment internals to know which image is running and whether an update is ready.
+
+## Future OS update flow
+
+The OS-update flow should never assume that an already-staged deployment is still the newest available image.
+
+Even when an update is staged, the administrator should still be offered **Check for newer update**.
+
+The intended flow is:
+
+1. show the current bootc deployment status
+2. show any already-staged deployment
+3. offer **Check for newer update** regardless of whether a staged deployment exists
+4. perform a non-disruptive update check
+5. if the staged deployment is still current, report that it remains the newest available image
+6. if something newer exists, offer to download/stage the newer deployment
+7. show the resulting staged deployment
+8. offer a controlled reboot into that deployment
+
+This matters for appliances that may remain running for weeks or months without rebooting: an older update may already be staged while a newer image has since become available.
+
+A normal check should not reboot the system.
+
+## Future reboot into an OS update
+
+Rebooting into a staged JustVoxel update should use Minecraft-aware safety checks rather than immediately restarting the host.
+
+The planned flow is:
+
+1. confirm that a staged deployment exists
+2. query Minecraft player state when the server is running
+3. fail closed when player state is unknown
+4. if players are online, show the current player state and require explicit administrator confirmation
+5. create a verified cold Minecraft backup before the OS transition
+6. use the normal graceful Minecraft shutdown path
+7. reboot into the staged bootc deployment
+
+This provides the same family-server protection model used by Minecraft container maintenance.
+
+## Future power controls
+
+The `mjust system` area may also expose common appliance power operations:
+
+- reboot
+- power off
+
+These should use the Minecraft-aware interruption checks before shutting down a running appliance.
+
+An ordinary reboot or poweroff does not necessarily need to force a new full backup every time; the important baseline is player awareness and a graceful Minecraft shutdown. OS update/reboot operations may use the stronger pre-update backup policy described above.
+
+## Future Bare-Metal firmware reboot
+
+A future Bare Metal-only option may expose reboot into UEFI/firmware setup when the running hardware and firmware support it.
+
+This option should **not** be exposed by the JustVoxel VM variant. Firmware configuration for a VM is considered a hypervisor responsibility.
+
+For Bare Metal, the planned behavior is:
+
+1. verify that firmware-setup reboot is supported by the running system
+2. perform a best-effort check for an attached display/DRM connector
+3. if a display appears connected, allow normal confirmation
+4. if no display appears connected, warn clearly and default to cancel
+5. if display state cannot be determined reliably, explain that the check is uncertain and require explicit confirmation
+6. perform the same Minecraft player/graceful-stop checks before rebooting
+
+Display detection is advisory only. Hardware, KVM switches, EDID behavior, and firmware can make Linux display detection imperfect, so it should not be treated as an absolute guarantee.
+
+## Much-later bootc rollback work
+
+A JustVoxel-aware OS rollback is intentionally **not** part of the near-term system-management work.
+
+Bootc rollback can restore the previous deployment together with the `/etc` state associated with that deployment. JustVoxel keeps active administrator configuration under `/etc`, including Minecraft and systemd/Quadlet configuration, so a safe appliance-level rollback needs a separate design for preserving and reconciling current administrator state.
+
+A future rollback implementation would likely need to address at least:
+
+- preservation of current JustVoxel `/etc` configuration outside the deployment-specific state
+- a verified Minecraft backup before rollback
+- player-aware graceful shutdown
+- controlled bootc rollback/reboot
+- post-boot detection of the rollback event
+- comparison/reconciliation of current versus restored JustVoxel configuration
+- clear recovery behavior if the rolled-back OS and newer local configuration are incompatible
+
+Because of those requirements, rollback should be treated as a separate later project after normal deployment, update, storage, backup, VM, and Bare Metal flows are proven stable.
+
+## Near-term implementation order
+
+The current priority remains validation rather than immediately adding the roadmap features above.
+
+Recommended order:
+
+1. destructive VM testing of the existing setup/storage/migration flows
+2. fix and harden anything found during VM testing
+3. validate backup retention and failure behavior
+4. validate NFS/SMB failure handling
+5. validate Minecraft container/version update behavior
+6. build and validate the JustVoxel ISO/installation/first-boot experience
+7. perform Bare Metal validation
+8. implement the nearer `mjust system` health/status/update/power features
+9. leave JustVoxel-aware OS rollback for a later dedicated design cycle
