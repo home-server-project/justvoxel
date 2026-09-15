@@ -1,37 +1,67 @@
 #!/usr/bin/bash
 set -Eeuo pipefail
 source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/update-policy.sh
 require_root
 require_config
 
 image="$(minecraft_image_ref)"
 latest_mc=''
 latest_image_release=''
+game_state='unknown'
+repin_game=no
+old_game_mode="${MINECRAFT_VERSION_MODE}"
+old_game_version="${MINECRAFT_VERSION}"
 
 printf 'Minecraft container image: %s\n' "${image}"
 printf 'Minecraft game version policy: %s (%s)\n' "${MINECRAFT_VERSION_MODE}" "${MINECRAFT_VERSION}"
 
+echo
 if [[ ${MINECRAFT_VERSION_MODE} == pinned ]]; then
     latest_mc="$(resolve_latest_stable_paper_version || true)"
-    if [[ -n ${latest_mc} && ${latest_mc} != "${MINECRAFT_VERSION}" ]]; then
-        echo "Newer stable Paper-supported Minecraft version available: ${latest_mc}"
-        echo "Current pinned Minecraft version: ${MINECRAFT_VERSION}"
-        echo 'Use mjust configure when you intentionally want to change the game version.'
-    fi
+    game_state="$(jv_game_version_state "${MINECRAFT_VERSION_MODE}" "${MINECRAFT_VERSION}" "${latest_mc}")"
+    echo 'Minecraft/Paper update check'
+    echo "Current pinned version: ${MINECRAFT_VERSION}"
+    case "${game_state}" in
+        current)
+            echo "Newest stable Paper-supported version: ${latest_mc}"
+            echo 'Game version: CURRENT'
+            ;;
+        update_available)
+            echo "Newest stable Paper-supported version: ${latest_mc}"
+            echo 'Game version: UPDATE AVAILABLE'
+            if confirm "Re-pin Minecraft/Paper to ${latest_mc} during this maintenance?"; then
+                repin_game=yes
+            else
+                echo 'Pinned Minecraft/Paper version will remain unchanged.'
+            fi
+            ;;
+        *)
+            echo 'Newest stable Paper-supported version: Unknown'
+            echo 'Game version check: Unknown'
+            echo 'The configured pinned version will remain unchanged.'
+            ;;
+    esac
 else
-    echo 'Minecraft VERSION=LATEST is enabled; a future start/restart can upgrade the game version.'
+    game_state='moving'
+    echo 'Minecraft/Paper update check'
+    echo 'Game version policy: LATEST'
+    echo 'The installed itzg container resolves the game/Paper version on Minecraft start.'
+    echo 'A future start/restart can therefore update the game version without changing the container tag.'
 fi
 
+echo
 if [[ ${MINECRAFT_IMAGE_TAG} != stable && ${MINECRAFT_IMAGE_TAG} != latest ]]; then
     latest_image_release="$(resolve_latest_itzg_release || true)"
     echo "Container image tag is pinned/custom: ${MINECRAFT_IMAGE_TAG}"
     [[ -n ${latest_image_release} ]] && echo "Latest upstream itzg image release: ${latest_image_release}"
-    echo 'mjust will still check this exact tag for a rebuilt digest; use mjust configure to change tags.'
+    echo 'mjust will check this exact tag for a rebuilt digest; use mjust configure to change tags.'
+    echo
 fi
 
-remote_digest="$(skopeo inspect --format '{{.Digest}}' "docker://${image}" 2>/dev/null || true)"
+remote_digest="$(jv_remote_platform_digest "${image}" || true)"
 if [[ ! ${remote_digest} =~ ^sha256:[0-9a-f]{64}$ ]]; then
-    echo "ERROR: could not inspect configured Minecraft image: ${image}" >&2
+    echo "ERROR: could not resolve the remote platform digest for ${image}" >&2
     exit 1
 fi
 
@@ -50,7 +80,7 @@ if [[ -z ${local_id} ]]; then
     state=image_missing
     echo 'Minecraft container: configured image is not local and must be pulled'
 elif [[ ! ${local_digest} =~ ^sha256:[0-9a-f]{64}$ ]]; then
-    echo 'ERROR: local Minecraft image exists but its registry digest is unknown.' >&2
+    echo 'ERROR: local Minecraft image exists but its platform digest is unknown.' >&2
     exit 1
 elif [[ ${remote_digest} != ${local_digest} ]]; then
     state=update_available
@@ -60,14 +90,15 @@ elif [[ ${was_active} == yes && ${running_id} != ${local_id} ]]; then
     echo 'Minecraft container: selected local image differs from the running image; restart is needed'
 else
     state=current
-    echo 'Minecraft container: current for the configured tag'
+    echo 'Minecraft container: CURRENT for the configured tag'
 fi
 
-echo "Remote digest: ${remote_digest}"
-[[ -n ${local_digest} ]] && echo "Local digest:  ${local_digest}"
-[[ -n ${running_id} ]] && echo "Running image: ${running_id}"
+echo "Remote platform digest: ${remote_digest}"
+[[ -n ${local_digest} ]] && echo "Local platform digest:  ${local_digest}"
+[[ -n ${running_id} ]] && echo "Running image ID:       ${running_id}"
 
-if [[ ${state} == current ]]; then
+if [[ ${state} == current && ${repin_game} != yes ]]; then
+    echo 'No Minecraft maintenance changes are selected.'
     exit 0
 fi
 
@@ -102,7 +133,7 @@ if [[ ${was_active} == yes ]]; then
     approve_online_players "${players}"
 fi
 
-if ! confirm 'Create a cold backup and apply this Minecraft container maintenance?'; then
+if ! confirm 'Create a cold backup and apply the selected Minecraft maintenance?'; then
     echo 'Update cancelled.'
     exit 0
 fi
@@ -136,21 +167,29 @@ fi
 old_local_id="${local_id}"
 old_running_id="${running_id}"
 restart_if_pull_fails=0
+game_config_changed=no
 
 cleanup() {
     local result=$?
     trap - EXIT
-    if (( result != 0 )) && (( restart_if_pull_fails )) && [[ ${was_active} == yes ]] && ! systemctl is-active --quiet minecraft.service; then
-        echo 'Maintenance failed before the new image was selected; attempting to restart the previous server.' >&2
-        systemctl start minecraft.service || true
+    if (( result != 0 )); then
+        if [[ ${game_config_changed} == yes ]]; then
+            echo 'Maintenance failed after changing the selected game version; restoring the previous JustVoxel game-version configuration.' >&2
+            MINECRAFT_VERSION_MODE="${old_game_mode}"
+            MINECRAFT_VERSION="${old_game_version}"
+            write_main_config || true
+            render_runtime || true
+        fi
+        if (( restart_if_pull_fails )) && [[ ${was_active} == yes ]] && ! systemctl is-active --quiet minecraft.service; then
+            echo 'Maintenance failed before a newer image was selected; attempting to restart the previous server.' >&2
+            systemctl start minecraft.service || true
+        fi
     fi
     exit "${result}"
 }
 trap cleanup EXIT
 
 echo 'Creating pre-update cold backup.'
-# The updater already owns the shared maintenance lock. A successful backup
-# leaves Minecraft stopped so there is only one shutdown/start cycle.
 JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 \
     /usr/libexec/justvoxel/minecraft-backup --leave-stopped
 
@@ -163,13 +202,35 @@ if [[ ${state} == update_available || ${state} == image_missing ]]; then
     podman pull "${image}"
 fi
 
+new_local_id="$(podman image inspect "${image}" --format '{{.Id}}' 2>/dev/null || true)"
+new_local_digest="$(podman image inspect "${image}" --format '{{.Digest}}' 2>/dev/null || true)"
+[[ -n ${new_local_id} ]] || { echo 'ERROR: selected Minecraft image is still not available locally.' >&2; exit 1; }
+[[ ${new_local_digest} =~ ^sha256:[0-9a-f]{64}$ ]] || { echo 'ERROR: selected local Minecraft platform digest is unknown.' >&2; exit 1; }
+
+# Refresh the remote digest after pulling so a tag that moved during maintenance
+# is compared against its current platform manifest rather than a stale index.
+remote_digest_after="$(jv_remote_platform_digest "${image}" || true)"
+[[ ${remote_digest_after} =~ ^sha256:[0-9a-f]{64}$ ]] || { echo 'ERROR: could not re-check the remote Minecraft platform digest.' >&2; exit 1; }
+if [[ ${new_local_digest} != "${remote_digest_after}" ]]; then
+    echo 'ERROR: pulled Minecraft image does not match the current remote platform digest.' >&2
+    echo "Remote platform digest: ${remote_digest_after}" >&2
+    echo "Local platform digest:  ${new_local_digest}" >&2
+    exit 1
+fi
+remote_digest="${remote_digest_after}"
+
 # From this point the configured image may have changed. Do not automatically
 # loop a failed start; preserve the previous image for administrator rollback.
 restart_if_pull_fails=0
 
-new_local_id="$(podman image inspect "${image}" --format '{{.Id}}' 2>/dev/null || true)"
-new_local_digest="$(podman image inspect "${image}" --format '{{.Digest}}' 2>/dev/null || true)"
-[[ -n ${new_local_id} ]] || { echo 'ERROR: selected Minecraft image is still not available locally.' >&2; exit 1; }
+if [[ ${repin_game} == yes ]]; then
+    MINECRAFT_VERSION_MODE=pinned
+    MINECRAFT_VERSION="${latest_mc}"
+    write_main_config
+    render_runtime
+    game_config_changed=yes
+    echo "Minecraft/Paper pinned version updated to ${MINECRAFT_VERSION}."
+fi
 
 if [[ ${was_active} == yes ]]; then
     systemctl start minecraft.service
@@ -194,8 +255,9 @@ if [[ ${was_active} == yes ]]; then
         podman exec minecraft rcon-cli 'geyser version'
     fi
 else
-    echo 'Minecraft was stopped before maintenance, so it remains stopped.'
-    echo 'The selected image is ready for the next start.'
+    echo 'Minecraft was already stopped, so it remains stopped.'
+    echo 'The selected image/version configuration is ready for the next start.'
+    echo 'Runtime verification will occur when Minecraft is next started.'
 fi
 
 candidate_previous_id=''
@@ -229,5 +291,10 @@ if [[ -n ${candidate_previous_id} ]]; then
     echo "Previous Minecraft image retained for rollback: ${candidate_previous_id}"
 fi
 
+game_config_changed=no
 trap - EXIT
-echo "Minecraft container maintenance completed and verified. Local digest: ${new_local_digest:-unknown}"
+if [[ ${was_active} == yes ]]; then
+    echo "Minecraft maintenance completed and runtime verified. Platform digest: ${new_local_digest}"
+else
+    echo "Minecraft maintenance completed. Platform digest: ${new_local_digest}"
+fi
