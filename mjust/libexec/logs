@@ -1,0 +1,33 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/ui.sh
+
+if ! jui_has_tty; then
+    exec journalctl --no-pager -u minecraft.service -n 100
+fi
+
+echo 'Minecraft logs'
+echo '--------------'
+echo 'Press q or Esc to return to JustVoxel. Ctrl-C also exits the log viewer.'
+echo
+
+journalctl --no-pager -u minecraft.service -n 100 -f &
+log_pid=$!
+
+cleanup() {
+    local rc=$?
+    trap - EXIT INT TERM HUP
+    kill "${log_pid}" >/dev/null 2>&1 || true
+    wait "${log_pid}" 2>/dev/null || true
+    return "${rc}"
+}
+trap cleanup EXIT
+trap 'exit 0' INT TERM HUP
+
+while true; do
+    key=''
+    IFS= read -rsn1 key </dev/tty || break
+    case "${key}" in
+        q|Q|$'\e') break ;;
+    esac
+done
