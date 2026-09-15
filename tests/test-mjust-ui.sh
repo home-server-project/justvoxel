@@ -8,6 +8,8 @@ source "${repo_root}/mjust/libexec/common.sh"
 source "${repo_root}/mjust/libexec/ui.sh"
 # shellcheck disable=SC1091
 source "${repo_root}/mjust/libexec/player-guidance.sh"
+# shellcheck disable=SC1091
+source "${repo_root}/mjust/libexec/update-policy.sh"
 
 fail() {
     echo "FAIL: $*" >&2
@@ -15,7 +17,8 @@ fail() {
 }
 
 visible="$(mktemp)"
-trap 'rm -f "${visible}"' EXIT
+tty_helper="$(mktemp)"
+trap 'rm -f "${visible}" "${tty_helper}"' EXIT
 
 result="$(choose 'Choose a value' 'one' 'two' 2>"${visible}" <<< '2')"
 [[ ${result} == 2 ]] || fail "choose stdout was '${result}', expected exactly '2'"
@@ -66,14 +69,42 @@ if normalize_daily_backup_time '*-*-* 04:30:00' >/dev/null 2>&1; then
 fi
 [[ $(daily_backup_schedule_from_time '4:30') == '*-*-* 04:30:00' ]] || fail 'daily schedule rendering is incorrect'
 
+manifest_fixture='{"manifests":[{"digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","platform":{"os":"linux","architecture":"amd64"}},{"digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","platform":{"os":"linux","architecture":"arm64"}}]}'
+[[ $(jv_manifest_platform_digest "${manifest_fixture}" linux amd64) == 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' ]] || fail 'amd64 platform digest selection failed'
+[[ $(jv_manifest_platform_digest "${manifest_fixture}" linux arm64) == 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' ]] || fail 'arm64 platform digest selection failed'
+[[ $(jv_game_version_state pinned 26.2 26.2) == current ]] || fail 'equal pinned game version should be current'
+[[ $(jv_game_version_state pinned 26.2 26.3) == update_available ]] || fail 'newer stable pinned game version should be update_available'
+[[ $(jv_game_version_state pinned 26.2 '') == unknown ]] || fail 'missing Paper result should be unknown'
+[[ $(jv_game_version_state latest LATEST 26.3) == moving ]] || fail 'LATEST game policy should be moving'
+
 TERM=dumb
 export TERM
 [[ $(jui_backend) == none ]] || fail 'TERM=dumb must disable the interactive selector backend'
+unset TERM
+
+# Reproduce nested menus under a real controlling pseudo-terminal. stdout is
+# captured by command substitution while keyboard/display I/O must still work.
+command -v script >/dev/null 2>&1 || fail 'util-linux script command is required for pseudo-TTY UI regression coverage'
+cat > "${tty_helper}" <<EOF
+#!/usr/bin/bash
+set -euo pipefail
+source "${repo_root}/mjust/libexec/ui.sh"
+TERM=xterm
+export TERM
+PATH=/nonexistent
+export PATH
+value="\$(jui_choose 'Nested selector' 'one' 'two')"
+printf 'RESULT=%s\n' "\${value}"
+EOF
+chmod +x "${tty_helper}"
+tty_output="$(printf '1\n' | script -qec "${tty_helper}" /dev/null 2>&1 || true)"
+grep -Fq 'RESULT=one' <<< "${tty_output}" || fail "nested selector failed under a pseudo-TTY: ${tty_output}"
 
 menu="${repo_root}/mjust/libexec/menu"
 storage="${repo_root}/mjust/libexec/storage-provision"
 justfile="${repo_root}/mjust/justfile"
 start_over="${repo_root}/mjust/libexec/start-over"
+logs="${repo_root}/mjust/libexec/logs"
 
 for id in setup setup-advanced status players configure service whitelist backups storage update validate logs advanced exit; do
     grep -Fq "${id})" "${menu}" || fail "menu preview/dispatch id missing: ${id}"
@@ -89,6 +120,8 @@ grep -Fq 'mjust status --details' "${menu}" || fail 'detailed status is not expo
 grep -Fq -- '--details' "${repo_root}/mjust/bin/mjust" || fail 'mjust wrapper does not accept status --details'
 grep -Fq 'ERASE /dev/...' "${menu}" || fail 'storage preview does not preserve typed-confirmation guidance'
 grep -Fq "'Back'" "${repo_root}/mjust/libexec/storage-ui.sh" || fail 'storage UI has no Back option'
+grep -Fq 'Press q or Esc to return to JustVoxel' "${logs}" || fail 'interactive logs do not expose a return key'
+grep -Fq '/usr/libexec/justvoxel/mjust/logs' "${justfile}" || fail 'mjust logs is not routed through the JustVoxel log viewer'
 
 # Every useful direct recipe must be discoverable from the interactive interface.
 for command in \
