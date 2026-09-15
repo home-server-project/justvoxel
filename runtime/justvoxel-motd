@@ -15,7 +15,9 @@ case "${variant_id}" in
     *) variant='Unknown' ;;
 esac
 
-host="$(hostname -s 2>/dev/null || hostname 2>/dev/null || printf 'unknown')"
+host="$(cat /proc/sys/kernel/hostname 2>/dev/null || true)"
+host="${host%%.*}"
+[[ -n ${host} ]] || host='unknown'
 
 if [[ -f /etc/containers/systemd/minecraft.container ]]; then
     minecraft_state='Configured'
