@@ -52,7 +52,7 @@ update-minecraft:
     @sudo /usr/libexec/justvoxel/mjust/update-minecraft
 
 logs:
-    @/usr/libexec/justvoxel/mjust/logs
+    @sudo /usr/libexec/justvoxel/mjust/logs
 
 validate:
     @sudo /usr/libexec/justvoxel/mjust/validate
