@@ -37,6 +37,41 @@ else
     echo "${failed_units}" >&2
 fi
 
+mem_kib="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
+expected_zram_bytes=$((mem_kib * 1024 / 2))
+zram_cap_bytes=$((4096 * 1024 * 1024))
+if (( expected_zram_bytes > zram_cap_bytes )); then
+    expected_zram_bytes=${zram_cap_bytes}
+fi
+
+if [[ -r /sys/block/zram0/disksize ]]; then
+    actual_zram_bytes="$(cat /sys/block/zram0/disksize)"
+    delta=$((actual_zram_bytes - expected_zram_bytes))
+    (( delta < 0 )) && delta=$((-delta))
+    if (( delta <= 4096 )); then
+        pass "zram0 size follows min(RAM/2, 4096 MiB): $((actual_zram_bytes / 1024 / 1024)) MiB"
+    else
+        fail "zram0 size is ${actual_zram_bytes} bytes; expected approximately ${expected_zram_bytes} bytes"
+    fi
+else
+    fail '/dev/zram0 is not available after boot'
+fi
+
+active_swaps="$(swapon --show=NAME --noheadings 2>/dev/null | awk '{$1=$1; print}' || true)"
+if grep -Fxq '/dev/zram0' <<< "${active_swaps}"; then
+    pass 'zram0 is active as swap'
+else
+    fail 'zram0 is not active as swap'
+fi
+
+extra_swaps="$(grep -Fvx '/dev/zram0' <<< "${active_swaps}" | sed '/^$/d' || true)"
+if [[ -z ${extra_swaps} ]]; then
+    pass 'No disk or swap-file device is active by default'
+else
+    echo 'INFO: additional swap is active; this is not part of the JustVoxel default policy:'
+    echo "${extra_swaps}"
+fi
+
 if [[ -L ${JV_QUADLET} || -L ${JV_MC_ENV} || -L ${JV_BACKUP_ENV} ]]; then
     fail 'active runtime files must be local administrator-owned copies, not symlinks into the immutable image'
 else
