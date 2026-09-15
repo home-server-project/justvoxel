@@ -115,6 +115,7 @@ Start with the document that matches what you are trying to do:
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — why JustVoxel is built as an immutable appliance
 - [`docs/VARIANTS.md`](docs/VARIANTS.md) — VM versus Bare Metal technical differences
 - [`docs/BUILD.md`](docs/BUILD.md) — image composition, signing, CI, branches, and release mechanics
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) — current priorities, future features, and project non-goals
 
 ## Branch and release model
 
