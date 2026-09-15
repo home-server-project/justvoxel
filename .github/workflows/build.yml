@@ -26,7 +26,76 @@ env:
   ALMA_BUILDER_IMAGE: quay.io/almalinuxorg/10-kitten-base:10-kitten
 
 jobs:
+  source-tests:
+    name: Source and management tests
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Go
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6
+        with:
+          go-version: '1.25.x'
+          check-latest: true
+          cache: false
+
+      - name: Run shell and mjust regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for script in \
+            build_files/*.sh \
+            build_files/validate/*.sh \
+            mjust/bin/mjust \
+            mjust/libexec/* \
+            runtime/* \
+            tests/*.sh; do
+            [[ -f "${script}" ]] || continue
+            bash -n "${script}"
+          done
+          for test_script in tests/test-*.sh; do
+            [[ -f "${test_script}" ]] || continue
+            bash "${test_script}"
+          done
+
+      - name: Build and test management agent
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd management
+          go mod download
+          go vet ./...
+          go test ./...
+          CGO_ENABLED=0 go build -trimpath -o /tmp/management-agent ./cmd/justvoxel-management-agent
+          /tmp/management-agent version
+
+  resolve-webui:
+    name: Resolve stable WebUI release
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Resolve newest stable WebUI release
+        id: resolve
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(./build_files/resolve-webui-release.sh select stable)"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "Selected JustVoxel WebUI ${version}"
+
   build:
+    needs: [source-tests, resolve-webui]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -47,17 +116,43 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      - name: Set up Go
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6
+        with:
+          go-version: '1.25.x'
+          check-latest: true
+          cache: false
+
       - name: Install build dependencies
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y podman skopeo jq
+          sudo apt-get install -y podman skopeo jq curl python3
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
           cosign-release: 'v3.1.2'
+
+      - name: Fetch and verify exact WebUI release
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          WEBUI_VERSION: ${{ needs.resolve-webui.outputs.version }}
+        run: |
+          set -euo pipefail
+          ./build_files/resolve-webui-release.sh fetch "${WEBUI_VERSION}" build_artifacts/webui
+
+      - name: Build management agent
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build_artifacts/management
+          cd management
+          go mod download
+          go test ./...
+          CGO_ENABLED=0 go build -trimpath -o ../build_artifacts/management/management-agent ./cmd/justvoxel-management-agent
 
       - name: Resolve Alma build inputs
         id: inputs
@@ -82,6 +177,7 @@ jobs:
           ALMA_BUILDER_REF: ${{ steps.inputs.outputs.builder_ref }}
           TARGET: ${{ matrix.target }}
           VARIANT: ${{ matrix.variant }}
+          WEBUI_VERSION: ${{ needs.resolve-webui.outputs.version }}
         run: |
           set -euo pipefail
           image_repo="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ matrix.repository }}"
@@ -97,6 +193,8 @@ jobs:
             --build-arg "JUSTVOXEL_BAREMETAL_REPOSITORY=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/justvoxel-baremetal" \
             --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
             --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --label "io.home-server-project.justvoxel.webui.version=${WEBUI_VERSION}" \
+            --label "io.home-server-project.justvoxel.management-api=v1" \
             --target "${TARGET}" \
             --tag "justvoxel-${VARIANT}:unrechunked" \
             --file Containerfile \
@@ -212,11 +310,14 @@ jobs:
           VARIANT: ${{ matrix.variant }}
           LAYERS: ${{ steps.rechunk.outputs.layers }}
           DIGEST: ${{ steps.push.outputs.digest }}
+          WEBUI_VERSION: ${{ needs.resolve-webui.outputs.version }}
         run: |
           {
             echo "## JustVoxel ${VARIANT}"
             echo
             echo "- Base: AlmaLinux 10 minimal-plus"
+            echo "- WebUI: ${WEBUI_VERSION:-unresolved}"
+            echo "- Management API: v1"
             echo "- Rechunked layers: ${LAYERS:-unknown} / ${OCI_LAYER_LIMIT}"
             echo "- Image: ${IMAGE_REPOSITORY:-not-published}"
             echo "- Digest: ${DIGEST:-not-published}"
@@ -224,7 +325,7 @@ jobs:
 
   release:
     name: Publish GitHub release
-    needs: build
+    needs: [resolve-webui, build]
     if: github.event_name != 'pull_request' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-24.04
     permissions:
@@ -255,6 +356,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          WEBUI_VERSION: ${{ needs.resolve-webui.outputs.version }}
         run: |
           set -euo pipefail
           registry="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
@@ -279,6 +381,9 @@ jobs:
 
           Signed AlmaLinux 10 minimal-plus bootc images.
 
+          WebUI: ${WEBUI_VERSION}
+          Management API: v1
+
           ### VM
 
           \`\`\`text
@@ -294,8 +399,6 @@ jobs:
           ${baremetal_image}
           ${baremetal_digest}
           \`\`\`
-
-          Minecraft runtime and mjust are developed in later implementation stages; this release workflow is intentionally main-only.
           EOF_NOTES
 
           title="JustVoxel 10 - ${release_date}"

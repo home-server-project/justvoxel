@@ -29,6 +29,9 @@ test "$(systemctl is-enabled NetworkManager.service)" = "enabled"
 test "$(systemctl is-enabled systemd-resolved.service)" = "enabled"
 test "$(systemctl is-enabled firewalld.service)" = "enabled"
 test "$(systemctl is-enabled sshd.service)" = "enabled"
+test "$(systemctl is-enabled justvoxel-web-bootstrap.service)" = "enabled"
+[[ "$(systemctl is-enabled justvoxel-webui.service 2>/dev/null || true)" != "enabled" ]]
+[[ "$(systemctl is-enabled justvoxel-management.service 2>/dev/null || true)" != "enabled" ]]
 [[ "$(systemctl is-enabled tailscaled.service 2>/dev/null || true)" != "enabled" ]]
 [[ "$(systemctl is-enabled netbird.service 2>/dev/null || true)" != "enabled" ]]
 
@@ -59,12 +62,27 @@ test -x /usr/libexec/justvoxel/motd
 bash -n /usr/libexec/justvoxel/motd
 grep -Fq 'Welcome to JustVoxel' /usr/libexec/justvoxel/motd
 grep -Fq 'IPv4:' /usr/libexec/justvoxel/motd
+grep -Fq 'Web management:' /usr/libexec/justvoxel/motd
 grep -Fq 'mjust setup-advanced' /usr/libexec/justvoxel/motd
 
 test -f /usr/lib/justvoxel/variant
 test -f /usr/lib/tmpfiles.d/justvoxel.conf
 test -f /usr/lib/sysusers.d/justvoxel-rpc.conf
 grep -Fqx 'u rpc 32 "Rpcbind Daemon" /var/lib/rpcbind -' /usr/lib/sysusers.d/justvoxel-rpc.conf
+
+test -f /usr/lib/sysusers.d/justvoxel-web.conf
+grep -Fq 'u justvoxel-web ' /usr/lib/sysusers.d/justvoxel-web.conf
+test -f /usr/lib/tmpfiles.d/justvoxel-web.conf
+test -f /usr/lib/systemd/system/justvoxel-management.service
+test -f /usr/lib/systemd/system/justvoxel-webui.service
+test -f /usr/lib/systemd/system/justvoxel-web-bootstrap.service
+test -f /usr/lib/firewalld/services/justvoxel-web.xml
+test -x /usr/libexec/justvoxel/management-agent
+test -x /usr/libexec/justvoxel/justvoxel-webui
+test -r /usr/lib/justvoxel/webui-release.json
+jq -e '.management_api == "v1" and (.artifact_sha256 | test("^[0-9a-f]{64}$"))' /usr/lib/justvoxel/webui-release.json >/dev/null
+/usr/libexec/justvoxel/justvoxel-webui -version | grep -Fq 'management-api=v1'
+/usr/libexec/justvoxel/management-agent version | grep -Fq 'JustVoxel Management API v1'
 
 test -x /usr/libexec/justvoxel/minecraft-backup
 bash -n /usr/libexec/justvoxel/minecraft-backup
@@ -83,6 +101,8 @@ test -f /usr/libexec/justvoxel/mjust/storage-common.sh
 test -x /usr/libexec/justvoxel/mjust/welcome
 test -x /usr/libexec/justvoxel/mjust/status
 test -x /usr/libexec/justvoxel/mjust/storage-summary
+test -x /usr/libexec/justvoxel/mjust/web
+test -x /usr/libexec/justvoxel/mjust/web-status-json
 test -x /usr/libexec/justvoxel/mjust/ui.sh
 for script in /usr/libexec/justvoxel/mjust/*; do
     [[ -f "${script}" ]] || continue
@@ -91,6 +111,7 @@ done
 /usr/bin/mjust --list >/dev/null
 /usr/bin/mjust --list | grep -Fq 'setup-advanced'
 /usr/bin/mjust --list | grep -Fq 'status'
+/usr/bin/mjust --list | grep -Fq 'web'
 /usr/bin/mjust --list | grep -Fq 'welcome'
 /usr/bin/mjust --list | grep -Fq 'welcome-off'
 /usr/bin/mjust --list | grep -Fq 'welcome-on'

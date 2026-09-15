@@ -41,6 +41,7 @@ systemctl enable NetworkManager.service 2>/dev/null || true
 systemctl enable systemd-resolved.service
 systemctl enable firewalld.service 2>/dev/null || true
 systemctl enable sshd.service 2>/dev/null || true
+systemctl enable justvoxel-web-bootstrap.service
 
 install -d -m0755 /usr/share/doc/justvoxel
 cp -avf /ctx/docs/. /usr/share/doc/justvoxel/
@@ -57,6 +58,22 @@ install -m0755 /ctx/runtime/minecraft-backup /usr/libexec/justvoxel/minecraft-ba
 install -m0755 /ctx/runtime/justvoxel-motd /usr/libexec/justvoxel/motd
 install -d -m0755 /usr/libexec/justvoxel/mjust
 install -m0755 /ctx/mjust/libexec/* /usr/libexec/justvoxel/mjust/
+
+if [[ ! -x /ctx/build_artifacts/management/management-agent ]]; then
+    echo 'ERROR: verified JustVoxel management agent build artifact is missing.' >&2
+    exit 1
+fi
+if [[ ! -x /ctx/build_artifacts/webui/justvoxel-webui || ! -r /ctx/build_artifacts/webui/webui-release.json ]]; then
+    echo 'ERROR: verified JustVoxel WebUI build artifacts are missing.' >&2
+    exit 1
+fi
+install -m0755 /ctx/build_artifacts/management/management-agent /usr/libexec/justvoxel/management-agent
+install -m0755 /ctx/build_artifacts/webui/justvoxel-webui /usr/libexec/justvoxel/justvoxel-webui
+install -d -m0755 /usr/lib/justvoxel
+install -m0644 /ctx/build_artifacts/webui/webui-release.json /usr/lib/justvoxel/webui-release.json
+jq -e '.management_api == "v1" and (.version | type == "string") and (.source_commit | test("^[0-9a-f]{40}$")) and (.artifact_sha256 | test("^[0-9a-f]{64}$"))' /usr/lib/justvoxel/webui-release.json >/dev/null
+/usr/libexec/justvoxel/justvoxel-webui -version | grep -Fq "management-api=v1"
+/usr/libexec/justvoxel/management-agent version | grep -Fq 'JustVoxel Management API v1'
 
 install -d -m0755 /usr/libexec/justvoxel/health
 install -m0755 /ctx/build_files/validate/common.sh /usr/libexec/justvoxel/health/common

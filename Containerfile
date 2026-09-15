@@ -32,6 +32,7 @@ RUN /usr/libexec/bootc-base-imagectl build-rootfs \
 
 FROM scratch AS ctx
 COPY build_files /build_files
+COPY build_artifacts /build_artifacts
 COPY system_files /system_files
 COPY docs /docs
 COPY templates /templates

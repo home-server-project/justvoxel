@@ -33,6 +33,15 @@ else
     needs_setup=yes
 fi
 
+web_management='Disabled'
+if [[ -e /var/lib/justvoxel/webui/enabled ]]; then
+    if [[ ${ipv4} == 'Not assigned' ]]; then
+        web_management='Enabled - address pending'
+    else
+        web_management="https://${ipv4}:8443"
+    fi
+fi
+
 if [[ -t 1 && ${TERM:-dumb} != dumb ]]; then
     green=$'\033[38;5;82m'
     bold=$'\033[1m'
@@ -45,11 +54,12 @@ fi
 
 printf '%s%sWelcome to JustVoxel%s\n' "${green}" "${bold}" "${reset}"
 printf 'Minecraft Server Appliance\n\n'
-printf '  System:     %s\n' "${pretty_name}"
-printf '  Variant:    %s\n' "${variant}"
-printf '  Host:       %s\n' "${host}"
-printf '  IPv4:       %s\n' "${ipv4}"
-printf '  Minecraft:  %s\n\n' "${minecraft_state}"
+printf '  System:          %s\n' "${pretty_name}"
+printf '  Variant:         %s\n' "${variant}"
+printf '  Host:            %s\n' "${host}"
+printf '  IPv4:            %s\n' "${ipv4}"
+printf '  Minecraft:       %s\n' "${minecraft_state}"
+printf '  Web management:  %s\n\n' "${web_management}"
 
 if [[ ${needs_setup} == yes ]]; then
     printf '  Normal setup:      %smjust setup%s\n' "${green}" "${reset}"
@@ -58,6 +68,7 @@ fi
 printf '  Admin menu:        %smjust%s\n' "${green}" "${reset}"
 printf '  List commands:     %smjust --list%s\n' "${green}" "${reset}"
 printf '  Server status:     %smjust status%s\n' "${green}" "${reset}"
+printf '  Web status:        %smjust web status%s\n' "${green}" "${reset}"
 printf '  Validate system:   %smjust validate%s\n' "${green}" "${reset}"
 printf '\n'
 printf '  Documentation: https://github.com/home-server-project/justvoxel\n'

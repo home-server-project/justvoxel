@@ -1,0 +1,114 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+config=/etc/justvoxel/justvoxel.conf
+metadata=/usr/lib/justvoxel/webui-release.json
+variant_file=/usr/lib/justvoxel/variant
+
+configured=no
+if [[ -r ${config} ]]; then
+    # shellcheck disable=SC1090
+    source "${config}"
+    configured=yes
+fi
+
+variant_raw="$(cat "${variant_file}" 2>/dev/null || true)"
+case "${variant_raw}" in
+    justvoxel-vm) variant='VM' ;;
+    justvoxel-baremetal) variant='Bare Metal' ;;
+    *) variant='Unknown' ;;
+esac
+
+ipv4="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i == "src") {print $(i+1); exit}}' || true)"
+if [[ -z ${ipv4} ]]; then
+    ipv4="$(ip -o -4 addr show scope global up 2>/dev/null | awk '{split($4,a,"/"); print a[1]; exit}' || true)"
+fi
+[[ -n ${ipv4} ]] || ipv4='Unknown'
+
+failed_count="$(systemctl --failed --type=service --no-legend --plain 2>/dev/null | grep -c . || true)"
+system_state="$(systemctl is-system-running 2>/dev/null || true)"
+if [[ ${failed_count} == 0 && ( ${system_state} == running || ${system_state} == degraded ) ]]; then
+    health='Healthy'
+else
+    health='Attention needed'
+fi
+
+minecraft_state='Not configured'
+players=0
+max_players=0
+mc_version='Unknown'
+java_port=0
+bedrock=false
+bedrock_port=0
+backup_enabled=false
+backup_last='None found'
+backup_next='Disabled'
+
+if [[ ${configured} == yes ]]; then
+    minecraft_state='Stopped'
+    if systemctl is-failed --quiet minecraft.service 2>/dev/null; then
+        minecraft_state='Failed'
+    elif systemctl is-active --quiet minecraft.service 2>/dev/null; then
+        minecraft_state='Running'
+    fi
+
+    [[ ${MAX_PLAYERS:-} =~ ^[0-9]+$ ]] && max_players="${MAX_PLAYERS}"
+    [[ ${JAVA_PORT:-} =~ ^[0-9]+$ ]] && java_port="${JAVA_PORT}"
+    if [[ ${BEDROCK_ENABLED:-no} == yes ]]; then
+        bedrock=true
+        [[ ${BEDROCK_PORT:-} =~ ^[0-9]+$ ]] && bedrock_port="${BEDROCK_PORT}"
+    fi
+
+    if [[ ${minecraft_state} == Running ]]; then
+        list_output="$(podman exec minecraft rcon-cli 'list' 2>/dev/null || true)"
+        if [[ ${list_output} =~ There[[:space:]]are[[:space:]]([0-9]+)[[:space:]]of[[:space:]]a[[:space:]]max[[:space:]]of[[:space:]]([0-9]+) ]]; then
+            players="${BASH_REMATCH[1]}"
+            max_players="${BASH_REMATCH[2]}"
+        fi
+        version_output="$(podman exec minecraft rcon-cli 'version' 2>/dev/null | head -n1 || true)"
+        [[ -n ${version_output} ]] && mc_version="${version_output}"
+    fi
+
+    if [[ ${BACKUP_TIMER_ENABLED:-no} == yes ]]; then
+        backup_enabled=true
+        backup_next="$(systemctl show minecraft-backup.timer -p NextElapseUSecRealtime --value 2>/dev/null || true)"
+        [[ -n ${backup_next} && ${backup_next} != n/a ]] || backup_next='Unknown'
+    fi
+    if [[ -n ${BACKUP_PATH:-} && -d ${BACKUP_PATH} ]]; then
+        latest="$(find "${BACKUP_PATH}" -maxdepth 1 -type f -name 'minecraft-*.tar.gz' -printf '%T@ %f\n' 2>/dev/null | sort -nr | head -n1 || true)"
+        [[ -n ${latest} ]] && backup_last="${latest#* }"
+    fi
+fi
+
+webui_version='Unknown'
+api_version='v1'
+if [[ -r ${metadata} ]]; then
+    webui_version="$(jq -r '.version // "Unknown"' "${metadata}" 2>/dev/null || echo Unknown)"
+    api_version="$(jq -r '.management_api // "v1"' "${metadata}" 2>/dev/null || echo v1)"
+fi
+
+justvoxel_version='10'
+if [[ -r /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    source /etc/os-release
+    justvoxel_version="${VERSION_ID:-10}"
+fi
+
+jq -n \
+    --arg variant "${variant}" \
+    --arg health "${health}" \
+    --arg ipv4 "${ipv4}" \
+    --arg mc_state "${minecraft_state}" \
+    --argjson players "${players}" \
+    --argjson max_players "${max_players}" \
+    --arg mc_version "${mc_version}" \
+    --argjson java_port "${java_port}" \
+    --argjson bedrock "${bedrock}" \
+    --argjson bedrock_port "${bedrock_port}" \
+    --argjson backup_enabled "${backup_enabled}" \
+    --arg backup_last "${backup_last}" \
+    --arg backup_next "${backup_next}" \
+    --arg justvoxel_version "${justvoxel_version}" \
+    --arg webui_version "${webui_version}" \
+    --arg api_version "${api_version}" \
+    '{system:{variant:$variant,health:$health,ipv4:$ipv4},minecraft:{state:$mc_state,players:$players,max_players:$max_players,version:$mc_version,java_port:$java_port,bedrock:$bedrock,bedrock_port:$bedrock_port},backup:{enabled:$backup_enabled,last:$backup_last,next:$backup_next},justvoxel:{version:$justvoxel_version,webui:$webui_version,management_api:$api_version}}'
