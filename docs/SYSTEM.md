@@ -6,6 +6,7 @@ JustVoxel keeps operating-system maintenance separate from Minecraft/container m
 
 - `mjust os-status` — friendly bootc deployment status
 - `mjust os-update` — check for a newer OS image and optionally download/stage it
+- `mjust resources` — open the live btop system resource monitor
 - `mjust reboot` — player-aware graceful reboot
 - `mjust poweroff` — player-aware graceful power off
 - `mjust firmware` — Bare Metal-only reboot into firmware/UEFI setup
@@ -27,6 +28,24 @@ When a newer image is available, the administrator is asked whether to download 
 Downloading/staging an OS image does not reboot the host, stop Minecraft, query players, or create a Minecraft backup. The running system continues unchanged. The staged deployment is used after the next normal reboot.
 
 There is intentionally no separate `mjust os-apply` command. Reboot is the normal bootc apply boundary.
+
+## System resources
+
+`mjust resources` opens `btop` as a live resource view for CPU, memory and swap, disks, network activity, and running processes.
+
+It requires an interactive terminal. Over SSH, allocate a terminal, for example:
+
+```text
+ssh -t <server> mjust resources
+```
+
+Inside btop:
+
+- `q` quits directly back to the JustVoxel System menu or the calling shell
+- `Esc` opens the btop menu, which includes Quit
+- `Ctrl-C` also exits btop
+
+The JustVoxel menu does not add an extra pause after btop exits.
 
 ## Reboot and power off
 
