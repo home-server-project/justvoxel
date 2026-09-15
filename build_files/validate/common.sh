@@ -13,7 +13,7 @@ rpm -q \
     NetworkManager NetworkManager-tui systemd-resolved firewalld openssh-server sudo \
     podman skopeo just container-selinux policycoreutils-python-utils selinux-policy-extra \
     util-linux xfsprogs parted iperf3 nfs-utils cifs-utils qemu-guest-agent open-vm-tools \
-    hyperv-daemons >/dev/null
+    hyperv-daemons gssproxy >/dev/null
 
 semodule -l >/dev/null
 
@@ -36,6 +36,12 @@ grep -Fqx 'dns=systemd-resolved' /etc/NetworkManager/conf.d/90-systemd-resolved.
 test -f /usr/lib/tmpfiles.d/justvoxel-resolved.conf
 grep -Fq '/run/systemd/resolve/stub-resolv.conf' /usr/lib/tmpfiles.d/justvoxel-resolved.conf
 
+test -f /usr/lib/tmpfiles.d/justvoxel-gssproxy.conf
+grep -Fqx 'd /var/lib/gssproxy/clients 0700 root root -' /usr/lib/tmpfiles.d/justvoxel-gssproxy.conf
+grep -Fqx 'd /var/lib/gssproxy/rcache  0700 root root -' /usr/lib/tmpfiles.d/justvoxel-gssproxy.conf
+grep -Fqx 'z /var/lib/gssproxy/clients 0700 root root -' /usr/lib/tmpfiles.d/justvoxel-gssproxy.conf
+grep -Fqx 'z /var/lib/gssproxy/rcache  0700 root root -' /usr/lib/tmpfiles.d/justvoxel-gssproxy.conf
+
 test -f /etc/profile.d/zz-justvoxel-prompt.sh
 grep -Fq '38;5;82' /etc/profile.d/zz-justvoxel-prompt.sh
 
@@ -44,6 +50,8 @@ bash -n /etc/profile.d/90-justvoxel-motd.sh
 test -x /usr/libexec/justvoxel/motd
 bash -n /usr/libexec/justvoxel/motd
 grep -Fq 'Welcome to JustVoxel' /usr/libexec/justvoxel/motd
+grep -Fq 'IPv4:' /usr/libexec/justvoxel/motd
+grep -Fq 'mjust setup-advanced' /usr/libexec/justvoxel/motd
 
 test -f /usr/lib/justvoxel/variant
 test -f /usr/lib/tmpfiles.d/justvoxel.conf
@@ -70,6 +78,7 @@ for script in /usr/libexec/justvoxel/mjust/*; do
     bash -n "${script}"
 done
 /usr/bin/mjust --list >/dev/null
+/usr/bin/mjust --list | grep -Fq 'setup-advanced'
 /usr/bin/mjust --list | grep -Fq 'welcome'
 /usr/bin/mjust --list | grep -Fq 'welcome-off'
 /usr/bin/mjust --list | grep -Fq 'welcome-on'
