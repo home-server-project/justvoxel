@@ -73,13 +73,24 @@ Whole-disk erase excludes system disks and mounted disks. Destructive operations
 
 `mjust storage-migrate` can move Minecraft data to provisioned local storage after a verified cold backup; the old data is retained until the administrator removes it manually.
 
-## mjust
+## mjust administration
 
-The management layer includes first setup, safe configuration changes, status/start/stop/restart, online player checks, Java and Floodgate whitelist operations, verified cold backup, player-aware Minecraft maintenance, storage provisioning/migration, logs, and appliance validation.
+`mjust` is JustVoxel's built-in administration interface. It exists so someone who is comfortable installing an operating system and following normal computer instructions can configure and run the appliance without needing deep Linux, container, systemd, bootc, SELinux, firewall, or Minecraft-server administration knowledge.
 
-Moving container tags are refreshed only by an explicit pull. Pre-update backups use the same retention policy as timer/manual backups. JustVoxel tracks one previous Minecraft image for rollback and never performs a broad Podman image prune.
+Run `mjust` with no arguments to open the interactive terminal interface and choose what you want to do. The interface covers first setup, Minecraft configuration and service control, players and whitelist management, backups and restore, storage, Minecraft updates, health/status, operating-system maintenance, system resources, validation, and other appliance tasks. The underlying safety checks stay active whether an operation is started from the menu or from a direct `mjust` command.
 
-See `docs/MJUST.md` and `docs/STORAGE.md`.
+Experienced administrators are not locked into the wrapper. JustVoxel remains a normal immutable AlmaLinux server, so standard Linux tools such as `systemctl`, `journalctl`, `podman`, `bootc`, `nmcli`, and `firewall-cmd` remain available when deeper administration or troubleshooting is wanted.
+
+The interaction model is inspired by Universal Blue's `ujust` / `ugum` work in [ublue-os/packages](https://github.com/ublue-os/packages), but JustVoxel uses its own server-focused implementation.
+
+For more detail:
+
+- [`docs/MJUST.md`](docs/MJUST.md) — complete mjust interface and command reference
+- [`docs/STATUS.md`](docs/STATUS.md) — appliance health dashboard
+- [`docs/SYSTEM.md`](docs/SYSTEM.md) — OS status, updates, resources, reboot, poweroff, and firmware controls
+- [`docs/STORAGE.md`](docs/STORAGE.md) — storage choices, provisioning, mounts, and migration
+- [`docs/RESTORE.md`](docs/RESTORE.md) — world and full Minecraft-data recovery
+- [`docs/MANAGEMENT.md`](docs/MANAGEMENT.md) — how WebUI, mjust, direct commands, and native Linux administration fit together
 
 ## Branch and release model
 
@@ -89,10 +100,6 @@ See `docs/MJUST.md` and `docs/STORAGE.md`.
 - Image rechunking uses the Home Server Project / Pasiv Black Box limits: 127 RPM chunks, 128 OCI layers maximum.
 
 No Minecraft server JAR or Mojang server binary is baked into the bootc image.
-
-## Credits
-
-The `mjust` interaction model is inspired by Universal Blue's `ujust` / `ugum` work in [ublue-os/packages](https://github.com/ublue-os/packages). JustVoxel uses its own small server-focused implementation. Any future direct source reuse will retain the applicable Apache-2.0 attribution and notices.
 
 ## License
 
