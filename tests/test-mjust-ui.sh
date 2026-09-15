@@ -35,4 +35,18 @@ if validate_nonroot_id 0; then
     fail 'UID/GID 0 must be rejected'
 fi
 
+[[ $(normalize_daily_backup_time '04:30') == '04:30' ]] || fail '04:30 should stay 04:30'
+[[ $(normalize_daily_backup_time '4:30') == '04:30' ]] || fail '4:30 should normalize to 04:30'
+[[ $(normalize_daily_backup_time '23:59') == '23:59' ]] || fail '23:59 should be accepted'
+if normalize_daily_backup_time '24:00' >/dev/null 2>&1; then
+    fail '24:00 must be rejected'
+fi
+if normalize_daily_backup_time '12:60' >/dev/null 2>&1; then
+    fail '12:60 must be rejected'
+fi
+if normalize_daily_backup_time '*-*-* 04:30:00' >/dev/null 2>&1; then
+    fail 'normal daily-time helper must reject raw systemd calendar syntax'
+fi
+[[ $(daily_backup_schedule_from_time '4:30') == '*-*-* 04:30:00' ]] || fail 'daily schedule rendering is incorrect'
+
 echo 'mjust UI regression tests passed.'
