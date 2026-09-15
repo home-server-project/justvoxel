@@ -76,23 +76,37 @@ The normal setup wizard currently collects:
 - Minecraft/Paper game-version policy
 - backup target
 - backup retention count
-- systemd backup schedule
-- whether the backup timer is enabled
+- daily backup time
+- whether automatic daily backups are enabled
 - explicit Minecraft EULA acceptance
 
 Memory values are suggested from installed system RAM, but the administrator can change both the Java heap and the maximum total Minecraft memory. The Java heap is contained inside the container memory limit, so the total limit must be larger than the heap.
 
-Normal setup does not ask for UID/GID. It selects the non-root IDs used for persistent Minecraft data in this order:
+Normal setup does not ask for UID/GID. Immediately after showing `Mode: normal`, it explains which non-root IDs will own the persistent Minecraft data. JustVoxel selects those IDs in this order:
 
 1. the administrator who invoked setup through `sudo` (`SUDO_UID:SUDO_GID`)
 2. the local `voxel` account when available
 3. `1000:1000` as the final fallback
 
-UID or GID `0` is rejected. Setup prints the selected ownership source briefly so the administrator knows what will own the world data.
+UID or GID `0` is rejected. The final planned-configuration summary keeps only the concise ownership value and source.
 
 `mjust setup-advanced` calls the same setup implementation with an advanced flag. It keeps the same normal flow but allows the administrator to override the suggested Minecraft data UID/GID. This is intentionally not duplicated into a second wizard.
 
 Normal `mjust configure` does not expose UID/GID changes for an existing world. Changing ownership of an already-populated world requires a separately designed guarded operation rather than an ordinary configuration edit.
+
+### Normal backup schedule UX
+
+Normal setup does not require systemd calendar syntax. It asks for a daily clock time such as `04:30` and uses the host system timezone reported by `timedatectl`.
+
+The normal-mode value is rendered internally as the existing systemd calendar expression:
+
+`*-*-* HH:MM:00`
+
+For example, `04:30` becomes `*-*-* 04:30:00`.
+
+Before asking whether to enable automatic backups, normal setup explains that JustVoxel uses verified cold backups: Minecraft is stopped cleanly, the world data is archived and verified, and Minecraft is then started again.
+
+`mjust setup-advanced` retains the full raw systemd calendar field and existing `systemd-analyze calendar` validation so advanced scheduling capability is unchanged.
 
 ## Container image policy
 
