@@ -28,6 +28,19 @@ For installer ISO creation, installation layout, disk-size guidance, VM recommen
 
 The ISO builder is being developed as a lightweight unattended bootc installer rather than a desktop-based interactive installer.
 
+## Memory guidance
+
+JustVoxel does not hard-block lower-memory systems. Users are free to try the appliance on any compatible hardware.
+
+- **Minimum recommended:** 8 GiB RAM
+- **Recommended for normal performance:** 12–16 GiB RAM
+
+Systems below 8 GiB may still run JustVoxel, but Minecraft performance can be limited depending on world size, plugins, player count, view/simulation distance, Geyser/Floodgate cross-play, and other workload characteristics.
+
+JustVoxel enables zram as a memory-pressure safety buffer using `zram-generator`'s built-in sizing policy: `min(RAM / 2, 4096 MiB)`. Zram is not additional physical RAM and is not counted when `mjust setup` calculates Minecraft memory recommendations. No disk swap is configured by JustVoxel by default.
+
+The setup wizard remains permissive and uses conservative recommendations based on physical `MemTotal` only.
+
 ## Foundation
 
 Both variants include bootc, Podman/Quadlet support, NetworkManager with systemd-resolved, OpenSSH, SELinux tooling, firewalld, upstream `just`, Tailscale and NetBird clients, NFS/SMB client support, XFS/partition tooling, and lightweight QEMU/Proxmox, VMware, and Hyper-V guest integration. Tailscale and NetBird remain disabled and unconfigured by default.
