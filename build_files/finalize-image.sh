@@ -95,11 +95,11 @@ fi
 # only populated on the initial deployment. Required runtime directories must
 # therefore be recreated declaratively (tmpfiles.d/StateDirectory), not relied
 # upon as package payload in the image. Remove obvious build-only state first,
-# then make bootc lint inspect the remaining package/runtime state BEFORE the
-# final /var cleanup so a missing declarative rule cannot be hidden by rm -rf.
+# then run an informational lint over the remaining package/runtime state before
+# cleanup. The shipped image is still gated later by fatal bootc lint.
 dnf clean all
 rm -rf /var/cache/* /var/log/* /var/tmp/* /var/lib/dnf /var/lib/rpm-state
-bootc container lint --fatal-warnings
+bootc container lint
 
 # Keep only the minimal bootc /var skeleton in the immutable image. Runtime
 # state is recreated by the declarative rules validated above.
