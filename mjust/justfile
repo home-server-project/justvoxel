@@ -51,6 +51,15 @@ logs:
 validate:
     @sudo /usr/libexec/justvoxel/mjust/validate
 
+welcome:
+    @/usr/libexec/justvoxel/mjust/welcome show
+
+welcome-off:
+    @/usr/libexec/justvoxel/mjust/welcome off
+
+welcome-on:
+    @/usr/libexec/justvoxel/mjust/welcome on
+
 storage:
     @sudo /usr/libexec/justvoxel/mjust/storage-provision menu
 
