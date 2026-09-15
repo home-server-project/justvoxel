@@ -167,6 +167,8 @@ Reboot and poweroff use the same player-awareness policy as other disruptive Min
 
 `mjust firmware` is available only on the Bare Metal variant and refuses the operation on the VM variant.
 
+A JustVoxel-aware bootc rollback workflow is not implemented. It remains a future roadmap item; see `ROADMAP.md`.
+
 See `SYSTEM.md` for the complete system-management behavior.
 
 ## Live system resources
@@ -244,7 +246,6 @@ The current implementation deliberately does not:
 - relocate Podman's global image store
 - run a broad Podman image prune
 - automatically change a pinned Minecraft/Paper version
-- provide a JustVoxel-aware bootc rollback workflow
 
 These are intentional safety boundaries rather than missing automatic steps.
 
@@ -264,4 +265,4 @@ The management, backup/restore, storage, system-status/update, resource-monitori
 
 The priority remains validation and hardening before stable promotion. VM validation should come first, followed by destructive/failure-path storage testing, backup and restore testing, network-storage failure testing, Minecraft update testing, installation/first-boot testing, and then Bare Metal validation.
 
-JustVoxel-aware bootc rollback remains a later dedicated design because safe rollback also requires deliberate handling of deployment-specific `/etc` state.
+Future feature priorities, including JustVoxel-aware system rollback, are tracked in `ROADMAP.md`.
