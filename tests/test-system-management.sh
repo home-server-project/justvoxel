@@ -21,7 +21,7 @@ justfile="${repo_root}/mjust/justfile"
 service="${repo_root}/mjust/libexec/service"
 
 grep -Fq 'bootc upgrade --check' "${os_update}" || fail 'os-update must check first'
-grep -Fq '^bootc upgrade$' "${os_update}" || fail 'os-update must stage with ordinary bootc upgrade'
+grep -Eq '^[[:space:]]*bootc upgrade[[:space:]]*$' "${os_update}" || fail 'os-update must stage with ordinary bootc upgrade'
 if grep -Eq -- '--download-only|--apply' "${os_update}"; then fail 'os-update must not use download-only/apply'; fi
 grep -Fq 'does not reboot the appliance' "${os_update}" || fail 'os-update must state non-disruptive behavior'
 
@@ -35,7 +35,7 @@ for recipe in os-status os-update reboot poweroff firmware; do
     grep -Fq "${recipe}:" "${justfile}" || fail "missing recipe: ${recipe}"
 done
 for command in 'mjust os-status' 'mjust os-update' 'mjust reboot' 'mjust poweroff' 'mjust firmware'; do
-    grep -Fq "${command}" "${menu}" || fail "system command not discoverable in TUI: ${command}"
+    grep -Fq "${command}" "${menu}" || fail "system command not discoverable in mjust UI: ${command}"
 done
 grep -Fq 'system)' "${menu}" || fail 'System menu dispatch missing'
 grep -Fq 'Check for OS updates now?' "${menu}" || fail 'OS status does not offer continuation to update check'
