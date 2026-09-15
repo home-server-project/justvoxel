@@ -54,6 +54,7 @@ install -m0755 /ctx/mjust/bin/mjust /usr/bin/mjust
 
 install -d -m0755 /usr/libexec/justvoxel
 install -m0755 /ctx/runtime/minecraft-backup /usr/libexec/justvoxel/minecraft-backup
+install -m0755 /ctx/runtime/justvoxel-motd /usr/libexec/justvoxel/motd
 install -d -m0755 /usr/libexec/justvoxel/mjust
 install -m0755 /ctx/mjust/libexec/* /usr/libexec/justvoxel/mjust/
 
@@ -70,6 +71,8 @@ for cmd in \
 done
 
 bash -n /usr/libexec/justvoxel/minecraft-backup
+bash -n /usr/libexec/justvoxel/motd
+bash -n /etc/profile.d/90-justvoxel-motd.sh
 for script in /usr/bin/mjust /usr/libexec/justvoxel/mjust/*; do
     [[ -f "${script}" ]] || continue
     bash -n "${script}"
