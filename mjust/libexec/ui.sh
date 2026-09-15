@@ -4,6 +4,16 @@ jui_is_interactive() {
     [[ -t 0 && -t 1 && ${TERM:-dumb} != dumb ]]
 }
 
+# Nested menus commonly run inside command substitution so their stdout can
+# return exactly one selected value. In that case stdout is a pipe even though
+# the administrator still has a real controlling terminal. Use /dev/tty for
+# nested keyboard/display interaction instead of treating captured stdout as
+# noninteractive.
+jui_has_tty() {
+    [[ ${TERM:-dumb} != dumb ]] || return 1
+    { : </dev/tty >/dev/tty; } 2>/dev/null
+}
+
 jui_terminal_cols() {
     local cols
     cols="$(tput cols 2>/dev/null || true)"
@@ -25,7 +35,7 @@ jui_rich_supported() {
 }
 
 jui_backend() {
-    if ! jui_is_interactive; then
+    if ! jui_has_tty; then
         printf 'none'
     elif command -v gum >/dev/null 2>&1; then
         printf 'gum'
@@ -47,7 +57,7 @@ jui_choose() {
 
     case "${backend}" in
         gum)
-            gum choose --header "${prompt}" "${options[@]}"
+            gum choose --header "${prompt}" "${options[@]}" </dev/tty
             ;;
         fzf)
             printf '%s\n' "${options[@]}" \
@@ -55,18 +65,19 @@ jui_choose() {
                     --prompt="${prompt} > " --no-multi
             ;;
         bash)
-            printf '%s\n' "${prompt}" >&2
+            printf '%s\n' "${prompt}" >/dev/tty
             for index in "${!options[@]}"; do
-                printf '  %d. %s\n' "$((index + 1))" "${options[index]}" >&2
+                printf '  %d. %s\n' "$((index + 1))" "${options[index]}" >/dev/tty
             done
             while true; do
-                read -r -p 'Selection: ' choice
+                printf 'Selection: ' >/dev/tty
+                IFS= read -r choice </dev/tty
                 if [[ ${choice} =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#options[@]} )); then
                     selected="${options[choice - 1]}"
                     printf '%s' "${selected}"
                     return 0
                 fi
-                echo 'Please enter a valid number.' >&2
+                echo 'Please enter a valid number.' >/dev/tty
             done
             ;;
         *)
@@ -80,14 +91,15 @@ jui_confirm() {
     backend="$(jui_backend)"
     case "${backend}" in
         gum)
-            gum confirm "${prompt}"
+            gum confirm "${prompt}" </dev/tty
             ;;
         fzf)
             selected="$(printf 'No\nYes\n' | fzf --height='~20%' --layout=reverse --border --prompt="${prompt} > " --no-multi || true)"
             [[ ${selected} == Yes ]]
             ;;
         bash)
-            read -r -p "${prompt} [y/N]: " answer
+            printf '%s [y/N]: ' "${prompt}" >/dev/tty
+            IFS= read -r answer </dev/tty
             [[ ${answer,,} == y || ${answer,,} == yes ]]
             ;;
         *)
@@ -101,10 +113,11 @@ jui_input() {
     backend="$(jui_backend)"
     case "${backend}" in
         gum)
-            gum input --prompt "${prompt}: " --value "${default}"
+            gum input --prompt "${prompt}: " --value "${default}" </dev/tty
             ;;
         fzf|bash)
-            read -r -p "${prompt}${default:+ [${default}]}: " value
+            printf '%s%s: ' "${prompt}" "${default:+ [${default}]}" >/dev/tty
+            IFS= read -r value </dev/tty
             printf '%s' "${value:-${default}}"
             ;;
         *)
@@ -114,7 +127,8 @@ jui_input() {
 }
 
 jui_pause() {
-    jui_is_interactive || return 0
-    echo
-    read -r -p 'Press Enter to return to the JustVoxel menu...' _
+    jui_has_tty || return 0
+    echo >/dev/tty
+    printf 'Press Enter to return to the JustVoxel menu...' >/dev/tty
+    IFS= read -r _ </dev/tty
 }
