@@ -13,7 +13,15 @@ rpm -q \
     NetworkManager NetworkManager-tui systemd-resolved firewalld openssh-server sudo \
     podman skopeo just container-selinux policycoreutils-python-utils selinux-policy-extra \
     util-linux xfsprogs parted iperf3 nfs-utils cifs-utils qemu-guest-agent open-vm-tools \
-    hyperv-daemons gssproxy >/dev/null
+    hyperv-daemons gssproxy zram-generator >/dev/null
+
+test -x /usr/lib/systemd/system-generators/zram-generator
+test -f /etc/systemd/zram-generator.conf
+grep -Fqx '[zram0]' /etc/systemd/zram-generator.conf
+if grep -Eq '^[[:space:]]*(zram-size|compression-algorithm|swap-priority|writeback-device)[[:space:]]*=' /etc/systemd/zram-generator.conf; then
+    echo 'ERROR: JustVoxel zram policy should use zram-generator built-in sizing/compression defaults.' >&2
+    exit 1
+fi
 
 semodule -l >/dev/null
 
