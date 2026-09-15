@@ -26,12 +26,15 @@ The administrator-owned active configuration lives under `/etc`, including:
 
 Bootc image updates may update mjust and its immutable templates, but they do not silently overwrite an installed machine's active `/etc` configuration.
 
+Required runtime directory state under `/var` is treated differently. `/var` persists across bootc deployments, so image updates cannot rely on package-owned `/var` directories being copied into an already-installed machine. JustVoxel keeps the image `/var` skeleton minimal and uses declarative `tmpfiles.d`/systemd mechanisms for required runtime directories. The image finalization path runs fatal bootc lint before the final `/var` cleanup so missing reconstruction rules are not hidden by the cleanup step.
+
 ## Current mjust commands
 
 The current command surface is:
 
 - `mjust` — interactive menu
-- `mjust setup` — first-time appliance configuration
+- `mjust setup` — normal first-time appliance configuration
+- `mjust setup-advanced` — the same setup implementation with advanced options enabled
 - `mjust configure` — safe changes to an installed configuration
 - `mjust status` — Minecraft service status
 - `mjust start`
@@ -59,16 +62,16 @@ The current command surface is:
 
 `mjust setup` refuses to overwrite an existing JustVoxel installation.
 
-The setup wizard currently collects:
+The normal setup wizard currently collects:
 
 - Minecraft persistent-data location
-- Java heap limit
-- total Minecraft container memory limit
-- Java host TCP port
+- Minecraft Java heap
+- maximum total Minecraft container memory
+- Minecraft Java host TCP port
 - optional Bedrock UDP port
 - timezone
 - maximum players
-- MOTD
+- server welcome message (MOTD)
 - Minecraft container-image policy
 - Minecraft/Paper game-version policy
 - backup target
@@ -77,7 +80,19 @@ The setup wizard currently collects:
 - whether the backup timer is enabled
 - explicit Minecraft EULA acceptance
 
-Memory values are suggested from installed system RAM, but the administrator can change both the Java heap and the container limit. The container limit must be larger than the Java heap.
+Memory values are suggested from installed system RAM, but the administrator can change both the Java heap and the maximum total Minecraft memory. The Java heap is contained inside the container memory limit, so the total limit must be larger than the heap.
+
+Normal setup does not ask for UID/GID. It selects the non-root IDs used for persistent Minecraft data in this order:
+
+1. the administrator who invoked setup through `sudo` (`SUDO_UID:SUDO_GID`)
+2. the local `voxel` account when available
+3. `1000:1000` as the final fallback
+
+UID or GID `0` is rejected. Setup prints the selected ownership source briefly so the administrator knows what will own the world data.
+
+`mjust setup-advanced` calls the same setup implementation with an advanced flag. It keeps the same normal flow but allows the administrator to override the suggested Minecraft data UID/GID. This is intentionally not duplicated into a second wizard.
+
+Normal `mjust configure` does not expose UID/GID changes for an existing world. Changing ownership of an already-populated world requires a separately designed guarded operation rather than an ordinary configuration edit.
 
 ## Container image policy
 
@@ -85,15 +100,17 @@ The Minecraft container image and Minecraft/Paper game version are separate sett
 
 The container is based on `docker.io/itzg/minecraft-server`.
 
-Supported image-tag choices are:
+New setup uses these image-tag choices:
 
-- `latest` — moving upstream main-branch image; current default because it matches the hardware-tested reference deployment
-- `stable` — moving upstream released image
+- `stable` — moving upstream released image; recommended/default for new installations
+- `latest` — moving upstream main-branch image
 - custom/exact tag — administrator-selected tag validated against the upstream registry
 
 mjust rejects upstream tags that are explicitly marked deprecated by the upstream image metadata when that metadata is available.
 
-A normal service restart does not itself pull a newer image. A moving tag changes locally only after an explicit image pull. `mjust update-minecraft` performs that remote/local comparison and pull operation.
+A normal service restart does not itself pull a newer OCI image. A moving image tag changes locally only after an explicit image pull. `mjust update-minecraft` performs that remote/local comparison and pull operation.
+
+Existing JustVoxel configurations created before the setting existed retain the compatibility default of `latest`; setup does not silently rewrite an installed machine's existing policy.
 
 For a custom or exact tag, mjust keeps using that tag until the administrator changes it.
 
@@ -103,8 +120,8 @@ Minecraft/Paper versioning is independent from the container-image tag.
 
 The administrator can choose:
 
-1. Pin the newest Minecraft version that currently has a stable Paper build. This is the recommended default.
-2. Use `VERSION=LATEST` and allow the container to select the latest supported Minecraft release during startup.
+1. Pin the newest Minecraft version that currently has a stable Paper build. This is the recommended/default choice.
+2. Use `VERSION=LATEST`. The already-installed itzg container resolves the newest Minecraft/Paper release when Minecraft starts, so the game/Paper files under persistent data may update after a start or restart even when no newer Podman image was pulled.
 3. Pin another exact Minecraft version, provided PaperMC reports a stable Paper build for it.
 
 When a pinned Minecraft version is configured, `mjust update-minecraft` may report that a newer stable Paper-supported Minecraft version exists, but it does not silently change the pinned game version.
@@ -368,7 +385,9 @@ RCON remains internal to the Minecraft container and is not published as a host 
 
 ## Validation
 
-`mjust validate` checks the active JustVoxel deployment, including important runtime files and permissions, SELinux labeling, firewall state, storage identity, backup target availability, generated service state, RCON response, Minecraft version, and Bedrock/Geyser state when enabled.
+`mjust validate` checks the active JustVoxel deployment, including important runtime files and permissions, SELinux labeling, firewall state, storage identity, backup target availability, generated service state, RCON response, Minecraft version, Bedrock/Geyser state when enabled, and the systemd failed-unit set.
+
+A clean appliance is expected to report no failed systemd units. If `systemctl --failed` is non-empty, `mjust validate` shows the failed units and returns failure. This makes first-boot service regressions such as the gssproxy state-directory failure visible during preserved-VM validation.
 
 The goal is to fail visibly when the appliance does not match its recorded configuration rather than continuing with an unexpected mount or incomplete runtime.
 
