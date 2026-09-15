@@ -7,9 +7,12 @@ test "$(cat /usr/lib/justvoxel/variant)" = "justvoxel-vm"
 # virtual disk or NFS/SMB backup target is part of the supported storage model.
 rpm -q nfs-utils cifs-utils parted xfsprogs util-linux >/dev/null
 
+# pciutils is intentionally allowed in the VM image because open-vm-tools
+# depends on it. The remaining packages below are physical-hardware
+# administration tools that should stay out of the VM variant.
 for package in \
     nut nut-client btrfs-progs smartmontools smartmontools-selinux nvme-cli \
-    lm_sensors ethtool usbutils pciutils dmidecode fwupd fwupd-efi \
+    lm_sensors ethtool usbutils dmidecode fwupd fwupd-efi \
     NetworkManager-wifi microcode_ctl amd-ucode-firmware atheros-firmware \
     brcmfmac-firmware iwlwifi-dvm-firmware iwlwifi-mvm-firmware realtek-firmware \
     mt7xxx-firmware hdparm powertop; do
