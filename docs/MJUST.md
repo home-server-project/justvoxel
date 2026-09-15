@@ -1,443 +1,242 @@
-# mjust administrator guide
+# mjust user and administrator guide
 
-`mjust` is the JustVoxel administrator interface. It is a small wrapper around upstream `just`; recipes stay short and delegate appliance work to scripts under `/usr/libexec/justvoxel/mjust/`.
+`mjust` is JustVoxel's built-in administration interface.
 
-The interaction model is inspired by Universal Blue `ujust`, but JustVoxel uses its own server-focused implementation.
+It is designed for people who are comfortable installing an operating system and following normal computer instructions, but who should not need deep Linux, container, systemd, bootc, SELinux, firewall, storage, or Minecraft-server administration knowledge just to run a family Minecraft appliance.
 
-This document is the current operational reference for the `testing` implementation. It records what mjust can do now, the supported storage/partition models, the safety rules, and the operations that are intentionally not automated.
+Run `mjust` with no arguments to open the interactive terminal interface. Choose the task you want, read the explanation, and follow the prompts. The same operations are also available as direct `mjust` commands for experienced users, documentation, automation, and troubleshooting.
 
-> JustVoxel is still under development. VM and Bare Metal validation are required before the project is treated as production-ready.
+The interaction model is inspired by Universal Blue's `ujust` / `ugum` work in `ublue-os/packages`, but JustVoxel uses its own server-focused implementation.
 
-## Configuration ownership
+JustVoxel remains a normal immutable AlmaLinux server underneath. Advanced administrators can still use normal Linux tools directly when they want deeper control.
 
-The bootc image owns immutable implementation and templates under:
+> JustVoxel is still under active development on the `testing` branch. VM and Bare Metal validation are required before production use.
 
-- `/usr/share/justvoxel/`
-- `/usr/libexec/justvoxel/`
+## How mjust is organized
 
-The administrator-owned active configuration lives under `/etc`, including:
+The normal interactive interface groups appliance tasks by what the user wants to accomplish rather than by the Linux commands underneath.
 
-- `/etc/justvoxel/justvoxel.conf`
-- `/etc/justvoxel/minecraft.env`
-- `/etc/justvoxel/minecraft-backup.env`
-- `/etc/containers/systemd/minecraft.container`
-- `/etc/systemd/system/minecraft-backup.service`
-- `/etc/systemd/system/minecraft-backup.timer`
+The main areas are:
 
-Bootc image updates may update mjust and its immutable templates, but they do not silently overwrite an installed machine's active `/etc` configuration.
+- first setup and Minecraft configuration
+- appliance status and health
+- Minecraft start, stop, and restart
+- players and whitelist management
+- backups and restore
+- storage and Minecraft data migration
+- Minecraft/Paper updates
+- operating-system maintenance
+- live system resources
+- validation and logs
+- advanced/reset tools
 
-Required runtime directory state under `/var` is treated differently. `/var` persists across bootc deployments, so image updates cannot rely on package-owned `/var` directories being copied into an already-installed machine. JustVoxel keeps the image `/var` skeleton minimal and uses declarative `tmpfiles.d`/systemd mechanisms for required runtime directories. The image finalization path runs fatal bootc lint before the final `/var` cleanup so missing reconstruction rules are not hidden by the cleanup step.
+Safety checks live in the command/workflow layer, not only in the menu. Using a direct command does not bypass player checks, backup validation, storage protection, typed confirmations, SELinux handling, or other JustVoxel safeguards.
 
-## Current mjust commands
+## First setup
 
-The current command surface is:
+`mjust setup` is the normal first-run wizard.
 
-- `mjust` — adaptive interactive terminal menu
-- `mjust setup` — normal first-time appliance configuration
-- `mjust setup-advanced` — the same setup implementation with advanced options enabled
-- `mjust configure` — safe changes to an installed configuration
-- `mjust status` — concise human-readable appliance/Minecraft status
-- `mjust status --details` — concise status plus administrator-oriented systemd/Podman/storage detail
+It collects the settings needed to bring the appliance online, including Minecraft data location, Java and container memory, Java and optional Bedrock ports, timezone, maximum players, server message, Minecraft container-image policy, Minecraft/Paper version policy, backup target and schedule, backup retention, and Minecraft EULA acceptance.
+
+The normal flow tries to keep Linux-specific details out of the way. Memory values are suggested from installed physical RAM, but the user can change them.
+
+`mjust setup-advanced` uses the same setup implementation and exposes additional controls such as custom Minecraft data UID/GID values and a raw systemd backup schedule.
+
+Setup refuses to silently overwrite an already-configured JustVoxel installation.
+
+## Configure an installed server
+
+`mjust configure` changes supported Minecraft and backup settings after first setup.
+
+The current configuration flow can change memory limits, Java/Bedrock ports, MOTD, backup schedule and timer state, storage/migration settings, Minecraft container-image policy, and Minecraft/Paper version policy.
+
+`mjust configure-max-players` provides a focused guided screen for changing the maximum player count.
+
+Configuration changes that require Minecraft to restart are not applied through an automatic disruptive restart. JustVoxel tells the user when a restart is needed.
+
+## Status and health
+
+`mjust status` is the normal user-facing appliance dashboard.
+
+It presents short, readable information about the host, Minecraft state, players, Paper version, Bedrock support, network state, storage, backups, memory, service health, and the configured Minecraft container image.
+
+`mjust status --details` shows the same friendly summary first and then adds administrator-oriented systemd, Podman, mount, and network detail.
+
+`mjust validate` is different from status. Validation is the stricter correctness check used to confirm that the deployed appliance matches its recorded configuration and expected runtime state.
+
+See `STATUS.md` for the full status model.
+
+## Minecraft service control
+
+The normal commands are:
+
 - `mjust start`
 - `mjust stop`
 - `mjust restart`
-- `mjust players` — query players through RCON
+
+Stop and restart are player-aware. When Minecraft is running, JustVoxel checks players through internal RCON before interruption. If player state cannot be confirmed, the operation fails closed instead of guessing.
+
+When players are online, the user must explicitly approve the interruption. JustVoxel then uses the configured graceful Minecraft shutdown path.
+
+## Players and whitelist
+
+`mjust players` shows the current player list through the server's internal RCON connection.
+
+Whitelist management has separate Java and Bedrock/Floodgate operations:
+
 - `mjust whitelist-list`
 - `mjust whitelist-add-java <name>`
 - `mjust whitelist-remove-java <name>`
 - `mjust whitelist-add-bedrock <gamertag>`
 - `mjust whitelist-remove-bedrock <gamertag>`
-- `mjust backup` — verified cold backup
-- `mjust update-minecraft` — container-image maintenance
-- `mjust logs`
-- `mjust validate`
-- `mjust storage` — storage-management menu
-- `mjust storage-plan` — non-destructive storage/device overview
-- `mjust storage-disk` — dedicated whole-disk provisioning
-- `mjust storage-partition` — adopt/use an existing partition
-- `mjust storage-free-space` — create a partition only in existing unallocated space
-- `mjust storage-network` — NFS or SMB/CIFS backup target
-- `mjust storage-migrate` — guarded Minecraft data migration
-
-## Adaptive terminal interface
-
-Running `mjust` with no command opens a JustVoxel-native terminal interface. Direct `mjust` commands remain the authoritative operations; the menu is only a human-friendly dispatcher and explanation layer.
-
-On a normal SSH or local TTY with enough terminal space, JustVoxel uses `fzf` for an arrow-key two-pane browser. The left side lists operations and the right-side preview explains what the selected operation does, important safety behavior, and the equivalent direct command.
-
-On a smaller or more limited interactive terminal, JustVoxel falls back to a compact selector. The selector preference is `gum`, then compact `fzf`, then a plain Bash numbered menu if neither helper is available. `gum` and `fzf` are appliance dependencies in both VM and Bare Metal images.
-
-When `TERM=dumb` is in use or stdin/stdout is not attached to an interactive TTY, `mjust` does not block waiting for input. It prints concise direct-command help instead. For an interactive SSH menu, allocate a TTY, for example with `ssh -t`.
-
-Before first setup the menu is intentionally small: first setup, status, storage, advanced setup, and exit. After configuration it exposes the normal appliance areas: status, players, configuration, service control, backups, storage, Minecraft update, validation, logs, advanced tools, and exit.
-
-The terminal interface does not weaken safety controls. Stop/restart/update operations still perform their command-level player checks. Destructive storage operations still require their existing typed confirmations such as `ERASE /dev/...`, `FORMAT /dev/...`, and `CREATE PARTITION /dev/...`; a graphical-looking selector never replaces those confirmations.
-
-## Status output
-
-`mjust status` is intentionally different from validation and logs. It gives a concise, human-readable view of the current appliance state rather than dumping raw `systemctl` or Podman output.
-
-When available it reports Minecraft running/stopped/failed state, players online versus maximum, Minecraft/Paper version, Bedrock/Geyser/Floodgate state, Java and Bedrock addresses, current Minecraft-container memory use and configured maximum, configured Java heap, Minecraft service uptime, container channel/image, backup state, next scheduled backup, and a concise overall system state. A missing optional observation is reported as `Unknown` rather than printing command errors.
-
-`mjust status --details` prints the same friendly summary first and then adds the administrator-oriented systemd, Podman, and raw storage detail that the original status command exposed. `mjust logs` remains the dedicated log-following command, while `mjust validate` remains the full correctness check.
-
-## First setup
-
-`mjust setup` refuses to overwrite an existing JustVoxel installation.
-
-The normal setup wizard currently collects:
-
-- Minecraft persistent-data location
-- Minecraft Java heap
-- maximum total Minecraft container memory
-- Minecraft Java host TCP port
-- optional Bedrock UDP port
-- timezone
-- maximum players
-- server welcome message (MOTD)
-- Minecraft container-image policy
-- Minecraft/Paper game-version policy
-- backup target
-- backup retention count
-- daily backup time
-- whether automatic daily backups are enabled
-- explicit Minecraft EULA acceptance
-
-Memory values are suggested from installed system RAM, but the administrator can change both the Java heap and the maximum total Minecraft memory. The Java heap is contained inside the container memory limit, so the total limit must be larger than the heap.
-
-Normal setup does not ask for UID/GID. Immediately after showing `Mode: normal`, it explains which non-root IDs will own the persistent Minecraft data. JustVoxel selects those IDs in this order:
-
-1. the administrator who invoked setup through `sudo` (`SUDO_UID:SUDO_GID`)
-2. the local `voxel` account when available
-3. `1000:1000` as the final fallback
-
-UID or GID `0` is rejected. The final planned-configuration summary keeps only the concise ownership value and source.
-
-`mjust setup-advanced` calls the same setup implementation with an advanced flag. It keeps the same normal flow but allows the administrator to override the suggested Minecraft data UID/GID. This is intentionally not duplicated into a second wizard.
-
-Normal `mjust configure` does not expose UID/GID changes for an existing world. Changing ownership of an already-populated world requires a separately designed guarded operation rather than an ordinary configuration edit.
-
-### Normal backup schedule UX
-
-Normal setup does not require systemd calendar syntax. It asks for a daily clock time such as `04:30` and uses the host system timezone reported by `timedatectl`.
-
-The normal-mode value is rendered internally as the existing systemd calendar expression:
-
-`*-*-* HH:MM:00`
-
-For example, `04:30` becomes `*-*-* 04:30:00`.
-
-Before asking whether to enable automatic backups, normal setup explains that JustVoxel uses verified cold backups: Minecraft is stopped cleanly, the world data is archived and verified, and Minecraft is then started again.
-
-`mjust setup-advanced` retains the full raw systemd calendar field and existing `systemd-analyze calendar` validation so advanced scheduling capability is unchanged.
-
-## Container image policy
-
-The Minecraft container image and Minecraft/Paper game version are separate settings.
-
-The container is based on `docker.io/itzg/minecraft-server`.
-
-New setup uses these image-tag choices:
-
-- `stable` — moving upstream released image; recommended/default for new installations
-- `latest` — moving upstream main-branch image
-- custom/exact tag — administrator-selected tag validated against the upstream registry
-
-mjust rejects upstream tags that are explicitly marked deprecated by the upstream image metadata when that metadata is available.
-
-A normal service restart does not itself pull a newer OCI image. A moving image tag changes locally only after an explicit image pull. `mjust update-minecraft` performs that remote/local comparison and pull operation.
-
-Existing JustVoxel configurations created before the setting existed retain the compatibility default of `latest`; setup does not silently rewrite an installed machine's existing policy.
-
-For a custom or exact tag, mjust keeps using that tag until the administrator changes it.
-
-## Minecraft/Paper version policy
-
-Minecraft/Paper versioning is independent from the container-image tag.
-
-The administrator can choose:
-
-1. Pin the newest Minecraft version that currently has a stable Paper build. This is the recommended/default choice.
-2. Use `VERSION=LATEST`. The already-installed itzg container resolves the newest Minecraft/Paper release when Minecraft starts, so the game/Paper files under persistent data may update after a start or restart even when no newer Podman image was pulled.
-3. Pin another exact Minecraft version, provided PaperMC reports a stable Paper build for it.
-
-When a pinned Minecraft version is configured, `mjust update-minecraft` may report that a newer stable Paper-supported Minecraft version exists, but it does not silently change the pinned game version.
-
-`mjust configure` can change both the container image policy and the Minecraft version policy. It does not automatically restart Minecraft after the change.
-
-## Player-aware service control
-
-Stop, restart, update, backup maintenance, and data migration use RCON player checks when Minecraft is active.
-
-If player status cannot be confirmed, mjust fails closed instead of interrupting the server.
-
-If players are online, the administrator can cancel or explicitly continue. When maintenance continues, the normal configured Minecraft graceful-stop path is used. The server announces shutdown to connected players and waits 60 seconds before the final stop/save sequence.
-
-## Backup model
-
-Minecraft backups are full cold backups of the persistent Minecraft data directory.
-
-The backup helper:
-
-1. validates the configured backup target
-2. verifies that the destination is writable
-3. acquires the shared maintenance lock
-4. gracefully stops Minecraft if it is running
-5. writes the archive to a `.partial` file
-6. verifies the archive
-7. atomically publishes the completed archive
-8. applies retention
-9. restarts Minecraft only when the backup operation itself stopped it, unless another maintenance operation requested that it remain stopped
-
-Manual backups, scheduled backups, pre-update backups, and pre-migration backups all use the same retention count. If retention is seven, publishing the eighth verified archive removes the oldest completed archive.
-
-A missing or incorrect external/network mount fails closed before Minecraft is stopped, so a backup cannot silently fall back onto the root filesystem.
-
-## Minecraft container updates
-
-`mjust update-minecraft` compares:
-
-- the configured remote image digest
-- the local image digest for that tag
-- the image currently used by the running Minecraft container
-
-The update flow is designed as one maintenance cycle:
-
-1. inspect image/update state
-2. report current container policy and available upstream information
-3. query players if the server is active
-4. require explicit administrator approval
-5. re-check player state immediately before maintenance
-6. acquire the maintenance lock
-7. create a verified cold backup and leave Minecraft stopped
-8. pull the configured image if required
-9. start Minecraft once
-10. verify RCON, Minecraft version, plugins, Geyser when enabled, and the running image identity
-
-JustVoxel tracks one previous Minecraft image generation for rollback and does not run a general Podman image prune that could affect unrelated containers.
-
-## Storage model overview
-
-Minecraft data and backup storage are independent choices.
-
-Podman's global image store is not moved by mjust.
-
-Typical layouts are:
-
-### VM
-
-Recommended:
-
-- primary virtual disk — JustVoxel OS and Minecraft data
-- second virtual disk — backups
-
-NFS and SMB/CIFS backup targets are also supported. The VM image includes `nfs-utils` and `cifs-utils`.
-
-If no safe secondary virtual disk is available, the storage flow tells the administrator to add another disk in the hypervisor and rerun the operation.
-
-### Bare Metal
-
-Supported backup/storage targets include:
-
-- dedicated internal disk
-- external USB disk or USB stick
-- existing local partition/filesystem
-- a new partition created only from already-unallocated disk space
-- NFS share
-- SMB/CIFS share
-- normal directory on the system filesystem
-
-USB storage is treated as ordinary block storage. mjust shows device path, size, model, transport, filesystem, UUID, and mount state so the administrator can identify the intended device.
-
-## `mjust storage-plan`
-
-`mjust storage-plan` is non-destructive. It is intended to be the first inspection command before changing storage.
-
-It reports the current JustVoxel variant, visible block storage, protected system disks, and the recommended VM/Bare Metal storage model.
-
-## Whole-disk provisioning
-
-`mjust storage-disk` provisions an entire dedicated disk.
-
-The flow:
-
-1. identifies the disks backing `/`, `/boot`, `/boot/efi`, and `/var`
-2. excludes those system disks from whole-disk erase candidates
-3. excludes disks that already have mounted child filesystems
-4. shows safe candidates with device, size, transport, and model
-5. requires the administrator to select the exact disk
-6. shows the selected device layout again
-7. requires the exact destructive phrase `ERASE /dev/...`
-8. wipes existing signatures
-9. creates GPT
-10. creates one XFS partition
-11. mounts it persistently by filesystem UUID
-
-A simple `y`/`yes` is not enough for whole-disk destruction.
-
-This path works for a second VM disk, internal SATA/NVMe storage, or an external USB disk/stick.
-
-## Existing partition adoption
-
-`mjust storage-partition` can use an existing writable partition.
-
-Supported existing local filesystems are:
-
-- XFS
-- ext4
-- Btrfs
-
-If the partition is already mounted at a safe, non-critical mount point, JustVoxel adopts and validates the existing mount without rewriting the administrator's current mount configuration.
-
-If the partition is not mounted, mjust asks for a mount point and creates a persistent UUID-based mount.
-
-If the selected partition contains no recognized filesystem, mjust may format only that selected partition as XFS after requiring the exact phrase `FORMAT /dev/...`.
-
-mjust does not silently reformat a recognized filesystem.
-
-## Partition creation from unallocated space
-
-`mjust storage-free-space` can create a new partition only in space that is already unallocated.
-
-This is intended for cases such as a system disk or secondary disk where installation intentionally left unused space.
-
-The flow shows the disk and the largest unallocated segment, then lets the administrator select either all available space or a specific size in GiB.
-
-Before writing the partition table, mjust requires the exact phrase `CREATE PARTITION /dev/...`.
-
-The new partition is formatted as XFS and mounted by UUID.
-
-### Important limitation
-
-JustVoxel does **not** automatically shrink or resize an existing filesystem or partition.
-
-If a disk is fully allocated, mjust refuses the free-space operation rather than trying to make space by shrinking an existing filesystem.
-
-## System-disk rules
-
-Whole-disk erase of the detected system disk is not offered.
-
-Using already-unallocated space on the system disk is allowed because the operation does not resize or overwrite existing partitions. The exact free-space range and device are displayed before the new partition is created.
-
-Critical mount points such as `/`, `/boot`, `/boot/efi`, and `/var` are protected from adoption as JustVoxel storage targets.
-
-## Persistent local mounts
-
-New local mounts created by mjust use filesystem UUIDs rather than transient Linux names such as `/dev/sdb1`.
-
-That is especially important for USB storage because device names can change after reboot or when hardware is reconnected.
-
-The runtime records the expected filesystem identity and validates it before Minecraft data or backup operations continue.
-
-## NFS backup storage
-
-NFS is supported for both VM and Bare Metal backup targets.
-
-mjust can create a persistent NFS mount using `_netdev` and `nofail`, or adopt an already-mounted matching NFS share without rewriting its existing mount configuration.
-
-Before a backup uses the share, the backup helper confirms:
-
-- the mount exists
-- the source matches the configured source
-- the target is actually writable
-
-This allows NFS servers that use root-squash or server-side ownership rules; JustVoxel verifies usable write access rather than requiring local `chown` semantics.
-
-## SMB/CIFS backup storage
-
-SMB/CIFS is supported for both VM and Bare Metal backup targets.
-
-When mjust creates an SMB mount, credentials are stored in:
-
-`/etc/justvoxel/smb-backup.credentials`
-
-The file is root-owned with root-only permissions and is referenced from the mount configuration. Credentials are not written directly into `/etc/fstab`.
-
-Like NFS, the mount uses network-aware boot options and the backup helper verifies the actual mounted source and writability before stopping Minecraft.
-
-## Minecraft data migration
-
-`mjust storage-migrate` moves the active Minecraft persistent-data directory to provisioned local storage.
-
-Supported migration destinations are:
-
-- dedicated whole disk
-- existing local partition/filesystem
-- new partition created in already-unallocated space
-
-The migration process:
-
-1. provision or adopt the destination storage
-2. refuse a non-empty destination Minecraft directory
-3. query player state and fail closed if unknown
-4. require confirmation if players are online
-5. acquire the shared maintenance lock
-6. create a verified cold backup and leave Minecraft stopped
-7. copy the full persistent data tree with `rsync`
-8. run a dry-run `rsync` verification
-9. update the administrator-owned data path and mount identity
-10. apply SELinux labels
-11. regenerate the local Quadlet/runtime configuration
-12. start and verify Minecraft when it was running before migration
-
-If the new runtime fails, mjust restores the previous data-path configuration and attempts to return to the old deployment.
-
-The old Minecraft data directory is not automatically deleted. The administrator removes it only after validating normal gameplay and backups.
-
-## Backup target strength
-
-JustVoxel permits a backup partition on the same physical disk as the OS/data because it can still protect against some configuration or reinstall mistakes.
-
-It should not be treated as protection against physical disk failure.
-
-Stronger backup separation comes from:
-
-- a separate internal disk
-- a separate virtual disk with independent hypervisor backup/replication policy
-- an external USB disk/stick
-- NFS/SMB storage on another machine
-
-## `mjust configure`
-
-The current configuration menu can:
-
-- show the current configuration
-- change Java/container memory limits
-- change Java/Bedrock host ports
-- change MOTD and maximum players
-- change backup schedule and timer state
-- enter the storage/migration menu
-- change the container-image tag policy
-- change the Minecraft/Paper version policy
-
-Configuration changes that require a Minecraft restart are not applied by an automatic disruptive restart. mjust tells the administrator to restart when appropriate.
-
-## Whitelist management
-
-mjust provides separate Java and Bedrock/Floodgate whitelist operations.
-
-Java names are validated before the normal Minecraft whitelist command is run. Bedrock whitelist operations use Floodgate's whitelist command when Bedrock support is enabled.
 
 RCON remains internal to the Minecraft container and is not published as a host port.
 
+## Backups
+
+`mjust backup` creates a verified cold backup of the complete persistent Minecraft data directory.
+
+The backup flow validates the configured destination before stopping Minecraft, acquires the shared maintenance lock, gracefully stops the server when required, creates the archive as a temporary partial file, verifies it, publishes it atomically, applies retention, and restarts Minecraft only when appropriate.
+
+A missing or incorrect external/network backup mount fails closed before Minecraft is stopped. This prevents a failed network mount from silently writing backups to the root filesystem.
+
+Manual backups, scheduled backups, pre-update backups, and pre-migration backups use the same retention policy.
+
+## Restore
+
+JustVoxel provides two restore levels.
+
+`mjust restore` restores the main Minecraft world and its normal Nether/End world directories while keeping current plugins and Minecraft/JustVoxel configuration.
+
+`mjust restore-full` restores the complete backed-up Minecraft persistent-data directory, including plugins, plugin data, and Minecraft-side configuration.
+
+Restore uses archive validation, staging, player-aware shutdown, an exact `RESTORE` confirmation, a pre-restore safety copy, SELinux relabeling, and post-restore runtime validation. If the restored server fails validation, JustVoxel attempts to return to the preserved pre-restore state.
+
+See `RESTORE.md` for the detailed recovery model and boundaries.
+
+## Minecraft/Paper updates
+
+`mjust update-minecraft` handles Minecraft container-image maintenance and the configured Minecraft/Paper version policy.
+
+The container-image tag and Minecraft/Paper game version are independent settings.
+
+Before disruptive maintenance, JustVoxel checks players, creates a verified cold backup, performs the selected update work, starts Minecraft once, and validates the resulting server.
+
+Moving container tags are refreshed only by an explicit image pull. A pinned Minecraft/Paper version is not silently changed just because a newer stable Paper-supported version exists.
+
+JustVoxel retains one previous Minecraft image generation for rollback and does not run a broad Podman image prune that could affect unrelated containers.
+
+## Storage
+
+Run `mjust storage` to open the storage-management menu.
+
+The current direct storage operations are:
+
+- `mjust storage-plan` — read-only storage/device overview
+- `mjust storage-disk` — provision a dedicated whole disk or USB device
+- `mjust storage-partition` — adopt/use an existing partition
+- `mjust storage-free-space` — create a partition only in already-unallocated space
+- `mjust storage-network` — configure NFS or SMB/CIFS backup storage
+- `mjust storage-system` — use a normal directory on the system filesystem
+- `mjust storage-migrate` — move active Minecraft data to provisioned local storage
+
+Destructive storage actions require exact typed confirmations such as `ERASE /dev/...`, `FORMAT /dev/...`, or `CREATE PARTITION /dev/...`. A simple yes/no confirmation is not enough.
+
+JustVoxel protects detected system disks from whole-disk erase and does not automatically shrink existing filesystems or partitions.
+
+New local mounts created by mjust use filesystem UUIDs rather than temporary device names such as `/dev/sdb1`.
+
+See `STORAGE.md` for supported layouts, network storage, migration behavior, and storage safety rules.
+
+## Operating-system maintenance
+
+JustVoxel keeps operating-system maintenance separate from Minecraft container maintenance.
+
+The current system-management commands are:
+
+- `mjust os-status` — friendly bootc deployment status
+- `mjust os-update` — check for a newer JustVoxel OS image and optionally download/stage it
+- `mjust resources` — open the live btop resource monitor
+- `mjust reboot` — player-aware graceful reboot
+- `mjust poweroff` — player-aware graceful power off
+- `mjust firmware` — Bare Metal-only reboot into firmware/UEFI setup
+
+Checking or downloading a bootc OS update does not stop Minecraft, create a backup, or reboot the appliance. The staged deployment is used on the next normal reboot.
+
+Reboot and poweroff use the same player-awareness policy as other disruptive Minecraft operations.
+
+`mjust firmware` is available only on the Bare Metal variant and refuses the operation on the VM variant.
+
+See `SYSTEM.md` for the complete system-management behavior.
+
+## Live system resources
+
+`mjust resources` opens `btop` for a live view of CPU, memory and swap, disks, network activity, and processes.
+
+It requires an interactive terminal. Inside btop, `q` exits directly back to the JustVoxel menu or calling shell.
+
+## Logs
+
+`mjust logs` follows the Minecraft systemd journal for troubleshooting.
+
+It is separate from the friendly status dashboard and the stricter validation workflow.
+
 ## Validation
 
-`mjust validate` checks the active JustVoxel deployment, including important runtime files and permissions, SELinux labeling, firewall state, storage identity, backup target availability, generated service state, RCON response, Minecraft version, Bedrock/Geyser state when enabled, zram, and the systemd failed-unit set.
-
-A clean appliance is expected to report no failed systemd units. If `systemctl --failed` is non-empty, `mjust validate` shows the failed units and returns failure. This makes first-boot service regressions such as the gssproxy state-directory failure visible during preserved-VM validation.
-
-The validation summary is purpose-aware for storage. It identifies system/container storage, Minecraft data and backup storage rather than printing duplicate raw `df` rows. When Minecraft data and backups share one filesystem, capacity is printed once and the output explains that same-filesystem backups help with world/configuration recovery but do not protect against physical disk failure. Raw `findmnt`/`df` information remains available from `mjust status --details`.
+`mjust validate` checks the active JustVoxel deployment, including important runtime files and permissions, SELinux labels, firewall state, storage identity, backup target availability, generated service state, RCON response, Minecraft version, Bedrock/Geyser state when enabled, zram, and failed systemd units.
 
 The goal is to fail visibly when the appliance does not match its recorded configuration rather than continuing with an unexpected mount or incomplete runtime.
 
+## Start over / reset Minecraft
+
+`mjust start-over` returns an installed JustVoxel Minecraft configuration to first-setup state without deleting Minecraft world data or existing backup archives.
+
+The operation can save a root-only configuration archive first, handles a running Minecraft server through the normal player-aware shutdown path, and requires the exact phrase `START OVER` before removing active JustVoxel configuration.
+
+It does not erase storage filesystems, Minecraft world data, backup archives, Podman images, unrelated containers, or bootc deployments.
+
+See `START_OVER.md` for the full reset boundary.
+
+## Login welcome controls
+
+The advanced menu also provides controls for the JustVoxel login welcome display:
+
+- `mjust welcome`
+- `mjust welcome-off`
+- `mjust welcome-on`
+
+These affect the login/welcome presentation only and do not change Minecraft runtime behavior.
+
+## Interactive terminal behavior
+
+On a normal local or SSH terminal with enough space, JustVoxel uses `fzf` for an arrow-key two-pane browser. The selected action includes a short explanation and the equivalent direct command where useful.
+
+On smaller or more limited interactive terminals, JustVoxel falls back to a compact selector. The preference is `gum`, then compact `fzf`, then a plain Bash numbered menu.
+
+When stdin/stdout is not attached to an interactive TTY, or `TERM=dumb` is used, `mjust` does not wait for menu input. It prints concise direct-command help instead.
+
+For an interactive SSH menu, allocate a TTY, for example with `ssh -t`.
+
+## Configuration ownership
+
+The bootc image owns the immutable implementation and templates under locations such as:
+
+- `/usr/share/justvoxel/`
+- `/usr/libexec/justvoxel/`
+
+Administrator-owned active configuration lives under `/etc`, including the JustVoxel configuration, Minecraft environment, backup environment, generated Minecraft Quadlet, and generated backup service/timer.
+
+Bootc image updates may update the immutable mjust implementation and templates, but they do not silently overwrite an installed machine's active administrator configuration in `/etc`.
+
+Persistent application/runtime state under `/var` remains outside the immutable deployment and is created/reconstructed through the appliance's declarative system mechanisms where required.
+
 ## Operations intentionally not automated
 
-The current implementation deliberately does **not**:
+The current implementation deliberately does not:
 
-- shrink an existing partition
-- shrink an existing filesystem
-- resize an existing filesystem to create free space
-- erase the detected system disk as a whole-disk target
+- shrink an existing partition or filesystem
+- resize a filesystem to create free space
+- erase the detected system disk as a whole-disk storage target
 - silently reformat a recognized filesystem
 - silently overwrite active `/etc` configuration during a bootc update
 - automatically delete the old Minecraft data directory after migration
@@ -445,212 +244,24 @@ The current implementation deliberately does **not**:
 - relocate Podman's global image store
 - run a broad Podman image prune
 - automatically change a pinned Minecraft/Paper version
+- provide a JustVoxel-aware bootc rollback workflow
 
-These are intentional safety boundaries, not missing automatic steps.
+These are intentional safety boundaries rather than missing automatic steps.
+
+## Advanced Linux administration
+
+mjust is the normal appliance interface, but it is not a proprietary shell and it does not lock experienced administrators out of the host.
+
+Standard tools such as `systemctl`, `journalctl`, `podman`, `bootc`, `nmcli`, `firewall-cmd`, `findmnt`, and `lsblk` remain available over SSH or the local console.
+
+Some active files are generated from JustVoxel's recorded configuration. Manual edits are possible, but files owned by a JustVoxel render workflow may be regenerated later by operations such as configuration changes or storage migration.
+
+See `MANAGEMENT.md` for how interactive mjust, direct commands, Web management, and native Linux administration fit together.
 
 ## Current development status
 
-The management and storage flows are implemented on `testing`, and the first real VM has successfully completed bootc upgrade, reboot, normal setup, Paper + Geyser/Floodgate startup, and full validation with no failed system services. Additional destructive storage, failure-path, and physical-hardware validation is still required before stable promotion.
+The management, backup/restore, storage, system-status/update, resource-monitoring, and power-control flows are implemented on `testing`.
 
-The safest validation order remains VM first: one system disk, one disposable secondary virtual disk, then dedicated-disk provisioning, partition adoption, free-space partition creation, network backup targets, backup/retention, and Minecraft data migration. Bare Metal validation should follow only after the VM paths are proven.
+The priority remains validation and hardening before stable promotion. VM validation should come first, followed by destructive/failure-path storage testing, backup and restore testing, network-storage failure testing, Minecraft update testing, installation/first-boot testing, and then Bare Metal validation.
 
-# Future mjust system-management roadmap
-
-The next major mjust expansion is intended to make JustVoxel easier to administer for people who do not want to interpret raw Linux command output.
-
-The planned direction is a new `mjust system` area that presents short, readable appliance information and wraps common bootc/systemd/power operations with the same safety model already used for Minecraft maintenance.
-
-These features are roadmap items only. They are **not implemented yet**.
-
-## Future `mjust system` overview
-
-The system area should provide a compact appliance summary rather than dumping raw command output.
-
-A future overview should include information such as:
-
-- hostname
-- uptime
-- JustVoxel variant and image/version
-- CPU and memory summary
-- Minecraft service health
-- latest backup status and age
-- storage capacity/free-space summary
-- network state and active addresses
-- failed systemd services
-- current bootc deployment state
-- whether an OS update is staged
-
-The goal is output that can be understood without Linux-administration experience.
-
-A future convenience command such as `mjust health` may provide the same information as a short health dashboard, for example:
-
-- Minecraft: healthy
-- Backups: healthy / last successful backup age
-- Storage: healthy / free space
-- Network: connected / active address
-- Failed services: none or summarized failures
-- OS deployment: current / staged update available
-
-## Future network status
-
-The planned network view should summarize useful information instead of reproducing the full output of `ip address` or NetworkManager diagnostics.
-
-Useful fields include:
-
-- detected Ethernet/Wi-Fi interfaces
-- interface up/down state
-- link/carrier state
-- current IPv4 and IPv6 addresses
-- default-route interface and gateway
-- active DNS configuration
-- current hostname
-
-The output should make common problems obvious, such as an interface being down, no address being assigned, or no default route being present.
-
-## Future storage health
-
-Storage health should be variant-aware.
-
-### Bare Metal
-
-When supported by the hardware, mjust may summarize:
-
-- physical disk identity
-- mounted filesystem health/state
-- capacity and free space
-- SMART overall health
-- NVMe health status
-- media/data-integrity error counters
-- device temperature
-- remaining-life/wear indicators when the drive exposes them
-
-The user-facing result should be concise: healthy, warning, or problem, with the important reason shown when attention is required.
-
-Raw SMART/NVMe reports should remain available for troubleshooting but should not be the normal user interface.
-
-### VM
-
-The VM variant cannot reliably report the health of the physical device behind a virtual disk.
-
-It should report virtual-disk capacity, filesystem/mount status, and local I/O/filesystem problems, while clearly stating that physical storage health is managed by the hypervisor/storage platform.
-
-## Future failed-service view
-
-A future system-health option should summarize `systemctl --failed` in a readable form.
-
-When nothing has failed, it should simply report that there are no failed system services.
-
-When failures exist, it should show the affected unit name, description, and a short state/result summary rather than forcing the administrator to interpret the full systemd output immediately.
-
-Detailed journal output can remain a separate troubleshooting action.
-
-## Future bootc deployment status
-
-JustVoxel should use bootc's machine-readable status output for program logic rather than parsing the human-formatted command output.
-
-The mjust view should translate deployment state into simple concepts such as:
-
-- **Running image** — deployment currently booted
-- **Staged image** — deployment already downloaded and ready for the next boot
-- **Rollback image** — previous deployment retained by bootc
-
-The user should not need to understand bootc deployment internals to know which image is running and whether an update is ready.
-
-## Future OS update flow
-
-The OS-update flow should never assume that an already-staged deployment is still the newest available image.
-
-Even when an update is staged, the administrator should still be offered **Check for newer update**.
-
-The intended flow is:
-
-1. show the current bootc deployment status
-2. show any already-staged deployment
-3. offer **Check for newer update** regardless of whether a staged deployment exists
-4. perform a non-disruptive update check
-5. if the staged deployment is still current, report that it remains the newest available image
-6. if something newer exists, offer to download/stage the newer deployment
-7. show the resulting staged deployment
-8. offer a controlled reboot into that deployment
-
-This matters for appliances that may remain running for weeks or months without rebooting: an older update may already be staged while a newer image has since become available.
-
-A normal check should not reboot the system.
-
-## Future reboot into an OS update
-
-Rebooting into a staged JustVoxel update should use Minecraft-aware safety checks rather than immediately restarting the host.
-
-The planned flow is:
-
-1. confirm that a staged deployment exists
-2. query Minecraft player state when the server is running
-3. fail closed when player state is unknown
-4. if players are online, show the current player state and require explicit administrator confirmation
-5. create a verified cold Minecraft backup before the OS transition
-6. use the normal graceful Minecraft shutdown path
-7. reboot into the staged bootc deployment
-
-This provides the same family-server protection model used by Minecraft container maintenance.
-
-## Future power controls
-
-The `mjust system` area may also expose common appliance power operations:
-
-- reboot
-- power off
-
-These should use the Minecraft-aware interruption checks before shutting down a running appliance.
-
-An ordinary reboot or poweroff does not necessarily need to force a new full backup every time; the important baseline is player awareness and a graceful Minecraft shutdown. OS update/reboot operations may use the stronger pre-update backup policy described above.
-
-## Future Bare-Metal firmware reboot
-
-A future Bare Metal-only option may expose reboot into UEFI/firmware setup when the running hardware and firmware support it.
-
-This option should **not** be exposed by the JustVoxel VM variant. Firmware configuration for a VM is considered a hypervisor responsibility.
-
-For Bare Metal, the planned behavior is:
-
-1. verify that firmware-setup reboot is supported by the running system
-2. perform a best-effort check for an attached display/DRM connector
-3. if a display appears connected, allow normal confirmation
-4. if no display appears connected, warn clearly and default to cancel
-5. if display state cannot be determined reliably, explain that the check is uncertain and require explicit confirmation
-6. perform the same Minecraft player/graceful-stop checks before rebooting
-
-Display detection is advisory only. Hardware, KVM switches, EDID behavior, and firmware can make Linux display detection imperfect, so it should not be treated as an absolute guarantee.
-
-## Much-later bootc rollback work
-
-A JustVoxel-aware OS rollback is intentionally **not** part of the near-term system-management work.
-
-Bootc rollback can restore the previous deployment together with the `/etc` state associated with that deployment. JustVoxel keeps active administrator configuration under `/etc`, including Minecraft and systemd/Quadlet configuration, so a safe appliance-level rollback needs a separate design for preserving and reconciling current administrator state.
-
-A future rollback implementation would likely need to address at least:
-
-- preservation of current JustVoxel `/etc` configuration outside the deployment-specific state
-- a verified Minecraft backup before rollback
-- player-aware graceful shutdown
-- controlled bootc rollback/reboot
-- post-boot detection of the rollback event
-- comparison/reconciliation of current versus restored JustVoxel configuration
-- clear recovery behavior if the rolled-back OS and newer local configuration are incompatible
-
-Because of those requirements, rollback should be treated as a separate later project after normal deployment, update, storage, backup, VM, and Bare Metal flows are proven stable.
-
-## Near-term implementation order
-
-The current priority remains validation rather than immediately adding the roadmap features above.
-
-Recommended order:
-
-1. destructive VM testing of the existing setup/storage/migration flows
-2. fix and harden anything found during VM testing
-3. validate backup retention and failure behavior
-4. validate NFS/SMB failure handling
-5. validate Minecraft container/version update behavior
-6. build and validate the JustVoxel ISO/installation/first-boot experience
-7. perform Bare Metal validation
-8. implement the nearer `mjust system` health/status/update/power features
-9. leave JustVoxel-aware OS rollback for a later dedicated design cycle
+JustVoxel-aware bootc rollback remains a later dedicated design because safe rollback also requires deliberate handling of deployment-specific `/etc` state.
