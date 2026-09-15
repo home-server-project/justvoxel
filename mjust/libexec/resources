@@ -1,0 +1,19 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+if [[ ! -t 0 || ! -t 1 || ${TERM:-dumb} == dumb ]]; then
+    cat >&2 <<'TEXT'
+System resources requires an interactive terminal.
+
+For SSH use:
+  ssh -t <server> mjust resources
+TEXT
+    exit 1
+fi
+
+command -v btop >/dev/null 2>&1 || {
+    echo 'ERROR: btop is not installed in this JustVoxel image.' >&2
+    exit 1
+}
+
+exec btop
