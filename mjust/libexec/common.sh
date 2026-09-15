@@ -134,6 +134,21 @@ suggest_memory_values() {
     fi
 }
 
+normalize_daily_backup_time() {
+    local value="$1" hour minute
+    [[ ${value} =~ ^([0-9]{1,2}):([0-9]{2})$ ]] || return 1
+    hour="${BASH_REMATCH[1]}"
+    minute="${BASH_REMATCH[2]}"
+    (( 10#${hour} <= 23 && 10#${minute} <= 59 )) || return 1
+    printf '%02d:%02d' "$((10#${hour}))" "$((10#${minute}))"
+}
+
+daily_backup_schedule_from_time() {
+    local normalized
+    normalized="$(normalize_daily_backup_time "$1")" || return 1
+    printf '*-*-* %s:00' "${normalized}"
+}
+
 validate_positive_int() {
     [[ $1 =~ ^[1-9][0-9]*$ ]]
 }
