@@ -1,0 +1,55 @@
+#!/usr/bin/bash
+set -u
+
+pretty_name='JustVoxel'
+if [[ -r /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    source /etc/os-release
+    pretty_name="${PRETTY_NAME:-JustVoxel}"
+fi
+
+variant_id="$(cat /usr/lib/justvoxel/variant 2>/dev/null || true)"
+case "${variant_id}" in
+    justvoxel-vm) variant='VM' ;;
+    justvoxel-baremetal) variant='Bare Metal' ;;
+    *) variant='Unknown' ;;
+esac
+
+host="$(hostname -s 2>/dev/null || hostname 2>/dev/null || printf 'unknown')"
+
+if [[ -f /etc/containers/systemd/minecraft.container ]]; then
+    minecraft_state='Configured'
+    needs_setup=no
+else
+    minecraft_state='Not configured'
+    needs_setup=yes
+fi
+
+if [[ -t 1 && ${TERM:-dumb} != dumb ]]; then
+    green=$'\033[38;5;82m'
+    bold=$'\033[1m'
+    reset=$'\033[0m'
+else
+    green=''
+    bold=''
+    reset=''
+fi
+
+printf '%s%sWelcome to JustVoxel%s\n' "${green}" "${bold}" "${reset}"
+printf 'Minecraft Server Appliance\n\n'
+printf '  System:     %s\n' "${pretty_name}"
+printf '  Variant:    %s\n' "${variant}"
+printf '  Host:       %s\n' "${host}"
+printf '  Minecraft:  %s\n\n' "${minecraft_state}"
+
+if [[ ${needs_setup} == yes ]]; then
+    printf '  First setup:      %smjust setup%s\n' "${green}" "${reset}"
+fi
+printf '  Admin menu:       %smjust%s\n' "${green}" "${reset}"
+printf '  List commands:    %smjust --list%s\n' "${green}" "${reset}"
+printf '  Server status:    %smjust status%s\n' "${green}" "${reset}"
+printf '  Validate system:  %smjust validate%s\n' "${green}" "${reset}"
+printf '\n'
+printf '  Documentation: https://github.com/home-server-project/justvoxel\n'
+printf '  Report an issue: https://github.com/home-server-project/justvoxel/issues\n'
+printf '  Hide this message: mjust welcome-off\n'
