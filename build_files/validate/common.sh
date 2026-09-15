@@ -2,7 +2,7 @@
 set -euo pipefail
 
 for cmd in \
-    bootc podman skopeo nmcli nmtui resolvectl firewall-cmd sshd sudo just mjust \
+    bootc podman skopeo nmcli nmtui resolvectl firewall-cmd sshd sudo just mjust fzf gum \
     tailscale netbird curl jq openssl tar gzip rsync ping dig traceroute nc tcpdump lsof \
     findmnt mountpoint flock mkfs.xfs mount.nfs mount.cifs lsblk blkid wipefs parted partprobe udevadm \
     qemu-ga vmtoolsd iperf3; do
@@ -11,7 +11,7 @@ done
 
 rpm -q \
     NetworkManager NetworkManager-tui systemd-resolved firewalld openssh-server sudo \
-    podman skopeo just container-selinux policycoreutils-python-utils selinux-policy-extra \
+    podman skopeo just fzf gum container-selinux policycoreutils-python-utils selinux-policy-extra \
     util-linux xfsprogs parted iperf3 nfs-utils cifs-utils qemu-guest-agent open-vm-tools \
     hyperv-daemons gssproxy zram-generator >/dev/null
 
@@ -81,12 +81,16 @@ test -x /usr/bin/mjust
 test -f /usr/share/justvoxel/mjust/justfile
 test -f /usr/libexec/justvoxel/mjust/storage-common.sh
 test -x /usr/libexec/justvoxel/mjust/welcome
+test -x /usr/libexec/justvoxel/mjust/status
+test -x /usr/libexec/justvoxel/mjust/storage-summary
+test -x /usr/libexec/justvoxel/mjust/ui.sh
 for script in /usr/libexec/justvoxel/mjust/*; do
     [[ -f "${script}" ]] || continue
     bash -n "${script}"
 done
 /usr/bin/mjust --list >/dev/null
 /usr/bin/mjust --list | grep -Fq 'setup-advanced'
+/usr/bin/mjust --list | grep -Fq 'status'
 /usr/bin/mjust --list | grep -Fq 'welcome'
 /usr/bin/mjust --list | grep -Fq 'welcome-off'
 /usr/bin/mjust --list | grep -Fq 'welcome-on'
