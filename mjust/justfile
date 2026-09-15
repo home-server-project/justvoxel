@@ -54,6 +54,12 @@ restore:
 restore-full:
     @sudo /usr/libexec/justvoxel/mjust/restore full
 
+export destination="":
+    @if [ -n "{{destination}}" ]; then sudo /usr/libexec/justvoxel/mjust/migration-export "{{destination}}"; else sudo /usr/libexec/justvoxel/mjust/migration-export; fi
+
+import source="":
+    @if [ -n "{{source}}" ]; then sudo /usr/libexec/justvoxel/mjust/migration-import "{{source}}"; else sudo /usr/libexec/justvoxel/mjust/migration-import; fi
+
 update-minecraft:
     @sudo /usr/libexec/justvoxel/mjust/update-minecraft
 

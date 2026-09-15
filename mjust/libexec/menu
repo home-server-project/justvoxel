@@ -18,6 +18,20 @@ Command:
   mjust setup
 TEXT
             ;;
+        import)
+            cat <<'TEXT'
+Import existing Minecraft server
+
+Migrate an existing JustVoxel, Paper or itzg/minecraft-server Paper server into
+this appliance. Import accepts a directory, tar/tar.gz archive, ZIP export,
+attached storage, USB, configured backup storage, or temporary NFS/SMB share.
+
+Fresh imports still require explicit Minecraft EULA acceptance.
+
+Command:
+  mjust import
+TEXT
+            ;;
         setup-advanced)
             cat <<'TEXT'
 Advanced setup
@@ -107,6 +121,21 @@ Commands:
   mjust backup
   mjust restore
   mjust restore-full
+TEXT
+            ;;
+        migration)
+            cat <<'TEXT'
+Migration
+
+Export one portable JustVoxel server migration bundle or import an existing
+JustVoxel/Paper server. Migration preserves the complete persistent Minecraft
+server data while recreating destination-specific machine configuration safely.
+
+Backup/Restore remains separate from Migration.
+
+Commands:
+  mjust export
+  mjust import
 TEXT
             ;;
         storage)
@@ -221,6 +250,8 @@ Use a direct command instead, for example:
   mjust backup
   mjust restore
   mjust restore-full
+  mjust export
+  mjust import
   mjust storage
   mjust update-minecraft
   mjust os-status
@@ -315,6 +346,18 @@ backup_menu() {
     done
 }
 
+migration_menu() {
+    local choice
+    while true; do
+        choice="$(jui_choose 'Migration' 'Export server' 'Import server' 'Back')" || return 0
+        case "${choice}" in
+            'Export server') run_and_pause /usr/bin/mjust export || true ;;
+            'Import server') run_and_pause /usr/bin/mjust import || true ;;
+            'Back') return 0 ;;
+        esac
+    done
+}
+
 storage_menu() {
     local choice
     while true; do
@@ -389,9 +432,9 @@ advanced_menu() {
 select_rich() {
     local rows selected
     if [[ ${configured} == yes ]]; then
-        rows=$'status\tStatus\nplayers\tPlayers\nconfigure\tConfigure Minecraft\nservice\tStart / Stop / Restart\nwhitelist\tWhitelist\nbackups\tBackups\nstorage\tStorage\nupdate\tUpdate Minecraft\nsystem\tSystem\nvalidate\tValidation\nlogs\tLogs\nadvanced\tAdvanced\nexit\tExit'
+        rows=$'status\tStatus\nplayers\tPlayers\nconfigure\tConfigure Minecraft\nservice\tStart / Stop / Restart\nwhitelist\tWhitelist\nbackups\tBackups\nmigration\tMigration\nstorage\tStorage\nupdate\tUpdate Minecraft\nsystem\tSystem\nvalidate\tValidation\nlogs\tLogs\nadvanced\tAdvanced\nexit\tExit'
     else
-        rows=$'setup\tFirst setup\nstatus\tStatus\nstorage\tStorage\nsystem\tSystem\nsetup-advanced\tAdvanced setup\nexit\tExit'
+        rows=$'setup\tFirst setup\nimport\tImport existing Minecraft server\nstatus\tStatus\nstorage\tStorage\nsystem\tSystem\nsetup-advanced\tAdvanced setup\nexit\tExit'
     fi
     selected="$(printf '%s\n' "${rows}" | fzf --delimiter=$'\t' --with-nth=2 --no-multi --layout=reverse --border --height=90% --prompt='JustVoxel > ' --preview='/usr/libexec/justvoxel/mjust/menu --preview {1}' --preview-window='right,55%,wrap,border-left' || true)"
     [[ -n ${selected} ]] || { printf 'exit'; return 0; }
@@ -401,15 +444,15 @@ select_rich() {
 select_compact() {
     local choice
     if [[ ${configured} == yes ]]; then
-        choice="$(jui_choose 'JustVoxel' 'Status' 'Players' 'Configure Minecraft' 'Start / Stop / Restart' 'Whitelist' 'Backups' 'Storage' 'Update Minecraft' 'System' 'Validation' 'Logs' 'Advanced' 'Exit')" || { printf 'exit'; return 0; }
+        choice="$(jui_choose 'JustVoxel' 'Status' 'Players' 'Configure Minecraft' 'Start / Stop / Restart' 'Whitelist' 'Backups' 'Migration' 'Storage' 'Update Minecraft' 'System' 'Validation' 'Logs' 'Advanced' 'Exit')" || { printf 'exit'; return 0; }
         case "${choice}" in
             'Status') printf 'status' ;; 'Players') printf 'players' ;; 'Configure Minecraft') printf 'configure' ;; 'Start / Stop / Restart') printf 'service' ;;
-            'Whitelist') printf 'whitelist' ;; 'Backups') printf 'backups' ;; 'Storage') printf 'storage' ;; 'Update Minecraft') printf 'update' ;; 'System') printf 'system' ;;
+            'Whitelist') printf 'whitelist' ;; 'Backups') printf 'backups' ;; 'Migration') printf 'migration' ;; 'Storage') printf 'storage' ;; 'Update Minecraft') printf 'update' ;; 'System') printf 'system' ;;
             'Validation') printf 'validate' ;; 'Logs') printf 'logs' ;; 'Advanced') printf 'advanced' ;; *) printf 'exit' ;;
         esac
     else
-        choice="$(jui_choose 'JustVoxel' 'First setup' 'Status' 'Storage' 'System' 'Advanced setup' 'Exit')" || { printf 'exit'; return 0; }
-        case "${choice}" in 'First setup') printf 'setup' ;; 'Status') printf 'status' ;; 'Storage') printf 'storage' ;; 'System') printf 'system' ;; 'Advanced setup') printf 'setup-advanced' ;; *) printf 'exit' ;; esac
+        choice="$(jui_choose 'JustVoxel' 'First setup' 'Import existing Minecraft server' 'Status' 'Storage' 'System' 'Advanced setup' 'Exit')" || { printf 'exit'; return 0; }
+        case "${choice}" in 'First setup') printf 'setup' ;; 'Import existing Minecraft server') printf 'import' ;; 'Status') printf 'status' ;; 'Storage') printf 'storage' ;; 'System') printf 'system' ;; 'Advanced setup') printf 'setup-advanced' ;; *) printf 'exit' ;; esac
     fi
 }
 
@@ -419,6 +462,7 @@ while true; do
     echo
     case "${action}" in
         setup) run_and_pause /usr/bin/mjust setup || true ;;
+        import) run_and_pause /usr/bin/mjust import || true ;;
         setup-advanced) run_and_pause /usr/bin/mjust setup-advanced || true ;;
         status) run_and_pause /usr/bin/mjust status || true ;;
         players) run_and_pause /usr/bin/mjust players || true ;;
@@ -426,6 +470,7 @@ while true; do
         service) service_menu ;;
         whitelist) whitelist_menu ;;
         backups) backup_menu ;;
+        migration) migration_menu ;;
         storage) storage_menu ;;
         update) run_and_pause /usr/bin/mjust update-minecraft || true ;;
         system) system_menu ;;
