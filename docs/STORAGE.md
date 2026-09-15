@@ -43,7 +43,7 @@ The administrator sees the exact device, size, model, transport, filesystems, an
 
 ## Existing partitions
 
-`mjust storage-partition` can adopt an existing XFS, ext4, or Btrfs partition. If the partition is already mounted at a non-critical mount point, mjust records it and writes a persistent UUID entry. If it is unmounted, mjust asks for a mount point and mounts it by UUID.
+`mjust storage-partition` can adopt an existing XFS, ext4, or Btrfs partition. If the partition is already mounted at a non-critical mount point, mjust records and validates it without rewriting the administrator's existing mount configuration. If it is unmounted, mjust asks for a mount point and creates a persistent UUID mount.
 
 If an existing partition has no filesystem, mjust can format only that partition as XFS after a separate exact `FORMAT /dev/...` confirmation. It never silently reformats a filesystem it recognizes.
 
@@ -59,7 +59,7 @@ The system disk is allowed for this operation because only already-free space is
 
 NFS and SMB/CIFS are supported for both VM and Bare Metal backup targets.
 
-Network mounts are written persistently to `/etc/fstab` with `_netdev` and `nofail`. A network outage therefore does not block the appliance from booting. The backup job still fails closed: if the expected share is not mounted or the reported source does not match the stored source, Minecraft is not stopped and no archive is written to the local root filesystem by mistake.
+Network mounts created by mjust are written persistently to `/etc/fstab` with `_netdev` and `nofail`. If the requested NFS/SMB source is already mounted at the selected path, mjust adopts that mount without rewriting its existing mount configuration. A network outage therefore does not block the appliance from booting. The backup job still fails closed: if the expected share is not mounted or the reported source does not match the stored source, Minecraft is not stopped and no archive is written to the local root filesystem by mistake.
 
 SMB credentials are stored only in `/etc/justvoxel/smb-backup.credentials` with root-only permissions and are referenced by the fstab entry rather than placed directly in `/etc/fstab`.
 
