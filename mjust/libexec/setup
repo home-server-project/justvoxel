@@ -27,6 +27,31 @@ if [[ ${advanced} == yes ]]; then
 else
     echo 'Mode: normal'
 fi
+
+read -r MINECRAFT_UID MINECRAFT_GID MINECRAFT_ID_SOURCE < <(resolve_minecraft_ids)
+if [[ ${advanced} == no ]]; then
+    echo
+    echo 'Minecraft data ownership'
+    echo 'Normal setup automatically uses the administrator account running setup'
+    echo 'for Minecraft data ownership.'
+    echo
+    case "${MINECRAFT_ID_SOURCE}" in
+        sudo)
+            echo "Current ownership: ${MINECRAFT_UID}:${MINECRAFT_GID} (from sudo administrator)"
+            ;;
+        voxel)
+            echo "Current ownership: ${MINECRAFT_UID}:${MINECRAFT_GID} (from voxel account)"
+            ;;
+        fallback)
+            echo "Current ownership: ${MINECRAFT_UID}:${MINECRAFT_GID} (fallback)"
+            ;;
+    esac
+    echo
+    echo 'This allows the Minecraft container to read and write its world data.'
+    echo 'Use `mjust setup-advanced` if you need custom numeric UID/GID values.'
+fi
+
+echo
 echo 'The image templates under /usr/share/justvoxel are immutable references only.'
 echo 'This setup creates administrator-owned runtime files under /etc and persistent data at the paths you choose.'
 echo
@@ -82,10 +107,9 @@ validate_positive_int "${MAX_PLAYERS}" || { echo 'ERROR: maximum players must be
 MOTD="$(prompt_default 'Server welcome message (MOTD)' 'JustVoxel Java and Bedrock Server')"
 validate_simple_text "${MOTD}" || { echo 'ERROR: MOTD must be a single line.' >&2; exit 1; }
 
-read -r MINECRAFT_UID MINECRAFT_GID MINECRAFT_ID_SOURCE < <(resolve_minecraft_ids)
 if [[ ${advanced} == yes ]]; then
     echo
-echo 'Minecraft data ownership'
+    echo 'Minecraft data ownership'
     echo "Suggested UID:GID: ${MINECRAFT_UID}:${MINECRAFT_GID}"
     MINECRAFT_UID="$(prompt_default 'Minecraft data UID' "${MINECRAFT_UID}")"
     MINECRAFT_GID="$(prompt_default 'Minecraft data GID' "${MINECRAFT_GID}")"
@@ -94,19 +118,6 @@ echo 'Minecraft data ownership'
         exit 1
     }
     MINECRAFT_ID_SOURCE=advanced
-else
-    case "${MINECRAFT_ID_SOURCE}" in
-        sudo)
-            echo "Minecraft data ownership: ${MINECRAFT_UID}:${MINECRAFT_GID} from the administrator who invoked sudo."
-            ;;
-        voxel)
-            echo "Minecraft data ownership: ${MINECRAFT_UID}:${MINECRAFT_GID} from the voxel account."
-            ;;
-        fallback)
-            echo 'Minecraft data ownership: 1000:1000 fallback because no non-root sudo/voxel identity was available.'
-            ;;
-    esac
-    echo 'These IDs are applied to the persistent Minecraft data so the container can read and write the world.'
 fi
 
 echo
@@ -166,7 +177,6 @@ case "${version_choice}" in
 esac
 
 echo
-echo 'Backup storage'
 storage_prepare_backup_interactive
 BACKUP_PATH="$(realpath -m -- "${BACKUP_PATH}")"
 validate_storage_path "${BACKUP_PATH}" || { echo 'ERROR: invalid backup path.' >&2; exit 1; }
@@ -177,15 +187,46 @@ fi
 
 BACKUP_KEEP="$(prompt_default 'Number of backups to keep' '7')"
 validate_positive_int "${BACKUP_KEEP}" || { echo 'ERROR: backup retention must be a positive integer.' >&2; exit 1; }
-BACKUP_SCHEDULE="$(prompt_default 'Backup systemd calendar schedule' '*-*-* 04:30:00')"
-if ! systemd-analyze calendar "${BACKUP_SCHEDULE}" >/dev/null 2>&1; then
-    echo 'ERROR: systemd did not accept that backup schedule.' >&2
-    exit 1
-fi
-if confirm 'Enable the scheduled cold-backup timer?'; then
-    BACKUP_TIMER_ENABLED=yes
+
+if [[ ${advanced} == yes ]]; then
+    BACKUP_SCHEDULE="$(prompt_default 'Backup systemd calendar schedule' '*-*-* 04:30:00')"
+    if ! systemd-analyze calendar "${BACKUP_SCHEDULE}" >/dev/null 2>&1; then
+        echo 'ERROR: systemd did not accept that backup schedule.' >&2
+        exit 1
+    fi
+    if confirm 'Enable the scheduled cold-backup timer?'; then
+        BACKUP_TIMER_ENABLED=yes
+    else
+        BACKUP_TIMER_ENABLED=no
+    fi
 else
-    BACKUP_TIMER_ENABLED=no
+    SYSTEM_TIMEZONE="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
+    SYSTEM_TIMEZONE="${SYSTEM_TIMEZONE:-UTC}"
+    echo
+    echo 'Automatic backup schedule'
+    echo "Backups run once every day using the system timezone: ${SYSTEM_TIMEZONE}."
+    while true; do
+        BACKUP_DAILY_TIME="$(prompt_default 'Daily backup time' '04:30')"
+        if BACKUP_DAILY_TIME="$(normalize_daily_backup_time "${BACKUP_DAILY_TIME}")"; then
+            break
+        fi
+        echo 'ERROR: enter a valid daily time such as 04:30 or 21:15.' >&2
+    done
+    BACKUP_SCHEDULE="$(daily_backup_schedule_from_time "${BACKUP_DAILY_TIME}")"
+    if ! systemd-analyze calendar "${BACKUP_SCHEDULE}" >/dev/null 2>&1; then
+        echo 'ERROR: systemd did not accept the generated daily backup schedule.' >&2
+        exit 1
+    fi
+    echo
+    echo 'Automatic backups'
+    echo 'JustVoxel uses verified cold backups.'
+    echo 'Minecraft is stopped cleanly, the world data is backed up and verified,'
+    echo 'then Minecraft is started again.'
+    if confirm 'Enable automatic daily backups?'; then
+        BACKUP_TIMER_ENABLED=yes
+    else
+        BACKUP_TIMER_ENABLED=no
+    fi
 fi
 
 echo
@@ -215,7 +256,15 @@ echo "  Backup type: ${BACKUP_TYPE}"
 echo "  Backup path: ${BACKUP_PATH}"
 [[ -n ${BACKUP_MOUNT_POINT} ]] && echo "  Backup mount: ${BACKUP_MOUNT_POINT}"
 echo "  Backup retention: ${BACKUP_KEEP}"
-echo "  Backup schedule: ${BACKUP_SCHEDULE} (${BACKUP_TIMER_ENABLED})"
+if [[ ${advanced} == yes ]]; then
+    echo "  Backup schedule: ${BACKUP_SCHEDULE} (${BACKUP_TIMER_ENABLED})"
+else
+    if [[ ${BACKUP_TIMER_ENABLED} == yes ]]; then
+        echo "  Backup schedule: daily at ${BACKUP_DAILY_TIME} (enabled)"
+    else
+        echo "  Backup schedule: daily at ${BACKUP_DAILY_TIME} (disabled)"
+    fi
+fi
 echo
 if ! confirm 'Create this JustVoxel configuration?'; then
     echo 'Cancelled. No JustVoxel runtime configuration was created; any storage you explicitly provisioned remains unchanged.'
