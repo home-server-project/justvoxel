@@ -212,8 +212,7 @@ else
 fi
 
 echo
-echo 'Storage usage:'
-df -h "${DATA_PATH}" "${BACKUP_PATH}" 2>/dev/null || true
+/usr/libexec/justvoxel/mjust/storage-summary || fail 'storage summary could not be generated'
 
 if (( failures > 0 )); then
     echo
