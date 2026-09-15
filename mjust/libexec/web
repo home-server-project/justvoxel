@@ -8,7 +8,7 @@ readonly agent=/usr/libexec/justvoxel/management-agent
 readonly web_service=justvoxel-webui.service
 readonly agent_service=justvoxel-management.service
 readonly firewall_service=justvoxel-web
-readonly port=8443
+readonly port=8099
 
 require_root() {
     if [[ ${EUID} -ne 0 ]]; then
@@ -36,6 +36,11 @@ primary_ipv4() {
     printf '%s' "${ipv4:-127.0.0.1}"
 }
 
+web_healthy() {
+    systemctl is-active --quiet "${web_service}" && \
+        curl -fsS --max-time 2 "http://127.0.0.1:${port}/healthz" >/dev/null
+}
+
 enable_web() {
     local password=""
     install -d -m0700 "${state_dir}"
@@ -47,7 +52,7 @@ enable_web() {
         rm -f "${enabled_marker}"
         return 1
     fi
-    if ! curl -kfsS --max-time 5 "https://127.0.0.1:${port}/healthz" >/dev/null; then
+    if ! web_healthy; then
         systemctl disable --now "${web_service}" "${agent_service}" >/dev/null 2>&1 || true
         firewall_close
         rm -f "${enabled_marker}"
@@ -69,13 +74,19 @@ disable_web() {
 }
 
 status_web() {
-    local version='Unknown' source='Unknown' api='v1' address
+    local version='Unknown' source='Unknown' api='v1' address='Disabled'
     if [[ -r /usr/lib/justvoxel/webui-release.json ]]; then
         version="$(jq -r '.version // "Unknown"' /usr/lib/justvoxel/webui-release.json)"
         source="$(jq -r '.source_commit // "Unknown"' /usr/lib/justvoxel/webui-release.json)"
         api="$(jq -r '.management_api // "v1"' /usr/lib/justvoxel/webui-release.json)"
     fi
-    address="https://$(primary_ipv4):${port}"
+    if [[ -e ${enabled_marker} ]]; then
+        if web_healthy; then
+            address="http://$(primary_ipv4):${port}"
+        else
+            address='Enabled - service unavailable'
+        fi
+    fi
     printf 'JustVoxel Web management\n'
     printf '  Enabled:        %s\n' "$( [[ -e ${enabled_marker} ]] && echo yes || echo no )"
     printf '  Web service:    %s\n' "$(systemctl is-active "${web_service}" 2>/dev/null || true)"
@@ -97,7 +108,7 @@ bootstrap_first_boot() {
             printf '\nJustVoxel WebUI initial administrator\n'
             printf '  Username: admin\n'
             printf '  Password: %s\n' "${password}"
-            printf '  Address:  https://%s:%s\n' "$(primary_ipv4)" "${port}"
+            printf '  Address:  http://%s:%s\n' "$(primary_ipv4)" "${port}"
             printf '  You will be required to change this password after sign-in.\n\n'
         } > /dev/console
     fi
@@ -111,7 +122,7 @@ case "${1:-status}" in
     enable)
         password="$(enable_web)"
         echo 'Web management enabled.'
-        echo "Address: https://$(primary_ipv4):${port}"
+        echo "Address: http://$(primary_ipv4):${port}"
         if [[ -n ${password} ]]; then
             echo 'Initial administrator credential:'
             echo '  Username: admin'

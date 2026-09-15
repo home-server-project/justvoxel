@@ -2,20 +2,14 @@ package main
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/subtle"
-	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/json"
-	"encoding/pem"
 	"errors"
 	"flag"
 	"fmt"
 	"log"
-	"math/big"
 	"net"
 	"net/http"
 	"os"
@@ -35,8 +29,6 @@ const (
 	managementAPI = "v1"
 	stateDir      = "/var/lib/justvoxel/webui"
 	authPath      = stateDir + "/auth.json"
-	certPath      = stateDir + "/tls.crt"
-	keyPath       = stateDir + "/tls.key"
 	metadataPath  = "/usr/lib/justvoxel/webui-release.json"
 	statusHelper  = "/usr/libexec/justvoxel/mjust/web-status-json"
 	passwordChars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
@@ -155,9 +147,6 @@ func bootstrap() (string, bool, error) {
 	} else if _, err := readCredential(); err != nil {
 		return "", false, fmt.Errorf("existing credential is invalid: %w", err)
 	}
-	if err := ensureTLS(); err != nil {
-		return "", false, err
-	}
 	return password, created, nil
 }
 
@@ -174,9 +163,6 @@ func resetPassword() (string, error) {
 		return "", err
 	}
 	if err := writeCredential(cred); err != nil {
-		return "", err
-	}
-	if err := ensureTLS(); err != nil {
 		return "", err
 	}
 	return password, nil
@@ -563,75 +549,6 @@ func randomToken(bytes int) (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(buf), nil
-}
-
-func ensureTLS() error {
-	certExists := fileExists(certPath)
-	keyExists := fileExists(keyPath)
-	if certExists && keyExists {
-		return nil
-	}
-	if certExists != keyExists {
-		return errors.New("TLS state is incomplete; remove both tls.crt and tls.key before retrying")
-	}
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return err
-	}
-	serialLimit := new(big.Int).Lsh(big.NewInt(1), 128)
-	serial, err := rand.Int(rand.Reader, serialLimit)
-	if err != nil {
-		return err
-	}
-	hostname, _ := os.Hostname()
-	dnsNames := []string{"localhost"}
-	if hostname != "" {
-		dnsNames = append(dnsNames, hostname)
-	}
-	ipAddresses := []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")}
-	ifaces, _ := net.Interfaces()
-	for _, iface := range ifaces {
-		addrs, _ := iface.Addrs()
-		for _, addr := range addrs {
-			ipText := strings.Split(addr.String(), "/")[0]
-			if ip := net.ParseIP(ipText); ip != nil && !ip.IsLoopback() {
-				ipAddresses = append(ipAddresses, ip)
-			}
-		}
-	}
-	now := time.Now()
-	template := &x509.Certificate{
-		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: "JustVoxel WebUI"},
-		NotBefore:    now.Add(-5 * time.Minute),
-		NotAfter:     now.AddDate(5, 0, 0),
-		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		DNSNames:     dnsNames,
-		IPAddresses:  ipAddresses,
-	}
-	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
-	if err != nil {
-		return err
-	}
-	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
-	keyDER, err := x509.MarshalECPrivateKey(key)
-	if err != nil {
-		return err
-	}
-	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
-	if err := atomicWrite(certPath, certPEM, 0o644); err != nil {
-		return err
-	}
-	if err := atomicWrite(keyPath, keyPEM, 0o600); err != nil {
-		return err
-	}
-	return nil
-}
-
-func fileExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.Mode().IsRegular()
 }
 
 func readReleaseMetadata() (releaseMetadata, error) {

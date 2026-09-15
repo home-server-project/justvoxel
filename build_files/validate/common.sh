@@ -77,6 +77,12 @@ test -f /usr/lib/systemd/system/justvoxel-management.service
 test -f /usr/lib/systemd/system/justvoxel-webui.service
 test -f /usr/lib/systemd/system/justvoxel-web-bootstrap.service
 test -f /usr/lib/firewalld/services/justvoxel-web.xml
+grep -Fq -- '--listen 0.0.0.0:8099' /usr/lib/systemd/system/justvoxel-webui.service
+grep -Fq 'port="8099"' /usr/lib/firewalld/services/justvoxel-web.xml
+if grep -Fq 'LoadCredential=' /usr/lib/systemd/system/justvoxel-webui.service; then
+    echo 'ERROR: JustVoxel WebUI must not require self-signed TLS credentials for default local access.' >&2
+    exit 1
+fi
 test -x /usr/libexec/justvoxel/management-agent
 test -x /usr/libexec/justvoxel/justvoxel-webui
 test -r /usr/lib/justvoxel/webui-release.json

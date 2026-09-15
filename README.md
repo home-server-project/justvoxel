@@ -49,6 +49,14 @@ The Bare Metal variant additionally includes NUT, Btrfs tools, SMART/NVMe toolin
 
 The VM variant deliberately excludes that physical-hardware administration set. Linux kernel support provides the basic VirtualBox guest drivers; JustVoxel does not add out-of-tree VirtualBox Guest Additions or DKMS machinery.
 
+## Web management
+
+JustVoxel WebUI is intended for trusted local-network administration by default. It uses plain HTTP on TCP port `8099` so users can open the appliance directly from its LAN IP without accepting a self-signed certificate warning.
+
+The lack of TLS in the default local WebUI is intentional. Do not forward port `8099` directly to the public Internet. Remote or public access should use a separately configured trusted HTTPS or private-network solution.
+
+See `docs/WEBUI.md` for the local-access and security model.
+
 ## Minecraft runtime
 
 JustVoxel ships immutable templates for Paper with Geyser, Floodgate, and ViaVersion. The image itself does not accept the Minecraft EULA, generate a world, or create an active Quadlet.

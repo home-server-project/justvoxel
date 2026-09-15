@@ -35,10 +35,15 @@ fi
 
 web_management='Disabled'
 if [[ -e /var/lib/justvoxel/webui/enabled ]]; then
-    if [[ ${ipv4} == 'Not assigned' ]]; then
-        web_management='Enabled - address pending'
+    if systemctl is-active --quiet justvoxel-webui.service && \
+        curl -fsS --max-time 1 http://127.0.0.1:8099/healthz >/dev/null 2>&1; then
+        if [[ ${ipv4} == 'Not assigned' ]]; then
+            web_management='Enabled - address pending'
+        else
+            web_management="http://${ipv4}:8099"
+        fi
     else
-        web_management="https://${ipv4}:8443"
+        web_management='Enabled - service unavailable'
     fi
 fi
 
