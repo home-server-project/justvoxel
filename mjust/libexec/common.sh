@@ -32,8 +32,13 @@ require_config() {
     source "${JV_CONFIG}"
 
     # Compatibility defaults for configurations created before image/version
-    # policy became administrator-configurable.
+    # policy and portable Minecraft settings became administrator-configurable.
     MINECRAFT_IMAGE_TAG="${MINECRAFT_IMAGE_TAG:-latest}"
+    GAME_MODE="${GAME_MODE:-survival}"
+    DIFFICULTY="${DIFFICULTY:-normal}"
+    WHITELIST_ENABLED="${WHITELIST_ENABLED:-yes}"
+    ENFORCE_WHITELIST="${ENFORCE_WHITELIST:-yes}"
+    BEDROCK_MANAGED_PLUGINS="${BEDROCK_MANAGED_PLUGINS:-yes}"
     if [[ -z ${MINECRAFT_VERSION_MODE:-} ]]; then
         if [[ ${MINECRAFT_VERSION:-} == LATEST ]]; then
             MINECRAFT_VERSION_MODE=latest
@@ -246,6 +251,7 @@ write_main_config() {
         shell_quote_assignment JAVA_PORT "${JAVA_PORT}"
         shell_quote_assignment BEDROCK_ENABLED "${BEDROCK_ENABLED}"
         shell_quote_assignment BEDROCK_PORT "${BEDROCK_PORT}"
+        shell_quote_assignment BEDROCK_MANAGED_PLUGINS "${BEDROCK_MANAGED_PLUGINS:-yes}"
         shell_quote_assignment JAVA_MEMORY "${JAVA_MEMORY}"
         shell_quote_assignment CONTAINER_MEMORY "${CONTAINER_MEMORY}"
         shell_quote_assignment MINECRAFT_IMAGE_TAG "${MINECRAFT_IMAGE_TAG}"
@@ -254,6 +260,10 @@ write_main_config() {
         shell_quote_assignment MINECRAFT_UID "${MINECRAFT_UID}"
         shell_quote_assignment MINECRAFT_GID "${MINECRAFT_GID}"
         shell_quote_assignment TIMEZONE "${TIMEZONE}"
+        shell_quote_assignment GAME_MODE "${GAME_MODE:-survival}"
+        shell_quote_assignment DIFFICULTY "${DIFFICULTY:-normal}"
+        shell_quote_assignment WHITELIST_ENABLED "${WHITELIST_ENABLED:-yes}"
+        shell_quote_assignment ENFORCE_WHITELIST "${ENFORCE_WHITELIST:-yes}"
         shell_quote_assignment MAX_PLAYERS "${MAX_PLAYERS}"
         shell_quote_assignment MOTD "${MOTD}"
     } > "${tmp}"
@@ -348,7 +358,9 @@ render_runtime() {
     install -d -m0755 -o root -g root /etc/containers/systemd
 
     local rcon_password env_tmp quadlet_tmp backup_tmp service_tmp timer_tmp image_ref
-    if [[ -r ${JV_MC_ENV} ]]; then
+    if [[ ${JUSTVOXEL_REGENERATE_RCON:-0} == 1 ]]; then
+        rcon_password="$(openssl rand -hex 24)"
+    elif [[ -r ${JV_MC_ENV} ]]; then
         rcon_password="$(sed -n 's/^RCON_PASSWORD=//p' "${JV_MC_ENV}" | head -n1)"
     else
         rcon_password="$(openssl rand -hex 24)"
@@ -363,13 +375,19 @@ render_runtime() {
     replace_token "${env_tmp}" MINECRAFT_GID "${MINECRAFT_GID}"
     replace_token "${env_tmp}" TIMEZONE "$(systemd_env_escape "${TIMEZONE}")"
     replace_token "${env_tmp}" JAVA_MEMORY "${JAVA_MEMORY^^}"
+    replace_token "${env_tmp}" GAME_MODE "${GAME_MODE}"
+    replace_token "${env_tmp}" DIFFICULTY "${DIFFICULTY}"
+    replace_token "${env_tmp}" WHITELIST_ENABLED "$([[ ${WHITELIST_ENABLED} == yes ]] && printf TRUE || printf FALSE)"
+    replace_token "${env_tmp}" ENFORCE_WHITELIST "$([[ ${ENFORCE_WHITELIST} == yes ]] && printf TRUE || printf FALSE)"
     replace_token "${env_tmp}" MAX_PLAYERS "${MAX_PLAYERS}"
     replace_token "${env_tmp}" RCON_PASSWORD "${rcon_password}"
     replace_token "${env_tmp}" MOTD "$(systemd_env_escape "${MOTD}")"
-    if [[ ${BEDROCK_ENABLED} == yes ]]; then
+    if [[ ${BEDROCK_ENABLED} == yes && ${BEDROCK_MANAGED_PLUGINS} == yes ]]; then
         replace_token "${env_tmp}" PLUGINS_LINE 'PLUGINS=https://download.geysermc.org/v2/projects/geyser/versions/latest/builds/latest/downloads/spigot,https://download.geysermc.org/v2/projects/floodgate/versions/latest/builds/latest/downloads/spigot'
+    elif [[ ${BEDROCK_ENABLED} == yes ]]; then
+        replace_token "${env_tmp}" PLUGINS_LINE '# Geyser/Floodgate binaries are preserved from imported persistent server data.'
     else
-        replace_token "${env_tmp}" PLUGINS_LINE '# Bedrock cross-play disabled; Geyser and Floodgate are not installed.'
+        replace_token "${env_tmp}" PLUGINS_LINE '# Bedrock cross-play disabled; Geyser and Floodgate are not installed by JustVoxel.'
     fi
     install -o root -g root -m0600 "${env_tmp}" "${JV_MC_ENV}"
     rm -f "${env_tmp}"
