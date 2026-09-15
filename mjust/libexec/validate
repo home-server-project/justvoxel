@@ -29,6 +29,14 @@ check_file "${JV_QUADLET}" 644
 check_file "${JV_BACKUP_SERVICE}" 644
 check_file "${JV_BACKUP_TIMER}" 644
 
+failed_units="$(systemctl --failed --no-legend --plain 2>/dev/null || true)"
+if [[ -z ${failed_units} ]]; then
+    pass 'Failed system services: none'
+else
+    fail 'one or more systemd units are failed'
+    echo "${failed_units}" >&2
+fi
+
 if [[ -L ${JV_QUADLET} || -L ${JV_MC_ENV} || -L ${JV_BACKUP_ENV} ]]; then
     fail 'active runtime files must be local administrator-owned copies, not symlinks into the immutable image'
 else
