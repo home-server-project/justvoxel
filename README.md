@@ -84,7 +84,7 @@ No Minecraft server JAR or Mojang server binary is baked into the bootc image.
 
 ## Credits
 
-The `mjust` interaction model is inspired by Universal Blue's `ujust` / `ugum` work in `ublue-os/packages`. JustVoxel uses its own small server-focused implementation. Any future direct source reuse will retain the applicable Apache-2.0 attribution and notices.
+The `mjust` interaction model is inspired by Universal Blue's `ujust` / `ugum` work in [ublue-os/packages](https://github.com/ublue-os/packages). JustVoxel uses its own small server-focused implementation. Any future direct source reuse will retain the applicable Apache-2.0 attribution and notices.
 
 ## License
 
