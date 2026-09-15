@@ -70,19 +70,50 @@ TERM=dumb
 export TERM
 [[ $(jui_backend) == none ]] || fail 'TERM=dumb must disable the interactive selector backend'
 
+menu="${repo_root}/mjust/libexec/menu"
+storage="${repo_root}/mjust/libexec/storage-provision"
+justfile="${repo_root}/mjust/justfile"
+start_over="${repo_root}/mjust/libexec/start-over"
+
 for id in setup setup-advanced status players configure service whitelist backups storage update validate logs advanced exit; do
-    grep -Fq "${id})" "${repo_root}/mjust/libexec/menu" || fail "menu preview/dispatch id missing: ${id}"
+    grep -Fq "${id})" "${menu}" || fail "menu preview/dispatch id missing: ${id}"
 done
 
-grep -Fq '[[ -e /etc/containers/systemd/minecraft.container ]]' "${repo_root}/mjust/libexec/menu" || fail 'menu must use the non-secret rendered Quadlet as its configured marker'
-grep -Fq 'Configure Minecraft' "${repo_root}/mjust/libexec/menu" || fail 'configure submenu missing'
-grep -Fq 'Maximum players' "${repo_root}/mjust/libexec/menu" || fail 'maximum players menu entry missing'
-grep -Fq 'Whitelist' "${repo_root}/mjust/libexec/menu" || fail 'whitelist menu entry missing'
-grep -Fq 'BedrockBuddy' "${repo_root}/mjust/libexec/menu" || fail 'generic Bedrock example missing'
-grep -Fq 'PlayerOne' "${repo_root}/mjust/libexec/menu" || fail 'generic Java example missing'
-grep -Fq 'mjust status --details' "${repo_root}/mjust/libexec/menu" || fail 'detailed status is not exposed through the advanced menu'
+grep -Fq '[[ -e /etc/containers/systemd/minecraft.container ]]' "${menu}" || fail 'menu must use the non-secret rendered Quadlet as its configured marker'
+grep -Fq 'Configure Minecraft' "${menu}" || fail 'configure submenu missing'
+grep -Fq 'Maximum players' "${menu}" || fail 'maximum players menu entry missing'
+grep -Fq 'Whitelist' "${menu}" || fail 'whitelist menu entry missing'
+grep -Fq 'BedrockBuddy' "${menu}" || fail 'generic Bedrock example missing'
+grep -Fq 'PlayerOne' "${menu}" || fail 'generic Java example missing'
+grep -Fq 'mjust status --details' "${menu}" || fail 'detailed status is not exposed through the advanced menu'
 grep -Fq -- '--details' "${repo_root}/mjust/bin/mjust" || fail 'mjust wrapper does not accept status --details'
-grep -Fq 'ERASE /dev/...' "${repo_root}/mjust/libexec/menu" || fail 'storage preview does not preserve typed-confirmation guidance'
+grep -Fq 'ERASE /dev/...' "${menu}" || fail 'storage preview does not preserve typed-confirmation guidance'
 grep -Fq "'Back'" "${repo_root}/mjust/libexec/storage-ui.sh" || fail 'storage UI has no Back option'
+
+# Every useful direct recipe must be discoverable from the interactive interface.
+for command in \
+    'mjust setup' 'mjust setup-advanced' 'mjust configure' 'mjust configure-max-players' \
+    'mjust status' 'mjust start' 'mjust stop' 'mjust restart' 'mjust players' \
+    'mjust whitelist-list' 'mjust whitelist-add-java' 'mjust whitelist-remove-java' \
+    'mjust whitelist-add-bedrock' 'mjust whitelist-remove-bedrock' 'mjust backup' \
+    'mjust update-minecraft' 'mjust logs' 'mjust validate' \
+    'mjust storage-disk' 'mjust storage-partition' 'mjust storage-free-space' \
+    'mjust storage-network' 'mjust storage-system' 'mjust storage-migrate' 'mjust storage-plan' \
+    'mjust welcome' 'mjust welcome-off' 'mjust welcome-on' 'mjust start-over'; do
+    grep -Fq "${command}" "${menu}" || fail "direct command is not discoverable in mjust UI: ${command}"
+done
+
+grep -Fq 'All mjust commands' "${menu}" || fail 'advanced all-commands entry missing'
+grep -Fq '/usr/bin/mjust --list' "${menu}" || fail 'all-commands entry must use authoritative mjust --list output'
+grep -Fq 'storage-system:' "${justfile}" || fail 'storage-system direct recipe missing'
+grep -Fq 'start-over:' "${justfile}" || fail 'start-over direct recipe missing'
+grep -Fq 'system)' "${storage}" || fail 'storage-provision system action missing'
+
+test -f "${start_over}" || fail 'start-over implementation missing'
+grep -Fq 'START OVER' "${start_over}" || fail 'start-over exact typed confirmation missing'
+grep -Fq 'config-backups' "${start_over}" || fail 'start-over configuration backup path missing'
+grep -Fq 'Minecraft world/data will NOT be deleted.' "${start_over}" || fail 'start-over data-preservation statement missing'
+grep -Fq 'podman rename minecraft' "${start_over}" || fail 'start-over preserved-container path missing'
+grep -Fq 'podman rm minecraft' "${start_over}" || fail 'start-over remove-container path missing'
 
 echo 'mjust UI regression tests passed.'

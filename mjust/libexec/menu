@@ -2,8 +2,6 @@
 set -euo pipefail
 source /usr/libexec/justvoxel/mjust/ui.sh
 
-# The administrator config directory is intentionally root-only. The rendered
-# Quadlet is non-secret and readable, so it is the safe non-root setup marker.
 configured=no
 [[ -e /etc/containers/systemd/minecraft.container ]] && configured=yes
 
@@ -62,6 +60,10 @@ Configure Minecraft
 Change supported Minecraft settings after first setup. Maximum players has its
 own guided screen; other settings remain available through the safe configure
 flow. Configuration changes never force an automatic disruptive restart.
+
+Commands:
+  mjust configure-max-players
+  mjust configure
 EOF
             ;;
         whitelist)
@@ -105,12 +107,18 @@ EOF
             cat <<'EOF'
 Storage
 
-Manage backup storage and guarded Minecraft data migration. Navigation uses the
-same terminal selector and includes Back choices. Destructive disk operations
-still require exact typed phrases such as ERASE /dev/...
+Manage backup storage and guarded Minecraft data migration. Every storage path
+is also available as a direct mjust command. Destructive disk operations keep
+exact typed confirmations such as ERASE /dev/...
 
-Command:
-  mjust storage
+Commands include:
+  mjust storage-disk
+  mjust storage-partition
+  mjust storage-free-space
+  mjust storage-network
+  mjust storage-system
+  mjust storage-migrate
+  mjust storage-plan
 EOF
             ;;
         update)
@@ -151,12 +159,10 @@ EOF
             cat <<'EOF'
 Advanced
 
-Open administrator-oriented tools such as detailed service/container status,
-storage plan and welcome-screen controls.
+Administrator-oriented tools: detailed status, storage-plan view, login welcome
+controls, the complete mjust command list, and guarded Start over/reset.
 
-Examples:
-  mjust status --details
-  mjust storage-plan
+Start over preserves Minecraft world data and existing backup archives.
 EOF
             ;;
         exit)
@@ -270,11 +276,53 @@ whitelist_menu() {
     done
 }
 
+storage_menu() {
+    local choice
+    while true; do
+        choice="$(jui_choose 'Storage' \
+            'Dedicated disk / USB backup storage' \
+            'Existing partition / filesystem backup storage' \
+            'Use unallocated disk space for backup storage' \
+            'Network backup storage (NFS / SMB)' \
+            'Directory on the system filesystem' \
+            'Migrate Minecraft data' \
+            'Storage plan / devices' \
+            'Back')" || return 0
+        case "${choice}" in
+            'Dedicated disk / USB backup storage') run_and_pause /usr/bin/mjust storage-disk || true ;;
+            'Existing partition / filesystem backup storage') run_and_pause /usr/bin/mjust storage-partition || true ;;
+            'Use unallocated disk space for backup storage') run_and_pause /usr/bin/mjust storage-free-space || true ;;
+            'Network backup storage (NFS / SMB)') run_and_pause /usr/bin/mjust storage-network || true ;;
+            'Directory on the system filesystem') run_and_pause /usr/bin/mjust storage-system || true ;;
+            'Migrate Minecraft data')
+                if [[ ${configured} == yes ]]; then
+                    run_and_pause /usr/bin/mjust storage-migrate || true
+                else
+                    echo 'Minecraft data migration is available after first setup.'
+                    jui_pause
+                fi
+                ;;
+            'Storage plan / devices') run_and_pause /usr/bin/mjust storage-plan || true ;;
+            'Back') return 0 ;;
+        esac
+    done
+}
+
+all_commands() {
+    echo 'All mjust commands'
+    echo '------------------'
+    /usr/bin/mjust --list
+}
+
 advanced_menu() {
-    local -a options=('Detailed status' 'Storage plan / devices' 'Show login welcome' 'Hide login welcome' 'Enable login welcome' 'Back')
-    if [[ ${configured} != yes ]]; then
+    local -a options=('Detailed status' 'Storage plan / devices' 'Show login welcome' 'Hide login welcome' 'Enable login welcome' 'All mjust commands')
+    if [[ ${configured} == yes ]]; then
+        options+=('Start over / reset Minecraft')
+    else
         options=('Advanced first setup' "${options[@]}")
     fi
+    options+=('Back')
+
     local choice
     choice="$(jui_choose 'Advanced' "${options[@]}")" || return 0
     case "${choice}" in
@@ -284,6 +332,8 @@ advanced_menu() {
         'Show login welcome') run_and_pause /usr/bin/mjust welcome || true ;;
         'Hide login welcome') run_and_pause /usr/bin/mjust welcome-off || true ;;
         'Enable login welcome') run_and_pause /usr/bin/mjust welcome-on || true ;;
+        'All mjust commands') all_commands; jui_pause ;;
+        'Start over / reset Minecraft') run_and_pause /usr/bin/mjust start-over || true ;;
         *) return 0 ;;
     esac
 }
@@ -360,7 +410,7 @@ while true; do
         service) service_menu ;;
         whitelist) whitelist_menu ;;
         backups) run_and_pause /usr/bin/mjust backup || true ;;
-        storage) run_and_pause /usr/bin/mjust storage || true ;;
+        storage) storage_menu ;;
         update) run_and_pause /usr/bin/mjust update-minecraft || true ;;
         validate) run_and_pause /usr/bin/mjust validate || true ;;
         logs) /usr/bin/mjust logs || true ;;

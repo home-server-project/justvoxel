@@ -84,5 +84,11 @@ storage-free-space:
 storage-network:
     @sudo /usr/libexec/justvoxel/mjust/storage-provision network
 
+storage-system:
+    @sudo /usr/libexec/justvoxel/mjust/storage-provision system
+
 storage-migrate:
     @sudo /usr/libexec/justvoxel/mjust/storage-provision migrate
+
+start-over:
+    @sudo /usr/libexec/justvoxel/mjust/start-over
