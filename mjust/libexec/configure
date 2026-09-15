@@ -8,7 +8,7 @@ show_configuration() {
     echo "Minecraft data: ${DATA_PATH}"
     echo "Container image: $(minecraft_image_ref)"
     echo "Minecraft version policy: ${MINECRAFT_VERSION_MODE} (${MINECRAFT_VERSION})"
-    echo "Java heap / container limit: ${JAVA_MEMORY} / ${CONTAINER_MEMORY}"
+    echo "Java heap / maximum total Minecraft memory: ${JAVA_MEMORY} / ${CONTAINER_MEMORY}"
     echo "Java port: ${JAVA_PORT}/tcp"
     echo "Bedrock: ${BEDROCK_ENABLED} (${BEDROCK_PORT}/udp)"
     echo "Backup type: ${BACKUP_TYPE}"
@@ -36,14 +36,14 @@ case "${choice}" in
         exit 0
         ;;
     2)
-        JAVA_MEMORY="$(prompt_default 'Java heap' "${JAVA_MEMORY}")"
-        CONTAINER_MEMORY="$(prompt_default 'Container memory limit' "${CONTAINER_MEMORY}")"
+        JAVA_MEMORY="$(prompt_default 'Minecraft Java heap' "${JAVA_MEMORY}")"
+        CONTAINER_MEMORY="$(prompt_default 'Maximum total Minecraft memory' "${CONTAINER_MEMORY}")"
         validate_memory "${JAVA_MEMORY}" && validate_memory "${CONTAINER_MEMORY}" || {
             echo 'ERROR: memory values must look like 4G or 4096M.' >&2
             exit 1
         }
         (( $(memory_to_mib "${CONTAINER_MEMORY}") > $(memory_to_mib "${JAVA_MEMORY}") )) || {
-            echo 'ERROR: container memory limit must be larger than the Java heap.' >&2
+            echo 'ERROR: maximum total Minecraft memory must be larger than the Java heap.' >&2
             exit 1
         }
         write_main_config
@@ -66,7 +66,7 @@ case "${choice}" in
         echo 'Port configuration updated. Restart Minecraft when it is safe to apply it.'
         ;;
     4)
-        MOTD="$(prompt_default 'Server message (MOTD)' "${MOTD}")"
+        MOTD="$(prompt_default 'Server welcome message (MOTD)' "${MOTD}")"
         validate_simple_text "${MOTD}" || { echo 'ERROR: MOTD must be one line.' >&2; exit 1; }
         MAX_PLAYERS="$(prompt_default 'Maximum players' "${MAX_PLAYERS}")"
         validate_positive_int "${MAX_PLAYERS}" || { echo 'ERROR: maximum players must be positive.' >&2; exit 1; }
@@ -95,8 +95,8 @@ case "${choice}" in
     7)
         image_choice="$(choose 'Container image policy' \
             'keep current tag' \
-            'latest' \
-            'stable' \
+            'latest - newest upstream main-branch image' \
+            'stable - newest released image' \
             'custom/exact tag')"
         case "${image_choice}" in
             1) ;;
@@ -117,7 +117,7 @@ case "${choice}" in
         version_choice="$(choose 'Minecraft version policy' \
             'keep current policy' \
             'pin newest stable Paper-supported Minecraft version' \
-            'LATEST' \
+            'LATEST - resolve newest Minecraft/Paper release when Minecraft starts' \
             'pin another exact stable Paper-supported version')"
         case "${version_choice}" in
             1) ;;
@@ -129,7 +129,7 @@ case "${choice}" in
             3)
                 MINECRAFT_VERSION_MODE=latest
                 MINECRAFT_VERSION=LATEST
-                echo 'WARNING: VERSION=LATEST can upgrade the Minecraft game version on a later start/restart.'
+                echo 'WARNING: the game/Paper version may update when Minecraft starts, even without pulling a newer Podman image.'
                 ;;
             4)
                 read -r -p 'Exact Minecraft version: ' MINECRAFT_VERSION
