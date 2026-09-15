@@ -75,7 +75,11 @@ if [[ ${service_state} == Failed ]]; then
     overall='Attention needed'
 fi
 
-players="${unknown}"
+if [[ ${service_state} == Stopped ]]; then
+    players="${not_running}"
+else
+    players="${unknown}"
+fi
 version="${unknown}"
 bedrock_state='Disabled'
 memory_current="${unknown}"
@@ -114,6 +118,7 @@ java_address="${unknown}"
 bedrock_address='Disabled'
 java_heap="${unknown}"
 container_max="${unknown}"
+image_channel="${unknown}"
 image_ref="${unknown}"
 backup_state="${unknown}"
 backup_next="${unknown}"
@@ -122,7 +127,8 @@ if [[ ${configured} == yes ]]; then
     java_address="${host_ip}:${JAVA_PORT:-Unknown}"
     java_heap="${JAVA_MEMORY:-Unknown}"
     container_max="${CONTAINER_MEMORY:-Unknown}"
-    image_ref="${JV_MINECRAFT_IMAGE_REPO}:${MINECRAFT_IMAGE_TAG:-latest}"
+    image_channel="${MINECRAFT_IMAGE_TAG:-latest}"
+    image_ref="${JV_MINECRAFT_IMAGE_REPO}:${image_channel}"
 
     if [[ ${BEDROCK_ENABLED:-no} == yes ]]; then
         bedrock_address="${host_ip}:${BEDROCK_PORT:-19132}"
@@ -163,6 +169,7 @@ printf '  %-20s %s / %s\n' 'Minecraft memory:' "${memory_current}" "${container_
 printf '  %-20s %s\n' 'Java heap:' "${java_heap}"
 printf '  %-20s %s\n' 'Minecraft uptime:' "${service_uptime}"
 printf '\n'
+printf '  %-20s %s\n' 'Container channel:' "${image_channel}"
 printf '  %-20s %s\n' 'Container image:' "${image_ref}"
 printf '  %-20s %s\n' 'Backups:' "${backup_state}"
 printf '  %-20s %s\n' 'Next backup:' "${backup_next}"
