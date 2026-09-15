@@ -1,44 +1,302 @@
 #!/usr/bin/bash
 set -euo pipefail
+source /usr/libexec/justvoxel/mjust/ui.sh
+
+configured=no
+[[ -r /etc/justvoxel/justvoxel.conf ]] && configured=yes
+
+preview() {
+    case "${1:-}" in
+        setup)
+            cat <<'EOF'
+First setup
+
+Configure Minecraft, memory, ports, Bedrock cross-play, storage and backups.
+Normal setup chooses safe defaults and keeps Linux-specific detail out of the way.
+
+Command:
+  mjust setup
+EOF
+            ;;
+        setup-advanced)
+            cat <<'EOF'
+Advanced setup
+
+Use the same first-setup flow with advanced controls such as custom numeric
+Minecraft data UID/GID values and raw systemd backup schedules.
+
+Command:
+  mjust setup-advanced
+EOF
+            ;;
+        status)
+            cat <<'EOF'
+Status
+
+Show a concise appliance view: Minecraft state, players, version, addresses,
+memory, uptime, image channel and backup schedule.
+
+Read-only.
+
+Command:
+  mjust status
+EOF
+            ;;
+        players)
+            cat <<'EOF'
+Players
+
+Show the current Minecraft player list through the server's internal RCON
+connection. RCON is not exposed as a host network port.
+
+Command:
+  mjust players
+EOF
+            ;;
+        configure)
+            cat <<'EOF'
+Configure Minecraft
+
+Safely change supported Minecraft settings after first setup. Configuration
+changes do not silently force a disruptive Minecraft restart.
+
+Command:
+  mjust configure
+EOF
+            ;;
+        service)
+            cat <<'EOF'
+Start / Stop / Restart
+
+Control Minecraft service state. Stop and restart check player state first and
+fail closed if JustVoxel cannot confirm whether players are online.
+
+Commands:
+  mjust start
+  mjust stop
+  mjust restart
+EOF
+            ;;
+        backups)
+            cat <<'EOF'
+Backups
+
+Run a verified cold backup. JustVoxel checks the destination, gracefully stops
+Minecraft when needed, verifies the archive, applies retention, then restarts
+Minecraft if this backup stopped it.
+
+Command:
+  mjust backup
+EOF
+            ;;
+        storage)
+            cat <<'EOF'
+Storage
+
+Manage backup storage and guarded Minecraft data migration. Destructive disk
+operations keep their strong typed confirmations such as ERASE /dev/...
+
+Command:
+  mjust storage
+EOF
+            ;;
+        update)
+            cat <<'EOF'
+Update Minecraft
+
+Check the configured Minecraft container image, player state and update path.
+Before changing a running server, JustVoxel creates a verified backup and then
+verifies Minecraft after the update.
+
+Command:
+  mjust update-minecraft
+EOF
+            ;;
+        validate)
+            cat <<'EOF'
+Validation
+
+Run the full JustVoxel deployment validation: configuration, storage identity,
+SELinux, firewall, zram, systemd state, RCON, Minecraft and Bedrock support.
+
+Command:
+  mjust validate
+EOF
+            ;;
+        logs)
+            cat <<'EOF'
+Logs
+
+Follow the Minecraft systemd journal for troubleshooting. Press Ctrl-C to stop
+following logs and return to the menu.
+
+Command:
+  mjust logs
+EOF
+            ;;
+        advanced)
+            cat <<'EOF'
+Advanced
+
+Open administrator-oriented tools such as detailed service/container status,
+storage plan and welcome-screen controls.
+
+Examples:
+  mjust status --details
+  mjust storage-plan
+EOF
+            ;;
+        exit)
+            echo 'Exit the JustVoxel menu.'
+            ;;
+        *)
+            echo 'Unknown menu item.'
+            ;;
+    esac
+}
+
+if [[ ${1:-} == --preview ]]; then
+    preview "${2:-}"
+    exit 0
+fi
+
+show_noninteractive_help() {
+    cat <<'EOF'
+JustVoxel mjust
+
+Interactive menu unavailable because this session has no usable TTY.
+Use a direct command instead, for example:
+  mjust status
+  mjust players
+  mjust configure
+  mjust backup
+  mjust storage
+  mjust update-minecraft
+  mjust validate
+  mjust logs
+  mjust --list
+
+For an SSH menu, allocate a terminal, for example: ssh -t <host> mjust
+EOF
+}
+
+if ! jui_is_interactive; then
+    show_noninteractive_help
+    exit 0
+fi
+
+run_and_pause() {
+    "$@"
+    local rc=$?
+    jui_pause
+    return "${rc}"
+}
+
+service_menu() {
+    local choice
+    choice="$(jui_choose 'Minecraft service' 'Start Minecraft' 'Stop Minecraft' 'Restart Minecraft' 'Back')" || return 0
+    case "${choice}" in
+        'Start Minecraft') run_and_pause /usr/bin/mjust start || true ;;
+        'Stop Minecraft') run_and_pause /usr/bin/mjust stop || true ;;
+        'Restart Minecraft') run_and_pause /usr/bin/mjust restart || true ;;
+        *) return 0 ;;
+    esac
+}
+
+advanced_menu() {
+    local -a options=('Detailed status' 'Storage plan / devices' 'Show login welcome' 'Hide login welcome' 'Enable login welcome' 'Back')
+    if [[ ${configured} != yes ]]; then
+        options=('Advanced first setup' "${options[@]}")
+    fi
+    local choice
+    choice="$(jui_choose 'Advanced' "${options[@]}")" || return 0
+    case "${choice}" in
+        'Advanced first setup') run_and_pause /usr/bin/mjust setup-advanced || true ;;
+        'Detailed status') run_and_pause /usr/bin/mjust status --details || true ;;
+        'Storage plan / devices') run_and_pause /usr/bin/mjust storage-plan || true ;;
+        'Show login welcome') run_and_pause /usr/bin/mjust welcome || true ;;
+        'Hide login welcome') run_and_pause /usr/bin/mjust welcome-off || true ;;
+        'Enable login welcome') run_and_pause /usr/bin/mjust welcome-on || true ;;
+        *) return 0 ;;
+    esac
+}
+
+select_rich() {
+    local rows selected
+    if [[ ${configured} == yes ]]; then
+        rows=$'status\tStatus\nplayers\tPlayers\nconfigure\tConfigure Minecraft\nservice\tStart / Stop / Restart\nbackups\tBackups\nstorage\tStorage\nupdate\tUpdate Minecraft\nvalidate\tValidation\nlogs\tLogs\nadvanced\tAdvanced\nexit\tExit'
+    else
+        rows=$'setup\tFirst setup\nstatus\tStatus\nstorage\tStorage\nsetup-advanced\tAdvanced setup\nexit\tExit'
+    fi
+    selected="$(printf '%s\n' "${rows}" | fzf \
+        --delimiter=$'\t' --with-nth=2 --no-multi \
+        --layout=reverse --border --height=90% \
+        --prompt='JustVoxel > ' \
+        --preview='/usr/libexec/justvoxel/mjust/menu --preview {1}' \
+        --preview-window='right,55%,wrap,border-left' || true)"
+    [[ -n ${selected} ]] || { printf 'exit'; return 0; }
+    printf '%s' "${selected%%$'\t'*}"
+}
+
+select_compact() {
+    local choice
+    if [[ ${configured} == yes ]]; then
+        choice="$(jui_choose 'JustVoxel' \
+            'Status' 'Players' 'Configure Minecraft' 'Start / Stop / Restart' \
+            'Backups' 'Storage' 'Update Minecraft' 'Validation' 'Logs' 'Advanced' 'Exit')" || { printf 'exit'; return 0; }
+        case "${choice}" in
+            'Status') printf 'status' ;;
+            'Players') printf 'players' ;;
+            'Configure Minecraft') printf 'configure' ;;
+            'Start / Stop / Restart') printf 'service' ;;
+            'Backups') printf 'backups' ;;
+            'Storage') printf 'storage' ;;
+            'Update Minecraft') printf 'update' ;;
+            'Validation') printf 'validate' ;;
+            'Logs') printf 'logs' ;;
+            'Advanced') printf 'advanced' ;;
+            *) printf 'exit' ;;
+        esac
+    else
+        choice="$(jui_choose 'JustVoxel' 'First setup' 'Status' 'Storage' 'Advanced setup' 'Exit')" || { printf 'exit'; return 0; }
+        case "${choice}" in
+            'First setup') printf 'setup' ;;
+            'Status') printf 'status' ;;
+            'Storage') printf 'storage' ;;
+            'Advanced setup') printf 'setup-advanced' ;;
+            *) printf 'exit' ;;
+        esac
+    fi
+}
 
 while true; do
+    if [[ -r /etc/justvoxel/justvoxel.conf ]]; then
+        configured=yes
+    else
+        configured=no
+    fi
+
+    if jui_rich_supported; then
+        action="$(select_rich)"
+    else
+        action="$(select_compact)"
+    fi
+
     echo
-    echo 'JustVoxel mjust'
-    echo '--------------'
-    echo '  1. First setup'
-    echo '  2. Status'
-    echo '  3. Players'
-    echo '  4. Start Minecraft'
-    echo '  5. Stop Minecraft'
-    echo '  6. Restart Minecraft'
-    echo '  7. Configure'
-    echo '  8. Run backup'
-    echo '  9. Update Minecraft container'
-    echo ' 10. Whitelist'
-    echo ' 11. Validate appliance'
-    echo ' 12. Follow logs'
-    echo ' 13. Storage management'
-    echo ' 14. Show storage plan/devices'
-    echo '  0. Exit'
-    read -r -p 'Selection: ' choice
-    case "${choice}" in
-        1) /usr/bin/mjust setup ;;
-        2) /usr/bin/mjust status ;;
-        3) /usr/bin/mjust players ;;
-        4) /usr/bin/mjust start ;;
-        5) /usr/bin/mjust stop ;;
-        6) /usr/bin/mjust restart ;;
-        7) /usr/bin/mjust configure ;;
-        8) /usr/bin/mjust backup ;;
-        9) /usr/bin/mjust update-minecraft ;;
-        10)
-            echo 'Use one of: whitelist-list, whitelist-add-java, whitelist-remove-java, whitelist-add-bedrock, whitelist-remove-bedrock'
-            ;;
-        11) /usr/bin/mjust validate ;;
-        12) /usr/bin/mjust logs ;;
-        13) /usr/bin/mjust storage ;;
-        14) /usr/bin/mjust storage-plan ;;
-        0) exit 0 ;;
-        *) echo 'Invalid selection.' >&2 ;;
+    case "${action}" in
+        setup) run_and_pause /usr/bin/mjust setup || true ;;
+        setup-advanced) run_and_pause /usr/bin/mjust setup-advanced || true ;;
+        status) run_and_pause /usr/bin/mjust status || true ;;
+        players) run_and_pause /usr/bin/mjust players || true ;;
+        configure) run_and_pause /usr/bin/mjust configure || true ;;
+        service) service_menu ;;
+        backups) run_and_pause /usr/bin/mjust backup || true ;;
+        storage) run_and_pause /usr/bin/mjust storage || true ;;
+        update) run_and_pause /usr/bin/mjust update-minecraft || true ;;
+        validate) run_and_pause /usr/bin/mjust validate || true ;;
+        logs) /usr/bin/mjust logs || true ;;
+        advanced) advanced_menu ;;
+        exit) exit 0 ;;
+        *) echo 'Unknown menu selection.' >&2 ;;
     esac
 done

@@ -1,0 +1,195 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/common.sh
+require_root
+
+details=no
+if [[ ${1:-} == --details ]]; then
+    details=yes
+    shift
+fi
+if (( $# > 0 )); then
+    echo 'Usage: mjust status [--details]' >&2
+    exit 2
+fi
+
+configured=no
+if [[ -r ${JV_CONFIG} ]]; then
+    # shellcheck disable=SC1090
+    source "${JV_CONFIG}"
+    configured=yes
+fi
+
+unknown='Unknown'
+not_running='Not running'
+
+primary_ipv4() {
+    local ipv4
+    ipv4="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i == "src") {print $(i+1); exit}}')"
+    if [[ -z ${ipv4} ]]; then
+        ipv4="$(ip -o -4 addr show scope global up 2>/dev/null | awk '{split($4,a,"/"); print a[1]; exit}')"
+    fi
+    printf '%s' "${ipv4:-Unknown}"
+}
+
+format_duration() {
+    local total="${1:-0}" days hours minutes
+    (( total >= 0 )) || total=0
+    days=$((total / 86400))
+    hours=$(((total % 86400) / 3600))
+    minutes=$(((total % 3600) / 60))
+    if (( days > 0 )); then
+        printf '%dd %dh %dm' "${days}" "${hours}" "${minutes}"
+    elif (( hours > 0 )); then
+        printf '%dh %dm' "${hours}" "${minutes}"
+    else
+        printf '%dm' "${minutes}"
+    fi
+}
+
+service_active=no
+service_state='Stopped'
+if systemctl is-failed --quiet minecraft.service 2>/dev/null; then
+    service_state='Failed'
+elif systemctl is-active --quiet minecraft.service 2>/dev/null; then
+    service_state='Running'
+    service_active=yes
+elif [[ ${configured} != yes ]]; then
+    service_state='Not configured'
+fi
+
+system_state="$(systemctl is-system-running 2>/dev/null || true)"
+case "${system_state}" in
+    running) overall='Healthy' ;;
+    degraded) overall='Attention needed' ;;
+    maintenance|stopping|offline) overall='Attention needed' ;;
+    *)
+        if [[ ${service_state} == Failed ]]; then
+            overall='Attention needed'
+        else
+            overall="${unknown}"
+        fi
+        ;;
+esac
+if [[ ${service_state} == Failed ]]; then
+    overall='Attention needed'
+fi
+
+players="${unknown}"
+version="${unknown}"
+bedrock_state='Disabled'
+memory_current="${unknown}"
+service_uptime="${not_running}"
+
+if [[ ${service_active} == yes ]]; then
+    rcon_players="$(podman exec minecraft rcon-cli 'list' 2>/dev/null || true)"
+    if [[ ${rcon_players} =~ There[[:space:]]are[[:space:]]([0-9]+)[[:space:]]of[[:space:]]a[[:space:]]max[[:space:]]of[[:space:]]([0-9]+)[[:space:]]players[[:space:]]online ]]; then
+        players="${BASH_REMATCH[1]} / ${BASH_REMATCH[2]}"
+    fi
+
+    rcon_version="$(podman exec minecraft rcon-cli 'version' 2>/dev/null | head -n1 || true)"
+    [[ -n ${rcon_version} ]] && version="${rcon_version}"
+
+    stats="$(podman stats --no-stream --format '{{.MemUsage}}' minecraft 2>/dev/null | head -n1 || true)"
+    if [[ -n ${stats} ]]; then
+        memory_current="$(awk -F/ '{gsub(/^[ \t]+|[ \t]+$/, "", $1); print $1}' <<< "${stats}")"
+    fi
+
+    active_us="$(systemctl show minecraft.service -p ActiveEnterTimestampMonotonic --value 2>/dev/null || true)"
+    boot_s="$(awk '{print int($1)}' /proc/uptime 2>/dev/null || echo 0)"
+    if [[ ${active_us} =~ ^[0-9]+$ ]] && (( active_us > 0 )); then
+        active_s=$((active_us / 1000000))
+        if (( boot_s >= active_s )); then
+            service_uptime="$(format_duration $((boot_s - active_s)))"
+        else
+            service_uptime="${unknown}"
+        fi
+    else
+        service_uptime="${unknown}"
+    fi
+fi
+
+host_ip="$(primary_ipv4)"
+java_address="${unknown}"
+bedrock_address='Disabled'
+java_heap="${unknown}"
+container_max="${unknown}"
+image_ref="${unknown}"
+backup_state="${unknown}"
+backup_next="${unknown}"
+
+if [[ ${configured} == yes ]]; then
+    java_address="${host_ip}:${JAVA_PORT:-Unknown}"
+    java_heap="${JAVA_MEMORY:-Unknown}"
+    container_max="${CONTAINER_MEMORY:-Unknown}"
+    image_ref="${JV_MINECRAFT_IMAGE_REPO}:${MINECRAFT_IMAGE_TAG:-latest}"
+
+    if [[ ${BEDROCK_ENABLED:-no} == yes ]]; then
+        bedrock_address="${host_ip}:${BEDROCK_PORT:-19132}"
+        bedrock_state="${unknown}"
+        if [[ ${service_active} == yes ]]; then
+            geyser="$(podman exec minecraft rcon-cli 'geyser version' 2>/dev/null | head -n1 || true)"
+            geyser_config="${DATA_PATH}/plugins/Geyser-Spigot/config.yml"
+            if [[ -n ${geyser} ]] && grep -Eq '^[[:space:]]*auth-type:[[:space:]]*floodgate[[:space:]]*$' "${geyser_config}" 2>/dev/null; then
+                bedrock_state='Ready (Geyser + Floodgate)'
+            fi
+        elif [[ ${service_state} == Stopped ]]; then
+            bedrock_state='Configured; Minecraft stopped'
+        fi
+    fi
+
+    if [[ ${BACKUP_TIMER_ENABLED:-no} == yes ]]; then
+        backup_state='Enabled'
+        backup_next="$(systemctl show minecraft-backup.timer -p NextElapseUSecRealtime --value 2>/dev/null || true)"
+        [[ -n ${backup_next} && ${backup_next} != n/a ]] || backup_next="${unknown}"
+    else
+        backup_state='Disabled'
+        backup_next='Disabled'
+    fi
+fi
+
+printf 'JustVoxel status\n'
+printf '%s\n\n' '----------------'
+printf '  %-20s %s\n' 'Overall:' "${overall}"
+printf '  %-20s %s\n' 'Minecraft:' "${service_state}"
+printf '  %-20s %s\n' 'Players:' "${players}"
+printf '  %-20s %s\n' 'Minecraft/Paper:' "${version}"
+printf '  %-20s %s\n' 'Bedrock cross-play:' "${bedrock_state}"
+printf '\n'
+printf '  %-20s %s\n' 'Java:' "${java_address}"
+printf '  %-20s %s\n' 'Bedrock:' "${bedrock_address}"
+printf '\n'
+printf '  %-20s %s / %s\n' 'Minecraft memory:' "${memory_current}" "${container_max}"
+printf '  %-20s %s\n' 'Java heap:' "${java_heap}"
+printf '  %-20s %s\n' 'Minecraft uptime:' "${service_uptime}"
+printf '\n'
+printf '  %-20s %s\n' 'Container image:' "${image_ref}"
+printf '  %-20s %s\n' 'Backups:' "${backup_state}"
+printf '  %-20s %s\n' 'Next backup:' "${backup_next}"
+
+if [[ ${details} == yes ]]; then
+    echo
+    echo 'Systemd detail'
+    echo '--------------'
+    systemctl --no-pager --full status minecraft.service || true
+    echo
+    echo 'Podman detail'
+    echo '-------------'
+    if podman container exists minecraft 2>/dev/null; then
+        podman ps -a --filter name='^minecraft$'
+        echo
+        podman stats --no-stream minecraft 2>/dev/null || true
+    else
+        echo 'Minecraft container does not currently exist.'
+    fi
+    echo
+    echo 'Storage detail'
+    echo '--------------'
+    if [[ ${configured} == yes ]]; then
+        findmnt --target "${DATA_PATH}" 2>/dev/null || true
+        findmnt --target "${BACKUP_PATH}" 2>/dev/null || true
+        df -h "${DATA_PATH}" "${BACKUP_PATH}" 2>/dev/null || true
+    else
+        echo 'JustVoxel is not configured.'
+    fi
+fi

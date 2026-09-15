@@ -1,0 +1,86 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/common.sh
+require_root
+require_config
+
+fs_key() {
+    stat -c '%d' -- "$1" 2>/dev/null || true
+}
+
+fs_source() {
+    findmnt -n -o SOURCE --target "$1" 2>/dev/null || printf 'Unknown'
+}
+
+fs_target() {
+    findmnt -n -o TARGET --target "$1" 2>/dev/null || printf 'Unknown'
+}
+
+fs_usage_line() {
+    local path="$1" size used avail pcent
+    read -r size used avail pcent < <(df -h --output=size,used,avail,pcent -- "$path" 2>/dev/null | tail -n1)
+    printf '%s|%s|%s|%s' "${size:-Unknown}" "${used:-Unknown}" "${avail:-Unknown}" "${pcent:-Unknown}"
+}
+
+print_fs() {
+    local path="$1" source target usage size used avail pcent
+    source="$(fs_source "${path}")"
+    target="$(fs_target "${path}")"
+    usage="$(fs_usage_line "${path}")"
+    IFS='|' read -r size used avail pcent <<< "${usage}"
+    printf '  Filesystem: %s\n' "${source}"
+    printf '  Mounted at: %s\n' "${target}"
+    printf '  Size: %s\n' "${size}"
+    printf '  Used: %s (%s)\n' "${used}" "${pcent}"
+    printf '  Available: %s\n' "${avail}"
+}
+
+container_path=/var/lib/containers
+system_path="${container_path}"
+[[ -e ${system_path} ]] || system_path=/var
+
+system_key="$(fs_key "${system_path}")"
+data_key="$(fs_key "${DATA_PATH}")"
+backup_key="$(fs_key "${BACKUP_PATH}")"
+
+echo 'Storage'
+echo
+
+if [[ -n ${system_key} && ${system_key} == "${data_key}" ]]; then
+    echo 'System / container / Minecraft storage'
+    print_fs "${DATA_PATH}"
+    echo
+    echo '  Minecraft data:'
+    echo "    ${DATA_PATH}"
+    echo
+    echo '  Container data:'
+    echo "    ${container_path}"
+else
+    echo 'System / container storage'
+    print_fs "${system_path}"
+    echo
+    echo '  Container data:'
+    echo "    ${container_path}"
+    echo
+    echo 'Minecraft data storage'
+    print_fs "${DATA_PATH}"
+    echo
+    echo '  Minecraft data:'
+    echo "    ${DATA_PATH}"
+fi
+
+echo
+echo 'Backup storage'
+echo "  ${BACKUP_PATH}"
+if [[ -n ${backup_key} && ${backup_key} == "${data_key}" ]]; then
+    echo '  Shares the same filesystem as Minecraft data.'
+    echo '  Same-filesystem backups help recover from world or configuration problems,'
+    echo '  but they do not protect against physical disk failure.'
+elif [[ -n ${backup_key} && ${backup_key} == "${system_key}" ]]; then
+    echo '  Shares the same filesystem as the system/container storage.'
+    echo '  Same-filesystem backups help recover from world or configuration problems,'
+    echo '  but they do not protect against physical disk failure.'
+else
+    echo
+    print_fs "${BACKUP_PATH}"
+fi

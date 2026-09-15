@@ -13,7 +13,7 @@ configure:
     @sudo /usr/libexec/justvoxel/mjust/configure
 
 status:
-    @sudo /usr/libexec/justvoxel/mjust/service status
+    @sudo /usr/libexec/justvoxel/mjust/status
 
 start:
     @sudo /usr/libexec/justvoxel/mjust/service start
