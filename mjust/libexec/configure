@@ -22,9 +22,10 @@ show_configuration() {
 
 choice="$(choose 'Safe configuration changes' \
     'Show current configuration' \
+    'Change maximum players' \
     'Change memory limits' \
     'Change Java/Bedrock host ports' \
-    'Change MOTD and maximum players' \
+    'Change server welcome message (MOTD)' \
     'Change backup schedule/timer' \
     'Change storage / migrate Minecraft data' \
     'Change container image or Minecraft version policy' \
@@ -36,6 +37,9 @@ case "${choice}" in
         exit 0
         ;;
     2)
+        exec /usr/libexec/justvoxel/mjust/configure-max-players
+        ;;
+    3)
         JAVA_MEMORY="$(prompt_default 'Minecraft Java heap' "${JAVA_MEMORY}")"
         CONTAINER_MEMORY="$(prompt_default 'Maximum total Minecraft memory' "${CONTAINER_MEMORY}")"
         validate_memory "${JAVA_MEMORY}" && validate_memory "${CONTAINER_MEMORY}" || {
@@ -50,7 +54,7 @@ case "${choice}" in
         render_runtime
         echo 'Memory configuration updated. Restart Minecraft when it is safe to apply it.'
         ;;
-    3)
+    4)
         old_java="${JAVA_PORT}"
         old_bedrock_enabled="${BEDROCK_ENABLED}"
         old_bedrock="${BEDROCK_PORT}"
@@ -65,16 +69,14 @@ case "${choice}" in
         update_firewall_ports "${old_java}" "${old_bedrock_enabled}" "${old_bedrock}"
         echo 'Port configuration updated. Restart Minecraft when it is safe to apply it.'
         ;;
-    4)
+    5)
         MOTD="$(prompt_default 'Server welcome message (MOTD)' "${MOTD}")"
         validate_simple_text "${MOTD}" || { echo 'ERROR: MOTD must be one line.' >&2; exit 1; }
-        MAX_PLAYERS="$(prompt_default 'Maximum players' "${MAX_PLAYERS}")"
-        validate_positive_int "${MAX_PLAYERS}" || { echo 'ERROR: maximum players must be positive.' >&2; exit 1; }
         write_main_config
         render_runtime
-        echo 'Server settings updated. Restart Minecraft when it is safe to apply them.'
+        echo 'Server welcome message updated. Restart Minecraft when it is safe to apply it.'
         ;;
-    5)
+    6)
         BACKUP_SCHEDULE="$(prompt_default 'Backup systemd calendar schedule' "${BACKUP_SCHEDULE}")"
         systemd-analyze calendar "${BACKUP_SCHEDULE}" >/dev/null 2>&1 || {
             echo 'ERROR: invalid systemd calendar schedule.' >&2
@@ -89,10 +91,10 @@ case "${choice}" in
         render_runtime
         echo 'Backup timer configuration updated.'
         ;;
-    6)
+    7)
         exec /usr/libexec/justvoxel/mjust/storage-provision menu
         ;;
-    7)
+    8)
         image_choice="$(choose 'Container image policy' \
             'keep current tag' \
             'latest - newest upstream main-branch image' \
@@ -144,7 +146,7 @@ case "${choice}" in
         render_runtime
         echo 'Version policy updated. Minecraft was not restarted automatically.'
         ;;
-    8)
+    9)
         echo 'Cancelled.'
         ;;
 esac

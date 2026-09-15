@@ -34,7 +34,14 @@ finish_pre_setup_storage() {
 }
 
 provision_backup_mode() {
-    storage_prepare_backup_interactive
+    local rc
+    if storage_prepare_backup_interactive yes; then
+        :
+    else
+        rc=$?
+        (( rc == 2 )) && return 2
+        return "${rc}"
+    fi
     if [[ ${have_config} == yes ]]; then
         apply_backup_to_existing_config
     else
@@ -44,13 +51,19 @@ provision_backup_mode() {
 
 migrate_data() {
     require_config
-    local old_data old_mount old_uuid old_source was_active=no players diff_output
+    local old_data old_mount old_uuid old_source was_active=no players diff_output rc
     old_data="${DATA_PATH}"
     old_mount="${DATA_MOUNT_POINT}"
     old_uuid="${DATA_EXPECTED_UUID}"
     old_source="${DATA_EXPECTED_SOURCE}"
 
-    storage_prepare_data_target_interactive
+    if storage_prepare_data_target_interactive; then
+        :
+    else
+        rc=$?
+        (( rc == 2 )) && return 2
+        return "${rc}"
+    fi
     [[ ${STORAGE_PATH} != "${old_data}" ]] || { echo 'ERROR: new data path is the current data path.' >&2; return 1; }
     if [[ -e ${STORAGE_PATH} ]] && find "${STORAGE_PATH}" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
         echo "ERROR: migration target is not empty: ${STORAGE_PATH}" >&2
@@ -132,27 +145,62 @@ provision_specific() {
     fi
 }
 
+storage_menu() {
+    local choice rc
+    while true; do
+        choice="$(jui_choose 'Storage management' \
+            'Configure backup storage' \
+            'Migrate Minecraft data to local storage' \
+            'Show storage plan/devices' \
+            'Back')" || return 0
+        case "${choice}" in
+            'Configure backup storage')
+                if provision_backup_mode; then
+                    :
+                else
+                    rc=$?
+                    (( rc == 2 )) || return "${rc}"
+                fi
+                ;;
+            'Migrate Minecraft data to local storage')
+                if migrate_data; then
+                    :
+                else
+                    rc=$?
+                    (( rc == 2 )) || return "${rc}"
+                fi
+                ;;
+            'Show storage plan/devices')
+                /usr/libexec/justvoxel/mjust/storage-plan
+                ;;
+            'Back') return 0 ;;
+        esac
+    done
+}
+
 action="${1:-menu}"
 case "${action}" in
     menu)
         if [[ ${have_config} == yes ]]; then
-            menu_choice="$(choose 'Storage management' \
-                'Configure backup storage' \
-                'Migrate Minecraft data to local storage' \
-                'Show storage plan/devices' \
-                'Cancel')"
-            case "${menu_choice}" in
-                1) provision_backup_mode ;;
-                2) migrate_data ;;
-                3) /usr/libexec/justvoxel/mjust/storage-plan ;;
-                4) exit 0 ;;
-            esac
+            storage_menu
         else
-            provision_backup_mode
+            if provision_backup_mode; then
+                :
+            else
+                rc=$?
+                (( rc == 2 )) && exit 0
+                exit "${rc}"
+            fi
         fi
         ;;
     backup)
-        provision_backup_mode
+        if provision_backup_mode; then
+            :
+        else
+            rc=$?
+            (( rc == 2 )) && exit 0
+            exit "${rc}"
+        fi
         ;;
     disk)
         provision_specific disk
@@ -164,11 +212,11 @@ case "${action}" in
         provision_specific free
         ;;
     network)
-        network_choice="$(choose 'Network backup type' 'NFS' 'SMB/CIFS' 'Cancel')"
+        network_choice="$(jui_choose 'Network backup type' 'NFS' 'SMB/CIFS' 'Back')" || exit 0
         case "${network_choice}" in
-            1) storage_prepare_nfs ;;
-            2) storage_prepare_smb ;;
-            3) exit 0 ;;
+            'NFS') storage_prepare_nfs ;;
+            'SMB/CIFS') storage_prepare_smb ;;
+            'Back') exit 0 ;;
         esac
         if [[ ${have_config} == yes ]]; then
             apply_backup_to_existing_config
@@ -177,7 +225,13 @@ case "${action}" in
         fi
         ;;
     migrate)
-        migrate_data
+        if migrate_data; then
+            :
+        else
+            rc=$?
+            (( rc == 2 )) && exit 0
+            exit "${rc}"
+        fi
         ;;
     *)
         echo 'Usage: storage-provision {menu|backup|disk|partition|free|network|migrate}' >&2

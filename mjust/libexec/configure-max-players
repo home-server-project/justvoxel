@@ -1,0 +1,46 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/player-guidance.sh
+require_root
+require_config
+
+ram_gib="$(physical_ram_gib)"
+
+echo 'Maximum players'
+echo
+echo "Current limit: ${MAX_PLAYERS}"
+echo
+echo 'This controls how many players can be connected to the server at the same time.'
+echo
+print_player_ram_guidance
+echo
+echo "Physical RAM: ${ram_gib} GiB"
+echo "Current Java heap: ${JAVA_MEMORY}"
+echo "Current maximum total Minecraft memory: ${CONTAINER_MEMORY}"
+echo
+
+new_max="$(prompt_default 'Enter new maximum' "${MAX_PLAYERS}")"
+validate_positive_int "${new_max}" || {
+    echo 'ERROR: maximum players must be a positive integer.' >&2
+    exit 1
+}
+
+echo
+print_player_ram_notice "${new_max}" "${ram_gib}"
+echo
+
+MAX_PLAYERS="${new_max}"
+write_main_config
+render_runtime
+
+echo "Maximum players updated to ${MAX_PLAYERS}."
+echo
+if systemctl is-active --quiet minecraft.service 2>/dev/null; then
+    echo 'Minecraft is still running with the previous limit.'
+    echo 'Restart Minecraft when convenient to apply the new limit:'
+    echo
+    echo '  mjust restart'
+else
+    echo 'The new limit will apply the next time Minecraft starts.'
+fi

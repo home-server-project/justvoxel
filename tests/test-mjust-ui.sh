@@ -6,6 +6,8 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${repo_root}/mjust/libexec/common.sh"
 # shellcheck disable=SC1091
 source "${repo_root}/mjust/libexec/ui.sh"
+# shellcheck disable=SC1091
+source "${repo_root}/mjust/libexec/player-guidance.sh"
 
 fail() {
     echo "FAIL: $*" >&2
@@ -37,6 +39,19 @@ if validate_nonroot_id 0; then
     fail 'UID/GID 0 must be rejected'
 fi
 
+for value in 1 5 10 20 100 999999; do
+    validate_positive_int "${value}" || fail "positive player limit rejected: ${value}"
+done
+for value in 0 -1 abc 10.5; do
+    if validate_positive_int "${value}"; then
+        fail "invalid player limit accepted: ${value}"
+    fi
+done
+[[ $(player_limit_bucket 5) == five ]] || fail '5-player guidance bucket wrong'
+[[ $(player_limit_bucket 10) == ten ]] || fail '10-player guidance bucket wrong'
+[[ $(player_limit_bucket 20) == twenty ]] || fail '20-player guidance bucket wrong'
+[[ $(player_limit_bucket 100) == high ]] || fail 'high player guidance bucket wrong'
+
 [[ $(normalize_daily_backup_time '04:30') == '04:30' ]] || fail '04:30 should stay 04:30'
 [[ $(normalize_daily_backup_time '4:30') == '04:30' ]] || fail '4:30 should normalize to 04:30'
 [[ $(normalize_daily_backup_time '23:59') == '23:59' ]] || fail '23:59 should be accepted'
@@ -55,12 +70,19 @@ TERM=dumb
 export TERM
 [[ $(jui_backend) == none ]] || fail 'TERM=dumb must disable the interactive selector backend'
 
-for id in setup setup-advanced status players configure service backups storage update validate logs advanced exit; do
+for id in setup setup-advanced status players configure service whitelist backups storage update validate logs advanced exit; do
     grep -Fq "${id})" "${repo_root}/mjust/libexec/menu" || fail "menu preview/dispatch id missing: ${id}"
 done
 
+grep -Fq '[[ -e /etc/containers/systemd/minecraft.container ]]' "${repo_root}/mjust/libexec/menu" || fail 'menu must use the non-secret rendered Quadlet as its configured marker'
+grep -Fq 'Configure Minecraft' "${repo_root}/mjust/libexec/menu" || fail 'configure submenu missing'
+grep -Fq 'Maximum players' "${repo_root}/mjust/libexec/menu" || fail 'maximum players menu entry missing'
+grep -Fq 'Whitelist' "${repo_root}/mjust/libexec/menu" || fail 'whitelist menu entry missing'
+grep -Fq 'BedrockBuddy' "${repo_root}/mjust/libexec/menu" || fail 'generic Bedrock example missing'
+grep -Fq 'PlayerOne' "${repo_root}/mjust/libexec/menu" || fail 'generic Java example missing'
 grep -Fq 'mjust status --details' "${repo_root}/mjust/libexec/menu" || fail 'detailed status is not exposed through the advanced menu'
 grep -Fq -- '--details' "${repo_root}/mjust/bin/mjust" || fail 'mjust wrapper does not accept status --details'
 grep -Fq 'ERASE /dev/...' "${repo_root}/mjust/libexec/menu" || fail 'storage preview does not preserve typed-confirmation guidance'
+grep -Fq "'Back'" "${repo_root}/mjust/libexec/storage-ui.sh" || fail 'storage UI has no Back option'
 
 echo 'mjust UI regression tests passed.'

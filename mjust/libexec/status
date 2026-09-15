@@ -80,6 +80,7 @@ if [[ ${service_state} == Stopped ]]; then
 else
     players="${unknown}"
 fi
+running_max=''
 version="${unknown}"
 bedrock_state='Disabled'
 memory_current="${unknown}"
@@ -88,7 +89,8 @@ service_uptime="${not_running}"
 if [[ ${service_active} == yes ]]; then
     rcon_players="$(podman exec minecraft rcon-cli 'list' 2>/dev/null || true)"
     if [[ ${rcon_players} =~ There[[:space:]]are[[:space:]]([0-9]+)[[:space:]]of[[:space:]]a[[:space:]]max[[:space:]]of[[:space:]]([0-9]+)[[:space:]]players[[:space:]]online ]]; then
-        players="${BASH_REMATCH[1]} / ${BASH_REMATCH[2]}"
+        running_max="${BASH_REMATCH[2]}"
+        players="${BASH_REMATCH[1]} / ${running_max}"
     fi
 
     rcon_version="$(podman exec minecraft rcon-cli 'version' 2>/dev/null | head -n1 || true)"
@@ -122,11 +124,13 @@ image_channel="${unknown}"
 image_ref="${unknown}"
 backup_state="${unknown}"
 backup_next="${unknown}"
+configured_max="${unknown}"
 
 if [[ ${configured} == yes ]]; then
     java_address="${host_ip}:${JAVA_PORT:-Unknown}"
     java_heap="${JAVA_MEMORY:-Unknown}"
     container_max="${CONTAINER_MEMORY:-Unknown}"
+    configured_max="${MAX_PLAYERS:-Unknown}"
     image_channel="${MINECRAFT_IMAGE_TAG:-latest}"
     image_ref="${JV_MINECRAFT_IMAGE_REPO}:${image_channel}"
 
@@ -159,6 +163,15 @@ printf '%s\n\n' '----------------'
 printf '  %-20s %s\n' 'Overall:' "${overall}"
 printf '  %-20s %s\n' 'Minecraft:' "${service_state}"
 printf '  %-20s %s\n' 'Players:' "${players}"
+if [[ ${configured} == yes ]]; then
+    if [[ -z ${running_max} || ${running_max} != "${configured_max}" ]]; then
+        if [[ -n ${running_max} && ${configured_max} != Unknown ]]; then
+            printf '  %-20s %s (restart needed)\n' 'Configured maximum:' "${configured_max}"
+        else
+            printf '  %-20s %s\n' 'Configured maximum:' "${configured_max}"
+        fi
+    fi
+fi
 printf '  %-20s %s\n' 'Minecraft/Paper:' "${version}"
 printf '  %-20s %s\n' 'Bedrock cross-play:' "${bedrock_state}"
 printf '\n'
