@@ -8,7 +8,7 @@ configured=no
 preview() {
     case "${1:-}" in
         setup)
-            cat <<'EOF'
+            cat <<'TEXT'
 First setup
 
 Configure Minecraft, memory, ports, Bedrock cross-play, storage and backups.
@@ -16,10 +16,10 @@ Normal setup chooses safe defaults and keeps Linux-specific detail out of the wa
 
 Command:
   mjust setup
-EOF
+TEXT
             ;;
         setup-advanced)
-            cat <<'EOF'
+            cat <<'TEXT'
 Advanced setup
 
 Use the same first-setup flow with advanced controls such as custom numeric
@@ -27,10 +27,10 @@ Minecraft data UID/GID values and raw systemd backup schedules.
 
 Command:
   mjust setup-advanced
-EOF
+TEXT
             ;;
         status)
-            cat <<'EOF'
+            cat <<'TEXT'
 Status
 
 Show the friendly JustVoxel appliance health dashboard: system services,
@@ -38,10 +38,10 @@ Minecraft, players, network, storage, backups and container state.
 
 Read-only. Detailed administrator output remains available with:
   mjust status --details
-EOF
+TEXT
             ;;
         players)
-            cat <<'EOF'
+            cat <<'TEXT'
 Players
 
 Show the current Minecraft player list through the server's internal RCON
@@ -49,10 +49,10 @@ connection. RCON is not exposed as a host network port.
 
 Command:
   mjust players
-EOF
+TEXT
             ;;
         configure)
-            cat <<'EOF'
+            cat <<'TEXT'
 Configure Minecraft
 
 Change supported Minecraft settings after first setup. Maximum players has its
@@ -62,10 +62,10 @@ flow. Configuration changes never force an automatic disruptive restart.
 Commands:
   mjust configure-max-players
   mjust configure
-EOF
+TEXT
             ;;
         whitelist)
-            cat <<'EOF'
+            cat <<'TEXT'
 Whitelist
 
 Manage Java Edition and Bedrock/Xbox players.
@@ -74,10 +74,10 @@ Java: use the Minecraft Java username, for example PlayerOne.
 Bedrock: use the Xbox/Bedrock gamertag, for example BedrockBuddy.
 Do not manually type the Floodgate prefix; Floodgate may internally show
 BedrockBuddy as .BedrockBuddy.
-EOF
+TEXT
             ;;
         service)
-            cat <<'EOF'
+            cat <<'TEXT'
 Start / Stop / Restart
 
 Control Minecraft service state. Stop and restart check player state first and
@@ -87,22 +87,30 @@ Commands:
   mjust start
   mjust stop
   mjust restart
-EOF
+TEXT
             ;;
         backups)
-            cat <<'EOF'
+            cat <<'TEXT'
 Backups
 
-Run a verified cold backup. JustVoxel checks the destination, gracefully stops
-Minecraft when needed, verifies the archive, applies retention, then restarts
-Minecraft if this backup stopped it.
+Create a verified cold backup or restore Minecraft data from an existing
+JustVoxel backup.
 
-Command:
+Restore world rolls back the primary world and normal world-based player data
+while keeping current plugins and server/JustVoxel configuration.
+
+Restore full Minecraft data replaces the complete persistent Minecraft data
+directory, including plugins and Minecraft-side configuration. The current data
+is kept as a pre-restore safety copy until the restored server validates.
+
+Commands:
   mjust backup
-EOF
+  mjust restore
+  mjust restore-full
+TEXT
             ;;
         storage)
-            cat <<'EOF'
+            cat <<'TEXT'
 Storage
 
 Manage backup storage and guarded Minecraft data migration. Every storage path
@@ -117,10 +125,10 @@ Commands include:
   mjust storage-system
   mjust storage-migrate
   mjust storage-plan
-EOF
+TEXT
             ;;
         update)
-            cat <<'EOF'
+            cat <<'TEXT'
 Update Minecraft
 
 Check both the configured Minecraft container image and the Minecraft/Paper
@@ -132,10 +140,10 @@ cold backup, applies the selected maintenance and verifies the running server.
 
 Command:
   mjust update-minecraft
-EOF
+TEXT
             ;;
         system)
-            cat <<'EOF'
+            cat <<'TEXT'
 System
 
 Manage the JustVoxel OS and appliance power safely. OS update checks/downloads
@@ -150,10 +158,10 @@ Commands:
   mjust firmware
 
 Firmware/UEFI reboot is shown in the menu only on Bare Metal.
-EOF
+TEXT
             ;;
         validate)
-            cat <<'EOF'
+            cat <<'TEXT'
 Validation
 
 Run the full JustVoxel deployment validation: configuration, storage identity,
@@ -161,10 +169,10 @@ SELinux, firewall, zram, systemd state, RCON, Minecraft and Bedrock support.
 
 Command:
   mjust validate
-EOF
+TEXT
             ;;
         logs)
-            cat <<'EOF'
+            cat <<'TEXT'
 Logs
 
 Follow the Minecraft systemd journal for troubleshooting.
@@ -172,24 +180,20 @@ Press q or Esc to return to the JustVoxel menu. Ctrl-C also exits the viewer.
 
 Command:
   mjust logs
-EOF
+TEXT
             ;;
         advanced)
-            cat <<'EOF'
+            cat <<'TEXT'
 Advanced
 
 Administrator-oriented tools: detailed status, storage-plan view, login welcome
 controls, the complete mjust command list, and guarded Start over/reset.
 
 Start over preserves Minecraft world data and existing backup archives.
-EOF
+TEXT
             ;;
-        exit)
-            echo 'Exit the JustVoxel menu.'
-            ;;
-        *)
-            echo 'Unknown menu item.'
-            ;;
+        exit) echo 'Exit the JustVoxel menu.' ;;
+        *) echo 'Unknown menu item.' ;;
     esac
 }
 
@@ -199,7 +203,7 @@ if [[ ${1:-} == --preview ]]; then
 fi
 
 show_noninteractive_help() {
-    cat <<'EOF'
+    cat <<'TEXT'
 JustVoxel mjust
 
 Interactive menu unavailable because this session has no usable TTY.
@@ -210,6 +214,8 @@ Use a direct command instead, for example:
   mjust configure-max-players
   mjust whitelist-list
   mjust backup
+  mjust restore
+  mjust restore-full
   mjust storage
   mjust update-minecraft
   mjust os-status
@@ -221,7 +227,7 @@ Use a direct command instead, for example:
   mjust --list
 
 For an SSH menu, allocate a terminal, for example: ssh -t <host> mjust
-EOF
+TEXT
 }
 
 if ! jui_is_interactive; then
@@ -249,10 +255,7 @@ service_menu() {
 
 configure_menu() {
     local choice
-    choice="$(jui_choose 'Configure Minecraft' \
-        'Maximum players' \
-        'Other safe Minecraft settings' \
-        'Back')" || return 0
+    choice="$(jui_choose 'Configure Minecraft' 'Maximum players' 'Other safe Minecraft settings' 'Back')" || return 0
     case "${choice}" in
         'Maximum players') run_and_pause /usr/bin/mjust configure-max-players || true ;;
         'Other safe Minecraft settings') run_and_pause /usr/bin/mjust configure || true ;;
@@ -263,13 +266,7 @@ configure_menu() {
 whitelist_menu() {
     local choice name
     while true; do
-        choice="$(jui_choose 'Whitelist' \
-            'Show whitelist' \
-            'Add Java player' \
-            'Remove Java player' \
-            'Add Bedrock / Xbox player' \
-            'Remove Bedrock / Xbox player' \
-            'Back')" || return 0
+        choice="$(jui_choose 'Whitelist' 'Show whitelist' 'Add Java player' 'Remove Java player' 'Add Bedrock / Xbox player' 'Remove Bedrock / Xbox player' 'Back')" || return 0
         case "${choice}" in
             'Show whitelist') run_and_pause /usr/bin/mjust whitelist-list || true ;;
             'Add Java player')
@@ -299,18 +296,23 @@ whitelist_menu() {
     done
 }
 
+backup_menu() {
+    local choice
+    while true; do
+        choice="$(jui_choose 'Backups' 'Create backup' 'Restore world' 'Restore full Minecraft data' 'Back')" || return 0
+        case "${choice}" in
+            'Create backup') run_and_pause /usr/bin/mjust backup || true ;;
+            'Restore world') run_and_pause /usr/bin/mjust restore || true ;;
+            'Restore full Minecraft data') run_and_pause /usr/bin/mjust restore-full || true ;;
+            'Back') return 0 ;;
+        esac
+    done
+}
+
 storage_menu() {
     local choice
     while true; do
-        choice="$(jui_choose 'Storage' \
-            'Dedicated disk / USB backup storage' \
-            'Existing partition / filesystem backup storage' \
-            'Use unallocated disk space for backup storage' \
-            'Network backup storage (NFS / SMB)' \
-            'Directory on the system filesystem' \
-            'Migrate Minecraft data' \
-            'Storage plan / devices' \
-            'Back')" || return 0
+        choice="$(jui_choose 'Storage' 'Dedicated disk / USB backup storage' 'Existing partition / filesystem backup storage' 'Use unallocated disk space for backup storage' 'Network backup storage (NFS / SMB)' 'Directory on the system filesystem' 'Migrate Minecraft data' 'Storage plan / devices' 'Back')" || return 0
         case "${choice}" in
             'Dedicated disk / USB backup storage') run_and_pause /usr/bin/mjust storage-disk || true ;;
             'Existing partition / filesystem backup storage') run_and_pause /usr/bin/mjust storage-partition || true ;;
@@ -318,12 +320,7 @@ storage_menu() {
             'Network backup storage (NFS / SMB)') run_and_pause /usr/bin/mjust storage-network || true ;;
             'Directory on the system filesystem') run_and_pause /usr/bin/mjust storage-system || true ;;
             'Migrate Minecraft data')
-                if [[ ${configured} == yes ]]; then
-                    run_and_pause /usr/bin/mjust storage-migrate || true
-                else
-                    echo 'Minecraft data migration is available after first setup.'
-                    jui_pause
-                fi
+                if [[ ${configured} == yes ]]; then run_and_pause /usr/bin/mjust storage-migrate || true; else echo 'Minecraft data migration is available after first setup.'; jui_pause; fi
                 ;;
             'Storage plan / devices') run_and_pause /usr/bin/mjust storage-plan || true ;;
             'Back') return 0 ;;
@@ -333,16 +330,9 @@ storage_menu() {
 
 system_menu() {
     local variant choice
-    local -a options=(
-        'Operating system status'
-        'Check / download OS update'
-        'Reboot JustVoxel'
-        'Power off JustVoxel'
-    )
+    local -a options=('Operating system status' 'Check / download OS update' 'Reboot JustVoxel' 'Power off JustVoxel')
     variant="$(cat /usr/lib/justvoxel/variant 2>/dev/null || true)"
-    if [[ ${variant} == *baremetal* ]]; then
-        options+=('Firmware / UEFI setup')
-    fi
+    [[ ${variant} == *baremetal* ]] && options+=('Firmware / UEFI setup')
     options+=('Back')
 
     while true; do
@@ -351,9 +341,7 @@ system_menu() {
             'Operating system status')
                 /usr/bin/mjust os-status || true
                 echo
-                if jui_confirm 'Check for OS updates now?'; then
-                    /usr/bin/mjust os-update || true
-                fi
+                if jui_confirm 'Check for OS updates now?'; then /usr/bin/mjust os-update || true; fi
                 jui_pause
                 ;;
             'Check / download OS update') run_and_pause /usr/bin/mjust os-update || true ;;
@@ -373,11 +361,7 @@ all_commands() {
 
 advanced_menu() {
     local -a options=('Detailed status' 'Storage plan / devices' 'Show login welcome' 'Hide login welcome' 'Enable login welcome' 'All mjust commands')
-    if [[ ${configured} == yes ]]; then
-        options+=('Start over / reset Minecraft')
-    else
-        options=('Advanced first setup' "${options[@]}")
-    fi
+    if [[ ${configured} == yes ]]; then options+=('Start over / reset Minecraft'); else options=('Advanced first setup' "${options[@]}"); fi
     options+=('Back')
 
     local choice
@@ -402,12 +386,7 @@ select_rich() {
     else
         rows=$'setup\tFirst setup\nstatus\tStatus\nstorage\tStorage\nsystem\tSystem\nsetup-advanced\tAdvanced setup\nexit\tExit'
     fi
-    selected="$(printf '%s\n' "${rows}" | fzf \
-        --delimiter=$'\t' --with-nth=2 --no-multi \
-        --layout=reverse --border --height=90% \
-        --prompt='JustVoxel > ' \
-        --preview='/usr/libexec/justvoxel/mjust/menu --preview {1}' \
-        --preview-window='right,55%,wrap,border-left' || true)"
+    selected="$(printf '%s\n' "${rows}" | fzf --delimiter=$'\t' --with-nth=2 --no-multi --layout=reverse --border --height=90% --prompt='JustVoxel > ' --preview='/usr/libexec/justvoxel/mjust/menu --preview {1}' --preview-window='right,55%,wrap,border-left' || true)"
     [[ -n ${selected} ]] || { printf 'exit'; return 0; }
     printf '%s' "${selected%%$'\t'*}"
 }
@@ -415,50 +394,21 @@ select_rich() {
 select_compact() {
     local choice
     if [[ ${configured} == yes ]]; then
-        choice="$(jui_choose 'JustVoxel' \
-            'Status' 'Players' 'Configure Minecraft' 'Start / Stop / Restart' \
-            'Whitelist' 'Backups' 'Storage' 'Update Minecraft' 'System' 'Validation' 'Logs' 'Advanced' 'Exit')" || { printf 'exit'; return 0; }
+        choice="$(jui_choose 'JustVoxel' 'Status' 'Players' 'Configure Minecraft' 'Start / Stop / Restart' 'Whitelist' 'Backups' 'Storage' 'Update Minecraft' 'System' 'Validation' 'Logs' 'Advanced' 'Exit')" || { printf 'exit'; return 0; }
         case "${choice}" in
-            'Status') printf 'status' ;;
-            'Players') printf 'players' ;;
-            'Configure Minecraft') printf 'configure' ;;
-            'Start / Stop / Restart') printf 'service' ;;
-            'Whitelist') printf 'whitelist' ;;
-            'Backups') printf 'backups' ;;
-            'Storage') printf 'storage' ;;
-            'Update Minecraft') printf 'update' ;;
-            'System') printf 'system' ;;
-            'Validation') printf 'validate' ;;
-            'Logs') printf 'logs' ;;
-            'Advanced') printf 'advanced' ;;
-            *) printf 'exit' ;;
+            'Status') printf 'status' ;; 'Players') printf 'players' ;; 'Configure Minecraft') printf 'configure' ;; 'Start / Stop / Restart') printf 'service' ;;
+            'Whitelist') printf 'whitelist' ;; 'Backups') printf 'backups' ;; 'Storage') printf 'storage' ;; 'Update Minecraft') printf 'update' ;; 'System') printf 'system' ;;
+            'Validation') printf 'validate' ;; 'Logs') printf 'logs' ;; 'Advanced') printf 'advanced' ;; *) printf 'exit' ;;
         esac
     else
         choice="$(jui_choose 'JustVoxel' 'First setup' 'Status' 'Storage' 'System' 'Advanced setup' 'Exit')" || { printf 'exit'; return 0; }
-        case "${choice}" in
-            'First setup') printf 'setup' ;;
-            'Status') printf 'status' ;;
-            'Storage') printf 'storage' ;;
-            'System') printf 'system' ;;
-            'Advanced setup') printf 'setup-advanced' ;;
-            *) printf 'exit' ;;
-        esac
+        case "${choice}" in 'First setup') printf 'setup' ;; 'Status') printf 'status' ;; 'Storage') printf 'storage' ;; 'System') printf 'system' ;; 'Advanced setup') printf 'setup-advanced' ;; *) printf 'exit' ;; esac
     fi
 }
 
 while true; do
-    if [[ -e /etc/containers/systemd/minecraft.container ]]; then
-        configured=yes
-    else
-        configured=no
-    fi
-
-    if jui_rich_supported; then
-        action="$(select_rich)"
-    else
-        action="$(select_compact)"
-    fi
-
+    [[ -e /etc/containers/systemd/minecraft.container ]] && configured=yes || configured=no
+    if jui_rich_supported; then action="$(select_rich)"; else action="$(select_compact)"; fi
     echo
     case "${action}" in
         setup) run_and_pause /usr/bin/mjust setup || true ;;
@@ -468,7 +418,7 @@ while true; do
         configure) configure_menu ;;
         service) service_menu ;;
         whitelist) whitelist_menu ;;
-        backups) run_and_pause /usr/bin/mjust backup || true ;;
+        backups) backup_menu ;;
         storage) storage_menu ;;
         update) run_and_pause /usr/bin/mjust update-minecraft || true ;;
         system) system_menu ;;

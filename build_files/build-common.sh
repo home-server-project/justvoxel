@@ -66,7 +66,7 @@ install -m0755 /ctx/build_files/validate/baremetal.sh /usr/libexec/justvoxel/hea
 for cmd in \
     bootc podman skopeo nmcli nmtui resolvectl firewall-cmd sshd sudo just mjust \
     tailscale netbird curl jq findmnt mountpoint flock mkfs.xfs mount.nfs mount.cifs \
-    lsblk blkid wipefs parted partprobe udevadm qemu-ga vmtoolsd iperf3; do
+    lsblk blkid wipefs parted partprobe udevadm qemu-ga vmtoolsd iperf3 python3; do
     command -v "${cmd}"
 done
 

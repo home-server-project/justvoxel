@@ -48,6 +48,12 @@ whitelist-remove-bedrock gamertag:
 backup:
     @sudo /usr/libexec/justvoxel/minecraft-backup
 
+restore:
+    @sudo /usr/libexec/justvoxel/mjust/restore world
+
+restore-full:
+    @sudo /usr/libexec/justvoxel/mjust/restore full
+
 update-minecraft:
     @sudo /usr/libexec/justvoxel/mjust/update-minecraft
 
