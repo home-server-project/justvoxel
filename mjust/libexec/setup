@@ -4,6 +4,16 @@ source /usr/libexec/justvoxel/mjust/common.sh
 source /usr/libexec/justvoxel/mjust/storage-common.sh
 require_root
 
+advanced=no
+if [[ ${1:-} == --advanced ]]; then
+    advanced=yes
+    shift
+fi
+if (( $# > 0 )); then
+    echo 'Usage: setup [--advanced]' >&2
+    exit 2
+fi
+
 if [[ -e ${JV_CONFIG} || -e ${JV_QUADLET} ]]; then
     echo 'ERROR: an existing JustVoxel configuration was found.' >&2
     echo 'Use mjust configure for safe changes. Setup will not overwrite an installed server.' >&2
@@ -12,6 +22,11 @@ fi
 
 echo 'JustVoxel first setup'
 echo '---------------------'
+if [[ ${advanced} == yes ]]; then
+    echo 'Mode: advanced'
+else
+    echo 'Mode: normal'
+fi
 echo 'The image templates under /usr/share/justvoxel are immutable references only.'
 echo 'This setup creates administrator-owned runtime files under /etc and persistent data at the paths you choose.'
 echo
@@ -38,13 +53,16 @@ if confirm 'Is the Minecraft data path on a separate mounted filesystem (for exa
 fi
 
 read -r suggested_java suggested_container < <(suggest_memory_values)
-JAVA_MEMORY="$(prompt_default 'Java heap' "${suggested_java}")"
+echo 'Minecraft memory'
+echo 'Java heap is the memory available to the Minecraft JVM.'
+echo 'Maximum total Minecraft memory is the container limit and includes the Java heap plus container/runtime overhead.'
+JAVA_MEMORY="$(prompt_default 'Minecraft Java heap' "${suggested_java}")"
 validate_memory "${JAVA_MEMORY}" || { echo 'ERROR: use a value such as 4G or 4096M.' >&2; exit 1; }
-CONTAINER_MEMORY="$(prompt_default 'Container memory limit' "${suggested_container}")"
+CONTAINER_MEMORY="$(prompt_default 'Maximum total Minecraft memory' "${suggested_container}")"
 validate_memory "${CONTAINER_MEMORY}" || { echo 'ERROR: use a value such as 6G or 6144M.' >&2; exit 1; }
-(( $(memory_to_mib "${CONTAINER_MEMORY}") > $(memory_to_mib "${JAVA_MEMORY}") )) || { echo 'ERROR: container memory limit must be larger than the Java heap.' >&2; exit 1; }
+(( $(memory_to_mib "${CONTAINER_MEMORY}") > $(memory_to_mib "${JAVA_MEMORY}") )) || { echo 'ERROR: maximum total Minecraft memory must be larger than the Java heap.' >&2; exit 1; }
 
-JAVA_PORT="$(prompt_default 'Java host TCP port' '25565')"
+JAVA_PORT="$(prompt_default 'Minecraft Java port' '25565')"
 validate_port "${JAVA_PORT}" || { echo 'ERROR: invalid Java port.' >&2; exit 1; }
 
 if confirm 'Enable Bedrock cross-play with Geyser and Floodgate?'; then
@@ -61,24 +79,47 @@ TIMEZONE="$(prompt_default 'Timezone' "${TIMEZONE:-UTC}")"
 [[ -e "/usr/share/zoneinfo/${TIMEZONE}" ]] || { echo 'ERROR: timezone was not found in /usr/share/zoneinfo.' >&2; exit 1; }
 MAX_PLAYERS="$(prompt_default 'Maximum players' '10')"
 validate_positive_int "${MAX_PLAYERS}" || { echo 'ERROR: maximum players must be a positive integer.' >&2; exit 1; }
-MOTD="$(prompt_default 'Server message (MOTD)' 'JustVoxel Java and Bedrock Server')"
+MOTD="$(prompt_default 'Server welcome message (MOTD)' 'JustVoxel Java and Bedrock Server')"
 validate_simple_text "${MOTD}" || { echo 'ERROR: MOTD must be a single line.' >&2; exit 1; }
 
-MINECRAFT_UID="$(prompt_default 'Minecraft data UID' '1000')"
-MINECRAFT_GID="$(prompt_default 'Minecraft data GID' '1000')"
-[[ ${MINECRAFT_UID} =~ ^[1-9][0-9]*$ && ${MINECRAFT_GID} =~ ^[1-9][0-9]*$ ]] || { echo 'ERROR: UID and GID must be positive numeric IDs.' >&2; exit 1; }
+read -r MINECRAFT_UID MINECRAFT_GID MINECRAFT_ID_SOURCE < <(resolve_minecraft_ids)
+if [[ ${advanced} == yes ]]; then
+    echo
+echo 'Minecraft data ownership'
+    echo "Suggested UID:GID: ${MINECRAFT_UID}:${MINECRAFT_GID}"
+    MINECRAFT_UID="$(prompt_default 'Minecraft data UID' "${MINECRAFT_UID}")"
+    MINECRAFT_GID="$(prompt_default 'Minecraft data GID' "${MINECRAFT_GID}")"
+    validate_nonroot_id "${MINECRAFT_UID}" && validate_nonroot_id "${MINECRAFT_GID}" || {
+        echo 'ERROR: UID and GID must be valid non-root numeric IDs.' >&2
+        exit 1
+    }
+    MINECRAFT_ID_SOURCE=advanced
+else
+    case "${MINECRAFT_ID_SOURCE}" in
+        sudo)
+            echo "Minecraft data ownership: ${MINECRAFT_UID}:${MINECRAFT_GID} from the administrator who invoked sudo."
+            ;;
+        voxel)
+            echo "Minecraft data ownership: ${MINECRAFT_UID}:${MINECRAFT_GID} from the voxel account."
+            ;;
+        fallback)
+            echo 'Minecraft data ownership: 1000:1000 fallback because no non-root sudo/voxel identity was available.'
+            ;;
+    esac
+    echo 'These IDs are applied to the persistent Minecraft data so the container can read and write the world.'
+fi
 
 echo
 echo 'Container image policy'
 echo 'The container image tag and Minecraft/Paper game version are independent settings.'
-image_choice="$(choose 'Choose the itzg/minecraft-server image tag policy' \
-    'latest - newest main-branch container image (default; matches the proven deployment)' \
-    'stable - newest released container image' \
-    'custom/exact tag - advanced or pinned container image release')"
+image_choice="$(choose_default 'Minecraft container channel' 1 \
+    'Stable - newest released itzg/minecraft-server container (recommended)' \
+    'Latest - newest upstream main-branch container image' \
+    'Exact/custom tag - advanced users only')"
 case "${image_choice}" in
-    1) MINECRAFT_IMAGE_TAG=latest ;;
-    2) MINECRAFT_IMAGE_TAG=stable ;;
-    3) MINECRAFT_IMAGE_TAG="$(prompt_default 'Container image tag' 'latest')" ;;
+    1) MINECRAFT_IMAGE_TAG=stable ;;
+    2) MINECRAFT_IMAGE_TAG=latest ;;
+    3) MINECRAFT_IMAGE_TAG="$(prompt_default 'Container image tag' 'stable')" ;;
 esac
 if validate_minecraft_image_tag "${MINECRAFT_IMAGE_TAG}"; then
     :
@@ -94,10 +135,10 @@ fi
 
 echo
 echo 'Minecraft/Paper version policy'
-version_choice="$(choose 'Choose the Minecraft game version policy' \
-    'pin the newest Minecraft version with a stable Paper build (recommended)' \
-    'LATEST - follow the latest Minecraft release when the container starts' \
-    'pin another exact Minecraft version that has a stable Paper build')"
+version_choice="$(choose_default 'Minecraft game version' 1 \
+    'Recommended - newest Minecraft version with a stable Paper build, pinned' \
+    'Latest - check for the newest Minecraft/Paper release when Minecraft starts' \
+    'Exact version - advanced users only')"
 case "${version_choice}" in
     1)
         echo 'Checking PaperMC for the newest Minecraft version with a stable Paper build...'
@@ -109,7 +150,7 @@ case "${version_choice}" in
     2)
         MINECRAFT_VERSION_MODE=latest
         MINECRAFT_VERSION=LATEST
-        echo 'WARNING: VERSION=LATEST can upgrade the Minecraft game version on a future container start/restart.'
+        echo 'WARNING: the game/Paper version may update when Minecraft starts, even without pulling a newer Podman image.'
         ;;
     3)
         MINECRAFT_VERSION_MODE=pinned
@@ -160,9 +201,10 @@ echo
 echo 'Planned configuration:'
 echo "  Minecraft data: ${DATA_PATH}"
 [[ -n ${DATA_MOUNT_POINT} ]] && echo "  Minecraft data mount: ${DATA_MOUNT_POINT}"
+echo "  Minecraft ownership: ${MINECRAFT_UID}:${MINECRAFT_GID} (${MINECRAFT_ID_SOURCE})"
 echo "  Container image: $(minecraft_image_ref)"
 echo "  Minecraft version policy: ${MINECRAFT_VERSION_MODE} (${MINECRAFT_VERSION})"
-echo "  Java heap / container limit: ${JAVA_MEMORY} / ${CONTAINER_MEMORY}"
+echo "  Java heap / maximum total Minecraft memory: ${JAVA_MEMORY} / ${CONTAINER_MEMORY}"
 echo "  Java: ${JAVA_PORT}/tcp"
 if [[ ${BEDROCK_ENABLED} == yes ]]; then
     echo "  Bedrock: ${BEDROCK_PORT}/udp"
