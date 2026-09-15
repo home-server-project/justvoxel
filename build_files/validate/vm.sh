@@ -3,6 +3,10 @@ set -euo pipefail
 
 test "$(cat /usr/lib/justvoxel/variant)" = "justvoxel-vm"
 
+# VM keeps network-share clients and guarded partition tooling because a second
+# virtual disk or NFS/SMB backup target is part of the supported storage model.
+rpm -q nfs-utils cifs-utils parted xfsprogs util-linux >/dev/null
+
 for package in \
     nut nut-client btrfs-progs smartmontools smartmontools-selinux nvme-cli \
     lm_sensors ethtool usbutils pciutils dmidecode fwupd fwupd-efi \

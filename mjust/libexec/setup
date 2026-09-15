@@ -1,6 +1,7 @@
 #!/usr/bin/bash
 set -euo pipefail
 source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/storage-common.sh
 require_root
 
 if [[ -e ${JV_CONFIG} || -e ${JV_QUADLET} ]]; then
@@ -123,49 +124,11 @@ case "${version_choice}" in
         ;;
 esac
 
-backup_choice="$(choose 'Backup target type' \
-    'Directory on the system filesystem' \
-    'Existing mounted dedicated disk' \
-    'Existing mounted dedicated partition' \
-    'Existing mounted NFS share' \
-    'Existing mounted SMB/CIFS share')"
-
-BACKUP_MOUNT_POINT=''
-BACKUP_EXPECTED_UUID=''
-BACKUP_EXPECTED_SOURCE=''
-case "${backup_choice}" in
-    1)
-        BACKUP_TYPE=system
-        BACKUP_PATH="$(prompt_default 'Backup directory' '/var/lib/justvoxel/backups')"
-        ;;
-    2)
-        BACKUP_TYPE=disk
-        BACKUP_MOUNT_POINT="$(prompt_default 'Existing dedicated-disk mount point' '/mnt/justvoxel-backup')"
-        BACKUP_PATH="$(prompt_default 'Backup directory on that mount' "${BACKUP_MOUNT_POINT}/minecraft")"
-        ;;
-    3)
-        BACKUP_TYPE=partition
-        BACKUP_MOUNT_POINT="$(prompt_default 'Existing dedicated-partition mount point' '/mnt/justvoxel-backup')"
-        BACKUP_PATH="$(prompt_default 'Backup directory on that mount' "${BACKUP_MOUNT_POINT}/minecraft")"
-        ;;
-    4)
-        BACKUP_TYPE=nfs
-        BACKUP_MOUNT_POINT="$(prompt_default 'Existing NFS mount point' '/mnt/justvoxel-backup')"
-        BACKUP_PATH="$(prompt_default 'Backup directory on that mount' "${BACKUP_MOUNT_POINT}/minecraft")"
-        ;;
-    5)
-        BACKUP_TYPE=smb
-        BACKUP_MOUNT_POINT="$(prompt_default 'Existing SMB/CIFS mount point' '/mnt/justvoxel-backup')"
-        BACKUP_PATH="$(prompt_default 'Backup directory on that mount' "${BACKUP_MOUNT_POINT}/minecraft")"
-        ;;
-esac
+echo
+echo 'Backup storage'
+storage_prepare_backup_interactive
 BACKUP_PATH="$(realpath -m -- "${BACKUP_PATH}")"
-validate_storage_path "${BACKUP_PATH}" || { echo 'ERROR: use an absolute backup path without spaces or shell-special characters.' >&2; exit 1; }
-if [[ -n ${BACKUP_MOUNT_POINT} ]]; then
-    BACKUP_MOUNT_POINT="$(realpath -m -- "${BACKUP_MOUNT_POINT}")"
-    validate_storage_path "${BACKUP_MOUNT_POINT}" || { echo 'ERROR: use an absolute mount path without spaces or shell-special characters.' >&2; exit 1; }
-    capture_backup_mount_identity
-fi
+validate_storage_path "${BACKUP_PATH}" || { echo 'ERROR: invalid backup path.' >&2; exit 1; }
 if [[ ${BACKUP_PATH} == "${DATA_PATH}" || ${BACKUP_PATH} == "${DATA_PATH}/"* ]]; then
     echo 'ERROR: backup path cannot be the Minecraft data directory or a child of it.' >&2
     exit 1
@@ -213,7 +176,7 @@ echo "  Backup retention: ${BACKUP_KEEP}"
 echo "  Backup schedule: ${BACKUP_SCHEDULE} (${BACKUP_TIMER_ENABLED})"
 echo
 if ! confirm 'Create this JustVoxel configuration?'; then
-    echo 'Cancelled. No runtime configuration was created.'
+    echo 'Cancelled. No JustVoxel runtime configuration was created; any storage you explicitly provisioned remains unchanged.'
     exit 0
 fi
 
@@ -226,7 +189,12 @@ if [[ -n ${BACKUP_MOUNT_POINT} ]] && ! mountpoint -q -- "${BACKUP_MOUNT_POINT}";
     echo "ERROR: backup mount disappeared before setup: ${BACKUP_MOUNT_POINT}" >&2
     exit 1
 fi
-install -d -m0700 -o root -g root "${BACKUP_PATH}"
+if [[ ${BACKUP_TYPE} == nfs || ${BACKUP_TYPE} == smb ]]; then
+    mkdir -p -- "${BACKUP_PATH}"
+else
+    install -d -m0700 -o root -g root "${BACKUP_PATH}"
+fi
+[[ -w ${BACKUP_PATH} ]] || { echo "ERROR: backup path is not writable: ${BACKUP_PATH}" >&2; exit 1; }
 
 backing="$(findmnt -n -o SOURCE,TARGET,FSTYPE --target "${DATA_PATH}" 2>/dev/null || true)"
 echo "Minecraft data backing filesystem: ${backing:-unknown}"

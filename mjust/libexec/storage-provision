@@ -1,24 +1,186 @@
 #!/usr/bin/bash
 set -euo pipefail
 source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/storage-common.sh
 require_root
 
-action="${1:-}"
+have_config=no
+[[ -r ${JV_CONFIG} ]] && have_config=yes
+
+apply_backup_to_existing_config() {
+    require_config
+    storage_apply_backup_globals
+    if [[ ${BACKUP_PATH} == "${DATA_PATH}" || ${BACKUP_PATH} == "${DATA_PATH}/"* ]]; then
+        echo 'ERROR: backup path cannot be the Minecraft data directory or a child of it.' >&2
+        return 1
+    fi
+    if [[ ${BACKUP_TYPE} == nfs || ${BACKUP_TYPE} == smb ]]; then
+        mkdir -p -- "${BACKUP_PATH}"
+    else
+        install -d -m0700 -o root -g root "${BACKUP_PATH}"
+    fi
+    [[ -w ${BACKUP_PATH} ]] || { echo "ERROR: backup path is not writable: ${BACKUP_PATH}" >&2; return 1; }
+    write_main_config
+    render_runtime
+    echo "Backup storage updated: ${BACKUP_PATH}"
+}
+
+finish_pre_setup_storage() {
+    echo
+    echo 'Storage is provisioned and mounted.'
+    echo "Mount point: ${STORAGE_MOUNT_POINT}"
+    echo "Suggested path: ${STORAGE_PATH}"
+    echo 'Run mjust setup and choose the matching storage option; the target is now ready.'
+}
+
+provision_backup_mode() {
+    storage_prepare_backup_interactive
+    if [[ ${have_config} == yes ]]; then
+        apply_backup_to_existing_config
+    else
+        finish_pre_setup_storage
+    fi
+}
+
+migrate_data() {
+    require_config
+    local old_data old_mount old_uuid old_source was_active=no players diff_output
+    old_data="${DATA_PATH}"
+    old_mount="${DATA_MOUNT_POINT}"
+    old_uuid="${DATA_EXPECTED_UUID}"
+    old_source="${DATA_EXPECTED_SOURCE}"
+
+    storage_prepare_data_target_interactive
+    [[ ${STORAGE_PATH} != "${old_data}" ]] || { echo 'ERROR: new data path is the current data path.' >&2; return 1; }
+    if [[ -e ${STORAGE_PATH} ]] && find "${STORAGE_PATH}" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+        echo "ERROR: migration target is not empty: ${STORAGE_PATH}" >&2
+        return 1
+    fi
+    install -d -m0750 -o "${MINECRAFT_UID}" -g "${MINECRAFT_GID}" "${STORAGE_PATH}"
+
+    if systemctl is-active --quiet minecraft.service; then
+        was_active=yes
+        players="$(podman exec minecraft rcon-cli 'list' 2>/dev/null || true)"
+        [[ -n ${players} ]] || { echo 'ERROR: player state is unknown; refusing migration.' >&2; return 1; }
+        echo "${players}"
+        if ! grep -q 'There are 0 of' <<< "${players}"; then
+            confirm 'Players are online. Continue with the normal 60-second shutdown warning?' || {
+                echo 'Migration cancelled.'
+                return 1
+            }
+        fi
+    fi
+
+    echo 'Creating a verified pre-migration cold backup.'
+    exec 9>"${JV_MAINTENANCE_LOCK}"
+    flock -n 9 || { echo 'ERROR: another JustVoxel maintenance operation is running.' >&2; return 1; }
+    JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/minecraft-backup --leave-stopped
+
+    echo "Copying Minecraft data to ${STORAGE_PATH}"
+    rsync -aHAX --numeric-ids --delete "${old_data}/" "${STORAGE_PATH}/"
+    diff_output="$(rsync -aHAXn --numeric-ids --delete --itemize-changes "${old_data}/" "${STORAGE_PATH}/")"
+    if [[ -n ${diff_output} ]]; then
+        echo 'ERROR: migration verification found differences. Existing configuration is unchanged.' >&2
+        printf '%s\n' "${diff_output}" >&2
+        [[ ${was_active} == yes ]] && systemctl start minecraft.service || true
+        return 1
+    fi
+
+    DATA_PATH="${STORAGE_PATH}"
+    DATA_MOUNT_POINT="${STORAGE_MOUNT_POINT}"
+    DATA_EXPECTED_UUID="${STORAGE_EXPECTED_UUID}"
+    DATA_EXPECTED_SOURCE="${STORAGE_EXPECTED_SOURCE}"
+    write_main_config
+    apply_data_selinux
+    render_runtime
+
+    if [[ ${was_active} == yes ]]; then
+        if systemctl start minecraft.service && wait_for_rcon 900; then
+            echo 'Minecraft started successfully from the new storage.'
+        else
+            echo 'ERROR: Minecraft failed from the new storage; restoring the old configuration.' >&2
+            DATA_PATH="${old_data}"
+            DATA_MOUNT_POINT="${old_mount}"
+            DATA_EXPECTED_UUID="${old_uuid}"
+            DATA_EXPECTED_SOURCE="${old_source}"
+            write_main_config
+            apply_data_selinux
+            render_runtime
+            systemctl start minecraft.service || true
+            return 1
+        fi
+    fi
+
+    echo
+    echo 'Minecraft data migration completed.'
+    echo "New data path: ${DATA_PATH}"
+    echo "Old data was intentionally retained at: ${old_data}"
+    echo 'Remove the old copy only after you have verified normal gameplay and backups.'
+}
+
+provision_specific() {
+    local mode="$1"
+    case "${mode}" in
+        disk) storage_prepare_whole_disk backup ;;
+        partition) storage_prepare_existing_partition backup ;;
+        free) storage_prepare_free_partition backup ;;
+    esac
+    if [[ ${have_config} == yes ]]; then
+        apply_backup_to_existing_config
+    else
+        finish_pre_setup_storage
+    fi
+}
+
+action="${1:-menu}"
 case "${action}" in
+    menu)
+        if [[ ${have_config} == yes ]]; then
+            menu_choice="$(choose 'Storage management' \
+                'Configure backup storage' \
+                'Migrate Minecraft data to local storage' \
+                'Show storage plan/devices' \
+                'Cancel')"
+            case "${menu_choice}" in
+                1) provision_backup_mode ;;
+                2) migrate_data ;;
+                3) /usr/libexec/justvoxel/mjust/storage-plan ;;
+                4) exit 0 ;;
+            esac
+        else
+            provision_backup_mode
+        fi
+        ;;
+    backup)
+        provision_backup_mode
+        ;;
     disk)
-        echo 'Dedicated-disk provisioning skeleton is present but intentionally disabled in Step 3.'
+        provision_specific disk
         ;;
     partition)
-        echo 'Dedicated-partition provisioning skeleton is present but intentionally disabled in Step 3.'
+        provision_specific partition
+        ;;
+    free)
+        provision_specific free
+        ;;
+    network)
+        network_choice="$(choose 'Network backup type' 'NFS' 'SMB/CIFS' 'Cancel')"
+        case "${network_choice}" in
+            1) storage_prepare_nfs ;;
+            2) storage_prepare_smb ;;
+            3) exit 0 ;;
+        esac
+        if [[ ${have_config} == yes ]]; then
+            apply_backup_to_existing_config
+        else
+            finish_pre_setup_storage
+        fi
         ;;
     migrate)
-        echo 'Minecraft data migration skeleton is present but intentionally disabled in Step 3.'
+        migrate_data
         ;;
     *)
-        echo 'Usage: storage-provision {disk|partition|migrate}' >&2
+        echo 'Usage: storage-provision {menu|backup|disk|partition|free|network|migrate}' >&2
         exit 2
         ;;
 esac
-
-echo 'No disk, partition, filesystem, mount table, or Minecraft data was changed.'
-exit 3

@@ -2,7 +2,7 @@
 
 JustVoxel is a purpose-built immutable Minecraft server appliance from the Home Server Project.
 
-> **Development status:** active implementation is on the `testing` branch. `mjust` now provides the first management skeleton, but VM and hardware validation are still required before production use.
+> **Development status:** active implementation is on the `testing` branch. `mjust` now includes guarded local/network storage provisioning and Minecraft data migration, but VM and hardware validation are still required before production use.
 
 ## Images
 
@@ -22,7 +22,7 @@ Development images use the `:testing` tag.
 
 ## Foundation
 
-Both variants include bootc, Podman/Quadlet support, NetworkManager with systemd-resolved, OpenSSH, SELinux tooling, firewalld, upstream `just`, Tailscale and NetBird clients, NFS/SMB client support, XFS tooling, and lightweight QEMU/Proxmox, VMware, and Hyper-V guest integration. Tailscale and NetBird remain disabled and unconfigured by default.
+Both variants include bootc, Podman/Quadlet support, NetworkManager with systemd-resolved, OpenSSH, SELinux tooling, firewalld, upstream `just`, Tailscale and NetBird clients, NFS/SMB client support, XFS/partition tooling, and lightweight QEMU/Proxmox, VMware, and Hyper-V guest integration. Tailscale and NetBird remain disabled and unconfigured by default.
 
 The Bare Metal variant additionally includes NUT, Btrfs tools, SMART/NVMe tooling, sensors, ethtool, USB/PCI diagnostics, DMI information, firmware tooling, Wi-Fi support/firmware, CPU microcode support, hdparm, and powertop.
 
@@ -32,19 +32,23 @@ The VM variant deliberately excludes that physical-hardware administration set. 
 
 JustVoxel ships immutable templates for Paper with Geyser, Floodgate, and ViaVersion. The image itself does not accept the Minecraft EULA, generate a world, or create an active Quadlet.
 
-`mjust setup` creates administrator-owned runtime files under `/etc` from those templates. The active Quadlet and environment files are local copies and are never executed directly from `/usr/share/justvoxel/templates`, so a future bootc update cannot silently replace a working machine's configuration.
+`mjust setup` creates administrator-owned runtime files under `/etc`. The container image tag and Minecraft game version are independently configurable. Minecraft data location is independent from backup storage.
 
-The Minecraft data path is configurable independently from backups. This supports, for example, a SATA SSD for the bootc OS, an NVMe filesystem for the Minecraft world, and a different local partition, disk, NFS share, or SMB share for backups.
+## Storage
+
+For VM, the recommended layout is one primary virtual disk for the appliance/Minecraft data and a second virtual disk for backups. NFS and SMB/CIFS backup targets are also supported and the required clients are included in the VM image.
+
+Bare Metal supports dedicated internal disks, external USB disks/sticks, existing local partitions, new partitions created only in already-unallocated space, NFS, SMB/CIFS, and normal local directories.
+
+Whole-disk erase excludes system disks and mounted disks. Destructive operations require typing the exact device phrase. Local persistent mounts use UUIDs. JustVoxel does not automatically shrink existing filesystems.
+
+`mjust storage-migrate` can move Minecraft data to provisioned local storage after a verified cold backup; the old data is retained until the administrator removes it manually.
 
 ## mjust
 
-The management layer includes first setup, safe configuration changes, status/start/stop/restart, online player checks, Java and Floodgate whitelist operations, verified cold backup, player-aware Minecraft maintenance, logs, and appliance validation.
+The management layer includes first setup, safe configuration changes, status/start/stop/restart, online player checks, Java and Floodgate whitelist operations, verified cold backup, player-aware Minecraft maintenance, storage provisioning/migration, logs, and appliance validation.
 
-The container image tag and Minecraft/Paper game version are independent administrator choices. The container can use upstream `stable`, upstream `latest`, or a validated custom/exact tag. Minecraft can stay pinned to an exact stable Paper-supported version or deliberately follow `VERSION=LATEST`.
-
-Moving container tags are refreshed only when mjust explicitly pulls them. Pre-update backups use the same retention policy as timer/manual backups. JustVoxel tracks one previous Minecraft image for rollback and never performs a broad Podman image prune.
-
-Disk partitioning, formatting, fstab generation, and storage migration are represented in the design but intentionally perform no destructive action yet. Those safeguards belong to the next storage implementation step.
+Moving container tags are refreshed only by an explicit pull. Pre-update backups use the same retention policy as timer/manual backups. JustVoxel tracks one previous Minecraft image for rollback and never performs a broad Podman image prune.
 
 See `docs/MJUST.md` and `docs/STORAGE.md`.
 

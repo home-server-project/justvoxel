@@ -17,7 +17,8 @@ while true; do
     echo ' 10. Whitelist'
     echo ' 11. Validate appliance'
     echo ' 12. Follow logs'
-    echo ' 13. Storage provisioning plan'
+    echo ' 13. Storage management'
+    echo ' 14. Show storage plan/devices'
     echo '  0. Exit'
     read -r -p 'Selection: ' choice
     case "${choice}" in
@@ -35,7 +36,8 @@ while true; do
             ;;
         11) /usr/bin/mjust validate ;;
         12) /usr/bin/mjust logs ;;
-        13) /usr/bin/mjust storage-plan ;;
+        13) /usr/bin/mjust storage ;;
+        14) /usr/bin/mjust storage-plan ;;
         0) exit 0 ;;
         *) echo 'Invalid selection.' >&2 ;;
     esac

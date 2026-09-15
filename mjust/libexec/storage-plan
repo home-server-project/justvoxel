@@ -1,17 +1,51 @@
 #!/usr/bin/bash
 set -euo pipefail
 source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/storage-common.sh
 require_root
 
-echo 'JustVoxel storage provisioning skeleton'
-echo '----------------------------------------'
-echo 'Supported configuration model:'
-echo '  - Minecraft data directory on the system filesystem'
-echo '  - Minecraft data directory on another already-mounted filesystem, such as NVMe'
-echo '  - Backups on the system filesystem'
-echo '  - Backups on an existing dedicated disk'
-echo '  - Backups on an existing dedicated partition'
-echo '  - Backups on an existing NFS or SMB/CIFS mount'
+echo 'JustVoxel storage plan'
+echo '----------------------'
+echo "Variant: $(storage_variant)"
 echo
-echo 'Automatic disk partitioning, formatting, fstab creation, and data migration are intentionally not implemented yet.'
-echo 'This command performs no destructive action.'
+storage_show_devices
+echo
+echo 'System disk(s) protected from whole-disk erase:'
+storage_system_disks | sed 's/^/  /'
+echo
+
+if storage_is_vm; then
+    echo 'Recommended VM design:'
+    echo '  - primary virtual disk: JustVoxel OS + Minecraft data'
+    echo '  - second virtual disk: backups'
+    echo '  - NFS or SMB/CIFS: also supported as backup targets'
+    echo
+    secondary=0
+    while IFS= read -r disk; do
+        [[ -n ${disk} ]] || continue
+        if ! storage_disk_is_system "${disk}"; then
+            secondary=$((secondary + 1))
+        fi
+    done < <(lsblk -dnpo NAME,TYPE | awk '$2 == "disk" {print $1}')
+    if (( secondary == 0 )); then
+        echo 'No secondary virtual disk is currently visible.'
+        echo 'Add one in the hypervisor, or use NFS/SMB, then rerun storage setup.'
+    else
+        echo "Secondary disk(s) visible: ${secondary}"
+    fi
+else
+    echo 'Bare Metal backup choices:'
+    echo '  - dedicated internal disk'
+    echo '  - external USB disk/stick (provisioned like any other dedicated disk)'
+    echo '  - existing filesystem/partition'
+    echo '  - new partition created only in already-unallocated space'
+    echo '  - NFS or SMB/CIFS network share'
+fi
+
+echo
+echo 'Safety policy:'
+echo '  - whole-disk provisioning excludes system disks and any disk with mounted children'
+echo '  - partition creation never shrinks an existing filesystem'
+echo '  - destructive operations require typing the exact target phrase'
+echo '  - local persistent mounts use filesystem UUIDs'
+echo '  - backup and Minecraft services fail closed if an expected mount is missing'

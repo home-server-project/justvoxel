@@ -7,9 +7,7 @@ leave_stopped=0
 
 while (( $# > 0 )); do
     case "$1" in
-        --leave-stopped)
-            leave_stopped=1
-            ;;
+        --leave-stopped) leave_stopped=1 ;;
         *)
             echo "ERROR: unknown minecraft-backup option: $1" >&2
             exit 2
@@ -35,6 +33,18 @@ source "${config_file}"
 : "${MINECRAFT_BACKUP_PATH:?MINECRAFT_BACKUP_PATH must be configured}"
 
 MINECRAFT_SERVICE="${MINECRAFT_SERVICE:-minecraft.service}"
+BACKUP_TYPE="${BACKUP_TYPE:-}"
+if [[ -z ${BACKUP_TYPE} ]]; then
+    if [[ -n ${BACKUP_EXPECTED_UUID:-} ]]; then
+        BACKUP_TYPE=local
+    elif [[ ${BACKUP_EXPECTED_SOURCE:-} == //* ]]; then
+        BACKUP_TYPE=smb
+    elif [[ -n ${BACKUP_EXPECTED_SOURCE:-} ]]; then
+        BACKUP_TYPE=nfs
+    else
+        BACKUP_TYPE=system
+    fi
+fi
 BACKUP_KEEP="${BACKUP_KEEP:-7}"
 BACKUP_MOUNT_POINT="${BACKUP_MOUNT_POINT:-}"
 BACKUP_EXPECTED_UUID="${BACKUP_EXPECTED_UUID:-}"
@@ -44,12 +54,10 @@ if [[ "${MINECRAFT_DATA_PATH}" != /* || "${MINECRAFT_BACKUP_PATH}" != /* ]]; the
     echo "ERROR: Minecraft data and backup paths must be absolute." >&2
     exit 1
 fi
-
 if [[ "${MINECRAFT_DATA_PATH}" == "/" || "${MINECRAFT_BACKUP_PATH}" == "/" ]]; then
     echo "ERROR: refusing to use / as a Minecraft data or backup path." >&2
     exit 1
 fi
-
 if [[ ! "${BACKUP_KEEP}" =~ ^[1-9][0-9]*$ ]]; then
     echo "ERROR: BACKUP_KEEP must be a positive integer." >&2
     exit 1
@@ -62,7 +70,6 @@ if [[ "${minecraft_backup_path}" == "${minecraft_data_path}" || "${minecraft_bac
     echo "ERROR: backup path must not be the Minecraft data directory or a child of it." >&2
     exit 1
 fi
-
 if [[ ! -d "${minecraft_data_path}" ]]; then
     echo "ERROR: Minecraft data directory does not exist: ${minecraft_data_path}" >&2
     exit 1
@@ -73,13 +80,11 @@ if [[ -n "${BACKUP_MOUNT_POINT}" ]]; then
         echo "ERROR: BACKUP_MOUNT_POINT must be absolute." >&2
         exit 1
     fi
-
     backup_mount_point="$(realpath -m -- "${BACKUP_MOUNT_POINT}")"
     if ! mountpoint -q -- "${backup_mount_point}"; then
         echo "ERROR: configured backup mount is not mounted: ${backup_mount_point}" >&2
         exit 1
     fi
-
     case "${minecraft_backup_path}/" in
         "${backup_mount_point}/"*) ;;
         *)
@@ -87,7 +92,6 @@ if [[ -n "${BACKUP_MOUNT_POINT}" ]]; then
             exit 1
             ;;
     esac
-
     if [[ -n "${BACKUP_EXPECTED_UUID}" ]]; then
         actual_uuid="$(findmnt -n -o UUID --target "${backup_mount_point}" 2>/dev/null || true)"
         if [[ "${actual_uuid}" != "${BACKUP_EXPECTED_UUID}" ]]; then
@@ -95,7 +99,6 @@ if [[ -n "${BACKUP_MOUNT_POINT}" ]]; then
             exit 1
         fi
     fi
-
     if [[ -n "${BACKUP_EXPECTED_SOURCE}" ]]; then
         actual_source="$(findmnt -n -o SOURCE --target "${backup_mount_point}" 2>/dev/null || true)"
         if [[ "${actual_source}" != "${BACKUP_EXPECTED_SOURCE}" ]]; then
@@ -105,7 +108,13 @@ if [[ -n "${BACKUP_MOUNT_POINT}" ]]; then
     fi
 fi
 
-install -d -m0700 -o root -g root "${minecraft_backup_path}"
+if [[ ${BACKUP_TYPE} == nfs || ${BACKUP_TYPE} == smb ]]; then
+    # Network shares can use server-side ownership rules or NFS root-squash.
+    # Do not require local chown semantics; require that root can actually write.
+    mkdir -p -- "${minecraft_backup_path}"
+else
+    install -d -m0700 -o root -g root "${minecraft_backup_path}"
+fi
 if [[ ! -w "${minecraft_backup_path}" ]]; then
     echo "ERROR: backup path is not writable: ${minecraft_backup_path}" >&2
     exit 1
@@ -129,11 +138,9 @@ minecraft_restart_required=0
 cleanup() {
     local result=$?
     trap - EXIT
-
     if [[ -n "${minecraft_partial_archive:-}" && -f "${minecraft_partial_archive}" ]]; then
         rm -f -- "${minecraft_partial_archive}"
     fi
-
     if (( minecraft_restart_required )); then
         echo "Starting ${MINECRAFT_SERVICE} after backup interruption or failure"
         if ! systemctl start "${MINECRAFT_SERVICE}"; then
@@ -141,7 +148,6 @@ cleanup() {
             result=1
         fi
     fi
-
     exit "${result}"
 }
 trap cleanup EXIT
@@ -163,9 +169,7 @@ if systemctl is-active --quiet "${MINECRAFT_SERVICE}"; then
 fi
 
 echo "Creating ${minecraft_final_archive}"
-tar -C "${minecraft_source_parent}" \
-    -czf "${minecraft_partial_archive}" \
-    "${minecraft_source_name}"
+tar -C "${minecraft_source_parent}" -czf "${minecraft_partial_archive}" "${minecraft_source_name}"
 
 echo "Verifying new archive"
 tar -tzf "${minecraft_partial_archive}" >/dev/null
@@ -178,7 +182,6 @@ mapfile -t minecraft_archives < <(
         | sort -nr \
         | cut -d' ' -f2-
 )
-
 if (( ${#minecraft_archives[@]} > BACKUP_KEEP )); then
     for (( index=BACKUP_KEEP; index<${#minecraft_archives[@]}; index++ )); do
         echo "Removing expired backup: ${minecraft_archives[index]}"

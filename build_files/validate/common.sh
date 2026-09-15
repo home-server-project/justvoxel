@@ -4,14 +4,15 @@ set -euo pipefail
 for cmd in \
     bootc podman skopeo nmcli nmtui resolvectl firewall-cmd sshd sudo just mjust \
     tailscale netbird curl jq openssl tar gzip rsync ping dig traceroute nc tcpdump lsof \
-    findmnt mountpoint flock mkfs.xfs mount.nfs mount.cifs qemu-ga vmtoolsd iperf3; do
+    findmnt mountpoint flock mkfs.xfs mount.nfs mount.cifs lsblk blkid wipefs parted partprobe udevadm \
+    qemu-ga vmtoolsd iperf3; do
     command -v "${cmd}" >/dev/null
 done
 
 rpm -q \
     NetworkManager NetworkManager-tui systemd-resolved firewalld openssh-server sudo \
     podman skopeo just container-selinux policycoreutils-python-utils selinux-policy-extra \
-    util-linux xfsprogs iperf3 nfs-utils cifs-utils qemu-guest-agent open-vm-tools \
+    util-linux xfsprogs parted iperf3 nfs-utils cifs-utils qemu-guest-agent open-vm-tools \
     hyperv-daemons >/dev/null
 
 semodule -l >/dev/null
@@ -54,6 +55,7 @@ done
 
 test -x /usr/bin/mjust
 test -f /usr/share/justvoxel/mjust/justfile
+test -f /usr/libexec/justvoxel/mjust/storage-common.sh
 for script in /usr/libexec/justvoxel/mjust/*; do
     [[ -f "${script}" ]] || continue
     bash -n "${script}"
