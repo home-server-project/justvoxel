@@ -125,9 +125,12 @@ EOF
             cat <<'EOF'
 Update Minecraft
 
-Check the configured Minecraft container image, player state and update path.
-Before changing a running server, JustVoxel creates a verified backup and then
-verifies Minecraft after the update.
+Check both the configured Minecraft container image and the Minecraft/Paper
+game-version policy. A newer stable Paper-supported version is shown clearly
+and can be re-pinned only after explicit approval.
+
+Before changing a running server, JustVoxel checks players, creates a verified
+cold backup, applies the selected maintenance and verifies the running server.
 
 Command:
   mjust update-minecraft
@@ -148,8 +151,8 @@ EOF
             cat <<'EOF'
 Logs
 
-Follow the Minecraft systemd journal for troubleshooting. Press Ctrl-C to stop
-following logs and return to the menu.
+Follow the Minecraft systemd journal for troubleshooting.
+Press q or Esc to return to the JustVoxel menu. Ctrl-C also exits the viewer.
 
 Command:
   mjust logs
