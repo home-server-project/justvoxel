@@ -1,0 +1,68 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/os-common.sh
+source /usr/libexec/justvoxel/mjust/interrupt-safety.sh
+require_root
+
+action="${1:-}"
+case "${action}" in
+    reboot|poweroff) ;;
+    *)
+        echo 'Usage: system-power {reboot|poweroff}' >&2
+        exit 2
+        ;;
+esac
+
+staged=no
+status_json="$(jv_bootc_status_json 2>/dev/null || true)"
+if [[ -n ${status_json} ]] && jv_bootc_validate_status_json "${status_json}" && jv_bootc_staged_exists "${status_json}"; then
+    staged=yes
+fi
+
+was_active=no
+if systemctl is-active --quiet minecraft.service 2>/dev/null; then
+    was_active=yes
+fi
+
+echo "$( [[ ${action} == reboot ]] && echo 'Reboot JustVoxel' || echo 'Power off JustVoxel' )"
+echo
+if [[ ${was_active} == yes ]]; then
+    echo 'Minecraft: Running'
+else
+    echo 'Minecraft: Stopped'
+fi
+if [[ ${staged} == yes ]]; then
+    if [[ ${action} == reboot ]]; then
+        echo 'OS update: Staged - the staged deployment will be used after this reboot.'
+    else
+        echo 'OS update: Staged - the staged deployment will be used on the next boot.'
+    fi
+else
+    echo 'OS update: No staged deployment detected.'
+fi
+
+echo
+if [[ ${action} == reboot ]]; then
+    confirm 'Continue with reboot?' || { echo 'Reboot cancelled.'; exit 0; }
+    jv_stop_minecraft_for_system_action 'Reboot JustVoxel'
+    if ! systemctl reboot; then
+        echo 'ERROR: system reboot request failed.' >&2
+        if [[ ${was_active} == yes ]]; then
+            echo 'Restarting Minecraft because the host did not reboot.' >&2
+            systemctl start minecraft.service || true
+        fi
+        exit 1
+    fi
+else
+    confirm 'Continue with power off?' || { echo 'Power off cancelled.'; exit 0; }
+    jv_stop_minecraft_for_system_action 'Power off JustVoxel'
+    if ! systemctl poweroff; then
+        echo 'ERROR: system power-off request failed.' >&2
+        if [[ ${was_active} == yes ]]; then
+            echo 'Restarting Minecraft because the host did not power off.' >&2
+            systemctl start minecraft.service || true
+        fi
+        exit 1
+    fi
+fi

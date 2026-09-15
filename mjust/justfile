@@ -57,6 +57,21 @@ logs:
 validate:
     @sudo /usr/libexec/justvoxel/mjust/validate
 
+os-status:
+    @sudo /usr/libexec/justvoxel/mjust/os-status
+
+os-update:
+    @sudo /usr/libexec/justvoxel/mjust/os-update
+
+reboot:
+    @sudo /usr/libexec/justvoxel/mjust/system-power reboot
+
+poweroff:
+    @sudo /usr/libexec/justvoxel/mjust/system-power poweroff
+
+firmware:
+    @sudo /usr/libexec/justvoxel/mjust/firmware
+
 welcome:
     @/usr/libexec/justvoxel/mjust/welcome show
 

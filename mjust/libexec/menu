@@ -33,13 +33,11 @@ EOF
             cat <<'EOF'
 Status
 
-Show a concise appliance view: Minecraft state, players, version, addresses,
-memory, uptime, image channel and backup schedule.
+Show the friendly JustVoxel appliance health dashboard: system services,
+Minecraft, players, network, storage, backups and container state.
 
-Read-only.
-
-Command:
-  mjust status
+Read-only. Detailed administrator output remains available with:
+  mjust status --details
 EOF
             ;;
         players)
@@ -136,6 +134,24 @@ Command:
   mjust update-minecraft
 EOF
             ;;
+        system)
+            cat <<'EOF'
+System
+
+Manage the JustVoxel OS and appliance power safely. OS update checks/downloads
+do not stop Minecraft, create a backup, or reboot. A normal reboot later uses
+any bootc deployment that is already staged.
+
+Commands:
+  mjust os-status
+  mjust os-update
+  mjust reboot
+  mjust poweroff
+  mjust firmware
+
+Firmware/UEFI reboot is shown in the menu only on Bare Metal.
+EOF
+            ;;
         validate)
             cat <<'EOF'
 Validation
@@ -196,6 +212,10 @@ Use a direct command instead, for example:
   mjust backup
   mjust storage
   mjust update-minecraft
+  mjust os-status
+  mjust os-update
+  mjust reboot
+  mjust poweroff
   mjust validate
   mjust logs
   mjust --list
@@ -311,6 +331,40 @@ storage_menu() {
     done
 }
 
+system_menu() {
+    local variant choice
+    local -a options=(
+        'Operating system status'
+        'Check / download OS update'
+        'Reboot JustVoxel'
+        'Power off JustVoxel'
+    )
+    variant="$(cat /usr/lib/justvoxel/variant 2>/dev/null || true)"
+    if [[ ${variant} == *baremetal* ]]; then
+        options+=('Firmware / UEFI setup')
+    fi
+    options+=('Back')
+
+    while true; do
+        choice="$(jui_choose 'System' "${options[@]}")" || return 0
+        case "${choice}" in
+            'Operating system status')
+                /usr/bin/mjust os-status || true
+                echo
+                if jui_confirm 'Check for OS updates now?'; then
+                    /usr/bin/mjust os-update || true
+                fi
+                jui_pause
+                ;;
+            'Check / download OS update') run_and_pause /usr/bin/mjust os-update || true ;;
+            'Reboot JustVoxel') run_and_pause /usr/bin/mjust reboot || true ;;
+            'Power off JustVoxel') run_and_pause /usr/bin/mjust poweroff || true ;;
+            'Firmware / UEFI setup') run_and_pause /usr/bin/mjust firmware || true ;;
+            'Back') return 0 ;;
+        esac
+    done
+}
+
 all_commands() {
     echo 'All mjust commands'
     echo '------------------'
@@ -344,9 +398,9 @@ advanced_menu() {
 select_rich() {
     local rows selected
     if [[ ${configured} == yes ]]; then
-        rows=$'status\tStatus\nplayers\tPlayers\nconfigure\tConfigure Minecraft\nservice\tStart / Stop / Restart\nwhitelist\tWhitelist\nbackups\tBackups\nstorage\tStorage\nupdate\tUpdate Minecraft\nvalidate\tValidation\nlogs\tLogs\nadvanced\tAdvanced\nexit\tExit'
+        rows=$'status\tStatus\nplayers\tPlayers\nconfigure\tConfigure Minecraft\nservice\tStart / Stop / Restart\nwhitelist\tWhitelist\nbackups\tBackups\nstorage\tStorage\nupdate\tUpdate Minecraft\nsystem\tSystem\nvalidate\tValidation\nlogs\tLogs\nadvanced\tAdvanced\nexit\tExit'
     else
-        rows=$'setup\tFirst setup\nstatus\tStatus\nstorage\tStorage\nsetup-advanced\tAdvanced setup\nexit\tExit'
+        rows=$'setup\tFirst setup\nstatus\tStatus\nstorage\tStorage\nsystem\tSystem\nsetup-advanced\tAdvanced setup\nexit\tExit'
     fi
     selected="$(printf '%s\n' "${rows}" | fzf \
         --delimiter=$'\t' --with-nth=2 --no-multi \
@@ -363,7 +417,7 @@ select_compact() {
     if [[ ${configured} == yes ]]; then
         choice="$(jui_choose 'JustVoxel' \
             'Status' 'Players' 'Configure Minecraft' 'Start / Stop / Restart' \
-            'Whitelist' 'Backups' 'Storage' 'Update Minecraft' 'Validation' 'Logs' 'Advanced' 'Exit')" || { printf 'exit'; return 0; }
+            'Whitelist' 'Backups' 'Storage' 'Update Minecraft' 'System' 'Validation' 'Logs' 'Advanced' 'Exit')" || { printf 'exit'; return 0; }
         case "${choice}" in
             'Status') printf 'status' ;;
             'Players') printf 'players' ;;
@@ -373,17 +427,19 @@ select_compact() {
             'Backups') printf 'backups' ;;
             'Storage') printf 'storage' ;;
             'Update Minecraft') printf 'update' ;;
+            'System') printf 'system' ;;
             'Validation') printf 'validate' ;;
             'Logs') printf 'logs' ;;
             'Advanced') printf 'advanced' ;;
             *) printf 'exit' ;;
         esac
     else
-        choice="$(jui_choose 'JustVoxel' 'First setup' 'Status' 'Storage' 'Advanced setup' 'Exit')" || { printf 'exit'; return 0; }
+        choice="$(jui_choose 'JustVoxel' 'First setup' 'Status' 'Storage' 'System' 'Advanced setup' 'Exit')" || { printf 'exit'; return 0; }
         case "${choice}" in
             'First setup') printf 'setup' ;;
             'Status') printf 'status' ;;
             'Storage') printf 'storage' ;;
+            'System') printf 'system' ;;
             'Advanced setup') printf 'setup-advanced' ;;
             *) printf 'exit' ;;
         esac
@@ -415,6 +471,7 @@ while true; do
         backups) run_and_pause /usr/bin/mjust backup || true ;;
         storage) storage_menu ;;
         update) run_and_pause /usr/bin/mjust update-minecraft || true ;;
+        system) system_menu ;;
         validate) run_and_pause /usr/bin/mjust validate || true ;;
         logs) /usr/bin/mjust logs || true ;;
         advanced) advanced_menu ;;
