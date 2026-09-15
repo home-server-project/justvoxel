@@ -32,11 +32,12 @@ Required runtime directory state under `/var` is treated differently. `/var` per
 
 The current command surface is:
 
-- `mjust` — interactive menu
+- `mjust` — adaptive interactive terminal menu
 - `mjust setup` — normal first-time appliance configuration
 - `mjust setup-advanced` — the same setup implementation with advanced options enabled
 - `mjust configure` — safe changes to an installed configuration
-- `mjust status` — Minecraft service status
+- `mjust status` — concise human-readable appliance/Minecraft status
+- `mjust status --details` — concise status plus administrator-oriented systemd/Podman/storage detail
 - `mjust start`
 - `mjust stop`
 - `mjust restart`
@@ -57,6 +58,28 @@ The current command surface is:
 - `mjust storage-free-space` — create a partition only in existing unallocated space
 - `mjust storage-network` — NFS or SMB/CIFS backup target
 - `mjust storage-migrate` — guarded Minecraft data migration
+
+## Adaptive terminal interface
+
+Running `mjust` with no command opens a JustVoxel-native terminal interface. Direct `mjust` commands remain the authoritative operations; the menu is only a human-friendly dispatcher and explanation layer.
+
+On a normal SSH or local TTY with enough terminal space, JustVoxel uses `fzf` for an arrow-key two-pane browser. The left side lists operations and the right-side preview explains what the selected operation does, important safety behavior, and the equivalent direct command.
+
+On a smaller or more limited interactive terminal, JustVoxel falls back to a compact selector. The selector preference is `gum`, then compact `fzf`, then a plain Bash numbered menu if neither helper is available. `gum` and `fzf` are appliance dependencies in both VM and Bare Metal images.
+
+When `TERM=dumb` is in use or stdin/stdout is not attached to an interactive TTY, `mjust` does not block waiting for input. It prints concise direct-command help instead. For an interactive SSH menu, allocate a TTY, for example with `ssh -t`.
+
+Before first setup the menu is intentionally small: first setup, status, storage, advanced setup, and exit. After configuration it exposes the normal appliance areas: status, players, configuration, service control, backups, storage, Minecraft update, validation, logs, advanced tools, and exit.
+
+The terminal interface does not weaken safety controls. Stop/restart/update operations still perform their command-level player checks. Destructive storage operations still require their existing typed confirmations such as `ERASE /dev/...`, `FORMAT /dev/...`, and `CREATE PARTITION /dev/...`; a graphical-looking selector never replaces those confirmations.
+
+## Status output
+
+`mjust status` is intentionally different from validation and logs. It gives a concise, human-readable view of the current appliance state rather than dumping raw `systemctl` or Podman output.
+
+When available it reports Minecraft running/stopped/failed state, players online versus maximum, Minecraft/Paper version, Bedrock/Geyser/Floodgate state, Java and Bedrock addresses, current Minecraft-container memory use and configured maximum, configured Java heap, Minecraft service uptime, container channel/image, backup state, next scheduled backup, and a concise overall system state. A missing optional observation is reported as `Unknown` rather than printing command errors.
+
+`mjust status --details` prints the same friendly summary first and then adds the administrator-oriented systemd, Podman, and raw storage detail that the original status command exposed. `mjust logs` remains the dedicated log-following command, while `mjust validate` remains the full correctness check.
 
 ## First setup
 
@@ -399,9 +422,11 @@ RCON remains internal to the Minecraft container and is not published as a host 
 
 ## Validation
 
-`mjust validate` checks the active JustVoxel deployment, including important runtime files and permissions, SELinux labeling, firewall state, storage identity, backup target availability, generated service state, RCON response, Minecraft version, Bedrock/Geyser state when enabled, and the systemd failed-unit set.
+`mjust validate` checks the active JustVoxel deployment, including important runtime files and permissions, SELinux labeling, firewall state, storage identity, backup target availability, generated service state, RCON response, Minecraft version, Bedrock/Geyser state when enabled, zram, and the systemd failed-unit set.
 
 A clean appliance is expected to report no failed systemd units. If `systemctl --failed` is non-empty, `mjust validate` shows the failed units and returns failure. This makes first-boot service regressions such as the gssproxy state-directory failure visible during preserved-VM validation.
+
+The validation summary is purpose-aware for storage. It identifies system/container storage, Minecraft data and backup storage rather than printing duplicate raw `df` rows. When Minecraft data and backups share one filesystem, capacity is printed once and the output explains that same-filesystem backups help with world/configuration recovery but do not protect against physical disk failure. Raw `findmnt`/`df` information remains available from `mjust status --details`.
 
 The goal is to fail visibly when the appliance does not match its recorded configuration rather than continuing with an unexpected mount or incomplete runtime.
 
@@ -425,9 +450,9 @@ These are intentional safety boundaries, not missing automatic steps.
 
 ## Current development status
 
-The management and storage flows are implemented on `testing`, but they still require destructive VM testing and physical-hardware validation before stable promotion.
+The management and storage flows are implemented on `testing`, and the first real VM has successfully completed bootc upgrade, reboot, normal setup, Paper + Geyser/Floodgate startup, and full validation with no failed system services. Additional destructive storage, failure-path, and physical-hardware validation is still required before stable promotion.
 
-The safest validation order is VM first: one system disk, one disposable secondary virtual disk, then dedicated-disk provisioning, partition adoption, free-space partition creation, network backup targets, backup/retention, and Minecraft data migration. Bare Metal validation should follow only after the VM paths are proven.
+The safest validation order remains VM first: one system disk, one disposable secondary virtual disk, then dedicated-disk provisioning, partition adoption, free-space partition creation, network backup targets, backup/retention, and Minecraft data migration. Bare Metal validation should follow only after the VM paths are proven.
 
 # Future mjust system-management roadmap
 
