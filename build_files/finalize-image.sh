@@ -91,7 +91,18 @@ if dnf repolist --enabled | grep -Eiq 'epel|tailscale|netbird'; then
     exit 1
 fi
 
+# /var is persistent machine state in bootc and image-provided /var content is
+# only populated on the initial deployment. Required runtime directories must
+# therefore be recreated declaratively (tmpfiles.d/StateDirectory), not relied
+# upon as package payload in the image. Remove obvious build-only state first,
+# then make bootc lint inspect the remaining package/runtime state BEFORE the
+# final /var cleanup so a missing declarative rule cannot be hidden by rm -rf.
 dnf clean all
+rm -rf /var/cache/* /var/log/* /var/tmp/* /var/lib/dnf /var/lib/rpm-state
+bootc container lint --fatal-warnings
+
+# Keep only the minimal bootc /var skeleton in the immutable image. Runtime
+# state is recreated by the declarative rules validated above.
 rm -rf /var
 install -d -m0755 /var
 install -d -m1777 /var/tmp
