@@ -39,6 +39,12 @@ grep -Fq '/run/systemd/resolve/stub-resolv.conf' /usr/lib/tmpfiles.d/justvoxel-r
 test -f /etc/profile.d/zz-justvoxel-prompt.sh
 grep -Fq '38;5;82' /etc/profile.d/zz-justvoxel-prompt.sh
 
+test -f /etc/profile.d/90-justvoxel-motd.sh
+bash -n /etc/profile.d/90-justvoxel-motd.sh
+test -x /usr/libexec/justvoxel/motd
+bash -n /usr/libexec/justvoxel/motd
+grep -Fq 'Welcome to JustVoxel' /usr/libexec/justvoxel/motd
+
 test -f /usr/lib/justvoxel/variant
 test -f /usr/lib/tmpfiles.d/justvoxel.conf
 
@@ -56,11 +62,15 @@ done
 test -x /usr/bin/mjust
 test -f /usr/share/justvoxel/mjust/justfile
 test -f /usr/libexec/justvoxel/mjust/storage-common.sh
+test -x /usr/libexec/justvoxel/mjust/welcome
 for script in /usr/libexec/justvoxel/mjust/*; do
     [[ -f "${script}" ]] || continue
     bash -n "${script}"
 done
 /usr/bin/mjust --list >/dev/null
+/usr/bin/mjust --list | grep -Fq 'welcome'
+/usr/bin/mjust --list | grep -Fq 'welcome-off'
+/usr/bin/mjust --list | grep -Fq 'welcome-on'
 
 # The bootc image ships only immutable source templates and management logic.
 # Active, administrator-owned runtime files are created later by `mjust setup`.
