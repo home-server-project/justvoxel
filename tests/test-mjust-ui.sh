@@ -4,6 +4,8 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck disable=SC1091
 source "${repo_root}/mjust/libexec/common.sh"
+# shellcheck disable=SC1091
+source "${repo_root}/mjust/libexec/ui.sh"
 
 fail() {
     echo "FAIL: $*" >&2
@@ -48,5 +50,17 @@ if normalize_daily_backup_time '*-*-* 04:30:00' >/dev/null 2>&1; then
     fail 'normal daily-time helper must reject raw systemd calendar syntax'
 fi
 [[ $(daily_backup_schedule_from_time '4:30') == '*-*-* 04:30:00' ]] || fail 'daily schedule rendering is incorrect'
+
+TERM=dumb
+export TERM
+[[ $(jui_backend) == none ]] || fail 'TERM=dumb must disable the interactive selector backend'
+
+for id in setup setup-advanced status players configure service backups storage update validate logs advanced exit; do
+    grep -Fq "${id})" "${repo_root}/mjust/libexec/menu" || fail "menu preview/dispatch id missing: ${id}"
+done
+
+grep -Fq 'mjust status --details' "${repo_root}/mjust/libexec/menu" || fail 'detailed status is not exposed through the advanced menu'
+grep -Fq -- '--details' "${repo_root}/mjust/bin/mjust" || fail 'mjust wrapper does not accept status --details'
+grep -Fq 'ERASE /dev/...' "${repo_root}/mjust/libexec/menu" || fail 'storage preview does not preserve typed-confirmation guidance'
 
 echo 'mjust UI regression tests passed.'
