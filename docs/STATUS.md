@@ -68,16 +68,23 @@ A separate disk, NFS or SMB filesystem is shown as its own backup target with it
 
 `mjust validate` remains separate from both status modes. Validation is allowed to be stricter, perform more checks, return failure, and explain configuration/runtime mismatches.
 
-## Roadmap boundary
+## System management is separate from status
 
-The earlier ideas for a separate `mjust health`, a separate friendly failed-service screen, and a duplicate `mjust system` health dashboard are consolidated into `mjust status`.
+Operating-system maintenance and power controls are implemented, but they intentionally remain separate from the normal health dashboard.
 
-The next system-management block remains separate and is intended to cover:
+Use:
 
-1. bootc running/staged/rollback deployment status
-2. non-disruptive OS update check and staging
-3. player-aware backup/graceful reboot into a staged OS update
-4. player-aware reboot and power-off controls
-5. Bare-Metal-only reboot into firmware setup when supported
+- `mjust os-status` for the running, staged, and rollback bootc deployment view
+- `mjust os-update` to check for and optionally download/stage a newer JustVoxel OS image
+- `mjust resources` for the live btop resource monitor
+- `mjust reboot` for a player-aware graceful reboot
+- `mjust poweroff` for a player-aware graceful shutdown
+- `mjust firmware` on Bare Metal for reboot into firmware/UEFI setup when supported
 
-JustVoxel-aware bootc rollback remains a later dedicated design because it also requires safe handling of deployment-specific `/etc` state.
+This keeps `mjust status` focused on answering one question quickly: is the appliance healthy and what needs attention?
+
+See `SYSTEM.md` for the detailed operating-system and power-management behavior.
+
+## Rollback boundary
+
+JustVoxel-aware bootc rollback remains intentionally separate and is not currently implemented as an mjust workflow. A safe appliance-level rollback needs deliberate handling of deployment-specific `/etc` state together with Minecraft backup and recovery behavior.
