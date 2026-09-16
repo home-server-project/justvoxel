@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -21,14 +20,11 @@ import (
 	"sync"
 	"syscall"
 	"time"
-
-	"golang.org/x/crypto/argon2"
 )
 
 const (
 	managementAPI = "v1"
 	stateDir      = "/var/lib/justvoxel/webui"
-	authPath      = stateDir + "/auth.json"
 	metadataPath  = "/usr/lib/justvoxel/webui-release.json"
 	statusHelper  = "/usr/libexec/justvoxel/mjust/web-status-json"
 	passwordChars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
@@ -40,17 +36,6 @@ const (
 	argonParallelism = 2
 	argonKeyLength   = 32
 )
-
-type credential struct {
-	Username    string `json:"username"`
-	Salt        string `json:"salt"`
-	Hash        string `json:"hash"`
-	MemoryKiB   uint32 `json:"memory_kib"`
-	Iterations  uint32 `json:"iterations"`
-	Parallelism uint8  `json:"parallelism"`
-	KeyLength   uint32 `json:"key_length"`
-	MustChange  bool   `json:"must_change"`
-}
 
 type releaseMetadata struct {
 	Version       string `json:"version"`
@@ -241,42 +226,6 @@ func peerUID(conn net.Conn) (uint32, error) {
 	return cred.Uid, nil
 }
 
-func (s *server) login(w http.ResponseWriter, r *http.Request) {
-	if wait := s.loginDelay(); wait > 0 {
-		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
-		writeError(w, http.StatusTooManyRequests, "too many failed login attempts")
-		return
-	}
-	var request struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-	}
-	if !decodeJSON(w, r, &request) {
-		return
-	}
-	cred, err := readCredential()
-	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, "credential unavailable")
-		return
-	}
-	if request.Username != cred.Username || !verifyPassword(cred, request.Password) {
-		s.recordFailure()
-		writeError(w, http.StatusUnauthorized, "invalid credentials")
-		return
-	}
-	s.clearFailures()
-	token, err := randomToken(32)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "session creation failed")
-		return
-	}
-	now := time.Now()
-	s.mu.Lock()
-	s.sessions[token] = session{Created: now, LastSeen: now, MustChange: cred.MustChange}
-	s.mu.Unlock()
-	writeJSON(w, http.StatusOK, map[string]any{"session": token, "must_change": cred.MustChange, "management_api": managementAPI})
-}
-
 func (s *server) logout(w http.ResponseWriter, r *http.Request) {
 	token, _, ok := s.authorize(r, true)
 	if !ok {
@@ -285,43 +234,6 @@ func (s *server) logout(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	delete(s.sessions, token)
-	s.mu.Unlock()
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-}
-
-func (s *server) changePassword(w http.ResponseWriter, r *http.Request) {
-	_, _, ok := s.authorize(r, true)
-	if !ok {
-		writeError(w, http.StatusUnauthorized, "invalid session")
-		return
-	}
-	var request struct {
-		CurrentPassword string `json:"current_password"`
-		NewPassword     string `json:"new_password"`
-	}
-	if !decodeJSON(w, r, &request) {
-		return
-	}
-	if len(request.NewPassword) < 12 || len(request.NewPassword) > 128 {
-		writeError(w, http.StatusBadRequest, "new password must be 12 to 128 characters")
-		return
-	}
-	cred, err := readCredential()
-	if err != nil || !verifyPassword(cred, request.CurrentPassword) {
-		writeError(w, http.StatusUnauthorized, "current password is incorrect")
-		return
-	}
-	newCred, err := credentialForPassword(request.NewPassword, false)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "password update failed")
-		return
-	}
-	if err := writeCredential(newCred); err != nil {
-		writeError(w, http.StatusInternalServerError, "password update failed")
-		return
-	}
-	s.mu.Lock()
-	s.sessions = make(map[string]session)
 	s.mu.Unlock()
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
@@ -434,61 +346,6 @@ func (s *server) clearFailures() {
 	s.mu.Unlock()
 }
 
-func credentialForPassword(password string, mustChange bool) (credential, error) {
-	salt := make([]byte, 16)
-	if _, err := rand.Read(salt); err != nil {
-		return credential{}, err
-	}
-	hash := argon2.IDKey([]byte(password), salt, argonIterations, argonMemory, argonParallelism, argonKeyLength)
-	return credential{
-		Username:    "admin",
-		Salt:        base64.RawStdEncoding.EncodeToString(salt),
-		Hash:        base64.RawStdEncoding.EncodeToString(hash),
-		MemoryKiB:   argonMemory,
-		Iterations:  argonIterations,
-		Parallelism: argonParallelism,
-		KeyLength:   argonKeyLength,
-		MustChange:  mustChange,
-	}, nil
-}
-
-func verifyPassword(cred credential, password string) bool {
-	if cred.Username != "admin" || cred.MemoryKiB == 0 || cred.Iterations == 0 || cred.Parallelism == 0 || cred.KeyLength == 0 {
-		return false
-	}
-	salt, err := base64.RawStdEncoding.DecodeString(cred.Salt)
-	if err != nil {
-		return false
-	}
-	expected, err := base64.RawStdEncoding.DecodeString(cred.Hash)
-	if err != nil || len(expected) != int(cred.KeyLength) {
-		return false
-	}
-	actual := argon2.IDKey([]byte(password), salt, cred.Iterations, cred.MemoryKiB, cred.Parallelism, cred.KeyLength)
-	return subtle.ConstantTimeCompare(actual, expected) == 1
-}
-
-func readCredential() (credential, error) {
-	data, err := os.ReadFile(authPath)
-	if err != nil {
-		return credential{}, err
-	}
-	var cred credential
-	if err := json.Unmarshal(data, &cred); err != nil {
-		return credential{}, err
-	}
-	return cred, nil
-}
-
-func writeCredential(cred credential) error {
-	data, err := json.MarshalIndent(cred, "", "  ")
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	return atomicWrite(authPath, data, 0o600)
-}
-
 func atomicWrite(path string, data []byte, mode os.FileMode) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-")
 	if err != nil {
@@ -527,7 +384,7 @@ func randomPassword(length int) (string, error) {
 				out[i] = passwordChars[int(b[0])%len(passwordChars)]
 				break
 			}
-		}
+	}
 	}
 	return string(out), nil
 }
