@@ -95,6 +95,8 @@ if grep -Fq 'LoadCredential=' /usr/lib/systemd/system/justvoxel-webui.service; t
 fi
 test -x /usr/libexec/justvoxel/management-agent
 test -x /usr/libexec/justvoxel/justvoxel-webui
+ldd /usr/libexec/justvoxel/management-agent | grep -Fq 'libpam.so'
+ldd /usr/libexec/justvoxel/management-agent | grep -Fq 'libpwquality.so'
 test -r /usr/lib/justvoxel/webui-release.json
 jq -e '.management_api == "v1" and (.artifact_sha256 | test("^[0-9a-f]{64}$"))' /usr/lib/justvoxel/webui-release.json >/dev/null
 /usr/libexec/justvoxel/justvoxel-webui -version | grep -Fq 'management-api=v1'
