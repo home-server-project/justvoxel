@@ -49,7 +49,7 @@ PYID
 
 jv_migration_available_bytes() {
     local path="$1" available
-    available="$(df -PB1 --output=avail -- "${path}" 2>/dev/null | tail -n1 | tr -d ' ')"
+    available="$(df -B1 --output=avail -- "${path}" 2>/dev/null | tail -n1 | tr -d ' ')"
     [[ ${available} =~ ^[0-9]+$ ]] || return 1
     printf '%s' "${available}"
 }

@@ -20,9 +20,16 @@ transport_files=(
 )
 transport_text="$(cat "${transport_files[@]}")"
 common="${repo_root}/mjust/libexec/common.sh"
+migration_common="${repo_root}/mjust/libexec/migration-common.sh"
 template="${repo_root}/templates/config/minecraft.env.in"
 menu="${repo_root}/mjust/libexec/menu"
 justfile="${repo_root}/mjust/justfile"
+
+# shellcheck disable=SC1090
+source "${migration_common}"
+available_bytes="$(jv_migration_available_bytes "${repo_root}")" || fail 'migration free-space helper failed on a local path'
+[[ ${available_bytes} =~ ^[0-9]+$ ]] || fail 'migration free-space helper did not return a numeric byte count'
+(( available_bytes > 0 )) || fail 'migration free-space helper returned no available space'
 
 for text in \
     'Type IMPORT to continue:' \
