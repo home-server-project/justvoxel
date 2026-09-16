@@ -120,13 +120,13 @@ for script in /usr/libexec/justvoxel/mjust/*; do
     [[ -f "${script}" ]] || continue
     bash -n "${script}"
 done
-/usr/bin/mjust --list >/dev/null
-/usr/bin/mjust --list | grep -Fq 'setup-advanced'
-/usr/bin/mjust --list | grep -Fq 'status'
-/usr/bin/mjust --list | grep -Fq 'web'
-/usr/bin/mjust --list | grep -Fq 'welcome'
-/usr/bin/mjust --list | grep -Fq 'welcome-off'
-/usr/bin/mjust --list | grep -Fq 'welcome-on'
+mjust_list="$(/usr/bin/mjust --list)"
+grep -Fq 'setup-advanced' <<<"${mjust_list}"
+grep -Fq 'status' <<<"${mjust_list}"
+grep -Fq 'web' <<<"${mjust_list}"
+grep -Fq 'welcome' <<<"${mjust_list}"
+grep -Fq 'welcome-off' <<<"${mjust_list}"
+grep -Fq 'welcome-on' <<<"${mjust_list}"
 
 # The bootc image ships only immutable source templates and management logic.
 # Active, administrator-owned runtime files are created later by `mjust setup`.
