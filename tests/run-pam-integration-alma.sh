@@ -11,6 +11,8 @@ fi
     exit 1
 }
 
+authselect select minimal --force >/dev/null
+
 cd /work
 
 readonly test_user=jv-pam-test
