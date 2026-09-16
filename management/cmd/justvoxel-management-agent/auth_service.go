@@ -24,7 +24,7 @@ var (
 )
 
 func authenticateAdministrator(username, password string) (administratorAuthResult, error) {
-	mode, err := currentAuthMode()
+	mode, err := readAuthMode()
 	if err != nil {
 		return administratorAuthResult{}, err
 	}
@@ -43,7 +43,7 @@ func authenticateAdministrator(username, password string) (administratorAuthResu
 			PasswordChangeRequired: result.PasswordChangeRequired,
 		}, nil
 	case authModeSeparate:
-		if !verifyLocalAdministrator(username, password) {
+		if !verifySeparateAdmin(username, password) {
 			return administratorAuthResult{}, systemauth.ErrInvalidCredentials
 		}
 		return administratorAuthResult{Mode: mode}, nil
@@ -64,13 +64,13 @@ func changeAdministratorPassword(mode authMode, currentPassword, newPassword str
 		}
 		return systemChangePassword(systemAdminUsername, currentPassword, newPassword)
 	case authModeSeparate:
-		if !verifyLocalAdministrator(systemAdminUsername, currentPassword) {
+		if !verifySeparateAdmin(systemAdminUsername, currentPassword) {
 			return systemauth.ErrInvalidCredentials
 		}
 		if err := systemValidatePass(systemAdminUsername, currentPassword, newPassword); err != nil {
 			return err
 		}
-		return writeLocalAdministrator(newPassword)
+		return writeSeparateAdmin(newPassword)
 	default:
 		return fmt.Errorf("unsupported authentication mode %q", mode)
 	}
