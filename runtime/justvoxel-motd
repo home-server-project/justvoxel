@@ -39,29 +39,30 @@ web_direct=''
 web_enabled_marker=/var/lib/justvoxel/webui/enabled
 web_initialized_marker=/var/lib/justvoxel/webui/initialized
 
-if [[ ! -e ${web_initialized_marker} ]]; then
-    if systemctl is-failed --quiet justvoxel-web-bootstrap.service 2>/dev/null; then
-        web_state='Unavailable'
+# Prefer the live listener over bootstrap marker timing. An interactive login can
+# happen while bootstrap is writing its final markers even though the WebUI is
+# already ready to use.
+if systemctl is-active --quiet justvoxel-webui.service 2>/dev/null && \
+    curl -fsS --max-time 1 http://127.0.0.1:8099/healthz >/dev/null 2>&1; then
+    web_state='Ready'
+    if [[ ${host} != unknown ]]; then
+        web_browser="http://${host}.local:8099"
     else
-        web_state='Starting...'
+        web_browser='Waiting for hostname'
     fi
+    if [[ ${ipv4} == 'Not assigned' ]]; then
+        web_direct='Waiting for network address'
+    else
+        web_direct="http://${ipv4}:8099"
+    fi
+elif systemctl is-failed --quiet justvoxel-web-bootstrap.service 2>/dev/null; then
+    web_state='Unavailable'
 elif [[ -e ${web_enabled_marker} ]]; then
-    if systemctl is-active --quiet justvoxel-webui.service 2>/dev/null && \
-        curl -fsS --max-time 1 http://127.0.0.1:8099/healthz >/dev/null 2>&1; then
-        web_state='Ready'
-        if [[ ${host} != unknown ]]; then
-            web_browser="http://${host}.local:8099"
-        else
-            web_browser='Waiting for hostname'
-        fi
-        if [[ ${ipv4} == 'Not assigned' ]]; then
-            web_direct='Waiting for network address'
-        else
-            web_direct="http://${ipv4}:8099"
-        fi
-    else
-        web_state='Unavailable'
-    fi
+    web_state='Unavailable'
+elif [[ ! -e ${web_initialized_marker} ]]; then
+    web_state='Starting...'
+else
+    web_state='Disabled'
 fi
 
 if [[ -t 1 && ${TERM:-dumb} != dumb ]]; then
