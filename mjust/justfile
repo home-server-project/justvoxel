@@ -60,6 +60,9 @@ export destination="":
 import source="":
     @if [ -n "{{source}}" ]; then sudo /usr/libexec/justvoxel/mjust/migration-import "{{source}}"; else sudo /usr/libexec/justvoxel/mjust/migration-import; fi
 
+migration-recover transaction="":
+    @if [ -n "{{transaction}}" ]; then sudo /usr/libexec/justvoxel/mjust/migration-recover "{{transaction}}"; else sudo /usr/libexec/justvoxel/mjust/migration-recover; fi
+
 update-minecraft:
     @sudo /usr/libexec/justvoxel/mjust/update-minecraft
 
