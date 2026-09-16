@@ -156,14 +156,23 @@ jobs:
             --security-opt=label=disable \
             -v "${PWD}/management:/src:ro" \
             -v "${PWD}/build_artifacts/management:/out" \
-            -w /src \
             "${ALMA_REPOS_IMAGE}" \
             /bin/bash -c '
               set -euo pipefail
               dnf install -y gcc golang pam-devel libpwquality-devel
-              go mod download
-              CGO_ENABLED=1 go test ./...
-              CGO_ENABLED=1 go build -trimpath -o /out/management-agent ./cmd/justvoxel-management-agent
+              mkdir -p /work
+              cp -a /src/. /work/
+              cd /work
+              go mod tidy
+              dirty=0
+              diff -u /src/go.mod /work/go.mod || dirty=1
+              diff -u /src/go.sum /work/go.sum || dirty=1
+              if (( dirty != 0 )); then
+                echo "ERROR: AlmaLinux Go requires module metadata changes shown above." >&2
+                exit 1
+              fi
+              CGO_ENABLED=1 go test -mod=readonly ./...
+              CGO_ENABLED=1 go build -mod=readonly -trimpath -o /out/management-agent ./cmd/justvoxel-management-agent
             '
           sudo chmod 0755 build_artifacts/management/management-agent
 
