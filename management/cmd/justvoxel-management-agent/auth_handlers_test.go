@@ -18,6 +18,7 @@ func withAuthTestDependencies(t *testing.T) {
 	oldWriteSeparate := writeSeparateAdmin
 	oldVerifySeparate := verifySeparateAdmin
 	oldSystemAuth := systemAuthenticate
+	oldSystemChange := systemChangePassword
 	oldSystemValidate := systemValidatePass
 	oldSystemPolicy := systemPasswordPolicy
 	t.Cleanup(func() {
@@ -26,6 +27,7 @@ func withAuthTestDependencies(t *testing.T) {
 		writeSeparateAdmin = oldWriteSeparate
 		verifySeparateAdmin = oldVerifySeparate
 		systemAuthenticate = oldSystemAuth
+		systemChangePassword = oldSystemChange
 		systemValidatePass = oldSystemValidate
 		systemPasswordPolicy = oldSystemPolicy
 	})
@@ -75,6 +77,35 @@ func TestSystemLoginPropagatesPasswordChangeRequired(t *testing.T) {
 	s.providerLogin(rr, req)
 	if rr.Code != http.StatusOK || !bytes.Contains(rr.Body.Bytes(), []byte(`"must_change":true`)) {
 		t.Fatalf("expired-password state not returned: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSystemPasswordChangeInvalidatesSessions(t *testing.T) {
+	withAuthTestDependencies(t)
+	readAuthMode = func() (authMode, error) { return authModeSystem, nil }
+	systemValidatePass = func(username, oldPassword, newPassword string) error { return nil }
+	systemChangePassword = func(username, oldPassword, newPassword string) error {
+		if username != systemAdminUsername || oldPassword != "old-secret" || newPassword != "new-secret" {
+			t.Fatalf("unexpected password change arguments")
+		}
+		return nil
+	}
+
+	now := time.Now()
+	s := &server{sessions: map[string]session{
+		"active": {Created: now, LastSeen: now, MustChange: true},
+		"other":  {Created: now, LastSeen: now},
+	}}
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/password", bytes.NewBufferString(`{"current_password":"old-secret","new_password":"new-secret"}`))
+	req.Header.Set("Authorization", "Bearer active")
+	rr := httptest.NewRecorder()
+	s.providerChangePassword(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("password change returned %d: %s", rr.Code, rr.Body.String())
+	}
+	if len(s.sessions) != 0 {
+		t.Fatal("sessions were not invalidated after password change")
 	}
 }
 
