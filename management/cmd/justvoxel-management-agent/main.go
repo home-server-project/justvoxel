@@ -195,9 +195,11 @@ func serve(socket string) error {
 
 	s := &server{webUID: uint32(uid64), sessions: make(map[string]session)}
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /v1/auth/login", s.login)
+	mux.HandleFunc("POST /v1/auth/login", s.providerLogin)
 	mux.HandleFunc("POST /v1/auth/logout", s.logout)
-	mux.HandleFunc("POST /v1/auth/password", s.changePassword)
+	mux.HandleFunc("POST /v1/auth/password", s.providerChangePassword)
+	mux.HandleFunc("GET /v1/auth", s.authStatus)
+	mux.HandleFunc("POST /v1/auth/mode", s.changeAuthMode)
 	mux.HandleFunc("GET /v1/info", s.info)
 	mux.HandleFunc("GET /v1/status", s.status)
 	registerMinecraftRoutes(mux, s)
