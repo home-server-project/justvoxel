@@ -82,9 +82,13 @@ For the complete interface and command reference, see [`docs/MJUST.md`](docs/MJU
 
 JustVoxel WebUI is intended for administration from a trusted local network. By default, Web management uses plain HTTP on TCP port `8099`, allowing direct access from the appliance LAN address without a self-signed certificate warning.
 
+The default administrator is `voxel`. In the recommended/default **System account** authentication mode, the same real Linux `voxel` password is used by the WebUI, local console, and SSH password login when SSH password authentication is enabled. Authentication is performed through the AlmaLinux/RHEL PAM stack by the privileged JustVoxel Management Agent; the unprivileged WebUI does not keep a synchronized copy of that password.
+
+An optional **Separate WebUI password** mode is available for administrators who intentionally want browser authentication to differ from the Linux/SSH password.
+
 Because the default local WebUI does not use TLS, administrator credentials and sessions should only be used on a network you trust. Do not forward TCP port `8099` directly to the public Internet.
 
-For the local-access and security model, see [`docs/WEBUI.md`](docs/WEBUI.md).
+For the local-access, authentication, and security model, see [`docs/WEBUI.md`](docs/WEBUI.md).
 
 ## Storage, backups, and recovery
 
@@ -97,7 +101,7 @@ Storage operations are guarded with device validation and exact typed confirmati
 See:
 
 - [`docs/STORAGE.md`](docs/STORAGE.md) for storage and migration
-- [`docs/RESTORE.md`](docs/RESTORE.md) for world and full-data recovery
+- [`docs/RESTORE.md`](docs/RESTORE.md) for world and full Minecraft-data recovery
 
 ## Updates
 
