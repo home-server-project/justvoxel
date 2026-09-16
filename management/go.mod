@@ -1,6 +1,6 @@
 module github.com/home-server-project/justvoxel/management
 
-go 1.25
+go 1.25.0
 
 require (
 	github.com/msteinert/pam/v2 v2.1.0
