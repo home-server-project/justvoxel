@@ -12,6 +12,7 @@ import_files=(
 )
 import_text="$(cat "${import_files[@]}")"
 exporter="${repo_root}/mjust/libexec/migration-export"
+recovery="${repo_root}/mjust/libexec/migration-recover"
 transport_files=(
     "${repo_root}/mjust/libexec/migration-transport.sh"
     "${repo_root}/mjust/libexec/migration-transport-device.sh"
@@ -21,6 +22,7 @@ transport_files=(
 transport_text="$(cat "${transport_files[@]}")"
 common="${repo_root}/mjust/libexec/common.sh"
 migration_common="${repo_root}/mjust/libexec/migration-common.sh"
+validate="${repo_root}/mjust/libexec/validate"
 template="${repo_root}/templates/config/minecraft.env.in"
 menu="${repo_root}/mjust/libexec/menu"
 justfile="${repo_root}/mjust/justfile"
@@ -43,7 +45,8 @@ for text in \
     '/usr/libexec/justvoxel/mjust/validate' \
     'JUSTVOXEL_REGENERATE_RCON=1' \
     'online-mode=false' \
-    'MINECRAFT_VERSION_MODE=pinned'; do
+    'MINECRAFT_VERSION_MODE=pinned' \
+    'mjust migration-recover'; do
     grep -Fq "${text}" <<< "${import_text}" || fail "import workflow invariant missing: ${text}"
 done
 for text in '.partial' 'verify-native' 'flock -n' 'jv_player_check_before_interrupt' 'sync -f' 'mv -- "${partial}"'; do
@@ -62,11 +65,25 @@ done
 grep -Fq 'GAME_MODE="${GAME_MODE:-survival}"' "${common}" || fail 'backward-compatible game-mode default missing'
 grep -Fq 'WHITELIST_ENABLED="${WHITELIST_ENABLED:-yes}"' "${common}" || fail 'backward-compatible whitelist default missing'
 grep -Fq 'JUSTVOXEL_REGENERATE_RCON' "${common}" || fail 'RCON regeneration support missing'
+
+grep -Fq 'critical-rollback|rolled-back' "${recovery}" || fail 'migration recovery must limit automatic finalization to completed rollback states'
+grep -Fq '/usr/libexec/justvoxel/mjust/restore-runtime-validate' "${recovery}" || fail 'migration recovery must validate the restored Minecraft runtime'
+grep -Fq 'FINALIZE ROLLBACK' "${recovery}" || fail 'migration recovery destructive confirmation missing'
+grep -Fq 'rm -rf -- "${transaction}"' "${recovery}" || fail 'migration recovery finalization cleanup missing'
+
+grep -Fq "warn '/dev/zram0 is not available" "${validate}" || fail 'missing advisory zram-disabled validation path'
+grep -Fq "warn 'zram0 is not active as swap" "${validate}" || fail 'missing advisory zram-inactive validation path'
+if grep -Fq "fail '/dev/zram0 is not available" "${validate}"; then fail 'zram absence must not be a fatal appliance validation failure'; fi
+if grep -Fq "fail 'zram0 is not active as swap" "${validate}"; then fail 'zram inactivity must not be a fatal appliance validation failure'; fi
+
 grep -Fq 'Migration' "${menu}" || fail 'Migration TUI missing'
 grep -Fq 'Import existing Minecraft server' "${menu}" || fail 'fresh-appliance import entry missing'
+grep -Fq 'Recover / finalize interrupted import' "${menu}" || fail 'migration recovery entry missing from TUI'
 grep -Fq 'mjust export' "${menu}" || fail 'export command not discoverable in TUI'
 grep -Fq 'mjust import' "${menu}" || fail 'import command not discoverable in TUI'
+grep -Fq 'mjust migration-recover' "${menu}" || fail 'migration recovery command not discoverable in TUI'
 grep -Fq 'export destination=""' "${justfile}" || fail 'mjust export recipe missing'
 grep -Fq 'import source=""' "${justfile}" || fail 'mjust import recipe missing'
+grep -Fq 'migration-recover transaction=""' "${justfile}" || fail 'mjust migration-recover recipe missing'
 
 echo 'migration workflow invariant tests passed.'
