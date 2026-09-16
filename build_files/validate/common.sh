@@ -11,9 +11,15 @@ done
 
 rpm -q \
     NetworkManager NetworkManager-tui systemd-resolved firewalld openssh-server sudo \
+    pam authselect authselect-libs libpwquality \
     podman skopeo just fzf gum container-selinux policycoreutils-python-utils selinux-policy-extra \
     util-linux xfsprogs parted iperf3 nfs-utils cifs-utils qemu-guest-agent open-vm-tools \
     hyperv-daemons gssproxy zram-generator >/dev/null
+
+test -f /etc/pam.d/justvoxel
+grep -Fqx 'auth       include      system-auth' /etc/pam.d/justvoxel
+grep -Fqx 'account    include      system-auth' /etc/pam.d/justvoxel
+grep -Fqx 'password   include      system-auth' /etc/pam.d/justvoxel
 
 test -x /usr/lib/systemd/system-generators/zram-generator
 test -f /etc/systemd/zram-generator.conf
@@ -62,7 +68,7 @@ test -x /usr/libexec/justvoxel/motd
 bash -n /usr/libexec/justvoxel/motd
 grep -Fq 'Welcome to JustVoxel' /usr/libexec/justvoxel/motd
 grep -Fq 'IPv4:' /usr/libexec/justvoxel/motd
-grep -Fq 'Web management:' /usr/libexec/justvoxel/motd
+grep -Fq 'Web interface:' /usr/libexec/justvoxel/motd
 grep -Fq 'mjust setup-advanced' /usr/libexec/justvoxel/motd
 
 test -f /usr/lib/justvoxel/variant

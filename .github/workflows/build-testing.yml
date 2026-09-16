@@ -41,6 +41,13 @@ jobs:
           check-latest: true
           cache: false
 
+      - name: Install PAM source-test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y libpam0g-dev libpwquality-dev
+
       - name: Run shell and mjust regression tests
         shell: bash
         run: |
@@ -60,15 +67,15 @@ jobs:
             bash "${test_script}"
           done
 
-      - name: Build and test management agent
+      - name: Build and test management agent source
         shell: bash
         run: |
           set -euo pipefail
           cd management
           go mod download
-          go vet ./...
-          go test ./...
-          CGO_ENABLED=0 go build -trimpath -o /tmp/management-agent ./cmd/justvoxel-management-agent
+          CGO_ENABLED=1 go vet ./...
+          CGO_ENABLED=1 go test ./...
+          CGO_ENABLED=1 go build -trimpath -o /tmp/management-agent ./cmd/justvoxel-management-agent
           /tmp/management-agent version
 
   resolve-webui:
@@ -119,13 +126,6 @@ jobs:
         with:
           ref: testing
 
-      - name: Set up Go
-        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6
-        with:
-          go-version: '1.25.x'
-          check-latest: true
-          cache: false
-
       - name: Install build dependencies
         shell: bash
         run: |
@@ -147,15 +147,25 @@ jobs:
           set -euo pipefail
           ./build_files/resolve-webui-release.sh fetch "${WEBUI_VERSION}" build_artifacts/webui
 
-      - name: Build management agent
+      - name: Build management agent on AlmaLinux 10
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p build_artifacts/management
-          cd management
-          go mod download
-          go test ./...
-          CGO_ENABLED=0 go build -trimpath -o ../build_artifacts/management/management-agent ./cmd/justvoxel-management-agent
+          sudo podman run --rm \
+            --security-opt=label=disable \
+            -v "${PWD}/management:/src:ro" \
+            -v "${PWD}/build_artifacts/management:/out" \
+            -w /src \
+            "${ALMA_REPOS_IMAGE}" \
+            /bin/bash -c '
+              set -euo pipefail
+              dnf install -y gcc golang pam-devel libpwquality-devel
+              go mod download
+              CGO_ENABLED=1 go test ./...
+              CGO_ENABLED=1 go build -trimpath -o /out/management-agent ./cmd/justvoxel-management-agent
+            '
+          sudo chmod 0755 build_artifacts/management/management-agent
 
       - name: Resolve Alma build inputs
         id: inputs
