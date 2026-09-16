@@ -12,7 +12,7 @@ type administratorAuthResult struct {
 	PasswordChangeRequired bool
 }
 
-type administratorPasswordPolicy struct {
+type passwordPolicyView struct {
 	MinLength int
 }
 
@@ -76,10 +76,10 @@ func changeAdministratorPassword(mode authMode, currentPassword, newPassword str
 	}
 }
 
-func administratorPasswordPolicy() (administratorPasswordPolicy, error) {
+func administratorPasswordPolicy() (passwordPolicyView, error) {
 	policy, err := systemPasswordPolicy()
 	if err != nil {
-		return administratorPasswordPolicy{}, err
+		return passwordPolicyView{}, err
 	}
-	return administratorPasswordPolicy{MinLength: policy.MinLength}, nil
+	return passwordPolicyView{MinLength: policy.MinLength}, nil
 }
