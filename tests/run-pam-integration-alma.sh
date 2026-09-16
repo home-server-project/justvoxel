@@ -11,7 +11,7 @@ fi
     exit 1
 }
 
-authselect select minimal --force >/dev/null
+authselect select local --force >/dev/null
 
 cd /work
 
