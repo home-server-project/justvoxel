@@ -134,6 +134,13 @@ func bootstrap() (string, bool, error) {
 }
 
 func resetPassword() (string, error) {
+	mode, err := currentAuthMode()
+	if err != nil {
+		return "", err
+	}
+	if mode != authModeSeparate {
+		return "", errors.New("System account mode uses the Linux voxel password; use passwd voxel")
+	}
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return "", err
 	}
@@ -141,11 +148,7 @@ func resetPassword() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	cred, err := credentialForPassword(password, true)
-	if err != nil {
-		return "", err
-	}
-	if err := writeCredential(cred); err != nil {
+	if err := writeLocalAdministrator(password); err != nil {
 		return "", err
 	}
 	return password, nil
