@@ -46,6 +46,8 @@ JustVoxel does not impose its own uppercase/lowercase/digit/symbol formula or a 
 
 The Management Agent reads the host's current libpwquality/PAM policy and the WebUI displays the effective minimum length. PAM remains authoritative when the password is actually changed.
 
+The privileged Management Agent intentionally uses systemd `ProtectSystem=true` rather than `full` or `strict`. System-account password changes are handled by PAM/pam_unix, which must create lock and temporary files and atomically update `/etc/shadow`. Making `/etc` read-only prevents that normal password-update transaction. The other management-service hardening controls remain enabled.
+
 ## Optional Separate WebUI password
 
 An administrator can deliberately switch to **Separate WebUI password** mode from WebUI Authentication settings.
