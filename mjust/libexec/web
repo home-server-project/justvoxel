@@ -4,6 +4,7 @@ set -euo pipefail
 readonly state_dir=/var/lib/justvoxel/webui
 readonly initialized_marker=${state_dir}/initialized
 readonly enabled_marker=${state_dir}/enabled
+readonly auth_mode_file=${state_dir}/auth-mode.json
 readonly agent=/usr/libexec/justvoxel/management-agent
 readonly web_service=justvoxel-webui.service
 readonly agent_service=justvoxel-management.service
@@ -14,6 +15,14 @@ require_root() {
     if [[ ${EUID} -ne 0 ]]; then
         echo 'ERROR: this operation must run as root.' >&2
         exit 1
+    fi
+}
+
+current_auth_mode() {
+    if [[ -r ${auth_mode_file} ]]; then
+        jq -r '.mode // "system"' "${auth_mode_file}"
+    else
+        printf 'system\n'
     fi
 }
 
@@ -103,6 +112,7 @@ status_web() {
     printf '  WebUI version:  %s\n' "${version}"
     printf '  Source commit:  %s\n' "${source}"
     printf '  Management API: %s\n' "${api}"
+    printf '  Authentication: %s\n' "$(current_auth_mode)"
 }
 
 bootstrap_first_boot() {
@@ -110,6 +120,30 @@ bootstrap_first_boot() {
         exit 0
     fi
     enable_web
+}
+
+reset_web_password() {
+    local mode password
+    mode="$(current_auth_mode)"
+    case "${mode}" in
+        system)
+            echo 'Resetting the JustVoxel system administrator password for voxel.'
+            passwd voxel
+            systemctl try-restart "${agent_service}" >/dev/null 2>&1 || true
+            echo 'Administrator password changed. Existing WebUI sessions were invalidated.'
+            ;;
+        separate)
+            password="$(${agent} password-reset)"
+            systemctl try-restart "${agent_service}" >/dev/null 2>&1 || true
+            echo 'Separate WebUI administrator password reset.'
+            echo '  Username: voxel'
+            printf '  Password: %s\n' "${password}"
+            ;;
+        *)
+            echo "ERROR: unsupported authentication mode: ${mode}" >&2
+            exit 1
+            ;;
+    esac
 }
 
 require_root
@@ -128,12 +162,7 @@ case "${1:-status}" in
         echo 'Web management disabled.'
         ;;
     password-reset)
-        password="$(${agent} password-reset)"
-        systemctl try-restart "${agent_service}" >/dev/null 2>&1 || true
-        echo 'Web administrator password reset.'
-        echo '  Username: admin'
-        printf '  Password: %s\n' "${password}"
-        echo 'You will be required to change this password after sign-in.'
+        reset_web_password
         ;;
     bootstrap)
         bootstrap_first_boot
