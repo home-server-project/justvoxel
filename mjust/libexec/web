@@ -54,9 +54,8 @@ wait_for_web_healthy() {
 }
 
 enable_web() {
-    local password=""
     install -d -m0700 "${state_dir}"
-    password="$(${agent} bootstrap)"
+    "${agent}" bootstrap >/dev/null
     systemctl enable --now "${agent_service}" >/dev/null
     if ! systemctl enable --now "${web_service}" >/dev/null; then
         systemctl disable --now "${agent_service}" >/dev/null 2>&1 || true
@@ -74,9 +73,6 @@ enable_web() {
     firewall_open
     touch "${enabled_marker}" "${initialized_marker}"
     chmod 0600 "${enabled_marker}" "${initialized_marker}"
-    if [[ -n ${password} ]]; then
-        printf '%s\n' "${password}"
-    fi
 }
 
 disable_web() {
@@ -110,20 +106,10 @@ status_web() {
 }
 
 bootstrap_first_boot() {
-    local password
     if [[ -e ${initialized_marker} ]]; then
         exit 0
     fi
-    password="$(enable_web)"
-    if [[ -n ${password} ]]; then
-        {
-            printf '\nJustVoxel WebUI initial administrator\n'
-            printf '  Username: admin\n'
-            printf '  Password: %s\n' "${password}"
-            printf '  Address:  http://%s:%s\n' "$(primary_ipv4)" "${port}"
-            printf '  You will be required to change this password after sign-in.\n\n'
-        } > /dev/console
-    fi
+    enable_web
 }
 
 require_root
@@ -132,15 +118,10 @@ case "${1:-status}" in
         status_web
         ;;
     enable)
-        password="$(enable_web)"
+        enable_web
         echo 'Web management enabled.'
         echo "Address: http://$(primary_ipv4):${port}"
-        if [[ -n ${password} ]]; then
-            echo 'Initial administrator credential:'
-            echo '  Username: admin'
-            printf '  Password: %s\n' "${password}"
-            echo 'You will be required to change this password after sign-in.'
-        fi
+        echo 'Administrator: voxel (system account)'
         ;;
     disable)
         disable_web
