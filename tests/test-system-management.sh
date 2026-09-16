@@ -19,11 +19,17 @@ firmware="${repo_root}/mjust/libexec/firmware"
 menu="${repo_root}/mjust/libexec/menu"
 justfile="${repo_root}/mjust/justfile"
 service="${repo_root}/mjust/libexec/service"
+management_unit="${repo_root}/system_files/usr/lib/systemd/system/justvoxel-management.service"
 
 grep -Fq 'bootc upgrade --check' "${os_update}" || fail 'os-update must check first'
 grep -Eq '^[[:space:]]*bootc upgrade[[:space:]]*$' "${os_update}" || fail 'os-update must stage with ordinary bootc upgrade'
 if grep -Eq -- '--download-only|--apply' "${os_update}"; then fail 'os-update must not use download-only/apply'; fi
 grep -Fq 'does not reboot the appliance' "${os_update}" || fail 'os-update must state non-disruptive behavior'
+
+grep -Fq 'ProtectSystem=true' "${management_unit}" || fail 'management service must keep /etc writable for PAM system password changes'
+if grep -Eq '^ProtectSystem=(full|strict)$' "${management_unit}"; then
+    fail 'management service must not make /etc read-only while PAM system password changes are supported'
+fi
 
 grep -Fq 'jv_player_check_before_interrupt' "${service}" || fail 'Minecraft service control does not share interruption safety'
 grep -Fq 'systemctl reboot' "${power}" || fail 'reboot action missing'
