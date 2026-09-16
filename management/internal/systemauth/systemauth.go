@@ -33,6 +33,9 @@ type PasswordPolicy struct {
 	MinLength int
 }
 
+// Authenticate verifies a local system account through the JustVoxel PAM
+// service. The caller decides which system usernames are allowed to administer
+// the appliance; this package deliberately does not broaden that policy.
 func Authenticate(username, password string) (AuthResult, error) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -66,6 +69,11 @@ func Authenticate(username, password string) (AuthResult, error) {
 	return AuthResult{}, nil
 }
 
+// ChangePassword changes the real local system password through the JustVoxel
+// PAM service. Authentication and password-policy enforcement remain owned by
+// the AlmaLinux/RHEL PAM stack; plaintext passwords are provided only through
+// PAM's in-process conversation callback and are never placed in command-line
+// arguments, environment variables, files, or logs.
 func ChangePassword(username, currentPassword, newPassword string) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -108,6 +116,10 @@ func ChangePassword(username, currentPassword, newPassword string) error {
 	return nil
 }
 
+// passwordChangeResponse maps standard Linux-PAM password prompts without
+// making the WebUI responsible for PAM conversation details. Explicit old-token
+// prompts receive the current password; explicit and unknown change prompts
+// receive the proposed new password because authentication already succeeded.
 func passwordChangeResponse(message string, promptIndex int, currentPassword, newPassword string) string {
 	prompt := strings.ToLower(strings.TrimSpace(message))
 	switch {
@@ -125,6 +137,9 @@ func passwordChangeResponse(message string, promptIndex int, currentPassword, ne
 	}
 }
 
+// Policy returns the effective libpwquality settings from the host. This is
+// intentionally read from AlmaLinux/RHEL configuration rather than duplicated
+// as a JustVoxel-specific password policy.
 func Policy() (PasswordPolicy, error) {
 	settings, err := loadPWQualitySettings()
 	if err != nil {
@@ -139,6 +154,10 @@ func Policy() (PasswordPolicy, error) {
 	return PasswordPolicy{MinLength: int(minLength)}, nil
 }
 
+// ValidatePassword checks a proposed password against the host's current
+// libpwquality configuration. PAM remains authoritative for actually changing
+// the system password; this check lets the WebUI explain the same host policy
+// without inventing its own composition rules.
 func ValidatePassword(username, oldPassword, newPassword string) error {
 	settings, err := loadPWQualitySettings()
 	if err != nil {
