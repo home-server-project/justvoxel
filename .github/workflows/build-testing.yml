@@ -159,7 +159,7 @@ jobs:
             "${ALMA_REPOS_IMAGE}" \
             /bin/bash -c '
               set -euo pipefail
-              dnf install -y gcc golang pam-devel libpwquality-devel
+              dnf install -y gcc golang pam-devel libpwquality-devel diffutils
               mkdir -p /work
               cp -a /src/. /work/
               cd /work
