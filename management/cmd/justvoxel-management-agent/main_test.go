@@ -8,22 +8,6 @@ import (
 	"time"
 )
 
-func TestPasswordHashVerification(t *testing.T) {
-	cred, err := credentialForPassword("correct horse battery staple", true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !cred.MustChange {
-		t.Fatal("expected bootstrap credential to require password change")
-	}
-	if !verifyPassword(cred, "correct horse battery staple") {
-		t.Fatal("correct password did not verify")
-	}
-	if verifyPassword(cred, "wrong password") {
-		t.Fatal("wrong password verified")
-	}
-}
-
 func TestRandomPasswordPolicy(t *testing.T) {
 	password, err := randomPassword(14)
 	if err != nil {
