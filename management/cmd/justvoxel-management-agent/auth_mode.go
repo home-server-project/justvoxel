@@ -12,7 +12,7 @@ func (s *server) authStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "invalid session")
 		return
 	}
-	mode, err := currentAuthMode()
+	mode, err := readAuthMode()
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "authentication mode unavailable")
 		return
@@ -23,8 +23,8 @@ func (s *server) authStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"mode":                mode,
-		"username":            systemAdminUsername,
+		"mode":                 mode,
+		"username":             systemAdminUsername,
 		"minimum_password_len": policy.MinLength,
 	})
 }
@@ -40,10 +40,10 @@ func (s *server) changeAuthMode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var request struct {
-		Mode              authMode `json:"mode"`
-		SystemPassword    string   `json:"system_password"`
-		NewWebPassword    string   `json:"new_web_password"`
-		ConfirmWebPassword string  `json:"confirm_web_password"`
+		Mode               authMode `json:"mode"`
+		SystemPassword     string   `json:"system_password"`
+		NewWebPassword     string   `json:"new_web_password"`
+		ConfirmWebPassword string   `json:"confirm_web_password"`
 	}
 	if !decodeJSON(w, r, &request) {
 		return
@@ -53,7 +53,7 @@ func (s *server) changeAuthMode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	current, err := currentAuthMode()
+	current, err := readAuthMode()
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "authentication mode unavailable")
 		return
@@ -82,17 +82,16 @@ func (s *server) changeAuthMode(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if err := writeLocalAdministrator(request.NewWebPassword); err != nil {
+		if err := writeSeparateAdmin(request.NewWebPassword); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to create separate WebUI credential")
 			return
 		}
 	case authModeSystem:
 		// The system credential was already verified above. The local WebUI
-		// credential may remain stored for future reuse, but while System mode
-		// is active it is never consulted for authentication.
+		// credential may remain stored, but System mode never consults it.
 	}
 
-	if err := setAuthMode(request.Mode); err != nil {
+	if err := writeAuthMode(request.Mode); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update authentication mode")
 		return
 	}
