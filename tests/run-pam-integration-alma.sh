@@ -6,9 +6,12 @@ if [[ ${EUID} -ne 0 ]]; then
     exit 1
 fi
 
-cd /work
+[[ -r /etc/pam.d/justvoxel ]] || {
+    echo 'ERROR: /etc/pam.d/justvoxel was not mounted into the AlmaLinux test environment.' >&2
+    exit 1
+}
 
-install -m0644 /src/system_files/etc/pam.d/justvoxel /etc/pam.d/justvoxel
+cd /work
 
 readonly test_user=jv-pam-test
 readonly old_password='JustVoxel-PAM-Old-2026!'
