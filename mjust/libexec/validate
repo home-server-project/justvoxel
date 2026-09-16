@@ -5,7 +5,9 @@ require_root
 require_config
 
 failures=0
+warnings=0
 pass() { echo "OK: $*"; }
+warn() { echo "WARN: $*" >&2; warnings=$((warnings + 1)); }
 fail() { echo "FAIL: $*" >&2; failures=$((failures + 1)); }
 
 check_file() {
@@ -37,31 +39,36 @@ else
     echo "${failed_units}" >&2
 fi
 
+# JustVoxel ships zram-generator's default min(RAM/2, 4096 MiB) policy, but
+# administrators may intentionally disable or tune zram. Treat drift from the
+# appliance default as advisory rather than an appliance-health failure.
 mem_kib="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
 expected_zram_bytes=$((mem_kib * 1024 / 2))
 zram_cap_bytes=$((4096 * 1024 * 1024))
 if (( expected_zram_bytes > zram_cap_bytes )); then
     expected_zram_bytes=${zram_cap_bytes}
 fi
+zram_tolerance_bytes=$((expected_zram_bytes / 100))
+(( zram_tolerance_bytes < 1024 * 1024 )) && zram_tolerance_bytes=$((1024 * 1024))
 
 if [[ -r /sys/block/zram0/disksize ]]; then
     actual_zram_bytes="$(cat /sys/block/zram0/disksize)"
     delta=$((actual_zram_bytes - expected_zram_bytes))
     (( delta < 0 )) && delta=$((-delta))
-    if (( delta <= 4096 )); then
-        pass "zram0 size follows min(RAM/2, 4096 MiB): $((actual_zram_bytes / 1024 / 1024)) MiB"
+    if (( delta <= zram_tolerance_bytes )); then
+        pass "zram0 size follows the default min(RAM/2, 4096 MiB) policy closely: $((actual_zram_bytes / 1024 / 1024)) MiB"
     else
-        fail "zram0 size is ${actual_zram_bytes} bytes; expected approximately ${expected_zram_bytes} bytes"
+        warn "zram0 size is ${actual_zram_bytes} bytes; JustVoxel default is approximately ${expected_zram_bytes} bytes"
     fi
 else
-    fail '/dev/zram0 is not available after boot'
+    warn '/dev/zram0 is not available; the JustVoxel default zram policy is disabled or unavailable'
 fi
 
 active_swaps="$(swapon --show=NAME --noheadings 2>/dev/null | awk '{$1=$1; print}' || true)"
 if grep -Fxq '/dev/zram0' <<< "${active_swaps}"; then
     pass 'zram0 is active as swap'
 else
-    fail 'zram0 is not active as swap'
+    warn 'zram0 is not active as swap; this is allowed when the administrator intentionally changes swap policy'
 fi
 
 extra_swaps="$(grep -Fvx '/dev/zram0' <<< "${active_swaps}" | sed '/^$/d' || true)"
@@ -221,4 +228,8 @@ if (( failures > 0 )); then
 fi
 
 echo
-echo 'JustVoxel validation passed.'
+if (( warnings > 0 )); then
+    echo "JustVoxel validation passed with ${warnings} warning(s)."
+else
+    echo 'JustVoxel validation passed.'
+fi
