@@ -83,6 +83,10 @@ test -f /usr/lib/systemd/system/justvoxel-management.service
 test -f /usr/lib/systemd/system/justvoxel-webui.service
 test -f /usr/lib/systemd/system/justvoxel-web-bootstrap.service
 test -f /usr/lib/firewalld/services/justvoxel-web.xml
+grep -Fqx 'User=justvoxel-web' /usr/lib/systemd/system/justvoxel-webui.service
+grep -Fqx 'User=root' /usr/lib/systemd/system/justvoxel-management.service
+grep -Fqx 'NoNewPrivileges=yes' /usr/lib/systemd/system/justvoxel-webui.service
+sudo -u justvoxel-web test ! -r /etc/shadow
 grep -Fq -- '--listen 0.0.0.0:8099' /usr/lib/systemd/system/justvoxel-webui.service
 grep -Fq 'port="8099"' /usr/lib/firewalld/services/justvoxel-web.xml
 if grep -Fq 'LoadCredential=' /usr/lib/systemd/system/justvoxel-webui.service; then
