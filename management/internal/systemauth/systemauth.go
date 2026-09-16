@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"strings"
 	"unsafe"
 
 	pam "github.com/msteinert/pam/v2"
@@ -21,6 +22,7 @@ const pamService = "justvoxel"
 var (
 	ErrInvalidCredentials = errors.New("invalid system credentials")
 	ErrAccountUnavailable = errors.New("system account unavailable")
+	ErrPasswordChange     = errors.New("system password change failed")
 )
 
 type AuthResult struct {
@@ -65,6 +67,71 @@ func Authenticate(username, password string) (AuthResult, error) {
 		return AuthResult{}, fmt.Errorf("%w: %v", ErrAccountUnavailable, err)
 	}
 	return AuthResult{}, nil
+}
+
+// ChangePassword changes the real local system password through the JustVoxel
+// PAM service. Authentication and password-policy enforcement remain owned by
+// the AlmaLinux/RHEL PAM stack; plaintext passwords are provided only through
+// PAM's in-process conversation callback and are never placed in command-line
+// arguments, environment variables, files, or logs.
+func ChangePassword(username, currentPassword, newPassword string) error {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	changing := false
+	changePrompt := 0
+	tx, err := pam.StartFunc(pamService, username, func(style pam.Style, message string) (string, error) {
+		switch style {
+		case pam.PromptEchoOn:
+			return username, nil
+		case pam.PromptEchoOff:
+			if !changing {
+				return currentPassword, nil
+			}
+			response := passwordChangeResponse(message, changePrompt, currentPassword, newPassword)
+			changePrompt++
+			return response, nil
+		case pam.ErrorMsg, pam.TextInfo:
+			return "", nil
+		default:
+			return "", pam.ErrConv
+		}
+	})
+	if err != nil {
+		return fmt.Errorf("%w: start PAM transaction: %v", ErrPasswordChange, err)
+	}
+	defer func() { _ = tx.End() }()
+
+	if err := tx.Authenticate(pam.DisallowNullAuthtok); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidCredentials, err)
+	}
+	if err := tx.AcctMgmt(pam.DisallowNullAuthtok); err != nil && !errors.Is(err, pam.ErrNewAuthtokReqd) {
+		return fmt.Errorf("%w: %v", ErrAccountUnavailable, err)
+	}
+
+	changing = true
+	if err := tx.ChangeAuthTok(0); err != nil {
+		return fmt.Errorf("%w: %v", ErrPasswordChange, err)
+	}
+	return nil
+}
+
+// passwordChangeResponse maps the standard Linux-PAM password prompts without
+// making the WebUI responsible for PAM conversation details. The fallback
+// order handles modules that provide minimal or empty prompt text: old token,
+// new token, confirmation of the new token.
+func passwordChangeResponse(message string, promptIndex int, currentPassword, newPassword string) string {
+	prompt := strings.ToLower(strings.TrimSpace(message))
+	switch {
+	case strings.Contains(prompt, "current"), strings.Contains(prompt, "old"):
+		return currentPassword
+	case strings.Contains(prompt, "new"), strings.Contains(prompt, "retype"), strings.Contains(prompt, "again"):
+		return newPassword
+	}
+	if promptIndex == 0 {
+		return currentPassword
+	}
+	return newPassword
 }
 
 // Policy returns the effective libpwquality settings from the host. This is
