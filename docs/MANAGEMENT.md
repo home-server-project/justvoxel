@@ -133,9 +133,35 @@ The WebUI should call the same management capabilities rather than create a seco
 
 ## Web management architecture
 
-The browser-facing WebUI is intentionally unprivileged. It communicates with the local JustVoxel Management API over a Unix socket.
+The browser-facing WebUI is intentionally unprivileged. It communicates with the privileged JustVoxel Management Agent over a local Unix socket. The WebUI process does not read `/etc/shadow` and does not call PAM directly.
 
-The current Management API is versioned as `v1`. Authentication and session handling live behind the local management service. The WebUI can be enabled, disabled, inspected, and have its administrator password reset through:
+The Management API is versioned as `v1`. Its default authentication provider is the AlmaLinux/RHEL system account. The administrator identity is `voxel`.
+
+In default **System account** mode, the trust path is:
+
+```text
+Browser
+  |
+Unprivileged JustVoxel WebUI
+  |
+Unix socket
+  |
+Privileged JustVoxel Management Agent
+  |
+PAM / authselect-managed AlmaLinux system stack
+  |
+local voxel account
+```
+
+The Management Agent authenticates the submitted credential once through PAM, detects an expired password through PAM account management, and then issues the normal JustVoxel WebUI session token. Normal WebUI requests use the session token rather than repeatedly transmitting the system password.
+
+System password changes are performed through PAM and change the real Linux `voxel` credential. A successful password change invalidates active WebUI sessions.
+
+The optional **Separate WebUI password** provider uses a WebUI-local Argon2 credential for the `voxel` browser identity. It is a separate provider, not password synchronization. Switching providers requires confirmation with the real system password and invalidates all WebUI sessions.
+
+Persistent WebUI authentication state is stored under `/var/lib/justvoxel/webui`. A missing authentication-mode state means System account mode, which keeps ordinary bootc updates/rebases safe for already-configured machines.
+
+Web management can be enabled, disabled, inspected, and recovered through:
 
 ```text
 mjust web status
@@ -143,6 +169,8 @@ mjust web enable
 mjust web disable
 mjust web password-reset
 ```
+
+`mjust web password-reset` is provider-aware: System account mode uses the normal Linux `voxel` password recovery path; Separate mode resets only the local WebUI credential.
 
 The default WebUI is intended for trusted local-network administration. See [WEBUI.md](WEBUI.md) for the current access and security model.
 
