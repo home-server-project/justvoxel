@@ -127,27 +127,10 @@ func bootstrap() (string, bool, error) {
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return "", false, err
 	}
-	created := false
-	password := ""
-	if _, err := os.Stat(authPath); errors.Is(err, os.ErrNotExist) {
-		password, err = randomPassword(14)
-		if err != nil {
-			return "", false, err
-		}
-		cred, err := credentialForPassword(password, true)
-		if err != nil {
-			return "", false, err
-		}
-		if err := writeCredential(cred); err != nil {
-			return "", false, err
-		}
-		created = true
-	} else if err != nil {
+	if _, err := currentAuthMode(); err != nil {
 		return "", false, err
-	} else if _, err := readCredential(); err != nil {
-		return "", false, fmt.Errorf("existing credential is invalid: %w", err)
 	}
-	return password, created, nil
+	return "", false, nil
 }
 
 func resetPassword() (string, error) {
