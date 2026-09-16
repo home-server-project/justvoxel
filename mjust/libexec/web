@@ -19,6 +19,7 @@ require_root() {
 
 firewall_open() {
     firewall-cmd --quiet --permanent --add-service="${firewall_service}"
+    firewall-cmd --quiet --permanent --add-service=mdns
     firewall-cmd --quiet --reload
 }
 
