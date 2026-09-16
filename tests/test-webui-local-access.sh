@@ -9,6 +9,8 @@ motd=runtime/justvoxel-motd
 unit=system_files/usr/lib/systemd/system/justvoxel-webui.service
 firewall=system_files/usr/lib/firewalld/services/justvoxel-web.xml
 agent=management/cmd/justvoxel-management-agent/main.go
+resolved=system_files/etc/systemd/resolved.conf.d/90-justvoxel-mdns.conf
+networkmanager=system_files/etc/NetworkManager/conf.d/90-systemd-resolved.conf
 readme=README.md
 doc=docs/WEBUI.md
 
@@ -19,7 +21,25 @@ grep -Fq 'wait_for_web_healthy()' "${web_script}"
 grep -Fq 'for attempt in {1..10}; do' "${web_script}"
 grep -Fq 'sleep 0.5' "${web_script}"
 grep -Fq 'if ! wait_for_web_healthy; then' "${web_script}"
-grep -Fq 'http://${ipv4}:8099' "${motd}"
+grep -Fq 'firewall-cmd --quiet --permanent --add-service=mdns' "${web_script}"
+grep -Fq 'MulticastDNS=yes' "${resolved}"
+grep -Fq 'dns=systemd-resolved' "${networkmanager}"
+grep -Fq 'connection.mdns=2' "${networkmanager}"
+
+grep -Fq "web_state='Starting...'" "${motd}"
+grep -Fq "web_state='Ready'" "${motd}"
+grep -Fq "web_state='Unavailable'" "${motd}"
+grep -Fq "web_state='Disabled'" "${motd}"
+grep -Fq 'web_initialized_marker=/var/lib/justvoxel/webui/initialized' "${motd}"
+grep -Fq 'systemctl is-failed --quiet justvoxel-web-bootstrap.service' "${motd}"
+grep -Fq 'web_browser="http://${host}.local:8099"' "${motd}"
+grep -Fq 'web_direct="http://${ipv4}:8099"' "${motd}"
+grep -Fq "printf '  Web interface:   %s" "${motd}"
+grep -Fq "printf '  Open in browser: %s" "${motd}"
+grep -Fq "printf '  Direct address:  %s" "${motd}"
+grep -Fq "printf '  Enable with:" "${motd}"
+grep -Fq "printf '  Check status:" "${motd}"
+
 grep -Fq -- '--listen 0.0.0.0:8099' "${unit}"
 grep -Fq 'port="8099"' "${firewall}"
 grep -Fq 'Local HTTP management interface' "${firewall}"
@@ -41,4 +61,4 @@ grep -Fq 'plain HTTP on TCP port `8099`' "${doc}"
 grep -Fq 'Do not forward TCP port `8099` directly to the public Internet.' "${doc}"
 grep -Fq 'plain HTTP on TCP port `8099`' "${readme}"
 
-echo 'JustVoxel local WebUI HTTP policy checks passed.'
+echo 'JustVoxel local WebUI HTTP and mDNS discovery policy checks passed.'
