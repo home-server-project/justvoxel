@@ -1,13 +1,17 @@
 #!/usr/bin/bash
 
+jv_player_list_raw() {
+    podman exec minecraft rcon-cli 'list' 2>/dev/null
+}
+
 jv_player_check_before_interrupt() {
-    local action="${1:-interrupt the server}" players
+    local action="${1:-interrupt the server}" players mode
 
     if ! systemctl is-active --quiet minecraft.service 2>/dev/null; then
         return 0
     fi
 
-    players="$(podman exec minecraft rcon-cli 'list' 2>/dev/null || true)"
+    players="$(jv_player_list_raw 2>/dev/null || true)"
     if [[ -z ${players} ]]; then
         echo 'ERROR: could not confirm player status through RCON. Refusing to interrupt Minecraft.' >&2
         return 1
@@ -18,7 +22,22 @@ jv_player_check_before_interrupt() {
         return 0
     fi
 
-    confirm "Players appear to be online. ${action} anyway?"
+    mode="${JV_INTERRUPT_CONFIRMATION_MODE:-interactive}"
+    case "${mode}" in
+        interactive)
+            confirm "Players appear to be online. ${action} anyway?"
+            ;;
+        required)
+            return 10
+            ;;
+        confirmed)
+            return 0
+            ;;
+        *)
+            echo "ERROR: invalid interruption confirmation mode: ${mode}" >&2
+            return 2
+            ;;
+    esac
 }
 
 jv_stop_minecraft_for_system_action() {

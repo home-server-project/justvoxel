@@ -200,6 +200,7 @@ func serve(socket string) error {
 	mux.HandleFunc("POST /v1/auth/password", s.changePassword)
 	mux.HandleFunc("GET /v1/info", s.info)
 	mux.HandleFunc("GET /v1/status", s.status)
+	registerMinecraftRoutes(mux, s)
 
 	httpServer := &http.Server{
 		Handler:           s.requirePeer(mux),
