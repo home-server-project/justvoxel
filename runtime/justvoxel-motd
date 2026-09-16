@@ -33,17 +33,34 @@ else
     needs_setup=yes
 fi
 
-web_management='Disabled'
-if [[ -e /var/lib/justvoxel/webui/enabled ]]; then
-    if systemctl is-active --quiet justvoxel-webui.service && \
+web_state='Disabled'
+web_browser=''
+web_direct=''
+web_enabled_marker=/var/lib/justvoxel/webui/enabled
+web_initialized_marker=/var/lib/justvoxel/webui/initialized
+
+if [[ ! -e ${web_initialized_marker} ]]; then
+    if systemctl is-failed --quiet justvoxel-web-bootstrap.service 2>/dev/null; then
+        web_state='Unavailable'
+    else
+        web_state='Starting...'
+    fi
+elif [[ -e ${web_enabled_marker} ]]; then
+    if systemctl is-active --quiet justvoxel-webui.service 2>/dev/null && \
         curl -fsS --max-time 1 http://127.0.0.1:8099/healthz >/dev/null 2>&1; then
-        if [[ ${ipv4} == 'Not assigned' ]]; then
-            web_management='Enabled - address pending'
+        web_state='Ready'
+        if [[ ${host} != unknown ]]; then
+            web_browser="http://${host}.local:8099"
         else
-            web_management="http://${ipv4}:8099"
+            web_browser='Waiting for hostname'
+        fi
+        if [[ ${ipv4} == 'Not assigned' ]]; then
+            web_direct='Waiting for network address'
+        else
+            web_direct="http://${ipv4}:8099"
         fi
     else
-        web_management='Enabled - service unavailable'
+        web_state='Unavailable'
     fi
 fi
 
@@ -63,8 +80,21 @@ printf '  System:          %s\n' "${pretty_name}"
 printf '  Variant:         %s\n' "${variant}"
 printf '  Host:            %s\n' "${host}"
 printf '  IPv4:            %s\n' "${ipv4}"
-printf '  Minecraft:       %s\n' "${minecraft_state}"
-printf '  Web management:  %s\n\n' "${web_management}"
+printf '  Minecraft:       %s\n\n' "${minecraft_state}"
+printf '  Web interface:   %s\n' "${web_state}"
+case "${web_state}" in
+    Ready)
+        printf '  Open in browser: %s\n' "${web_browser}"
+        printf '  Direct address:  %s\n' "${web_direct}"
+        ;;
+    Disabled)
+        printf '  Enable with:     %smjust web enable%s\n' "${green}" "${reset}"
+        ;;
+    Unavailable)
+        printf '  Check status:    %smjust web status%s\n' "${green}" "${reset}"
+        ;;
+esac
+printf '\n'
 
 if [[ ${needs_setup} == yes ]]; then
     printf '  Normal setup:      %smjust setup%s\n' "${green}" "${reset}"
