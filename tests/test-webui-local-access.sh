@@ -40,6 +40,14 @@ grep -Fq "printf '  Direct address:  %s" "${motd}"
 grep -Fq "printf '  Enable with:" "${motd}"
 grep -Fq "printf '  Check status:" "${motd}"
 
+health_line="$(grep -n -F 'if systemctl is-active --quiet justvoxel-webui.service' "${motd}" | head -n1 | cut -d: -f1)"
+marker_line="$(grep -n -F 'elif [[ ! -e ${web_initialized_marker} ]]; then' "${motd}" | head -n1 | cut -d: -f1)"
+[[ -n ${health_line} && -n ${marker_line} ]]
+if (( health_line >= marker_line )); then
+    echo 'ERROR: MOTD must prefer live WebUI health before bootstrap marker timing.' >&2
+    exit 1
+fi
+
 grep -Fq -- '--listen 0.0.0.0:8099' "${unit}"
 grep -Fq 'port="8099"' "${firewall}"
 grep -Fq 'Local HTTP management interface' "${firewall}"
