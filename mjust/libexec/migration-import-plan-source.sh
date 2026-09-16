@@ -45,7 +45,8 @@ stale="$(find "${data_parent}" -maxdepth 1 -type d -name '.justvoxel-import-*' -
 if [[ -n ${stale} ]]; then
     echo 'ERROR: an earlier JustVoxel import transaction still exists.' >&2
     echo "Recovery state: ${stale}" >&2
-    echo 'Review that state before starting another import.' >&2
+    echo 'Use the guided recovery flow before starting another import:' >&2
+    echo '  mjust migration-recover' >&2
     exit 1
 fi
 jv_migration_require_staging_space "${data_parent}" "${expanded_bytes}"
