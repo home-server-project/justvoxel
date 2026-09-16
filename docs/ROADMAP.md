@@ -33,6 +33,36 @@ Current work includes:
 
 Existing capabilities such as scheduled backups, manual backups, restore, storage provisioning and migration, Minecraft updates, bootc OS update staging, status, validation, resources, reboot, poweroff, and firmware handling are implemented features rather than future roadmap items.
 
+## Near-term: one administrator identity by default
+
+JustVoxel should avoid making a home user manage unrelated system and WebUI administrator passwords by default.
+
+The preferred default is one JustVoxel administrator account, normally `voxel`, with the local AlmaLinux account as the authoritative administrator identity. WebUI authentication should use the supported RHEL/AlmaLinux PAM path through the privileged management agent rather than reading `/etc/shadow` directly or maintaining a second synchronized password copy.
+
+The browser-facing WebUI must remain unprivileged. PAM interaction, password changes, session invalidation, and other privileged authentication work belong behind the existing management-agent boundary.
+
+First-boot behavior should be simple: the bootstrap administrator credential is replaced once, and the resulting system credential is the same credential used for local console access, WebUI administration, and SSH password authentication when SSH password login is enabled.
+
+Password policy should follow the normal supported AlmaLinux/RHEL stack rather than introducing a custom JustVoxel password-complexity framework or manually rewriting authselect-managed PAM files. JustVoxel should accept the platform's practical minimum requirement and explain that stronger passwords are recommended without forcing unnecessary application-specific composition rules.
+
+A later optional authentication mode may allow the WebUI administrator password to be separate from the system account. That should be implemented as an explicit alternate authentication provider, not by copying or synchronizing passwords between databases. Future Operator or Viewer accounts should remain WebUI-only identities and should not automatically become Linux users.
+
+## Near-term: player-aware maintenance shutdowns
+
+Maintenance actions should not make an empty Minecraft server wait through a player warning timer, but active players should receive clear in-game notice before interruption.
+
+A shared player-aware maintenance path should be used by operations that can stop Minecraft, including restart, Minecraft update, appliance reboot or poweroff, restore, migration, and other maintenance workflows where applicable.
+
+Desired behavior:
+
+- if Minecraft is already stopped, continue without a warning delay
+- if zero players are online, perform the normal clean stop immediately or after only a very short safety delay
+- if players are online, show visible in-game maintenance warnings at useful intervals such as 60, 30, 10, and 5 seconds before the clean stop
+- if player state cannot be determined reliably, fail closed rather than assuming the server is empty
+- avoid duplicated delays between JustVoxel's player-aware logic and the underlying Minecraft container shutdown mechanism
+
+The goal is to make reboot, shutdown, update, and restart fast when the home server is unused while still giving players enough time to finish what they are doing when the server is active.
+
 ## Next: existing-server import and portable export
 
 The highest-priority new capability after stabilization is safe migration into and out of JustVoxel.
@@ -79,6 +109,16 @@ Initial notification targets should stay simple, such as Discord and a generic w
 Event history should complement notifications by keeping short appliance-relevant records such as repeated Minecraft restarts, the last failure time, whether automatic recovery succeeded, and concise diagnostic context.
 
 Systemd should remain the normal service-recovery mechanism rather than adding a second custom watchdog solely for Minecraft restarts.
+
+## Later: local documentation in CLI and WebUI
+
+JustVoxel documentation should remain available on the appliance even when the Internet is unavailable.
+
+The repository Markdown documentation should remain the single source of truth and continue to ship with the matching JustVoxel system image. A future `mjust docs` experience should make the local documentation easy to browse or search from the terminal.
+
+The WebUI should provide a Help or Documentation area that renders those same bundled Markdown documents as a readable local documentation site with normal navigation, headings, links, tables, notes, and warnings rather than exposing raw Markdown text.
+
+Documentation should follow the installed bootc generation so an operating-system update brings the matching documentation and an operating-system rollback returns to the matching documentation. A separate PDF documentation set is not required unless a later use case justifies one.
 
 ## Later: operator access
 
