@@ -13,7 +13,8 @@ RuntimeDirectoryMode=0750
 ExecStart=/usr/libexec/justvoxel/management-agent serve /run/justvoxel/management.sock
 Restart=on-failure
 RestartSec=2s
-NoNewPrivileges=yes
+# Fixed Podman-backed helpers require the SELinux transition into container_runtime_t.
+NoNewPrivileges=no
 ProtectSystem=true
 ProtectHome=yes
 PrivateTmp=yes

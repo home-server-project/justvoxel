@@ -44,6 +44,27 @@ func TestPlayersRequiresAuthentication(t *testing.T) {
 	}
 }
 
+func TestPlayersUsesAllowlistedHelperAndReturnsJSON(t *testing.T) {
+	s := adminServerForTest()
+	oldRunner := runWebHelper
+	runWebHelper = func(_ context.Context, args ...string) ([]byte, int, error) {
+		if len(args) != 1 || args[0] != "players" {
+			t.Fatalf("unexpected helper args: %#v", args)
+		}
+		return []byte(`{"configured":true,"state":"running","online":0,"max":10,"names":[]}`), 0, nil
+	}
+	defer func() { runWebHelper = oldRunner }()
+
+	rr := httptest.NewRecorder()
+	s.players(rr, authorizedRequest(http.MethodGet, "http://unix/v1/players", ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"online":0`) || !strings.Contains(rr.Body.String(), `"names":[]`) {
+		t.Fatalf("unexpected player response: %s", rr.Body.String())
+	}
+}
+
 func TestMinecraftStartUsesAllowlistedAction(t *testing.T) {
 	s := adminServerForTest()
 	oldRunner := runWebHelper
@@ -90,7 +111,7 @@ func TestMinecraftConfirmedRestartUsesOnlyConfirmationFlag(t *testing.T) {
 		if len(args) != 2 || args[0] != "restart" || args[1] != "--confirm-players" {
 			t.Fatalf("unexpected helper args: %#v", args)
 		}
-		return []byte(`{"ok":true,"action":"restart","message":"Minecraft restarted."}`), 0, nil
+		return []byte(`{"ok":true,"action":"restart","message":"Minecraft restart requested."}`), 0, nil
 	}
 	defer func() { runWebHelper = oldRunner }()
 
