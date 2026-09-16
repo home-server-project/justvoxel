@@ -41,6 +41,17 @@ web_healthy() {
         curl -fsS --max-time 2 "http://127.0.0.1:${port}/healthz" >/dev/null
 }
 
+wait_for_web_healthy() {
+    local attempt
+    for attempt in {1..10}; do
+        sleep 0.5
+        if web_healthy; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 enable_web() {
     local password=""
     install -d -m0700 "${state_dir}"
@@ -52,7 +63,7 @@ enable_web() {
         rm -f "${enabled_marker}"
         return 1
     fi
-    if ! web_healthy; then
+    if ! wait_for_web_healthy; then
         systemctl disable --now "${web_service}" "${agent_service}" >/dev/null 2>&1 || true
         firewall_close
         rm -f "${enabled_marker}"
