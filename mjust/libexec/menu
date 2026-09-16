@@ -131,11 +131,16 @@ Export one portable JustVoxel server migration bundle or import an existing
 JustVoxel/Paper server. Migration preserves the complete persistent Minecraft
 server data while recreating destination-specific machine configuration safely.
 
+If an interrupted import leaves protected recovery state, use the guided
+recovery flow to validate the restored server and finalize that rollback before
+starting another import.
+
 Backup/Restore remains separate from Migration.
 
 Commands:
   mjust export
   mjust import
+  mjust migration-recover
 TEXT
             ;;
         storage)
@@ -200,6 +205,8 @@ Validation
 
 Run the full JustVoxel deployment validation: configuration, storage identity,
 SELinux, firewall, zram, systemd state, RCON, Minecraft and Bedrock support.
+Zram policy differences are advisory so administrator swap choices do not make
+an otherwise healthy appliance fail validation.
 
 Command:
   mjust validate
@@ -252,6 +259,7 @@ Use a direct command instead, for example:
   mjust restore-full
   mjust export
   mjust import
+  mjust migration-recover
   mjust storage
   mjust update-minecraft
   mjust os-status
@@ -349,10 +357,11 @@ backup_menu() {
 migration_menu() {
     local choice
     while true; do
-        choice="$(jui_choose 'Migration' 'Export server' 'Import server' 'Back')" || return 0
+        choice="$(jui_choose 'Migration' 'Export server' 'Import server' 'Recover / finalize interrupted import' 'Back')" || return 0
         case "${choice}" in
             'Export server') run_and_pause /usr/bin/mjust export || true ;;
             'Import server') run_and_pause /usr/bin/mjust import || true ;;
+            'Recover / finalize interrupted import') run_and_pause /usr/bin/mjust migration-recover || true ;;
             'Back') return 0 ;;
         esac
     done
