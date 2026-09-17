@@ -36,6 +36,9 @@ jobs:
             management/cmd/justvoxel-management-agent/admin_setup_plan_test.go)"
           if [[ -n "${unformatted}" ]]; then
             printf 'A4.4.5 Go files require gofmt:\n%s\n' "${unformatted}" >&2
+            gofmt -d \
+              management/cmd/justvoxel-management-agent/admin_setup_plan.go \
+              management/cmd/justvoxel-management-agent/admin_setup_plan_test.go >&2
             exit 1
           fi
           for script in \
