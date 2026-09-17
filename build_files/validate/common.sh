@@ -66,7 +66,7 @@ test -f /etc/profile.d/90-justvoxel-motd.sh
 bash -n /etc/profile.d/90-justvoxel-motd.sh
 test -x /usr/libexec/justvoxel/motd
 bash -n /usr/libexec/justvoxel/motd
-grep -Fq 'Welcome to JustVoxel' /usr/libexec/justvoxel/motd
+grep -Fq 'Minecraft Server Appliance' /usr/libexec/justvoxel/motd
 grep -Fq 'IPv4:' /usr/libexec/justvoxel/motd
 grep -Fq 'Web interface:' /usr/libexec/justvoxel/motd
 grep -Fq 'mjust setup-advanced' /usr/libexec/justvoxel/motd
