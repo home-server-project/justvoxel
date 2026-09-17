@@ -24,16 +24,21 @@ fail() {
 [[ $(jv_status_overall Running 0 unknown healthy healthy healthy) == 'Unknown' ]] || fail 'unknown system state should remain Unknown'
 
 status="${repo_root}/mjust/libexec/status"
-grep -Fq "echo 'System'" "${status}" || fail 'status System section missing'
-grep -Fq "echo 'Minecraft'" "${status}" || fail 'status Minecraft section missing'
-grep -Fq "echo 'Network'" "${status}" || fail 'status Network section missing'
-grep -Fq "echo 'Storage'" "${status}" || fail 'status Storage section missing'
-grep -Fq "echo 'Backups'" "${status}" || fail 'status Backups section missing'
-grep -Fq "echo 'Container'" "${status}" || fail 'status Container section missing'
-grep -Fq 'systemctl --failed --type=service' "${status}" || fail 'status must summarize failed system services'
-grep -Fq 'Same-filesystem backups help with world/configuration recovery, not physical disk failure.' "${status}" || fail 'same-filesystem backup warning missing'
-grep -Fq 'mjust status --details' "${status}" || fail 'status must direct overflow failed-service detail to --details'
-grep -Fq "echo 'Failed service detail'" "${status}" || fail 'detailed failed-service view missing'
-grep -Fq "echo 'Network detail'" "${status}" || fail 'detailed network view missing'
+for section in System Minecraft Network Storage Backups Container; do
+    grep -Fq "section '${section}'" "${status}" || fail "status ${section} section missing"
+done
+
+grep -Fq 'df -Pk -- "$1"' "${status}" || fail 'portable filesystem usage query missing'
+if grep -Fq 'df -Pk --output=' "${status}"; then
+    fail 'invalid GNU df -P/--output combination returned'
+fi
+
+grep -Fq 'justvoxel-vm' "${status}" || fail 'JustVoxel VM variant normalization missing'
+grep -Fq 'justvoxel-baremetal' "${status}" || fail 'JustVoxel Bare Metal variant normalization missing'
+grep -Fq 'c_good=' "${status}" || fail 'healthy status color missing'
+grep -Fq 'c_warn=' "${status}" || fail 'warning status color missing'
+grep -Fq 'c_bad=' "${status}" || fail 'failure status color missing'
+grep -Fq "section 'Advanced details'" "${status}" || fail 'advanced status detail section missing'
+grep -Fq 'systemctl --failed --type=service' "${status}" || fail 'failed service details missing'
 
 echo 'status dashboard regression tests passed.'
