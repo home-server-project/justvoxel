@@ -12,6 +12,26 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Diagnose setup planner syntax
+        shell: bash
+        run: |
+          set -u
+          if ! bash -n mjust/libexec/admin-setup-plan-json; then
+            echo '--- shellcheck ---'
+            if command -v shellcheck >/dev/null 2>&1; then
+              shellcheck -s bash -x mjust/libexec/admin-setup-plan-json || true
+            fi
+            echo '--- lines containing single quotes ---'
+            python3 - <<'PY'
+          from pathlib import Path
+          p = Path('mjust/libexec/admin-setup-plan-json')
+          for n, line in enumerate(p.read_text().splitlines(), 1):
+              count = line.count("'")
+              if count:
+                  print(f"{n:4d} [{count}] {line}")
+          PY
+            exit 1
+          fi
       - name: Validate shell syntax
         shell: bash
         run: |
