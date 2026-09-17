@@ -210,16 +210,16 @@ type adminSetupFingerprintBackups struct {
 }
 
 type adminSetupFingerprintNormalized struct {
-	Server    adminSetupPlanServer            `json:"server"`
-	Minecraft adminSetupFingerprintMinecraft  `json:"minecraft"`
-	Storage   adminSetupFingerprintStorage    `json:"storage"`
-	Backups   adminSetupFingerprintBackups    `json:"backups"`
+	Server    adminSetupPlanServer           `json:"server"`
+	Minecraft adminSetupFingerprintMinecraft `json:"minecraft"`
+	Storage   adminSetupFingerprintStorage   `json:"storage"`
+	Backups   adminSetupFingerprintBackups   `json:"backups"`
 }
 
 type adminSetupFingerprintPayload struct {
-	SchemaVersion string                     `json:"schema_version"`
+	SchemaVersion string                          `json:"schema_version"`
 	Normalized    adminSetupFingerprintNormalized `json:"normalized"`
-	Requirements  adminSetupPlanRequirements `json:"requirements"`
+	Requirements  adminSetupPlanRequirements      `json:"requirements"`
 }
 
 func registerAdminSetupPlanRoutes(mux *http.ServeMux, s *server) {
