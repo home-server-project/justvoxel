@@ -7,232 +7,22 @@ configured=no
 
 preview() {
     case "${1:-}" in
-        setup)
-            cat <<'TEXT'
-First setup
-
-Configure Minecraft, memory, ports, Bedrock cross-play, storage and backups.
-Normal setup chooses safe defaults and keeps Linux-specific detail out of the way.
-
-Command:
-  mjust setup
-TEXT
-            ;;
-        import)
-            cat <<'TEXT'
-Import existing Minecraft server
-
-Migrate an existing JustVoxel, Paper or itzg/minecraft-server Paper server into
-this appliance. Import accepts a directory, tar/tar.gz archive, ZIP export,
-attached storage, USB, configured backup storage, or temporary NFS/SMB share.
-
-Fresh imports still require explicit Minecraft EULA acceptance.
-
-Command:
-  mjust import
-TEXT
-            ;;
-        setup-advanced)
-            cat <<'TEXT'
-Advanced setup
-
-Use the same first-setup flow with advanced controls such as custom numeric
-Minecraft data UID/GID values and raw systemd backup schedules.
-
-Command:
-  mjust setup-advanced
-TEXT
-            ;;
-        status)
-            cat <<'TEXT'
-Status
-
-Show the friendly JustVoxel appliance health dashboard: system services,
-Minecraft, players, network, storage, backups and container state.
-
-Read-only. Detailed administrator output remains available with:
-  mjust status --details
-TEXT
-            ;;
-        players)
-            cat <<'TEXT'
-Players
-
-Show the current Minecraft player list through the server's internal RCON
-connection. RCON is not exposed as a host network port.
-
-Command:
-  mjust players
-TEXT
-            ;;
-        configure)
-            cat <<'TEXT'
-Configure Minecraft
-
-Change supported Minecraft settings after first setup. Maximum players has its
-own guided screen; other settings remain available through the safe configure
-flow. Configuration changes never force an automatic disruptive restart.
-
-Commands:
-  mjust configure-max-players
-  mjust configure
-TEXT
-            ;;
-        whitelist)
-            cat <<'TEXT'
-Whitelist
-
-Manage Java Edition and Bedrock/Xbox players.
-
-Java: use the Minecraft Java username, for example PlayerOne.
-Bedrock: use the Xbox/Bedrock gamertag, for example BedrockBuddy.
-Do not manually type the Floodgate prefix; Floodgate may internally show
-BedrockBuddy as .BedrockBuddy.
-TEXT
-            ;;
-        service)
-            cat <<'TEXT'
-Start / Stop / Restart
-
-Control Minecraft service state. Stop and restart check player state first and
-fail closed if JustVoxel cannot confirm whether players are online.
-
-Commands:
-  mjust start
-  mjust stop
-  mjust restart
-TEXT
-            ;;
-        backups)
-            cat <<'TEXT'
-Backups
-
-Create a verified cold backup or restore Minecraft data from an existing
-JustVoxel backup.
-
-Restore world rolls back the primary world and normal world-based player data
-while keeping current plugins and server/JustVoxel configuration.
-
-Restore full Minecraft data replaces the complete persistent Minecraft data
-directory, including plugins and Minecraft-side configuration. The current data
-is kept as a pre-restore safety copy until the restored server validates.
-
-Commands:
-  mjust backup
-  mjust restore
-  mjust restore-full
-TEXT
-            ;;
-        migration)
-            cat <<'TEXT'
-Migration
-
-Export one portable JustVoxel server migration bundle or import an existing
-JustVoxel/Paper server. Migration preserves the complete persistent Minecraft
-server data while recreating destination-specific machine configuration safely.
-
-If an interrupted import leaves protected recovery state, use the guided
-recovery flow to validate the restored server and finalize that rollback before
-starting another import.
-
-Backup/Restore remains separate from Migration.
-
-Commands:
-  mjust export
-  mjust import
-  mjust migration-recover
-TEXT
-            ;;
-        storage)
-            cat <<'TEXT'
-Storage
-
-Manage backup storage and guarded Minecraft data migration. Every storage path
-is also available as a direct mjust command. Destructive disk operations keep
-exact typed confirmations such as ERASE /dev/...
-
-Commands include:
-  mjust storage-disk
-  mjust storage-partition
-  mjust storage-free-space
-  mjust storage-network
-  mjust storage-system
-  mjust storage-migrate
-  mjust storage-plan
-TEXT
-            ;;
-        update)
-            cat <<'TEXT'
-Update Minecraft
-
-Check both the configured Minecraft container image and the Minecraft/Paper
-game-version policy. A newer stable Paper-supported version is shown clearly
-and can be re-pinned only after explicit approval.
-
-Before changing a running server, JustVoxel checks players, creates a verified
-cold backup, applies the selected maintenance and verifies the running server.
-
-Command:
-  mjust update-minecraft
-TEXT
-            ;;
-        system)
-            cat <<'TEXT'
-System
-
-Manage the JustVoxel OS, live system resources and appliance power safely.
-OS update checks/downloads do not stop Minecraft, create a backup, or reboot.
-A normal reboot later uses any bootc deployment that is already staged.
-
-System resources opens btop for a live view of CPU, memory/swap, disks,
-network activity and processes. Press q to return to JustVoxel. Esc opens the
-btop menu, and Ctrl-C also exits the monitor.
-
-Commands:
-  mjust os-status
-  mjust os-update
-  mjust resources
-  mjust reboot
-  mjust poweroff
-  mjust firmware
-
-Firmware/UEFI reboot is shown in the menu only on Bare Metal.
-TEXT
-            ;;
-        validate)
-            cat <<'TEXT'
-Validation
-
-Run the full JustVoxel deployment validation: configuration, storage identity,
-SELinux, firewall, zram, systemd state, RCON, Minecraft and Bedrock support.
-Zram policy differences are advisory so administrator swap choices do not make
-an otherwise healthy appliance fail validation.
-
-Command:
-  mjust validate
-TEXT
-            ;;
-        logs)
-            cat <<'TEXT'
-Logs
-
-Follow the Minecraft systemd journal for troubleshooting.
-Press q or Esc to return to the JustVoxel menu. Ctrl-C also exits the viewer.
-
-Command:
-  mjust logs
-TEXT
-            ;;
-        advanced)
-            cat <<'TEXT'
-Advanced
-
-Administrator-oriented tools: detailed status, storage-plan view, login welcome
-controls, the complete mjust command list, and guarded Start over/reset.
-
-Start over preserves Minecraft world data and existing backup archives.
-TEXT
-            ;;
+        setup) echo -e 'First setup\n\nConfigure Minecraft, memory, ports, Bedrock cross-play, storage and backups.' ;;
+        import) echo -e 'Import existing Minecraft server\n\nImport an existing JustVoxel, Paper or compatible server.' ;;
+        setup-advanced) echo -e 'Advanced setup\n\nFirst setup with additional administrator controls.' ;;
+        status) echo -e 'Status\n\nFriendly JustVoxel health dashboard. Advanced details are available separately.' ;;
+        players) echo -e 'Players\n\nShow the current Minecraft player list.' ;;
+        configure) echo -e 'Configure Minecraft\n\nChange supported Minecraft settings through guided menus.' ;;
+        whitelist) echo -e 'Whitelist\n\nAdd or remove Java Edition and Bedrock/Xbox players.' ;;
+        service) echo -e 'Start / Stop / Restart\n\nControl Minecraft safely.' ;;
+        backups) echo -e 'Backups\n\nCreate, restore and configure Minecraft backups.' ;;
+        migration) echo -e 'Migration\n\nExport, import or recover a server migration.' ;;
+        storage) echo -e 'Storage\n\nView storage and move Minecraft data. Device provisioning is under Advanced.' ;;
+        update) echo -e 'Update Minecraft\n\nCheck Minecraft/Paper and container image updates.' ;;
+        system) echo -e 'System\n\nView OS status and updates, resources, reboot and power controls.' ;;
+        validate) echo -e 'Validation\n\nRun the complete JustVoxel deployment validation.' ;;
+        logs) echo -e 'Logs\n\nReadable Minecraft logs or the full systemd journal.' ;;
+        advanced) echo -e 'Advanced\n\nDetailed status, storage device provisioning, welcome controls and reset tools.' ;;
         exit) echo 'Exit the JustVoxel menu.' ;;
         *) echo 'Unknown menu item.' ;;
     esac
@@ -252,22 +42,14 @@ Use a direct command instead, for example:
   mjust status
   mjust players
   mjust configure
-  mjust configure-max-players
   mjust whitelist-list
   mjust backup
   mjust restore
-  mjust restore-full
   mjust export
   mjust import
-  mjust migration-recover
-  mjust storage
   mjust update-minecraft
   mjust os-status
   mjust os-update
-  mjust resources
-  mjust reboot
-  mjust poweroff
-  mjust validate
   mjust logs
   mjust --list
 
@@ -300,42 +82,52 @@ service_menu() {
 
 configure_menu() {
     local choice
-    choice="$(jui_choose 'Configure Minecraft' 'Maximum players' 'Other safe Minecraft settings' 'Back')" || return 0
-    case "${choice}" in
-        'Maximum players') run_and_pause /usr/bin/mjust configure-max-players || true ;;
-        'Other safe Minecraft settings') run_and_pause /usr/bin/mjust configure || true ;;
+    while true; do
+        choice="$(jui_choose 'Configure Minecraft' 'Maximum players' 'Other safe Minecraft settings' 'Back')" || return 0
+        case "${choice}" in
+            'Maximum players') run_and_pause /usr/bin/mjust configure-max-players || true ;;
+            'Other safe Minecraft settings') run_and_pause /usr/bin/mjust configure || true ;;
+            'Back') return 0 ;;
+        esac
+    done
+}
+
+bedrock_enabled() {
+    sudo /usr/libexec/justvoxel/mjust/whitelist bedrock-enabled >/dev/null 2>&1
+}
+
+whitelist_player_type() {
+    local operation="$1" type name
+    type="$(jui_choose "$([[ ${operation} == add ]] && printf 'Add player' || printf 'Remove player')" 'Java Edition' 'Bedrock / Xbox' 'Back')" || return 0
+    case "${type}" in
+        'Java Edition')
+            name="$(jui_input 'Java username')" || return 0
+            [[ -n ${name} ]] || return 0
+            run_and_pause /usr/bin/mjust "whitelist-${operation}-java" "${name}" || true
+            ;;
+        'Bedrock / Xbox')
+            if ! bedrock_enabled; then
+                echo 'Bedrock cross-play is disabled.'
+                echo 'Enable it from Configure Minecraft -> Other safe Minecraft settings first.'
+                jui_pause
+                return 0
+            fi
+            name="$(jui_input 'Bedrock / Xbox gamertag')" || return 0
+            [[ -n ${name} ]] || return 0
+            run_and_pause /usr/bin/mjust "whitelist-${operation}-bedrock" "${name}" || true
+            ;;
         *) return 0 ;;
     esac
 }
 
 whitelist_menu() {
-    local choice name
+    local choice
     while true; do
-        choice="$(jui_choose 'Whitelist' 'Show whitelist' 'Add Java player' 'Remove Java player' 'Add Bedrock / Xbox player' 'Remove Bedrock / Xbox player' 'Back')" || return 0
+        choice="$(jui_choose 'Whitelist' 'Show whitelist' 'Add player' 'Remove player' 'Back')" || return 0
         case "${choice}" in
             'Show whitelist') run_and_pause /usr/bin/mjust whitelist-list || true ;;
-            'Add Java player')
-                echo 'Use the Minecraft Java username. Example: PlayerOne'
-                name="$(jui_input 'Java username')" || continue
-                [[ -n ${name} ]] && run_and_pause /usr/bin/mjust whitelist-add-java "${name}" || true
-                ;;
-            'Remove Java player')
-                echo 'Use the Minecraft Java username. Example: BlockBuilder'
-                name="$(jui_input 'Java username')" || continue
-                [[ -n ${name} ]] && run_and_pause /usr/bin/mjust whitelist-remove-java "${name}" || true
-                ;;
-            'Add Bedrock / Xbox player')
-                echo 'Use the Xbox/Bedrock gamertag. Example: BedrockBuddy'
-                echo 'Do not type the Floodgate prefix; .BedrockBuddy is only an internal example.'
-                name="$(jui_input 'Bedrock / Xbox gamertag')" || continue
-                [[ -n ${name} ]] && run_and_pause /usr/bin/mjust whitelist-add-bedrock "${name}" || true
-                ;;
-            'Remove Bedrock / Xbox player')
-                echo 'Use the Xbox/Bedrock gamertag. Example: PixelPlayer'
-                echo 'Do not type the Floodgate prefix.'
-                name="$(jui_input 'Bedrock / Xbox gamertag')" || continue
-                [[ -n ${name} ]] && run_and_pause /usr/bin/mjust whitelist-remove-bedrock "${name}" || true
-                ;;
+            'Add player') whitelist_player_type add ;;
+            'Remove player') whitelist_player_type remove ;;
             'Back') return 0 ;;
         esac
     done
@@ -344,11 +136,13 @@ whitelist_menu() {
 backup_menu() {
     local choice
     while true; do
-        choice="$(jui_choose 'Backups' 'Create backup' 'Restore world' 'Restore full Minecraft data' 'Back')" || return 0
+        choice="$(jui_choose 'Backups' 'Create backup now' 'Restore world' 'Restore full Minecraft data' 'Automatic backup settings' 'Backup storage location' 'Back')" || return 0
         case "${choice}" in
-            'Create backup') run_and_pause /usr/bin/mjust backup || true ;;
+            'Create backup now') run_and_pause /usr/bin/mjust backup || true ;;
             'Restore world') run_and_pause /usr/bin/mjust restore || true ;;
             'Restore full Minecraft data') run_and_pause /usr/bin/mjust restore-full || true ;;
+            'Automatic backup settings') run_and_pause sudo /usr/libexec/justvoxel/mjust/configure backup || true ;;
+            'Backup storage location') run_and_pause sudo /usr/libexec/justvoxel/mjust/storage-provision backup || true ;;
             'Back') return 0 ;;
         esac
     done
@@ -370,17 +164,27 @@ migration_menu() {
 storage_menu() {
     local choice
     while true; do
-        choice="$(jui_choose 'Storage' 'Dedicated disk / USB backup storage' 'Existing partition / filesystem backup storage' 'Use unallocated disk space for backup storage' 'Network backup storage (NFS / SMB)' 'Directory on the system filesystem' 'Migrate Minecraft data' 'Storage plan / devices' 'Back')" || return 0
+        choice="$(jui_choose 'Storage' 'Storage overview' 'Move Minecraft data' 'Back')" || return 0
         case "${choice}" in
-            'Dedicated disk / USB backup storage') run_and_pause /usr/bin/mjust storage-disk || true ;;
-            'Existing partition / filesystem backup storage') run_and_pause /usr/bin/mjust storage-partition || true ;;
-            'Use unallocated disk space for backup storage') run_and_pause /usr/bin/mjust storage-free-space || true ;;
-            'Network backup storage (NFS / SMB)') run_and_pause /usr/bin/mjust storage-network || true ;;
-            'Directory on the system filesystem') run_and_pause /usr/bin/mjust storage-system || true ;;
-            'Migrate Minecraft data')
+            'Storage overview')
+                if [[ ${configured} == yes ]]; then run_and_pause sudo /usr/libexec/justvoxel/mjust/storage-summary || true; else echo 'Storage overview is available after first setup.'; jui_pause; fi
+                ;;
+            'Move Minecraft data')
                 if [[ ${configured} == yes ]]; then run_and_pause /usr/bin/mjust storage-migrate || true; else echo 'Minecraft data migration is available after first setup.'; jui_pause; fi
                 ;;
-            'Storage plan / devices') run_and_pause /usr/bin/mjust storage-plan || true ;;
+            'Back') return 0 ;;
+        esac
+    done
+}
+
+system_status_menu() {
+    local choice
+    while true; do
+        /usr/bin/mjust os-status || true
+        echo
+        choice="$(jui_choose 'System status & updates' 'Check for updates' 'Back')" || return 0
+        case "${choice}" in
+            'Check for updates') run_and_pause /usr/bin/mjust os-update || true ;;
             'Back') return 0 ;;
         esac
     done
@@ -388,7 +192,7 @@ storage_menu() {
 
 system_menu() {
     local variant choice
-    local -a options=('Operating system status' 'Check / download OS update' 'System resources' 'Reboot JustVoxel' 'Power off JustVoxel')
+    local -a options=('System status & updates' 'System resources' 'Reboot JustVoxel' 'Power off JustVoxel')
     variant="$(cat /usr/lib/justvoxel/variant 2>/dev/null || true)"
     [[ ${variant} == *baremetal* ]] && options+=('Firmware / UEFI setup')
     options+=('Back')
@@ -396,17 +200,23 @@ system_menu() {
     while true; do
         choice="$(jui_choose 'System' "${options[@]}")" || return 0
         case "${choice}" in
-            'Operating system status')
-                /usr/bin/mjust os-status || true
-                echo
-                if jui_confirm 'Check for OS updates now?'; then /usr/bin/mjust os-update || true; fi
-                jui_pause
-                ;;
-            'Check / download OS update') run_and_pause /usr/bin/mjust os-update || true ;;
+            'System status & updates') system_status_menu ;;
             'System resources') /usr/bin/mjust resources || true ;;
             'Reboot JustVoxel') run_and_pause /usr/bin/mjust reboot || true ;;
             'Power off JustVoxel') run_and_pause /usr/bin/mjust poweroff || true ;;
             'Firmware / UEFI setup') run_and_pause /usr/bin/mjust firmware || true ;;
+            'Back') return 0 ;;
+        esac
+    done
+}
+
+logs_menu() {
+    local choice
+    while true; do
+        choice="$(jui_choose 'Logs' 'Minecraft logs' 'Advanced / full system log' 'Back')" || return 0
+        case "${choice}" in
+            'Minecraft logs') /usr/bin/mjust logs || true ;;
+            'Advanced / full system log') sudo /usr/libexec/justvoxel/mjust/logs --advanced || true ;;
             'Back') return 0 ;;
         esac
     done
@@ -418,8 +228,24 @@ all_commands() {
     /usr/bin/mjust --list
 }
 
+advanced_storage_menu() {
+    local choice
+    while true; do
+        choice="$(jui_choose 'Storage devices / provisioning' 'Dedicated disk / USB backup storage' 'Existing partition / filesystem backup storage' 'Use unallocated disk space for backup storage' 'Network backup storage (NFS / SMB)' 'Directory on the system filesystem' 'Storage plan / devices' 'Back')" || return 0
+        case "${choice}" in
+            'Dedicated disk / USB backup storage') run_and_pause /usr/bin/mjust storage-disk || true ;;
+            'Existing partition / filesystem backup storage') run_and_pause /usr/bin/mjust storage-partition || true ;;
+            'Use unallocated disk space for backup storage') run_and_pause /usr/bin/mjust storage-free-space || true ;;
+            'Network backup storage (NFS / SMB)') run_and_pause /usr/bin/mjust storage-network || true ;;
+            'Directory on the system filesystem') run_and_pause /usr/bin/mjust storage-system || true ;;
+            'Storage plan / devices') run_and_pause /usr/bin/mjust storage-plan || true ;;
+            'Back') return 0 ;;
+        esac
+    done
+}
+
 advanced_menu() {
-    local -a options=('Detailed status' 'Storage plan / devices' 'Show login welcome' 'Hide login welcome' 'Enable login welcome' 'All mjust commands')
+    local -a options=('Detailed status' 'Storage devices / provisioning' 'Show login welcome' 'Hide login welcome' 'Enable login welcome' 'All mjust commands')
     if [[ ${configured} == yes ]]; then options+=('Start over / reset Minecraft'); else options=('Advanced first setup' "${options[@]}"); fi
     options+=('Back')
 
@@ -428,7 +254,7 @@ advanced_menu() {
     case "${choice}" in
         'Advanced first setup') run_and_pause /usr/bin/mjust setup-advanced || true ;;
         'Detailed status') run_and_pause /usr/bin/mjust status --details || true ;;
-        'Storage plan / devices') run_and_pause /usr/bin/mjust storage-plan || true ;;
+        'Storage devices / provisioning') advanced_storage_menu ;;
         'Show login welcome') run_and_pause /usr/bin/mjust welcome || true ;;
         'Hide login welcome') run_and_pause /usr/bin/mjust welcome-off || true ;;
         'Enable login welcome') run_and_pause /usr/bin/mjust welcome-on || true ;;
@@ -484,7 +310,7 @@ while true; do
         update) run_and_pause /usr/bin/mjust update-minecraft || true ;;
         system) system_menu ;;
         validate) run_and_pause /usr/bin/mjust validate || true ;;
-        logs) /usr/bin/mjust logs || true ;;
+        logs) logs_menu ;;
         advanced) advanced_menu ;;
         exit) exit 0 ;;
         *) echo 'Unknown menu selection.' >&2 ;;

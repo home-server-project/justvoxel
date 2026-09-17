@@ -4,13 +4,18 @@ source /usr/libexec/justvoxel/mjust/common.sh
 require_root
 require_config
 
-[[ $(systemctl is-active minecraft.service 2>/dev/null || true) == active ]] || {
-    echo 'ERROR: Minecraft must be running for whitelist operations.' >&2
-    exit 1
-}
-
 action="${1:-list}"
 name="${2:-}"
+
+if [[ ${action} == bedrock-enabled ]]; then
+    [[ ${BEDROCK_ENABLED} == yes ]]
+    exit $?
+fi
+
+[[ $(systemctl is-active minecraft.service 2>/dev/null || true) == active ]] || {
+    echo 'Minecraft must be running for whitelist changes.' >&2
+    exit 1
+}
 
 run_rcon() {
     podman exec minecraft rcon-cli "$1"
@@ -22,7 +27,7 @@ case "${action}" in
         ;;
     add-java|remove-java)
         [[ ${name} =~ ^[A-Za-z0-9_]{1,16}$ ]] || {
-            echo 'ERROR: Java player name must contain only letters, numbers, or underscore and be at most 16 characters.' >&2
+            echo 'Java player name must contain only letters, numbers, or underscore and be at most 16 characters.' >&2
             exit 1
         }
         if [[ ${action} == add-java ]]; then verb=add; else verb=remove; fi
@@ -30,9 +35,13 @@ case "${action}" in
         run_rcon 'whitelist list'
         ;;
     add-bedrock|remove-bedrock)
-        [[ ${BEDROCK_ENABLED} == yes ]] || { echo 'ERROR: Bedrock cross-play is disabled.' >&2; exit 1; }
+        if [[ ${BEDROCK_ENABLED} != yes ]]; then
+            echo 'Bedrock cross-play is disabled.'
+            echo 'Enable it from Configure Minecraft -> Other safe Minecraft settings, then try again.'
+            exit 0
+        fi
         [[ -n ${name} && ${name} != *$'\n'* && ${name} != *$'\r'* && ${#name} -le 64 ]] || {
-            echo 'ERROR: invalid Bedrock gamertag.' >&2
+            echo 'Invalid Bedrock/Xbox gamertag.' >&2
             exit 1
         }
         if [[ ${action} == add-bedrock ]]; then verb=add; else verb=remove; fi
@@ -40,7 +49,7 @@ case "${action}" in
         run_rcon 'whitelist list'
         ;;
     *)
-        echo 'Usage: whitelist {list|add-java|remove-java|add-bedrock|remove-bedrock} [name]' >&2
+        echo 'Usage: whitelist {list|add-java|remove-java|add-bedrock|remove-bedrock|bedrock-enabled} [name]' >&2
         exit 2
         ;;
 esac

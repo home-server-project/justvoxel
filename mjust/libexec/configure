@@ -178,6 +178,18 @@ configure_image_version() {
     echo 'Version policy updated. Minecraft was not restarted automatically.'
 }
 
+case "${1:-menu}" in
+    backup)
+        configure_backup_schedule
+        exit $?
+        ;;
+    menu|'') ;;
+    *)
+        echo 'Usage: configure [backup]' >&2
+        exit 2
+        ;;
+esac
+
 while true; do
     choice="$(jui_choose 'Safe configuration changes' \
         'Show current configuration' \
@@ -203,5 +215,4 @@ while true; do
         'Change container image or Minecraft version policy') configure_image_version || true ;;
         'Back') exit 0 ;;
     esac
-
 done
