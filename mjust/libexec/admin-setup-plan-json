@@ -179,7 +179,7 @@ validate_local_target() {
         --arg expected_source "${actual_source}" \
         --arg purpose "${purpose}" \
         --argjson device_meta "${metadata}" \
-        '{type:$type,path:$path,mount_point:$mount_point,expected_uuid:$expected_uuid,expected_source:$expected_source,purpose:$purpose} + $device_meta
+        '{type:$type,path:$path,mount_point:$mount_point,expected_uuid:$expected_uuid,expected_source:$expected_source,purpose:$purpose} + $device_meta'
 }
 
 local_target_error() {
