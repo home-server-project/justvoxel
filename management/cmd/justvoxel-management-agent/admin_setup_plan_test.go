@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -75,10 +76,57 @@ func TestAdminSetupPlanReturnsStructuredNormalizedPlan(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("plan status = %d: %s", rr.Code, rr.Body.String())
 	}
-	for _, want := range []string{`"schema_version":"v1"`, `"version_policy":"pinned"`, `"same_physical_disk"`, `"smb_password_required":false`} {
+	for _, want := range []string{`"schema_version":"v1"`, `"plan_fingerprint":"sha256:`, `"version_policy":"pinned"`, `"same_physical_disk"`, `"smb_password_required":false`} {
 		if !strings.Contains(rr.Body.String(), want) {
 			t.Fatalf("plan response missing %s: %s", want, rr.Body.String())
 		}
+	}
+	var response adminSetupPlanResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.PlanFingerprint) != len("sha256:")+64 {
+		t.Fatalf("fingerprint = %q, want sha256 plus 64 hex characters", response.PlanFingerprint)
+	}
+}
+
+func TestAdminSetupPlanFingerprintIsStableAndExecutionRelevant(t *testing.T) {
+	var response adminSetupPlanResponse
+	if err := json.Unmarshal([]byte(validAdminSetupPlanResponse), &response); err != nil {
+		t.Fatal(err)
+	}
+	first, err := adminSetupPlanFingerprint(response.SchemaVersion, response.Normalized, response.Requirements)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := adminSetupPlanFingerprint(response.SchemaVersion, response.Normalized, response.Requirements)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatalf("same normalized plan produced different fingerprints: %q != %q", first, second)
+	}
+	if !strings.HasPrefix(first, "sha256:") || len(first) != len("sha256:")+64 {
+		t.Fatalf("unexpected fingerprint format: %q", first)
+	}
+
+	response.Normalized.Minecraft.Version = "1.21.9"
+	changed, err := adminSetupPlanFingerprint(response.SchemaVersion, response.Normalized, response.Requirements)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed == first {
+		t.Fatal("resolved Minecraft version change did not change the reviewed-plan fingerprint")
+	}
+
+	response.Normalized.Minecraft.Version = "1.21.8"
+	response.Normalized.Storage.ExpectedUUID = "replacement-storage-uuid"
+	changed, err = adminSetupPlanFingerprint(response.SchemaVersion, response.Normalized, response.Requirements)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed == first {
+		t.Fatal("storage identity change did not change the reviewed-plan fingerprint")
 	}
 }
 
