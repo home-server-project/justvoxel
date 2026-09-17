@@ -7,6 +7,10 @@ require_root
 
 action="${1:-configuration}"
 
+system_memory_mib() {
+    awk '/^MemTotal:/ {printf "%d\n", $2 / 1024; exit}' /proc/meminfo 2>/dev/null || printf '0\n'
+}
+
 configuration_json() {
     if [[ ! -r ${JV_CONFIG} ]]; then
         jq -n '{configured:false,minecraft:{},backup:{}}'
@@ -107,10 +111,11 @@ storage_json() {
 }
 
 setup_defaults_json() {
-    local suggested_java suggested_container timezone
+    local suggested_java suggested_container timezone total_mib
     read -r suggested_java suggested_container < <(suggest_memory_values)
     timezone="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
     timezone="${timezone:-UTC}"
+    total_mib="$(system_memory_mib)"
     jq -n \
         --arg data_path '/var/lib/justvoxel/minecraft' \
         --arg backup_path '/var/lib/justvoxel/backups' \
@@ -125,6 +130,7 @@ setup_defaults_json() {
         --arg version_mode pinned \
         --argjson backup_keep 7 \
         --arg backup_daily_time '04:30' \
+        --argjson system_memory_mib "${total_mib:-0}" \
         '{
             data_path:$data_path,
             backup_path:$backup_path,
@@ -139,16 +145,239 @@ setup_defaults_json() {
             image_tag:$image_tag,
             version_mode:$version_mode,
             backup_keep:$backup_keep,
-            backup_daily_time:$backup_daily_time
+            backup_daily_time:$backup_daily_time,
+            system_memory_mib:$system_memory_mib,
+            system_reserve_minimum_mib:1024,
+            system_reserve_recommended_mib:2048
         }'
+}
+
+configuration_change_json() {
+    local mode="$1" request
+    request="$(cat)"
+    if ! jq -e 'type == "object"' >/dev/null 2>&1 <<< "${request}"; then
+        jq -n '{ok:false,error:"Invalid configuration request."}'
+        return 0
+    fi
+    if [[ ! -r ${JV_CONFIG} ]]; then
+        jq -n '{ok:false,error:"Minecraft is not configured yet. Complete first setup before changing server settings."}'
+        return 0
+    fi
+
+    require_config
+
+    local old_java_port="${JAVA_PORT}" old_bedrock_enabled="${BEDROCK_ENABLED}" old_bedrock_port="${BEDROCK_PORT}"
+    local old_java_memory="${JAVA_MEMORY}" old_container_memory="${CONTAINER_MEMORY}" old_timezone="${TIMEZONE}"
+    local old_max_players="${MAX_PLAYERS}" old_motd="${MOTD}" old_image_tag="${MINECRAFT_IMAGE_TAG}"
+    local old_version_mode="${MINECRAFT_VERSION_MODE}" old_version="${MINECRAFT_VERSION}"
+    local old_backup_keep="${BACKUP_KEEP}" old_backup_schedule="${BACKUP_SCHEDULE}" old_backup_timer_enabled="${BACKUP_TIMER_ENABLED}"
+
+    local new_java_memory new_container_memory new_java_port new_bedrock_enabled_json new_bedrock_enabled new_bedrock_port
+    local new_timezone new_max_players new_motd new_image_tag new_version_policy new_version
+    local new_backup_keep new_backup_schedule new_backup_timer_enabled_json new_backup_timer_enabled
+
+    new_java_memory="$(jq -r '.java_memory // ""' <<< "${request}")"
+    new_container_memory="$(jq -r '.container_memory // ""' <<< "${request}")"
+    new_java_port="$(jq -r '.java_port // 0' <<< "${request}")"
+    new_bedrock_enabled_json="$(jq -r '.bedrock_enabled // false' <<< "${request}")"
+    new_bedrock_port="$(jq -r '.bedrock_port // 0' <<< "${request}")"
+    new_timezone="$(jq -r '.timezone // ""' <<< "${request}")"
+    new_max_players="$(jq -r '.max_players // 0' <<< "${request}")"
+    new_motd="$(jq -r '.motd // ""' <<< "${request}")"
+    new_image_tag="$(jq -r '.image_tag // ""' <<< "${request}")"
+    new_version_policy="$(jq -r '.version_policy // ""' <<< "${request}")"
+    new_version="$(jq -r '.version // ""' <<< "${request}")"
+    new_backup_keep="$(jq -r '.backup_keep // 0' <<< "${request}")"
+    new_backup_schedule="$(jq -r '.backup_schedule // ""' <<< "${request}")"
+    new_backup_timer_enabled_json="$(jq -r '.backup_timer_enabled // false' <<< "${request}")"
+
+    if [[ ${new_bedrock_enabled_json} == true ]]; then new_bedrock_enabled=yes; else new_bedrock_enabled=no; fi
+    if [[ ${new_backup_timer_enabled_json} == true ]]; then new_backup_timer_enabled=yes; else new_backup_timer_enabled=no; fi
+
+    if ! validate_memory "${new_java_memory}" || ! validate_memory "${new_container_memory}"; then
+        jq -n '{ok:false,error:"Memory values must use a size such as 4G or 4096M."}'
+        return 0
+    fi
+    if (( $(memory_to_mib "${new_container_memory}") <= $(memory_to_mib "${new_java_memory}") )); then
+        jq -n '{ok:false,error:"Maximum Minecraft memory must be larger than Minecraft game memory."}'
+        return 0
+    fi
+
+    local total_mib container_mib remaining_mib
+    total_mib="$(system_memory_mib)"
+    container_mib="$(memory_to_mib "${new_container_memory}")"
+    remaining_mib=$(( total_mib - container_mib ))
+    if (( total_mib > 0 && container_mib >= total_mib )); then
+        jq -n '{ok:false,error:"Maximum Minecraft memory must leave some memory available for JustVoxel and system services."}'
+        return 0
+    fi
+
+    if ! validate_port "${new_java_port}"; then
+        jq -n '{ok:false,error:"Minecraft Java port must be between 1 and 65535."}'
+        return 0
+    fi
+    if ! validate_port "${new_bedrock_port}"; then
+        jq -n '{ok:false,error:"Bedrock port must be between 1 and 65535."}'
+        return 0
+    fi
+    if [[ ${new_java_port} == "${new_bedrock_port}" && ${new_bedrock_enabled} == yes ]]; then
+        : # TCP and UDP may intentionally use the same numeric port.
+    fi
+    if [[ -z ${new_timezone} || ! -e /usr/share/zoneinfo/${new_timezone} ]]; then
+        jq -n '{ok:false,error:"Timezone was not found on this JustVoxel system."}'
+        return 0
+    fi
+    if ! validate_positive_int "${new_max_players}"; then
+        jq -n '{ok:false,error:"Maximum players must be a positive integer."}'
+        return 0
+    fi
+    if ! validate_simple_text "${new_motd}"; then
+        jq -n '{ok:false,error:"Server welcome message must be a single line."}'
+        return 0
+    fi
+    if [[ -z ${new_image_tag} || ! ${new_image_tag} =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+        jq -n '{ok:false,error:"Minecraft container channel or tag is invalid."}'
+        return 0
+    fi
+    if [[ ${new_image_tag} != "${old_image_tag}" ]]; then
+        local image_rc=0
+        if validate_minecraft_image_tag "${new_image_tag}"; then
+            :
+        else
+            image_rc=$?
+            if (( image_rc == 2 )); then
+                jq -n '{ok:false,error:"Upstream marks that Minecraft container tag as deprecated."}'
+            else
+                jq -n '{ok:false,error:"Minecraft container tag could not be validated against the upstream registry."}'
+            fi
+            return 0
+        fi
+    fi
+
+    case "${new_version_policy}" in
+        latest)
+            new_version=LATEST
+            ;;
+        recommended)
+            new_version="$(resolve_latest_stable_paper_version || true)"
+            if [[ -z ${new_version} ]]; then
+                jq -n '{ok:false,error:"Could not resolve the newest Minecraft version with a stable Paper build."}'
+                return 0
+            fi
+            new_version_policy=pinned
+            ;;
+        pinned)
+            if [[ -z ${new_version} || ${new_version} == LATEST || ! ${new_version} =~ ^[0-9A-Za-z._-]+$ ]]; then
+                jq -n '{ok:false,error:"Pinned Minecraft version is invalid."}'
+                return 0
+            fi
+            if [[ ${old_version_mode} != pinned || ${new_version} != "${old_version}" ]]; then
+                if ! paper_version_has_stable_build "${new_version}"; then
+                    jq -n '{ok:false,error:"PaperMC did not confirm a stable build for that Minecraft version."}'
+                    return 0
+                fi
+            fi
+            ;;
+        *)
+            jq -n '{ok:false,error:"Minecraft version policy is invalid."}'
+            return 0
+            ;;
+    esac
+
+    if ! validate_positive_int "${new_backup_keep}"; then
+        jq -n '{ok:false,error:"Backup retention must be a positive integer."}'
+        return 0
+    fi
+    if [[ -z ${new_backup_schedule} ]] || ! systemd-analyze calendar "${new_backup_schedule}" >/dev/null 2>&1; then
+        jq -n '{ok:false,error:"Automatic backup schedule is invalid."}'
+        return 0
+    fi
+
+    local changes='[]' warnings='[]' restart_required=false
+    add_change() {
+        local field="$1" label="$2" before="$3" after="$4" restart="$5"
+        [[ ${before} != "${after}" ]] || return 0
+        changes="$(jq -c --arg field "${field}" --arg label "${label}" --arg before "${before}" --arg after "${after}" --argjson restart "${restart}" '. + [{field:$field,label:$label,before:$before,after:$after,restart_required:$restart}]' <<< "${changes}")"
+        if [[ ${restart} == true ]]; then restart_required=true; fi
+    }
+
+    add_change java_memory 'Minecraft game memory' "${old_java_memory}" "${new_java_memory^^}" true
+    add_change container_memory 'Maximum Minecraft memory' "${old_container_memory}" "${new_container_memory^^}" true
+    add_change max_players 'Maximum players' "${old_max_players}" "${new_max_players}" true
+    add_change java_port 'Minecraft Java port' "${old_java_port}" "${new_java_port}" true
+    add_change bedrock_enabled 'Bedrock cross-play' "${old_bedrock_enabled}" "${new_bedrock_enabled}" true
+    add_change bedrock_port 'Bedrock UDP port' "${old_bedrock_port}" "${new_bedrock_port}" true
+    add_change timezone 'Minecraft timezone' "${old_timezone}" "${new_timezone}" true
+    add_change motd 'Server welcome message' "${old_motd}" "${new_motd}" true
+    add_change image_tag 'Minecraft container channel/tag' "${old_image_tag}" "${new_image_tag}" true
+    add_change version_policy 'Minecraft version policy' "${old_version_mode}" "${new_version_policy}" true
+    add_change version 'Minecraft version' "${old_version}" "${new_version}" true
+    add_change backup_keep 'Backups retained' "${old_backup_keep}" "${new_backup_keep}" false
+    add_change backup_schedule 'Automatic backup schedule' "${old_backup_schedule}" "${new_backup_schedule}" false
+    add_change backup_timer_enabled 'Automatic backups' "${old_backup_timer_enabled}" "${new_backup_timer_enabled}" false
+
+    if (( total_mib > 0 )); then
+        if (( remaining_mib < 1024 )); then
+            warnings="$(jq -c --arg message "This configuration leaves less than 1 GB for JustVoxel and system services. The appliance may become less responsive under load." '. + [$message]' <<< "${warnings}")"
+        elif (( remaining_mib < 2048 )); then
+            warnings="$(jq -c --arg message "This is a tight memory configuration. JustVoxel recommends leaving about 2 GB for the operating system and system services." '. + [$message]' <<< "${warnings}")"
+        fi
+    fi
+
+    JAVA_MEMORY="${new_java_memory^^}"
+    CONTAINER_MEMORY="${new_container_memory^^}"
+    JAVA_PORT="${new_java_port}"
+    BEDROCK_ENABLED="${new_bedrock_enabled}"
+    BEDROCK_PORT="${new_bedrock_port}"
+    TIMEZONE="${new_timezone}"
+    MAX_PLAYERS="${new_max_players}"
+    MOTD="${new_motd}"
+    MINECRAFT_IMAGE_TAG="${new_image_tag}"
+    MINECRAFT_VERSION_MODE="${new_version_policy}"
+    MINECRAFT_VERSION="${new_version}"
+    BACKUP_KEEP="${new_backup_keep}"
+    BACKUP_SCHEDULE="${new_backup_schedule}"
+    BACKUP_TIMER_ENABLED="${new_backup_timer_enabled}"
+
+    if [[ ${mode} == apply && $(jq 'length' <<< "${changes}") -gt 0 ]]; then
+        local config_backup failed_java failed_bedrock_enabled failed_bedrock_port
+        config_backup="$(mktemp "${JV_CONFIG_DIR}/.justvoxel.conf.pre-webui.XXXXXX")"
+        cp -a "${JV_CONFIG}" "${config_backup}"
+        if ! write_main_config || ! render_runtime || ! update_firewall_ports "${old_java_port}" "${old_bedrock_enabled}" "${old_bedrock_port}"; then
+            failed_java="${JAVA_PORT}"
+            failed_bedrock_enabled="${BEDROCK_ENABLED}"
+            failed_bedrock_port="${BEDROCK_PORT}"
+            cp -a "${config_backup}" "${JV_CONFIG}"
+            require_config || true
+            render_runtime >/dev/null 2>&1 || true
+            update_firewall_ports "${failed_java}" "${failed_bedrock_enabled}" "${failed_bedrock_port}" >/dev/null 2>&1 || true
+            rm -f "${config_backup}"
+            echo 'ERROR: failed to apply WebUI configuration; previous configuration was restored.' >&2
+            return 1
+        fi
+        rm -f "${config_backup}"
+    fi
+
+    local proposed
+    proposed="$(configuration_json)"
+    jq -n \
+        --argjson changes "${changes}" \
+        --argjson warnings "${warnings}" \
+        --argjson restart_required "${restart_required}" \
+        --argjson memory_remaining_mib "$(( remaining_mib > 0 ? remaining_mib : 0 ))" \
+        --argjson proposed "${proposed}" \
+        --argjson applied "$([[ ${mode} == apply ]] && printf true || printf false)" \
+        '{ok:true,changes:$changes,warnings:$warnings,restart_required:$restart_required,memory_remaining_mib:$memory_remaining_mib,proposed:$proposed,applied:$applied}'
 }
 
 case "${action}" in
     configuration) configuration_json ;;
     storage) storage_json ;;
     defaults) setup_defaults_json ;;
+    plan) configuration_change_json plan ;;
+    apply) configuration_change_json apply ;;
     *)
-        echo 'Usage: admin-discovery-json {configuration|storage|defaults}' >&2
+        echo 'Usage: admin-discovery-json {configuration|storage|defaults|plan|apply}' >&2
         exit 2
         ;;
 esac
