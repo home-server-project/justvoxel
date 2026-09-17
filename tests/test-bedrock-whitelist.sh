@@ -34,7 +34,13 @@ printf '%s\n' "${cmd}" >> "${log}"
 read_state() {
     if [[ -s ${state} ]]; then cat "${state}"; fi
 }
-write_state() { printf '%s\n' "$1" > "${state}"; }
+write_state() {
+    if [[ -n $1 ]]; then
+        printf '%s\n' "$1" > "${state}"
+    else
+        : > "${state}"
+    fi
+}
 list_state() {
     local value
     value="$(read_state)"
