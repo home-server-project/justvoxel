@@ -44,7 +44,7 @@ func registerMinecraftRoutes(mux *http.ServeMux, s *server) {
 }
 
 func (s *server) players(w http.ResponseWriter, r *http.Request) {
-	if !s.authorizeAdminRequest(w, r) {
+	if _, ok := s.requireReadAccess(w, r); !ok {
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
@@ -58,21 +58,29 @@ func (s *server) players(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) minecraftStart(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireRoles(w, r, roleAdministrator, roleOperator); !ok {
+		return
+	}
 	s.minecraftAction(w, r, "start")
 }
 
 func (s *server) minecraftStop(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdministrator(w, r); !ok {
+		return
+	}
 	s.minecraftAction(w, r, "stop")
 }
 
 func (s *server) minecraftRestart(w http.ResponseWriter, r *http.Request) {
+	// Operator restart stays closed until the persistent quota/cooldown layer is
+	// in place. Administrator restart remains unrestricted.
+	if _, ok := s.requireAdministrator(w, r); !ok {
+		return
+	}
 	s.minecraftAction(w, r, "restart")
 }
 
 func (s *server) minecraftAction(w http.ResponseWriter, r *http.Request, action string) {
-	if !s.authorizeAdminRequest(w, r) {
-		return
-	}
 	var request minecraftActionRequest
 	if !decodeJSON(w, r, &request) {
 		return
@@ -115,19 +123,6 @@ func (s *server) minecraftAction(w http.ResponseWriter, r *http.Request, action 
 		status = http.StatusInternalServerError
 	}
 	writeHelperJSON(w, status, output, "Minecraft control helper returned invalid data")
-}
-
-func (s *server) authorizeAdminRequest(w http.ResponseWriter, r *http.Request) bool {
-	_, sess, ok := s.authorize(r, false)
-	if ok {
-		return true
-	}
-	if sess.MustChange {
-		writeError(w, http.StatusForbidden, "password change required")
-	} else {
-		writeError(w, http.StatusUnauthorized, "invalid session")
-	}
-	return false
 }
 
 func writeHelperJSON(w http.ResponseWriter, status int, output []byte, invalidMessage string) {

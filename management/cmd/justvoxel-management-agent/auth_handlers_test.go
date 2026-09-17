@@ -33,6 +33,16 @@ func withAuthTestDependencies(t *testing.T) {
 	})
 }
 
+func administratorSession(now time.Time) session {
+	return session{
+		Username:   systemAdminUsername,
+		Role:       roleAdministrator,
+		AuthSource: authSourceSystem,
+		Created:    now,
+		LastSeen:   now,
+	}
+}
+
 func TestSystemLoginUsesVoxelPAMCredential(t *testing.T) {
 	withAuthTestDependencies(t)
 	readAuthMode = func() (authMode, error) { return authModeSystem, nil }
@@ -49,6 +59,9 @@ func TestSystemLoginUsesVoxelPAMCredential(t *testing.T) {
 	s.providerLogin(goodRR, good)
 	if goodRR.Code != http.StatusOK {
 		t.Fatalf("valid system credential returned %d: %s", goodRR.Code, goodRR.Body.String())
+	}
+	if !bytes.Contains(goodRR.Body.Bytes(), []byte(`"role":"administrator"`)) || !bytes.Contains(goodRR.Body.Bytes(), []byte(`"auth_source":"system"`)) {
+		t.Fatalf("administrator identity metadata missing: %s", goodRR.Body.String())
 	}
 
 	for _, body := range []string{
@@ -92,9 +105,11 @@ func TestSystemPasswordChangeInvalidatesSessions(t *testing.T) {
 	}
 
 	now := time.Now()
+	active := administratorSession(now)
+	active.MustChange = true
 	s := &server{sessions: map[string]session{
-		"active": {Created: now, LastSeen: now, MustChange: true},
-		"other":  {Created: now, LastSeen: now},
+		"active": active,
+		"other":  administratorSession(now),
 	}}
 	req := httptest.NewRequest(http.MethodPost, "/v1/auth/password", bytes.NewBufferString(`{"current_password":"old-secret","new_password":"new-secret"}`))
 	req.Header.Set("Authorization", "Bearer active")
@@ -124,9 +139,10 @@ func TestSystemToSeparateModeSwitch(t *testing.T) {
 	}
 	systemValidatePass = func(username, oldPassword, newPassword string) error { return nil }
 
+	now := time.Now()
 	s := &server{sessions: map[string]session{
-		"active": {Created: time.Now(), LastSeen: time.Now()},
-		"other":  {Created: time.Now(), LastSeen: time.Now()},
+		"active": administratorSession(now),
+		"other":  administratorSession(now),
 	}}
 	body := `{"mode":"separate","system_password":"system-secret","new_web_password":"web-secret","confirm_web_password":"web-secret"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/auth/mode", bytes.NewBufferString(body))
@@ -158,7 +174,8 @@ func TestSeparateToSystemRequiresSystemCredential(t *testing.T) {
 	}
 
 	newServer := func() *server {
-		return &server{sessions: map[string]session{"active": {Created: time.Now(), LastSeen: time.Now()}}}
+		now := time.Now()
+		return &server{sessions: map[string]session{"active": administratorSession(now)}}
 	}
 
 	s := newServer()
@@ -198,5 +215,36 @@ func TestSeparateModeIgnoresSystemCredentialForWebLogin(t *testing.T) {
 	}
 	if result, err := authenticateAdministrator("voxel", "web-secret"); err != nil || result.Mode != authModeSeparate {
 		t.Fatalf("separate credential failed: result=%#v err=%v", result, err)
+	}
+}
+
+func TestOperatorCannotChangeAdministratorAuthentication(t *testing.T) {
+	now := time.Now()
+	s := &server{sessions: map[string]session{
+		"operator": {
+			Username:   "Ilya",
+			Role:       roleOperator,
+			AuthSource: authSourceWebUI,
+			WebUserID:  1,
+			Created:    now,
+			LastSeen:   now,
+		},
+	}}
+
+	for _, test := range []struct {
+		path string
+		call func(http.ResponseWriter, *http.Request)
+	}{
+		{path: "/v1/auth", call: s.authStatus},
+		{path: "/v1/auth/password", call: s.providerChangePassword},
+		{path: "/v1/auth/mode", call: s.changeAuthMode},
+	} {
+		req := httptest.NewRequest(http.MethodPost, test.path, bytes.NewBufferString(`{}`))
+		req.Header.Set("Authorization", "Bearer operator")
+		rr := httptest.NewRecorder()
+		test.call(rr, req)
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("operator received %d for %s: %s", rr.Code, test.path, rr.Body.String())
+		}
 	}
 }

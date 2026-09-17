@@ -13,7 +13,27 @@ import (
 func adminServerForTest() *server {
 	now := time.Now()
 	return &server{sessions: map[string]session{
-		"token": {Created: now, LastSeen: now},
+		"token": {
+			Username:   systemAdminUsername,
+			Role:       roleAdministrator,
+			AuthSource: authSourceSystem,
+			Created:    now,
+			LastSeen:   now,
+		},
+	}}
+}
+
+func roleServerForTest(role principalRole) *server {
+	now := time.Now()
+	return &server{sessions: map[string]session{
+		"token": {
+			Username:   "test-user",
+			Role:       role,
+			AuthSource: authSourceWebUI,
+			WebUserID:  1,
+			Created:    now,
+			LastSeen:   now,
+		},
 	}}
 }
 
@@ -62,6 +82,75 @@ func TestPlayersUsesAllowlistedHelperAndReturnsJSON(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), `"online":0`) || !strings.Contains(rr.Body.String(), `"names":[]`) {
 		t.Fatalf("unexpected player response: %s", rr.Body.String())
+	}
+}
+
+func TestViewerCanReadPlayersButCannotMutateMinecraft(t *testing.T) {
+	s := roleServerForTest(roleViewer)
+	oldRunner := runWebHelper
+	called := false
+	runWebHelper = func(_ context.Context, args ...string) ([]byte, int, error) {
+		called = true
+		if len(args) == 1 && args[0] == "players" {
+			return []byte(`{"configured":true,"state":"running","online":0,"max":10,"names":[]}`), 0, nil
+		}
+		return []byte(`{"ok":true}`), 0, nil
+	}
+	defer func() { runWebHelper = oldRunner }()
+
+	rr := httptest.NewRecorder()
+	s.players(rr, authorizedRequest(http.MethodGet, "http://unix/v1/players", ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("viewer read failed: %d %s", rr.Code, rr.Body.String())
+	}
+	called = false
+	for _, action := range []struct {
+		path string
+		call func(http.ResponseWriter, *http.Request)
+	}{
+		{"/v1/minecraft/start", s.minecraftStart},
+		{"/v1/minecraft/stop", s.minecraftStop},
+		{"/v1/minecraft/restart", s.minecraftRestart},
+	} {
+		rr = httptest.NewRecorder()
+		action.call(rr, authorizedRequest(http.MethodPost, action.path, `{}`))
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("viewer mutation %s returned %d", action.path, rr.Code)
+		}
+		if called {
+			t.Fatalf("helper executed for forbidden viewer mutation %s", action.path)
+		}
+	}
+}
+
+func TestOperatorStartAllowedStopAndRestartClosedUntilQuotaLayer(t *testing.T) {
+	s := roleServerForTest(roleOperator)
+	oldRunner := runWebHelper
+	runWebHelper = func(_ context.Context, args ...string) ([]byte, int, error) {
+		if len(args) != 1 || args[0] != "start" {
+			t.Fatalf("unexpected helper args: %#v", args)
+		}
+		return []byte(`{"ok":true,"action":"start","message":"Minecraft start requested."}`), 0, nil
+	}
+	defer func() { runWebHelper = oldRunner }()
+
+	rr := httptest.NewRecorder()
+	s.minecraftStart(rr, authorizedRequest(http.MethodPost, "http://unix/v1/minecraft/start", `{}`))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("operator start failed: %d %s", rr.Code, rr.Body.String())
+	}
+	for _, action := range []struct {
+		path string
+		call func(http.ResponseWriter, *http.Request)
+	}{
+		{"/v1/minecraft/stop", s.minecraftStop},
+		{"/v1/minecraft/restart", s.minecraftRestart},
+	} {
+		rr = httptest.NewRecorder()
+		action.call(rr, authorizedRequest(http.MethodPost, action.path, `{}`))
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("operator action %s returned %d, want 403", action.path, rr.Code)
+		}
 	}
 }
 

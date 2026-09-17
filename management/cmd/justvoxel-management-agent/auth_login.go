@@ -21,7 +21,7 @@ func (s *server) providerLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := authenticateAdministrator(request.Username, request.Password)
+	result, err := s.authenticateIdentity(request.Username, request.Password)
 	if err != nil {
 		s.recordFailure()
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
@@ -37,17 +37,26 @@ func (s *server) providerLogin(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	s.mu.Lock()
 	s.sessions[token] = session{
+		Username:   result.Username,
+		Role:       result.Role,
+		AuthSource: result.AuthSource,
+		WebUserID:  result.WebUserID,
 		Created:    now,
 		LastSeen:   now,
 		MustChange: result.PasswordChangeRequired,
 	}
 	s.mu.Unlock()
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	response := map[string]any{
 		"session":        token,
 		"must_change":    result.PasswordChangeRequired,
 		"management_api": managementAPI,
-		"auth_mode":      result.Mode,
-		"username":       systemAdminUsername,
-	})
+		"username":       result.Username,
+		"role":           result.Role,
+		"auth_source":    result.AuthSource,
+	}
+	if result.Role == roleAdministrator {
+		response["auth_mode"] = result.AdminMode
+	}
+	writeJSON(w, http.StatusOK, response)
 }

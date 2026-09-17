@@ -45,6 +45,11 @@ type releaseMetadata struct {
 }
 
 type session struct {
+	Username   string
+	Role       principalRole
+	AuthSource authSource
+	WebUserID  int64
+
 	Created    time.Time
 	LastSeen   time.Time
 	MustChange bool
@@ -52,6 +57,7 @@ type session struct {
 
 type server struct {
 	webUID uint32
+	store  *webUIStore
 
 	mu       sync.Mutex
 	sessions map[string]session
@@ -143,6 +149,12 @@ func serve(socket string) error {
 	if _, _, err := bootstrap(); err != nil {
 		return err
 	}
+	store, err := openWebUIStore(webUIDatabasePath)
+	if err != nil {
+		return fmt.Errorf("open WebUI identity database: %w", err)
+	}
+	defer store.close()
+
 	webAccount, err := user.Lookup("justvoxel-web")
 	if err != nil {
 		return fmt.Errorf("lookup justvoxel-web: %w", err)
@@ -164,13 +176,14 @@ func serve(socket string) error {
 		return err
 	}
 
-	s := &server{webUID: uint32(uid64), sessions: make(map[string]session)}
+	s := &server{webUID: uint32(uid64), store: store, sessions: make(map[string]session)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/auth/login", s.providerLogin)
 	mux.HandleFunc("POST /v1/auth/logout", s.logout)
 	mux.HandleFunc("POST /v1/auth/password", s.providerChangePassword)
 	mux.HandleFunc("GET /v1/auth", s.authStatus)
 	mux.HandleFunc("POST /v1/auth/mode", s.changeAuthMode)
+	mux.HandleFunc("GET /v1/session", s.sessionStatus)
 	mux.HandleFunc("GET /v1/info", s.info)
 	mux.HandleFunc("GET /v1/status", s.status)
 	registerMinecraftRoutes(mux, s)

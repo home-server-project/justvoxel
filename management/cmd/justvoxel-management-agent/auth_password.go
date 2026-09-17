@@ -8,9 +8,7 @@ import (
 )
 
 func (s *server) providerChangePassword(w http.ResponseWriter, r *http.Request) {
-	_, _, ok := s.authorize(r, true)
-	if !ok {
-		writeError(w, http.StatusUnauthorized, "invalid session")
+	if _, ok := s.requireAdministratorCredentialPath(w, r); !ok {
 		return
 	}
 

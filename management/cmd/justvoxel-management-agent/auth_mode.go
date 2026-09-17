@@ -8,8 +8,7 @@ import (
 )
 
 func (s *server) authStatus(w http.ResponseWriter, r *http.Request) {
-	if _, _, ok := s.authorize(r, true); !ok {
-		writeError(w, http.StatusUnauthorized, "invalid session")
+	if _, ok := s.requireAdministratorCredentialPath(w, r); !ok {
 		return
 	}
 	mode, err := readAuthMode()
@@ -30,12 +29,7 @@ func (s *server) authStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) changeAuthMode(w http.ResponseWriter, r *http.Request) {
-	if _, sess, ok := s.authorize(r, false); !ok {
-		if sess.MustChange {
-			writeError(w, http.StatusForbidden, "password change required")
-		} else {
-			writeError(w, http.StatusUnauthorized, "invalid session")
-		}
+	if _, ok := s.requireAdministrator(w, r); !ok {
 		return
 	}
 
