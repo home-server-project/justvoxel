@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -149,13 +151,75 @@ type adminSetupPlanRequirements struct {
 }
 
 type adminSetupPlanResponse struct {
-	OK            bool                        `json:"ok"`
-	SchemaVersion string                      `json:"schema_version"`
-	Code          string                      `json:"code,omitempty"`
-	Error         string                      `json:"error,omitempty"`
-	Normalized    *adminSetupNormalizedPlan   `json:"normalized,omitempty"`
-	Warnings      []adminSetupPlanWarning     `json:"warnings"`
-	Requirements  *adminSetupPlanRequirements `json:"requirements,omitempty"`
+	OK              bool                        `json:"ok"`
+	SchemaVersion   string                      `json:"schema_version"`
+	PlanFingerprint string                      `json:"plan_fingerprint,omitempty"`
+	Code            string                      `json:"code,omitempty"`
+	Error           string                      `json:"error,omitempty"`
+	Normalized      *adminSetupNormalizedPlan   `json:"normalized,omitempty"`
+	Warnings        []adminSetupPlanWarning     `json:"warnings"`
+	Requirements    *adminSetupPlanRequirements `json:"requirements,omitempty"`
+}
+
+type adminSetupFingerprintMinecraft struct {
+	JavaMemory             string `json:"java_memory"`
+	ContainerMemory        string `json:"container_memory"`
+	JavaPort               int    `json:"java_port"`
+	BedrockPort            int    `json:"bedrock_port"`
+	ImageTag               string `json:"image_tag"`
+	RequestedVersionPolicy string `json:"requested_version_policy"`
+	VersionPolicy          string `json:"version_policy"`
+	Version                string `json:"version"`
+}
+
+type adminSetupFingerprintStorage struct {
+	Type           string `json:"type"`
+	Path           string `json:"path"`
+	Device         string `json:"device"`
+	ParentDisk     string `json:"parent_disk"`
+	Filesystem     string `json:"filesystem"`
+	UUID           string `json:"uuid"`
+	MountPoint     string `json:"mount_point"`
+	ExpectedUUID   string `json:"expected_uuid"`
+	ExpectedSource string `json:"expected_source"`
+	Source         string `json:"source"`
+	SystemDisk     bool   `json:"system_disk"`
+	Purpose        string `json:"purpose"`
+}
+
+type adminSetupFingerprintBackups struct {
+	Type                string `json:"type"`
+	Path                string `json:"path"`
+	Device              string `json:"device"`
+	ParentDisk          string `json:"parent_disk"`
+	Filesystem          string `json:"filesystem"`
+	UUID                string `json:"uuid"`
+	MountPoint          string `json:"mount_point"`
+	ExpectedUUID        string `json:"expected_uuid"`
+	ExpectedSource      string `json:"expected_source"`
+	Source              string `json:"source"`
+	SystemDisk          bool   `json:"system_disk"`
+	Purpose             string `json:"purpose"`
+	Username            string `json:"username"`
+	Domain              string `json:"domain"`
+	CredentialsRequired bool   `json:"credentials_required"`
+	Automatic           bool   `json:"automatic"`
+	DailyTime           string `json:"daily_time"`
+	Schedule            string `json:"schedule"`
+	Keep                int    `json:"keep"`
+}
+
+type adminSetupFingerprintNormalized struct {
+	Server    adminSetupPlanServer            `json:"server"`
+	Minecraft adminSetupFingerprintMinecraft  `json:"minecraft"`
+	Storage   adminSetupFingerprintStorage    `json:"storage"`
+	Backups   adminSetupFingerprintBackups    `json:"backups"`
+}
+
+type adminSetupFingerprintPayload struct {
+	SchemaVersion string                     `json:"schema_version"`
+	Normalized    adminSetupFingerprintNormalized `json:"normalized"`
+	Requirements  adminSetupPlanRequirements `json:"requirements"`
 }
 
 func registerAdminSetupPlanRoutes(mux *http.ServeMux, s *server) {
@@ -207,7 +271,55 @@ func (s *server) adminSetupPlan(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "first-run setup planner returned incomplete data")
 		return
 	}
+	fingerprint, err := adminSetupPlanFingerprint(out.SchemaVersion, out.Normalized, out.Requirements)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "first-run setup plan identity could not be created")
+		return
+	}
+	out.PlanFingerprint = fingerprint
 	writeJSON(w, http.StatusOK, out)
+}
+
+func adminSetupPlanFingerprint(schemaVersion string, normalized *adminSetupNormalizedPlan, requirements *adminSetupPlanRequirements) (string, error) {
+	if schemaVersion == "" || normalized == nil || requirements == nil {
+		return "", errors.New("incomplete setup plan")
+	}
+	canonical := adminSetupFingerprintPayload{
+		SchemaVersion: schemaVersion,
+		Normalized: adminSetupFingerprintNormalized{
+			Server: normalized.Server,
+			Minecraft: adminSetupFingerprintMinecraft{
+				JavaMemory: normalized.Minecraft.JavaMemory, ContainerMemory: normalized.Minecraft.ContainerMemory,
+				JavaPort: normalized.Minecraft.JavaPort, BedrockPort: normalized.Minecraft.BedrockPort,
+				ImageTag: normalized.Minecraft.ImageTag, RequestedVersionPolicy: normalized.Minecraft.RequestedVersionPolicy,
+				VersionPolicy: normalized.Minecraft.VersionPolicy, Version: normalized.Minecraft.Version,
+			},
+			Storage: adminSetupFingerprintStorage{
+				Type: normalized.Storage.Type, Path: normalized.Storage.Path, Device: normalized.Storage.Device,
+				ParentDisk: normalized.Storage.ParentDisk, Filesystem: normalized.Storage.Filesystem, UUID: normalized.Storage.UUID,
+				MountPoint: normalized.Storage.MountPoint, ExpectedUUID: normalized.Storage.ExpectedUUID,
+				ExpectedSource: normalized.Storage.ExpectedSource, Source: normalized.Storage.Source,
+				SystemDisk: normalized.Storage.SystemDisk, Purpose: normalized.Storage.Purpose,
+			},
+			Backups: adminSetupFingerprintBackups{
+				Type: normalized.Backups.Type, Path: normalized.Backups.Path, Device: normalized.Backups.Device,
+				ParentDisk: normalized.Backups.ParentDisk, Filesystem: normalized.Backups.Filesystem, UUID: normalized.Backups.UUID,
+				MountPoint: normalized.Backups.MountPoint, ExpectedUUID: normalized.Backups.ExpectedUUID,
+				ExpectedSource: normalized.Backups.ExpectedSource, Source: normalized.Backups.Source,
+				SystemDisk: normalized.Backups.SystemDisk, Purpose: normalized.Backups.Purpose,
+				Username: normalized.Backups.Username, Domain: normalized.Backups.Domain,
+				CredentialsRequired: normalized.Backups.CredentialsRequired, Automatic: normalized.Backups.Automatic,
+				DailyTime: normalized.Backups.DailyTime, Schedule: normalized.Backups.Schedule, Keep: normalized.Backups.Keep,
+			},
+		},
+		Requirements: *requirements,
+	}
+	payload, err := json.Marshal(canonical)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(payload)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
 func decodeAdminSetupPlanRequest(w http.ResponseWriter, r *http.Request, target *adminSetupPlanRequest) bool {
