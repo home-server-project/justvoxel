@@ -99,6 +99,7 @@ func registerAdminDiscoveryRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("GET /v1/admin/storage", s.adminStorage)
 	mux.HandleFunc("GET /v1/admin/setup-defaults", s.adminSetupDefaults)
 	registerAdminBackupStorageRoutes(mux, s)
+	registerAdminStorageProvisionRoutes(mux, s)
 }
 
 func (s *server) adminConfiguration(w http.ResponseWriter, r *http.Request) {
