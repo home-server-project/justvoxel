@@ -1,0 +1,36 @@
+name: A4.4.1 setup planner check
+
+on:
+  push:
+    branches: [a441-setup-plan-helper-work]
+
+permissions:
+  contents: read
+
+jobs:
+  source-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Validate shell syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          for script in \
+            build_files/*.sh \
+            build_files/validate/*.sh \
+            mjust/bin/mjust \
+            mjust/libexec/* \
+            runtime/* \
+            tests/*.sh; do
+            [[ -f "${script}" ]] || continue
+            bash -n "${script}"
+          done
+      - name: Run source regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for test_script in tests/test-*.sh; do
+            [[ -f "${test_script}" ]] || continue
+            bash "${test_script}"
+          done
