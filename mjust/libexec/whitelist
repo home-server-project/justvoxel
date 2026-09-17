@@ -1,6 +1,7 @@
 #!/usr/bin/bash
 set -euo pipefail
-source /usr/libexec/justvoxel/mjust/common.sh
+JV_LIBEXEC_DIR="${JV_LIBEXEC_DIR:-/usr/libexec/justvoxel/mjust}"
+source "${JV_LIBEXEC_DIR}/common.sh"
 require_root
 require_config
 
@@ -47,8 +48,6 @@ is_floodgate_uuid() {
 bedrock_whitelist() {
     local verb="$1" identity="$2" output status current after prefixed
 
-    # The normal JustVoxel/Floodgate username prefix is '.'. Accept it from a
-    # user for convenience, but fwhitelist itself receives the Xbox gamertag.
     identity="${identity#.}"
     [[ -n ${identity} && ${identity} != *$'\n'* && ${identity} != *$'\r'* && ${#identity} -le 64 ]] || {
         echo 'Invalid Bedrock/Xbox gamertag or Floodgate UUID.' >&2
@@ -84,8 +83,6 @@ bedrock_whitelist() {
     fi
 
     if [[ ${verb} == remove ]]; then
-        # For a known Bedrock player, remove the exact local Floodgate-prefixed
-        # profile instead of doing another Xbox/XUID lookup.
         run_rcon "whitelist remove ${prefixed}" >/dev/null
         after="$(whitelist_list)"
         if whitelist_has_player "${after}" "${prefixed}"; then
@@ -97,10 +94,6 @@ bedrock_whitelist() {
         return 0
     fi
 
-    # First use Floodgate's supported gamertag resolver. Some already-known
-    # players can fall out of its Xbox lookup cache, so success is verified
-    # from the authoritative Minecraft whitelist rather than the command exit
-    # code alone.
     set +e
     output="$(run_rcon "fwhitelist add ${identity}" 2>&1)"
     status=$?
@@ -112,9 +105,6 @@ bedrock_whitelist() {
         return 0
     fi
 
-    # If this player joined this server before, Paper normally still knows the
-    # local Floodgate-prefixed profile even when Floodgate cannot resolve the
-    # gamertag through its cache. Re-add that known local profile directly.
     if [[ ${identity} =~ ^[A-Za-z0-9_]{1,32}$ ]]; then
         set +e
         output="$(run_rcon "whitelist add ${prefixed}" 2>&1)"
