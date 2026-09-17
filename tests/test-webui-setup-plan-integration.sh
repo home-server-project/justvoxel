@@ -23,10 +23,11 @@ grep -Fq '/v1/admin/setup/apply' "${agent_test}"
 grep -Fq 'http.StatusNotFound' "${agent_test}"
 
 # Planning request structs and the helper schema must remain secret-free. The
-# helper may mention passwords only to reject password-named keys or explain
-# that SMB credentials are requested later during execution.
-if grep -Eq 'json:"[^" ]*password[^" ]*"' "${agent}"; then
-    echo 'A4.4 Agent planning schema unexpectedly accepts a password field.' >&2
+# response may legitimately expose the boolean execution requirement named
+# smb_password_required, so inspect only the request-schema section here.
+request_schema="$(sed -n '/^type adminSetupPlanServerRequest struct {/,/^type adminSetupPlanWarning struct {/p' "${agent}")"
+if grep -Eq 'json:"[^" ]*password[^" ]*"' <<< "${request_schema}"; then
+    echo 'A4.4 Agent planning request schema unexpectedly accepts a password field.' >&2
     exit 1
 fi
 grep -Fq 'contains("password")' "${helper}"
