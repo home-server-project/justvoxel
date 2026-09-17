@@ -1,0 +1,57 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+helper="${repo_root}/mjust/libexec/admin-setup-plan-json"
+
+[[ -f ${helper} ]] || { echo "missing A4.4.1 helper: ${helper}" >&2; exit 1; }
+bash -n "${helper}"
+
+# A4.4.1 is planning only. It may inspect storage and upstream metadata but it
+# must not mutate filesystems, mounts, configuration, services, firewall, or
+# runtime state.
+for forbidden in \
+    'mkfs\.' \
+    'wipefs' \
+    'parted ' \
+    'storage_mount_local' \
+    'storage_write_local_fstab' \
+    'storage_write_network_fstab' \
+    'write_main_config' \
+    'render_runtime' \
+    'configure_firewall' \
+    'systemctl (start|stop|restart|enable|disable)' \
+    'podman (run|rm|stop|start|pull)' \
+    'mount --' \
+    'umount'; do
+    if grep -Eq "${forbidden}" "${helper}"; then
+        echo "A4.4.1 setup planner contains forbidden mutating operation: ${forbidden}" >&2
+        exit 1
+    fi
+done
+
+# The helper owns the authoritative full-draft schema and rejects any key whose
+# name contains password. SMB credentials are execution-time input in A5, not
+# planning data.
+grep -Fq 'SETUP_PLAN_SCHEMA_VERSION=v1' "${helper}"
+grep -Fq 'contains("password")' "${helper}"
+grep -Fq 'smb_password_required' "${helper}"
+grep -Fq 'network_backup_validation_on_apply' "${helper}"
+
+# Important cross-field safety boundaries must remain server-side in the helper.
+grep -Fq 'Maximum Minecraft memory must be larger than Minecraft game memory.' "${helper}"
+grep -Fq 'must leave at least 1 GiB' "${helper}"
+grep -Fq 'Root, boot, EFI, and /var filesystems cannot be selected' "${helper}"
+grep -Fq 'Minecraft data and backups cannot use the same directory' "${helper}"
+grep -Fq 'same_physical_disk' "${helper}"
+grep -Fq 'resolve_latest_stable_paper_version' "${helper}"
+grep -Fq 'PaperMC did not confirm a stable build' "${helper}"
+grep -Fq 'JustVoxel is already configured' "${helper}"
+
+# A4.4.1 produces a normalized plan only; Apply is intentionally absent.
+if grep -Eq '(^|[[:space:]])apply([[:space:]:]|$)' "${helper}"; then
+    echo 'A4.4.1 setup planner must not expose an Apply action.' >&2
+    exit 1
+fi
+
+echo 'WebUI first-run setup planner A4.4.1 safety checks passed.'
