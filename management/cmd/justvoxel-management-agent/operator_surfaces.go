@@ -74,9 +74,34 @@ func (s *server) whitelistChange(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	helperAction := action + "-" + platform
+
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
+
+	listOutput, listErr := runWhitelistHelper(ctx, "list")
+	if listErr != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "whitelist is unavailable"})
+		return
+	}
+	present := whitelistContains(string(listOutput), platform, name)
+	if action == "add" && present {
+		message := name + " is already on the whitelist."
+		if s.store != nil {
+			_ = s.store.recordAuditEvent(actor, "whitelist_add", name, true, platform+" already_present")
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"output": message})
+		return
+	}
+	if action == "remove" && !present {
+		message := name + " is not currently on the whitelist."
+		if s.store != nil {
+			_ = s.store.recordAuditEvent(actor, "whitelist_remove", name, true, platform+" already_absent")
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"output": message})
+		return
+	}
+
+	helperAction := action + "-" + platform
 	output, err := runWhitelistHelper(ctx, helperAction, name)
 	if err != nil {
 		if s.store != nil {
@@ -90,6 +115,28 @@ func (s *server) whitelistChange(w http.ResponseWriter, r *http.Request) {
 		_ = s.store.recordAuditEvent(actor, "whitelist_"+action, name, true, platform)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"output": strings.TrimSpace(string(output))})
+}
+
+func whitelistContains(output, platform, name string) bool {
+	lowerOutput := strings.ToLower(output)
+	candidates := []string{name}
+	if platform == "bedrock" {
+		candidates = append(candidates, "."+name)
+	}
+	for _, candidate := range candidates {
+		candidate = strings.ToLower(strings.TrimSpace(candidate))
+		if candidate == "" {
+			continue
+		}
+		for _, token := range strings.FieldsFunc(lowerOutput, func(r rune) bool {
+			return r == ',' || r == ':' || r == '\n' || r == '\r' || r == '\t' || r == ' '
+		}) {
+			if strings.TrimSpace(token) == candidate {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func whitelistChangeError(platform, output string) string {
