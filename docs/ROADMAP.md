@@ -110,6 +110,128 @@ Event history should complement notifications by keeping short appliance-relevan
 
 Systemd should remain the normal service-recovery mechanism rather than adding a second custom watchdog solely for Minecraft restarts.
 
+## Later: Bare Metal UPS monitoring
+
+The Bare Metal JustVoxel image should eventually expose native UPS monitoring in the JustVoxel WebUI. The VM image should remain unchanged unless a separate remote-NUT use case is deliberately added later.
+
+The preferred design is not to add a second Cockpit administration interface or embed the Cockpit UPSide plugin. JustVoxel should use Network UPS Tools (NUT) as the backend and expose a narrow UPS API through the existing privileged management agent:
+
+```text
+JustVoxel WebUI
+    -> local Unix socket
+    -> JustVoxel Management Agent
+    -> NUT / upsd
+```
+
+The browser-facing WebUI must remain unprivileged and must not receive arbitrary shell access. The management agent may use the normal NUT client interfaces such as `upsc -l` and `upsc <ups-name>` and return normalized UPS data to the WebUI.
+
+The initial UPS page should be deliberately small and read-only. Useful fields include:
+
+- UPS manufacturer/model and friendly name where available
+- online / on-battery / low-battery / communication state
+- battery charge percentage
+- estimated runtime remaining
+- UPS load percentage
+- input voltage
+- output voltage
+- battery voltage where reported
+- current NUT/driver communication health
+
+The main dashboard may surface concise appliance warnings such as **On battery**, **Low battery**, or **UPS communication lost**. Dangerous UPS controls, load-off commands, UPS shutdown commands, writable NUT variables, and automated power sequencing are not part of the first monitoring implementation.
+
+### AlmaLinux 10 / bootc lessons already proven in Pasiv Black Box
+
+The implementation should treat the existing `highwaytoit/pasiv-black-box` main and testing branches as a practical AlmaLinux 10 reference. That project uncovered several NUT/UPSide issues that are easy to miss in a normal mutable distro install and should be checked before any JustVoxel UPS work is considered complete.
+
+#### NUT USB discovery
+
+`nut-scanner` on the AlmaLinux 10 image required the libusb development/runtime linkage to be present. Pasiv carries `libusb1-devel` and validates that `/usr/lib64/libusb-1.0.so` exists. JustVoxel should verify the exact requirement on its current AlmaLinux base rather than assuming that the presence of `nut` and `nut-client` alone makes USB scanning functional.
+
+#### NUT service-account supplementary groups
+
+EL10 bootc can keep vendor group data in `/usr/lib/group` while `systemd-sysusers` writes supplementary membership state under `/etc/gshadow`. Pasiv found that the NUT service account needed its package-declared `tty` and `dialout` memberships preserved in the image-managed group database so NUT could access its runtime/device paths correctly after deployment.
+
+Any JustVoxel implementation that uses local USB UPS hardware must validate after image composition and after a real boot that the `nut` account has the required supplementary groups. The fix should follow the active AlmaLinux/bootc account model rather than blindly copying a mutable-host command sequence.
+
+#### Secure NUT configuration ownership
+
+Pasiv explicitly preserves the package-intended ownership and mode for:
+
+- `/etc/ups/upsd.conf` -> `root:nut` mode `0640`
+- `/etc/ups/upsd.users` -> `root:nut` mode `0640`
+
+JustVoxel should validate those or the current package-equivalent permissions after bootc composition so `upsd` can read its configuration without making credential-bearing files broadly readable.
+
+#### Do not enable an unconfigured UPS stack globally
+
+A generic image cannot assume that every Bare Metal machine has a directly attached UPS. NUT hardware identifiers, UPS name, driver, credentials, shutdown thresholds, listener addresses, and site-specific power policy remain deployment-specific.
+
+The image should therefore ship the capability without pretending it is configured. Once a local UPS has been configured, the setup path should ensure the appropriate NUT top-level target/service set is enabled and survives reboot.
+
+Pasiv's working model uses `nut.target` as the reboot-safe top-level NUT activation point, with server, monitor, and driver units following the NUT target relationships rather than enabling unrelated units ad hoc.
+
+#### NUT network listener ordering
+
+If `upsd.conf` binds `LISTEN` to a specific LAN address, `nut-server.service` can start before that address exists and fail with listener errors during boot. Pasiv testing fixed this with a systemd drop-in that adds:
+
+```ini
+[Unit]
+Wants=network-online.target
+After=network-online.target
+```
+
+JustVoxel should include equivalent ordering only where the NUT server mode needs it and should validate a full host reboot, not just a manual service restart.
+
+#### Optional historical trends require the complete PCP path
+
+If JustVoxel later adds UPS history/trend charts, the AlmaLinux reference is more than simply installing `pcp`.
+
+Pasiv required the focused package set:
+
+- `pcp`
+- `pcp-pmda-openmetrics`
+- `pcp-system-tools`
+
+`pcp-system-tools` provides `pmrep`, which UPSide uses to read local PCP archives. Pasiv also enables `pmcd.service` and `pmlogger.service`, validates the OpenMetrics PMDA installer, and notes that the `pmcd` binary on this EL10 layout is under `/usr/libexec/pcp/bin/pmcd` rather than necessarily being available as a normal shell command.
+
+The OpenMetrics PMDA must be registered before an OpenMetrics-based UPS history collector can be configured. On the tested AlmaLinux system the registration path is:
+
+```text
+/var/lib/pcp/pmdas/openmetrics/Install
+```
+
+Historical charts should remain optional. Live NUT monitoring must not depend on PCP being configured.
+
+#### Use Pasiv's NUT Exporter work as telemetry/validation reference, not as a mandatory dependency
+
+Pasiv testing also validated a NUT Exporter path against a local NUT server on `127.0.0.1:3493`, including battery charge, runtime, battery/input/output voltage, load, and UPS status metrics. It deliberately disables hardware-identity metadata and keeps the exporter on a private monitoring path rather than exposing it generally on the LAN.
+
+JustVoxel does not need to add Prometheus, VictoriaMetrics, or NUT Exporter merely to render a local UPS page. However, that validated field set and reboot test are useful acceptance references. A future optional metrics/exporter integration may reuse that model if it fits JustVoxel without turning the appliance into a monitoring platform.
+
+### UPSide and Home Server Packages relationship
+
+`home-server-project/home-server-packages` already builds and validates the upstream `deviationist/cockpit-upside` package on AlmaLinux 10 / EL10 and Fedora. For JustVoxel, that package should primarily be treated as an upstream/reference implementation unless the architecture changes deliberately.
+
+UPSide is tightly coupled to Cockpit's runtime and `cockpit.spawn()` API. Installing Cockpit solely to host UPSide would create a second Web administration surface, second authentication/session model, and additional network exposure that does not fit the normal JustVoxel appliance design.
+
+If actual UPSide source code is reused rather than only its public NUT behavior and UI ideas, its `LGPL-2.1-or-later` licensing and required notices must be handled explicitly. A native JustVoxel implementation using standard NUT interfaces avoids that coupling.
+
+### Bare Metal UPS acceptance criteria
+
+Before the native UPS feature is considered complete, test it on real Bare Metal hardware with a supported USB UPS and include at least:
+
+- USB UPS detection/scanning
+- NUT driver start and stable communication
+- battery charge, runtime, load, voltage, and status reads
+- `nut` account/group and configuration-file permission validation
+- WebUI rendering through the management API without direct browser shell access
+- power-event state changes such as online -> on battery -> online where practical
+- service restart recovery
+- complete host reboot recovery
+- network-bound `upsd` startup where that mode is supported
+- zero unexpected failed systemd units after reboot
+- no UPS serial numbers, credentials, or deployment-specific private addresses exposed in reusable defaults or logs
+
 ## Later: local documentation in CLI and WebUI
 
 JustVoxel documentation should remain available on the appliance even when the Internet is unavailable.
