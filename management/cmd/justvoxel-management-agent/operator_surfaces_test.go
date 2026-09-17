@@ -48,9 +48,12 @@ func TestOperatorWhitelistUsesOnlyFixedHelperActions(t *testing.T) {
 	s := surfaceTestServer(t, roleOperator)
 	old := runWhitelistHelper
 	defer func() { runWhitelistHelper = old }()
-	var got []string
+	calls := make([][]string, 0, 2)
 	runWhitelistHelper = func(_ context.Context, args ...string) ([]byte, error) {
-		got = append([]string(nil), args...)
+		calls = append(calls, append([]string(nil), args...))
+		if len(args) == 1 && args[0] == "list" {
+			return []byte("There are 0 whitelisted player(s):\n"), nil
+		}
 		return []byte("Added Alex\n"), nil
 	}
 
@@ -59,8 +62,8 @@ func TestOperatorWhitelistUsesOnlyFixedHelperActions(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("operator whitelist status = %d: %s", rr.Code, rr.Body.String())
 	}
-	if len(got) != 2 || got[0] != "add-java" || got[1] != "Alex" {
-		t.Fatalf("helper args = %#v", got)
+	if len(calls) != 2 || len(calls[1]) != 2 || calls[1][0] != "add-java" || calls[1][1] != "Alex" {
+		t.Fatalf("helper calls = %#v", calls)
 	}
 }
 
@@ -68,9 +71,12 @@ func TestAdministratorCanAddFirstJavaWhitelistEntry(t *testing.T) {
 	s := surfaceTestServer(t, roleAdministrator)
 	old := runWhitelistHelper
 	defer func() { runWhitelistHelper = old }()
-	calls := 0
+	calls := make([][]string, 0, 2)
 	runWhitelistHelper = func(_ context.Context, args ...string) ([]byte, error) {
-		calls++
+		calls = append(calls, append([]string(nil), args...))
+		if len(args) == 1 && args[0] == "list" {
+			return []byte("There are 0 whitelisted player(s):\n"), nil
+		}
 		if len(args) != 2 || args[0] != "add-java" || args[1] != "FirstPlayer" {
 			t.Fatalf("helper args = %#v", args)
 		}
@@ -82,8 +88,8 @@ func TestAdministratorCanAddFirstJavaWhitelistEntry(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("administrator whitelist status = %d: %s", rr.Code, rr.Body.String())
 	}
-	if calls != 1 {
-		t.Fatalf("helper calls = %d, want 1", calls)
+	if len(calls) != 2 {
+		t.Fatalf("helper calls = %#v, want list then add-java", calls)
 	}
 }
 
@@ -91,9 +97,12 @@ func TestBedrockWhitelistStripsFloodgatePrefix(t *testing.T) {
 	s := surfaceTestServer(t, roleOperator)
 	old := runWhitelistHelper
 	defer func() { runWhitelistHelper = old }()
-	var got []string
+	calls := make([][]string, 0, 2)
 	runWhitelistHelper = func(_ context.Context, args ...string) ([]byte, error) {
-		got = append([]string(nil), args...)
+		calls = append(calls, append([]string(nil), args...))
+		if len(args) == 1 && args[0] == "list" {
+			return []byte("There are 0 whitelisted player(s):\n"), nil
+		}
 		return []byte("Added CatchaLlama\n"), nil
 	}
 
@@ -102,8 +111,8 @@ func TestBedrockWhitelistStripsFloodgatePrefix(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("bedrock whitelist status = %d: %s", rr.Code, rr.Body.String())
 	}
-	if len(got) != 2 || got[0] != "add-bedrock" || got[1] != "CatchaLlama" {
-		t.Fatalf("helper args = %#v", got)
+	if len(calls) != 2 || len(calls[1]) != 2 || calls[1][0] != "add-bedrock" || calls[1][1] != "CatchaLlama" {
+		t.Fatalf("helper calls = %#v", calls)
 	}
 }
 
@@ -112,6 +121,9 @@ func TestBedrockFloodgateCacheErrorIsFriendly(t *testing.T) {
 	old := runWhitelistHelper
 	defer func() { runWhitelistHelper = old }()
 	runWhitelistHelper = func(_ context.Context, args ...string) ([]byte, error) {
+		if len(args) == 1 && args[0] == "list" {
+			return []byte("There are 0 whitelisted player(s):\n"), nil
+		}
 		return []byte("Got an error from requesting the xuid of a Bedrock player: Unable to find user in our cache. Please try specifying their Floodgate UUID instead\n"), errors.New("exit status 1")
 	}
 
