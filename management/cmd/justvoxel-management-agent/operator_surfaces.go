@@ -67,6 +67,13 @@ func (s *server) whitelistChange(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "platform, action, and player name are invalid")
 		return
 	}
+	if platform == "bedrock" {
+		name = strings.TrimPrefix(name, ".")
+		if name == "" {
+			writeError(w, http.StatusBadRequest, "Bedrock player name or Floodgate UUID is required")
+			return
+		}
+	}
 	helperAction := action + "-" + platform
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
@@ -75,13 +82,33 @@ func (s *server) whitelistChange(w http.ResponseWriter, r *http.Request) {
 		if s.store != nil {
 			_ = s.store.recordAuditEvent(actor, "whitelist_"+action, name, false, platform)
 		}
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "whitelist change was rejected", "output": strings.TrimSpace(string(output))})
+		message := whitelistChangeError(platform, string(output))
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": message})
 		return
 	}
 	if s.store != nil {
 		_ = s.store.recordAuditEvent(actor, "whitelist_"+action, name, true, platform)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"output": strings.TrimSpace(string(output))})
+}
+
+func whitelistChangeError(platform, output string) string {
+	text := strings.TrimSpace(output)
+	lower := strings.ToLower(text)
+	if platform == "bedrock" && (strings.Contains(lower, "unable to find user in our cache") || strings.Contains(lower, "floodgate could not resolve")) {
+		return "Floodgate could not resolve this Bedrock player. Use the Xbox gamertag without the leading '.' or enter the player's Floodgate UUID."
+	}
+	for _, prefix := range []string{
+		"Java player name must",
+		"Invalid Bedrock/Xbox gamertag",
+		"Invalid Bedrock/Xbox gamertag or Floodgate UUID",
+		"Minecraft must be running",
+	} {
+		if strings.HasPrefix(text, prefix) {
+			return text
+		}
+	}
+	return "Whitelist change was rejected."
 }
 
 func (s *server) minecraftLogs(w http.ResponseWriter, r *http.Request) {

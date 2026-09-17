@@ -21,6 +21,38 @@ run_rcon() {
     podman exec minecraft rcon-cli "$1"
 }
 
+bedrock_whitelist() {
+    local verb="$1" identity="$2" output status lower
+
+    # Floodgate's leading username prefix (normally '.') is an internal
+    # representation. Accept it from a user for convenience, but never send it
+    # to fwhitelist. A Floodgate UUID is passed through unchanged.
+    identity="${identity#.}"
+    [[ -n ${identity} && ${identity} != *$'\n'* && ${identity} != *$'\r'* && ${#identity} -le 64 ]] || {
+        echo 'Invalid Bedrock/Xbox gamertag or Floodgate UUID.' >&2
+        return 1
+    }
+
+    set +e
+    output="$(run_rcon "fwhitelist ${verb} ${identity}" 2>&1)"
+    status=$?
+    set -e
+    lower="${output,,}"
+
+    if [[ ${lower} == *'unable to find user in our cache'* || ${lower} == *'specifying their floodgate uuid'* ]]; then
+        echo 'Floodgate could not resolve this Bedrock player.' >&2
+        echo "Use the Xbox gamertag without the leading '.' or enter the player's Floodgate UUID." >&2
+        return 1
+    fi
+    if (( status != 0 )); then
+        [[ -n ${output} ]] && printf '%s\n' "${output}" >&2
+        return "${status}"
+    fi
+
+    [[ -n ${output} ]] && printf '%s\n' "${output}"
+    run_rcon 'whitelist list'
+}
+
 case "${action}" in
     list)
         run_rcon 'whitelist list'
@@ -40,13 +72,8 @@ case "${action}" in
             echo 'Enable it from Configure Minecraft -> Other safe Minecraft settings, then try again.'
             exit 0
         fi
-        [[ -n ${name} && ${name} != *$'\n'* && ${name} != *$'\r'* && ${#name} -le 64 ]] || {
-            echo 'Invalid Bedrock/Xbox gamertag.' >&2
-            exit 1
-        }
         if [[ ${action} == add-bedrock ]]; then verb=add; else verb=remove; fi
-        run_rcon "fwhitelist ${verb} ${name}"
-        run_rcon 'whitelist list'
+        bedrock_whitelist "${verb}" "${name}"
         ;;
     *)
         echo 'Usage: whitelist {list|add-java|remove-java|add-bedrock|remove-bedrock|bedrock-enabled} [name]' >&2

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -60,6 +61,73 @@ func TestOperatorWhitelistUsesOnlyFixedHelperActions(t *testing.T) {
 	}
 	if len(got) != 2 || got[0] != "add-java" || got[1] != "Alex" {
 		t.Fatalf("helper args = %#v", got)
+	}
+}
+
+func TestAdministratorCanAddFirstJavaWhitelistEntry(t *testing.T) {
+	s := surfaceTestServer(t, roleAdministrator)
+	old := runWhitelistHelper
+	defer func() { runWhitelistHelper = old }()
+	calls := 0
+	runWhitelistHelper = func(_ context.Context, args ...string) ([]byte, error) {
+		calls++
+		if len(args) != 2 || args[0] != "add-java" || args[1] != "FirstPlayer" {
+			t.Fatalf("helper args = %#v", args)
+		}
+		return []byte("Added FirstPlayer to the whitelist\nThere are 1 whitelisted player(s): FirstPlayer\n"), nil
+	}
+
+	rr := httptest.NewRecorder()
+	s.whitelistChange(rr, surfaceRequest(http.MethodPost, "/v1/whitelist", `{"platform":"java","action":"add","name":"FirstPlayer"}`))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("administrator whitelist status = %d: %s", rr.Code, rr.Body.String())
+	}
+	if calls != 1 {
+		t.Fatalf("helper calls = %d, want 1", calls)
+	}
+}
+
+func TestBedrockWhitelistStripsFloodgatePrefix(t *testing.T) {
+	s := surfaceTestServer(t, roleOperator)
+	old := runWhitelistHelper
+	defer func() { runWhitelistHelper = old }()
+	var got []string
+	runWhitelistHelper = func(_ context.Context, args ...string) ([]byte, error) {
+		got = append([]string(nil), args...)
+		return []byte("Added CatchaLlama\n"), nil
+	}
+
+	rr := httptest.NewRecorder()
+	s.whitelistChange(rr, surfaceRequest(http.MethodPost, "/v1/whitelist", `{"platform":"bedrock","action":"add","name":".CatchaLlama"}`))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("bedrock whitelist status = %d: %s", rr.Code, rr.Body.String())
+	}
+	if len(got) != 2 || got[0] != "add-bedrock" || got[1] != "CatchaLlama" {
+		t.Fatalf("helper args = %#v", got)
+	}
+}
+
+func TestBedrockFloodgateCacheErrorIsFriendly(t *testing.T) {
+	s := surfaceTestServer(t, roleOperator)
+	old := runWhitelistHelper
+	defer func() { runWhitelistHelper = old }()
+	runWhitelistHelper = func(_ context.Context, args ...string) ([]byte, error) {
+		return []byte("Got an error from requesting the xuid of a Bedrock player: Unable to find user in our cache. Please try specifying their Floodgate UUID instead\n"), errors.New("exit status 1")
+	}
+
+	rr := httptest.NewRecorder()
+	s.whitelistChange(rr, surfaceRequest(http.MethodPost, "/v1/whitelist", `{"platform":"bedrock","action":"add","name":"CatchaLlama"}`))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("bedrock error status = %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{"Floodgate could not resolve this Bedrock player", "Floodgate UUID"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("friendly error missing %q: %s", want, body)
+		}
+	}
+	if strings.Contains(strings.ToLower(body), "xuid") || strings.Contains(strings.ToLower(body), "our cache") {
+		t.Fatalf("raw Floodgate error leaked: %s", body)
 	}
 }
 
