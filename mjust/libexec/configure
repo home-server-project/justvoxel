@@ -1,6 +1,7 @@
 #!/usr/bin/bash
 set -euo pipefail
 source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/ui.sh
 require_root
 require_config
 
@@ -20,133 +21,187 @@ show_configuration() {
     echo "MOTD: ${MOTD}"
 }
 
-choice="$(choose 'Safe configuration changes' \
-    'Show current configuration' \
-    'Change maximum players' \
-    'Change memory limits' \
-    'Change Java/Bedrock host ports' \
-    'Change server welcome message (MOTD)' \
-    'Change backup schedule/timer' \
-    'Change storage / migrate Minecraft data' \
-    'Change container image or Minecraft version policy' \
-    'Cancel')"
+configure_memory() {
+    local new_java new_container
+    new_java="$(jui_input 'Minecraft Java heap' "${JAVA_MEMORY}")" || return 0
+    new_container="$(jui_input 'Maximum total Minecraft memory' "${CONTAINER_MEMORY}")" || return 0
+    validate_memory "${new_java}" && validate_memory "${new_container}" || {
+        echo 'ERROR: memory values must look like 4G or 4096M.' >&2
+        return 1
+    }
+    (( $(memory_to_mib "${new_container}") > $(memory_to_mib "${new_java}") )) || {
+        echo 'ERROR: maximum total Minecraft memory must be larger than the Java heap.' >&2
+        return 1
+    }
+    JAVA_MEMORY="${new_java}"
+    CONTAINER_MEMORY="${new_container}"
+    write_main_config
+    render_runtime
+    echo 'Memory configuration updated. Restart Minecraft when it is safe to apply it.'
+}
 
-case "${choice}" in
-    1)
-        show_configuration
-        exit 0
-        ;;
-    2)
-        exec /usr/libexec/justvoxel/mjust/configure-max-players
-        ;;
-    3)
-        JAVA_MEMORY="$(prompt_default 'Minecraft Java heap' "${JAVA_MEMORY}")"
-        CONTAINER_MEMORY="$(prompt_default 'Maximum total Minecraft memory' "${CONTAINER_MEMORY}")"
-        validate_memory "${JAVA_MEMORY}" && validate_memory "${CONTAINER_MEMORY}" || {
-            echo 'ERROR: memory values must look like 4G or 4096M.' >&2
-            exit 1
-        }
-        (( $(memory_to_mib "${CONTAINER_MEMORY}") > $(memory_to_mib "${JAVA_MEMORY}") )) || {
-            echo 'ERROR: maximum total Minecraft memory must be larger than the Java heap.' >&2
-            exit 1
-        }
-        write_main_config
-        render_runtime
-        echo 'Memory configuration updated. Restart Minecraft when it is safe to apply it.'
-        ;;
-    4)
-        old_java="${JAVA_PORT}"
-        old_bedrock_enabled="${BEDROCK_ENABLED}"
-        old_bedrock="${BEDROCK_PORT}"
-        JAVA_PORT="$(prompt_default 'Java host TCP port' "${JAVA_PORT}")"
-        validate_port "${JAVA_PORT}" || { echo 'ERROR: invalid Java port.' >&2; exit 1; }
-        if [[ ${BEDROCK_ENABLED} == yes ]]; then
-            BEDROCK_PORT="$(prompt_default 'Bedrock host UDP port' "${BEDROCK_PORT}")"
-            validate_port "${BEDROCK_PORT}" || { echo 'ERROR: invalid Bedrock port.' >&2; exit 1; }
-        fi
-        write_main_config
-        render_runtime
-        update_firewall_ports "${old_java}" "${old_bedrock_enabled}" "${old_bedrock}"
-        echo 'Port configuration updated. Restart Minecraft when it is safe to apply it.'
-        ;;
-    5)
-        MOTD="$(prompt_default 'Server welcome message (MOTD)' "${MOTD}")"
-        validate_simple_text "${MOTD}" || { echo 'ERROR: MOTD must be one line.' >&2; exit 1; }
-        write_main_config
-        render_runtime
-        echo 'Server welcome message updated. Restart Minecraft when it is safe to apply it.'
-        ;;
-    6)
-        BACKUP_SCHEDULE="$(prompt_default 'Backup systemd calendar schedule' "${BACKUP_SCHEDULE}")"
-        systemd-analyze calendar "${BACKUP_SCHEDULE}" >/dev/null 2>&1 || {
-            echo 'ERROR: invalid systemd calendar schedule.' >&2
-            exit 1
-        }
-        if confirm 'Enable the scheduled backup timer?'; then
-            BACKUP_TIMER_ENABLED=yes
+configure_ports() {
+    local old_java="${JAVA_PORT}" old_bedrock_enabled="${BEDROCK_ENABLED}" old_bedrock="${BEDROCK_PORT}"
+    local new_java new_bedrock
+    new_java="$(jui_input 'Java host TCP port' "${JAVA_PORT}")" || return 0
+    validate_port "${new_java}" || { echo 'ERROR: invalid Java port.' >&2; return 1; }
+    new_bedrock="${BEDROCK_PORT}"
+    if [[ ${BEDROCK_ENABLED} == yes ]]; then
+        new_bedrock="$(jui_input 'Bedrock host UDP port' "${BEDROCK_PORT}")" || return 0
+        validate_port "${new_bedrock}" || { echo 'ERROR: invalid Bedrock port.' >&2; return 1; }
+    fi
+    JAVA_PORT="${new_java}"
+    BEDROCK_PORT="${new_bedrock}"
+    write_main_config
+    render_runtime
+    update_firewall_ports "${old_java}" "${old_bedrock_enabled}" "${old_bedrock}"
+    echo 'Port configuration updated. Restart Minecraft when it is safe to apply it.'
+}
+
+configure_bedrock() {
+    local choice state old_java="${JAVA_PORT}" old_bedrock_enabled="${BEDROCK_ENABLED}" old_bedrock="${BEDROCK_PORT}"
+    if [[ ${BEDROCK_ENABLED} == yes ]]; then state='enabled'; else state='disabled'; fi
+    choice="$(jui_choose "Bedrock cross-play - currently ${state}" \
+        "$([[ ${BEDROCK_ENABLED} == yes ]] && printf 'Disable Bedrock cross-play' || printf 'Enable Bedrock cross-play')" \
+        'Back')" || return 0
+    [[ ${choice} != Back ]] || return 0
+
+    if [[ ${BEDROCK_ENABLED} == yes ]]; then
+        BEDROCK_ENABLED=no
+    else
+        BEDROCK_ENABLED=yes
+        BEDROCK_PORT="$(jui_input 'Bedrock host UDP port' "${BEDROCK_PORT}")" || return 0
+        validate_port "${BEDROCK_PORT}" || { echo 'ERROR: invalid Bedrock port.' >&2; return 1; }
+    fi
+
+    write_main_config
+    render_runtime
+    update_firewall_ports "${old_java}" "${old_bedrock_enabled}" "${old_bedrock}"
+    echo "Bedrock cross-play is now ${BEDROCK_ENABLED}. Restart Minecraft when it is safe to apply it."
+}
+
+configure_motd() {
+    local new_motd
+    new_motd="$(jui_input 'Server welcome message (MOTD)' "${MOTD}")" || return 0
+    validate_simple_text "${new_motd}" || { echo 'ERROR: MOTD must be one line.' >&2; return 1; }
+    MOTD="${new_motd}"
+    write_main_config
+    render_runtime
+    echo 'Server welcome message updated. Restart Minecraft when it is safe to apply it.'
+}
+
+configure_backup_schedule() {
+    local new_schedule timer_choice new_timer
+    new_schedule="$(jui_input 'Backup systemd calendar schedule' "${BACKUP_SCHEDULE}")" || return 0
+    systemd-analyze calendar "${new_schedule}" >/dev/null 2>&1 || {
+        echo 'ERROR: invalid systemd calendar schedule.' >&2
+        return 1
+    }
+    timer_choice="$(jui_choose 'Scheduled backup timer' \
+        "Keep current: ${BACKUP_TIMER_ENABLED}" \
+        'Enable scheduled backups' \
+        'Disable scheduled backups' \
+        'Back')" || return 0
+    case "${timer_choice}" in
+        'Back') return 0 ;;
+        'Enable scheduled backups') new_timer=yes ;;
+        'Disable scheduled backups') new_timer=no ;;
+        *) new_timer="${BACKUP_TIMER_ENABLED}" ;;
+    esac
+    BACKUP_SCHEDULE="${new_schedule}"
+    BACKUP_TIMER_ENABLED="${new_timer}"
+    write_main_config
+    render_runtime
+    echo 'Backup timer configuration updated.'
+}
+
+configure_image_version() {
+    local image_choice version_choice new_tag="${MINECRAFT_IMAGE_TAG}"
+    local new_mode="${MINECRAFT_VERSION_MODE}" new_version="${MINECRAFT_VERSION}" rc
+
+    image_choice="$(jui_choose 'Container image policy' \
+        "Keep current: ${MINECRAFT_IMAGE_TAG}" \
+        'latest - newest upstream main-branch image' \
+        'stable - newest released image' \
+        'custom / exact tag' \
+        'Back')" || return 0
+    case "${image_choice}" in
+        'Back') return 0 ;;
+        'latest - newest upstream main-branch image') new_tag=latest ;;
+        'stable - newest released image') new_tag=stable ;;
+        'custom / exact tag') new_tag="$(jui_input 'Container image tag' "${MINECRAFT_IMAGE_TAG}")" || return 0 ;;
+    esac
+
+    validate_minecraft_image_tag "${new_tag}" || {
+        rc=$?
+        if (( rc == 2 )); then
+            echo "ERROR: upstream marks image tag '${new_tag}' deprecated." >&2
         else
-            BACKUP_TIMER_ENABLED=no
+            echo "ERROR: image tag '${new_tag}' could not be validated." >&2
         fi
-        write_main_config
-        render_runtime
-        echo 'Backup timer configuration updated.'
-        ;;
-    7)
-        exec /usr/libexec/justvoxel/mjust/storage-provision menu
-        ;;
-    8)
-        image_choice="$(choose 'Container image policy' \
-            'keep current tag' \
-            'latest - newest upstream main-branch image' \
-            'stable - newest released image' \
-            'custom/exact tag')"
-        case "${image_choice}" in
-            1) ;;
-            2) MINECRAFT_IMAGE_TAG=latest ;;
-            3) MINECRAFT_IMAGE_TAG=stable ;;
-            4) MINECRAFT_IMAGE_TAG="$(prompt_default 'Container image tag' "${MINECRAFT_IMAGE_TAG}")" ;;
-        esac
-        validate_minecraft_image_tag "${MINECRAFT_IMAGE_TAG}" || {
-            rc=$?
-            if (( rc == 2 )); then
-                echo "ERROR: upstream marks image tag '${MINECRAFT_IMAGE_TAG}' deprecated." >&2
-            else
-                echo "ERROR: image tag '${MINECRAFT_IMAGE_TAG}' could not be validated." >&2
-            fi
-            exit 1
-        }
+        return 1
+    }
 
-        version_choice="$(choose 'Minecraft version policy' \
-            'keep current policy' \
-            'pin newest stable Paper-supported Minecraft version' \
-            'LATEST - resolve newest Minecraft/Paper release when Minecraft starts' \
-            'pin another exact stable Paper-supported version')"
-        case "${version_choice}" in
-            1) ;;
-            2)
-                MINECRAFT_VERSION="$(resolve_latest_stable_paper_version || true)"
-                [[ -n ${MINECRAFT_VERSION} ]] || { echo 'ERROR: could not resolve a stable Paper version.' >&2; exit 1; }
-                MINECRAFT_VERSION_MODE=pinned
-                ;;
-            3)
-                MINECRAFT_VERSION_MODE=latest
-                MINECRAFT_VERSION=LATEST
-                echo 'WARNING: the game/Paper version may update when Minecraft starts, even without pulling a newer Podman image.'
-                ;;
-            4)
-                read -r -p 'Exact Minecraft version: ' MINECRAFT_VERSION
-                paper_version_has_stable_build "${MINECRAFT_VERSION}" || {
-                    echo 'ERROR: PaperMC did not confirm a stable build for that version.' >&2
-                    exit 1
-                }
-                MINECRAFT_VERSION_MODE=pinned
-                ;;
-        esac
-        write_main_config
-        render_runtime
-        echo 'Version policy updated. Minecraft was not restarted automatically.'
-        ;;
-    9)
-        echo 'Cancelled.'
-        ;;
-esac
+    version_choice="$(jui_choose 'Minecraft version policy' \
+        "Keep current: ${MINECRAFT_VERSION_MODE} (${MINECRAFT_VERSION})" \
+        'Pin newest stable Paper-supported Minecraft version' \
+        'LATEST - resolve newest Minecraft/Paper release when Minecraft starts' \
+        'Pin another exact stable Paper-supported version' \
+        'Back')" || return 0
+    case "${version_choice}" in
+        'Back') return 0 ;;
+        'Pin newest stable Paper-supported Minecraft version')
+            new_version="$(resolve_latest_stable_paper_version || true)"
+            [[ -n ${new_version} ]] || { echo 'ERROR: could not resolve a stable Paper version.' >&2; return 1; }
+            new_mode=pinned
+            ;;
+        'LATEST - resolve newest Minecraft/Paper release when Minecraft starts')
+            new_mode=latest
+            new_version=LATEST
+            echo 'WARNING: the game/Paper version may update when Minecraft starts, even without pulling a newer Podman image.'
+            ;;
+        'Pin another exact stable Paper-supported version')
+            new_version="$(jui_input 'Exact Minecraft version')" || return 0
+            paper_version_has_stable_build "${new_version}" || {
+                echo 'ERROR: PaperMC did not confirm a stable build for that version.' >&2
+                return 1
+            }
+            new_mode=pinned
+            ;;
+    esac
+
+    MINECRAFT_IMAGE_TAG="${new_tag}"
+    MINECRAFT_VERSION_MODE="${new_mode}"
+    MINECRAFT_VERSION="${new_version}"
+    write_main_config
+    render_runtime
+    echo 'Version policy updated. Minecraft was not restarted automatically.'
+}
+
+while true; do
+    choice="$(jui_choose 'Safe configuration changes' \
+        'Show current configuration' \
+        'Change maximum players' \
+        'Change memory limits' \
+        'Change Java/Bedrock host ports' \
+        'Enable / disable Bedrock cross-play' \
+        'Change server welcome message (MOTD)' \
+        'Change backup schedule/timer' \
+        'Change storage / migrate Minecraft data' \
+        'Change container image or Minecraft version policy' \
+        'Back')" || exit 0
+
+    case "${choice}" in
+        'Show current configuration') show_configuration ;;
+        'Change maximum players') exec /usr/libexec/justvoxel/mjust/configure-max-players ;;
+        'Change memory limits') configure_memory || true ;;
+        'Change Java/Bedrock host ports') configure_ports || true ;;
+        'Enable / disable Bedrock cross-play') configure_bedrock || true ;;
+        'Change server welcome message (MOTD)') configure_motd || true ;;
+        'Change backup schedule/timer') configure_backup_schedule || true ;;
+        'Change storage / migrate Minecraft data') /usr/libexec/justvoxel/mjust/storage-provision menu || true ;;
+        'Change container image or Minecraft version policy') configure_image_version || true ;;
+        'Back') exit 0 ;;
+    esac
+
+done
