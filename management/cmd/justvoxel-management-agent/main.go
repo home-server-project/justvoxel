@@ -190,6 +190,7 @@ func serve(socket string) error {
 	registerAdminUserRoutes(mux, s)
 	registerAdminActivityRoutes(mux, s)
 	registerAdminDiscoveryRoutes(mux, s)
+	registerAdminConfigurationRoutes(mux, s)
 	registerOperationalRoutes(mux, s)
 	registerMinecraftRoutes(mux, s)
 
@@ -301,7 +302,7 @@ func (s *server) authorize(r *http.Request, allowMustChange bool) (string, sessi
 	}
 	token := strings.TrimSpace(strings.TrimPrefix(header, "Bearer "))
 	if token == "" {
-		return "", session{}, false
+		return token, session{}, false
 	}
 	now := time.Now()
 	s.mu.Lock()
