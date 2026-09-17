@@ -10,8 +10,8 @@ fi
 
 variant_id="$(cat /usr/lib/justvoxel/variant 2>/dev/null || true)"
 case "${variant_id}" in
-    justvoxel-vm) variant='VM' ;;
-    justvoxel-baremetal) variant='Bare Metal' ;;
+    justvoxel-vm|vm) variant='VM' ;;
+    justvoxel-baremetal|baremetal) variant='Bare Metal' ;;
     *) variant='Unknown' ;;
 esac
 
@@ -39,74 +39,72 @@ web_direct=''
 web_enabled_marker=/var/lib/justvoxel/webui/enabled
 web_initialized_marker=/var/lib/justvoxel/webui/initialized
 
-# Prefer the live listener over bootstrap marker timing. An interactive login can
-# happen while bootstrap is writing its final markers even though the WebUI is
-# already ready to use.
 if systemctl is-active --quiet justvoxel-webui.service 2>/dev/null && \
     curl -fsS --max-time 1 http://127.0.0.1:8099/healthz >/dev/null 2>&1; then
     web_state='Ready'
-    if [[ ${host} != unknown ]]; then
-        web_browser="http://${host}.local:8099"
-    else
-        web_browser='Waiting for hostname'
-    fi
-    if [[ ${ipv4} == 'Not assigned' ]]; then
-        web_direct='Waiting for network address'
-    else
-        web_direct="http://${ipv4}:8099"
-    fi
+    if [[ ${host} != unknown ]]; then web_browser="http://${host}.local:8099"; else web_browser='Waiting for hostname'; fi
+    if [[ ${ipv4} == 'Not assigned' ]]; then web_direct='Waiting for network address'; else web_direct="http://${ipv4}:8099"; fi
 elif systemctl is-failed --quiet justvoxel-web-bootstrap.service 2>/dev/null; then
     web_state='Unavailable'
 elif [[ -e ${web_enabled_marker} ]]; then
     web_state='Unavailable'
 elif [[ ! -e ${web_initialized_marker} ]]; then
     web_state='Starting...'
-else
-    web_state='Disabled'
 fi
 
 if [[ -t 1 && ${TERM:-dumb} != dumb ]]; then
+    cyan=$'\033[38;5;45m'
+    white=$'\033[97m'
     green=$'\033[38;5;82m'
+    yellow=$'\033[38;5;220m'
+    blue=$'\033[38;5;75m'
+    dim=$'\033[38;5;245m'
     bold=$'\033[1m'
     reset=$'\033[0m'
 else
-    green=''
-    bold=''
-    reset=''
+    cyan='' white='' green='' yellow='' blue='' dim='' bold='' reset=''
 fi
 
-printf '%s%sWelcome to JustVoxel%s\n' "${green}" "${bold}" "${reset}"
-printf 'Minecraft Server Appliance\n\n'
-printf '  System:          %s\n' "${pretty_name}"
-printf '  Variant:         %s\n' "${variant}"
-printf '  Host:            %s\n' "${host}"
-printf '  IPv4:            %s\n' "${ipv4}"
-printf '  Minecraft:       %s\n\n' "${minecraft_state}"
-printf '  Web interface:   %s\n' "${web_state}"
+line() {
+    printf '  %s%-18s%s %s%s%s\n' "${cyan}" "$1" "${reset}" "${2:-${white}}" "$3" "${reset}"
+}
+
+printf '%s%s====================================================%s\n' "${cyan}" "${bold}" "${reset}"
+printf '%s%s                    JUSTVOXEL%s\n' "${cyan}" "${bold}" "${reset}"
+printf '%s%s              Minecraft Server Appliance%s\n' "${cyan}" "${bold}" "${reset}"
+printf '%s%s====================================================%s\n\n' "${cyan}" "${bold}" "${reset}"
+
+line 'System:' "${white}" "${pretty_name}"
+line 'Variant:' "${white}" "${variant}"
+line 'Host:' "${white}" "${host}"
+line 'IPv4:' "${white}" "${ipv4}"
+line 'Minecraft:' "$([[ ${minecraft_state} == Configured ]] && printf '%s' "${green}" || printf '%s' "${yellow}")" "${minecraft_state}"
+printf '\n'
+line 'Web interface:' "$([[ ${web_state} == Ready ]] && printf '%s' "${green}" || printf '%s' "${yellow}")" "${web_state}"
 case "${web_state}" in
     Ready)
-        printf '  Open in browser: %s\n' "${web_browser}"
-        printf '  Direct address:  %s\n' "${web_direct}"
+        line 'Open in browser:' "${blue}" "${web_browser}"
+        line 'Direct address:' "${blue}" "${web_direct}"
         ;;
     Disabled)
-        printf '  Enable with:     %smjust web enable%s\n' "${green}" "${reset}"
+        line 'Enable with:' "${green}" 'mjust web enable'
         ;;
     Unavailable)
-        printf '  Check status:    %smjust web status%s\n' "${green}" "${reset}"
+        line 'Check status:' "${green}" 'mjust web status'
         ;;
 esac
-printf '\n'
 
+printf '\n%s%sCommon commands%s\n' "${bold}" "${cyan}" "${reset}"
 if [[ ${needs_setup} == yes ]]; then
-    printf '  Normal setup:      %smjust setup%s\n' "${green}" "${reset}"
-    printf '  Advanced setup:    %smjust setup-advanced%s\n' "${green}" "${reset}"
+    line 'Normal setup:' "${green}" 'mjust setup'
+    line 'Advanced setup:' "${green}" 'mjust setup-advanced'
 fi
-printf '  Admin menu:        %smjust%s\n' "${green}" "${reset}"
-printf '  List commands:     %smjust --list%s\n' "${green}" "${reset}"
-printf '  Server status:     %smjust status%s\n' "${green}" "${reset}"
-printf '  Web status:        %smjust web status%s\n' "${green}" "${reset}"
-printf '  Validate system:   %smjust validate%s\n' "${green}" "${reset}"
-printf '\n'
-printf '  Documentation: https://github.com/home-server-project/justvoxel\n'
-printf '  Report an issue: https://github.com/home-server-project/justvoxel/issues\n'
-printf '  Hide this message: mjust welcome-off\n'
+line 'Admin menu:' "${green}" 'mjust'
+line 'Server status:' "${green}" 'mjust status'
+line 'List commands:' "${green}" 'mjust --list'
+line 'Validate system:' "${green}" 'mjust validate'
+
+printf '\n%s%sLinks%s\n' "${bold}" "${cyan}" "${reset}"
+line 'Documentation:' "${blue}" 'https://github.com/home-server-project/justvoxel'
+line 'Report an issue:' "${blue}" 'https://github.com/home-server-project/justvoxel/issues'
+line 'Hide this message:' "${dim}" 'mjust welcome-off'
