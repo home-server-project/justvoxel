@@ -11,13 +11,7 @@ system_memory_mib() {
     awk '/^MemTotal:/ {printf "%d\n", $2 / 1024; exit}' /proc/meminfo 2>/dev/null || printf '0\n'
 }
 
-configuration_json() {
-    if [[ ! -r ${JV_CONFIG} ]]; then
-        jq -n '{configured:false,minecraft:{},backup:{}}'
-        return 0
-    fi
-
-    require_config
+configuration_values_json() {
     jq -n \
         --arg data_path "${DATA_PATH}" \
         --arg data_mount_point "${DATA_MOUNT_POINT}" \
@@ -82,6 +76,15 @@ configuration_json() {
         }'
 }
 
+configuration_json() {
+    if [[ ! -r ${JV_CONFIG} ]]; then
+        jq -n '{configured:false,minecraft:{},backup:{}}'
+        return 0
+    fi
+    require_config
+    configuration_values_json
+}
+
 storage_json() {
     local raw devices systems system_lines
     raw="$(lsblk -J -b -e7 -l -o NAME,PATH,PKNAME,TYPE,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINTS,MODEL,TRAN,RO)"
@@ -91,18 +94,11 @@ storage_json() {
         systems="$(printf '%s\n' "${system_lines}" | jq -R -s 'split("\n") | map(select(length > 0))')"
     fi
     devices="$(jq '[.blockdevices[] | {
-        name:(.name // ""),
-        path:(.path // ""),
-        parent:(.pkname // ""),
-        type:(.type // ""),
-        size_bytes:(.size // 0),
-        filesystem:(.fstype // ""),
-        label:(.label // ""),
-        uuid:(.uuid // ""),
+        name:(.name // ""), path:(.path // ""), parent:(.pkname // ""), type:(.type // ""),
+        size_bytes:(.size // 0), filesystem:(.fstype // ""), label:(.label // ""), uuid:(.uuid // ""),
         mountpoints:((.mountpoints // []) | map(select(. != null))),
         model:((.model // "") | gsub("^[[:space:]]+|[[:space:]]+$"; "")),
-        transport:(.tran // ""),
-        read_only:((.ro // false) == true or (.ro // 0) == 1)
+        transport:(.tran // ""), read_only:((.ro // false) == true or (.ro // 0) == 1)
     }]' <<< "${raw}")"
     devices="$(jq --argjson systems "${systems}" '[.[] as $d | $d + {
         system:(($systems | index($d.path)) != null or (($d.parent | length) > 0 and (($systems | index("/dev/" + $d.parent)) != null)))
@@ -131,25 +127,10 @@ setup_defaults_json() {
         --argjson backup_keep 7 \
         --arg backup_daily_time '04:30' \
         --argjson system_memory_mib "${total_mib:-0}" \
-        '{
-            data_path:$data_path,
-            backup_path:$backup_path,
-            java_memory:$java_memory,
-            container_memory:$container_memory,
-            java_port:$java_port,
-            bedrock_enabled:false,
-            bedrock_port:$bedrock_port,
-            timezone:$timezone,
-            max_players:$max_players,
-            motd:$motd,
-            image_tag:$image_tag,
-            version_mode:$version_mode,
-            backup_keep:$backup_keep,
-            backup_daily_time:$backup_daily_time,
-            system_memory_mib:$system_memory_mib,
-            system_reserve_minimum_mib:1024,
-            system_reserve_recommended_mib:2048
-        }'
+        '{data_path:$data_path,backup_path:$backup_path,java_memory:$java_memory,container_memory:$container_memory,
+          java_port:$java_port,bedrock_enabled:false,bedrock_port:$bedrock_port,timezone:$timezone,max_players:$max_players,
+          motd:$motd,image_tag:$image_tag,version_mode:$version_mode,backup_keep:$backup_keep,backup_daily_time:$backup_daily_time,
+          system_memory_mib:$system_memory_mib,system_reserve_minimum_mib:1024,system_reserve_recommended_mib:2048}'
 }
 
 configuration_change_json() {
@@ -220,9 +201,6 @@ configuration_change_json() {
         jq -n '{ok:false,error:"Bedrock port must be between 1 and 65535."}'
         return 0
     fi
-    if [[ ${new_java_port} == "${new_bedrock_port}" && ${new_bedrock_enabled} == yes ]]; then
-        : # TCP and UDP may intentionally use the same numeric port.
-    fi
     if [[ -z ${new_timezone} || ! -e /usr/share/zoneinfo/${new_timezone} ]]; then
         jq -n '{ok:false,error:"Timezone was not found on this JustVoxel system."}'
         return 0
@@ -241,9 +219,7 @@ configuration_change_json() {
     fi
     if [[ ${new_image_tag} != "${old_image_tag}" ]]; then
         local image_rc=0
-        if validate_minecraft_image_tag "${new_image_tag}"; then
-            :
-        else
+        if validate_minecraft_image_tag "${new_image_tag}"; then :; else
             image_rc=$?
             if (( image_rc == 2 )); then
                 jq -n '{ok:false,error:"Upstream marks that Minecraft container tag as deprecated."}'
@@ -359,7 +335,7 @@ configuration_change_json() {
     fi
 
     local proposed
-    proposed="$(configuration_json)"
+    proposed="$(configuration_values_json)"
     jq -n \
         --argjson changes "${changes}" \
         --argjson warnings "${warnings}" \
