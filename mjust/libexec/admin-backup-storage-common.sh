@@ -13,7 +13,9 @@ read_request() {
 }
 
 real_path() {
-    realpath -m -- "$1" 2>/dev/null || true
+    local value="${1:-}"
+    [[ -n ${value} ]] || return 0
+    realpath -m -- "${value}" 2>/dev/null || true
 }
 
 nearest_existing_path() {
@@ -189,6 +191,23 @@ validate_request() {
             TARGET_MOUNT=''
             TARGET_EXPECTED_SOURCE=''
             TARGET_UUID=''
+            local system_probe system_mount system_fstype
+            system_probe="$(nearest_existing_path "${TARGET_PATH}")"
+            system_mount="$(findmnt -n -o TARGET --target "${system_probe}" 2>/dev/null || true)"
+            system_fstype="$(findmnt -n -o FSTYPE --target "${system_probe}" 2>/dev/null || true)"
+            case "${system_fstype}" in
+                nfs|nfs4|cifs|smb3)
+                    json_error 'This path is on network storage. Choose NFS or SMB so JustVoxel can track and validate the expected share.'
+                    return 1
+                    ;;
+            esac
+            case "${system_mount}" in
+                /|/var) ;;
+                *)
+                    json_error 'This path is on a separate mounted filesystem. Choose Existing local filesystem / partition so JustVoxel can track its UUID safely.'
+                    return 1
+                    ;;
+            esac
             target_disk="$(disk_for_path "${TARGET_PATH}")"
             if [[ -n ${target_disk} && -n ${minecraft_disk} && ${target_disk} == "${minecraft_disk}" ]]; then
                 TARGET_SAME_DISK=true
