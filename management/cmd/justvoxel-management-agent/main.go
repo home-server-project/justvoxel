@@ -189,6 +189,7 @@ func serve(socket string) error {
 	mux.HandleFunc("POST /v1/backups/manual", s.manualBackup)
 	registerAdminUserRoutes(mux, s)
 	registerAdminActivityRoutes(mux, s)
+	registerOperationalRoutes(mux, s)
 	registerMinecraftRoutes(mux, s)
 
 	httpServer := &http.Server{
