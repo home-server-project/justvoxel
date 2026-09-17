@@ -149,13 +149,13 @@ type adminSetupPlanRequirements struct {
 }
 
 type adminSetupPlanResponse struct {
-	OK            bool                       `json:"ok"`
-	SchemaVersion string                     `json:"schema_version"`
-	Code          string                     `json:"code,omitempty"`
-	Error         string                     `json:"error,omitempty"`
-	Normalized    adminSetupNormalizedPlan   `json:"normalized,omitempty"`
-	Warnings      []adminSetupPlanWarning    `json:"warnings"`
-	Requirements  adminSetupPlanRequirements `json:"requirements,omitempty"`
+	OK            bool                        `json:"ok"`
+	SchemaVersion string                      `json:"schema_version"`
+	Code          string                      `json:"code,omitempty"`
+	Error         string                      `json:"error,omitempty"`
+	Normalized    *adminSetupNormalizedPlan   `json:"normalized,omitempty"`
+	Warnings      []adminSetupPlanWarning     `json:"warnings"`
+	Requirements  *adminSetupPlanRequirements `json:"requirements,omitempty"`
 }
 
 func registerAdminSetupPlanRoutes(mux *http.ServeMux, s *server) {
@@ -168,7 +168,7 @@ func (s *server) adminSetupPlan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var request adminSetupPlanRequest
-	if !decodeJSON(w, r, &request) {
+	if !decodeAdminSetupPlanRequest(w, r, &request) {
 		return
 	}
 	payload, err := json.Marshal(request)
@@ -203,11 +203,26 @@ func (s *server) adminSetupPlan(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, out)
 		return
 	}
-	if out.Normalized.Minecraft.VersionPolicy == "" || out.Normalized.Storage.Type == "" || out.Normalized.Backups.Type == "" {
+	if out.Normalized == nil || out.Requirements == nil || out.Normalized.Minecraft.VersionPolicy == "" || out.Normalized.Storage.Type == "" || out.Normalized.Backups.Type == "" {
 		writeError(w, http.StatusInternalServerError, "first-run setup planner returned incomplete data")
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func decodeAdminSetupPlanRequest(w http.ResponseWriter, r *http.Request, target *adminSetupPlanRequest) bool {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16*1024))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON request")
+		return false
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		writeError(w, http.StatusBadRequest, "invalid JSON request")
+		return false
+	}
+	return true
 }
 
 func decodeAdminSetupPlanResponse(data []byte, target *adminSetupPlanResponse) error {
