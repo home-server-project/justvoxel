@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<service>
-  <short>JustVoxel WebUI</short>
-  <description>Local HTTP management interface for the JustVoxel Minecraft Server Appliance.</description>
-  <port protocol="tcp" port="8099"/>
-</service>
