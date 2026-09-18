@@ -63,6 +63,8 @@ The normal interface is designed around server tasks instead of Linux internals.
 
 Advanced administrators can still use the normal underlying Linux tools when needed.
 
+JustVoxel disables rpm-ostree package layering by default to keep deployed systems aligned with the tested appliance image. This does not affect system updates. For more details, see the [JustVoxel Base system documentation](https://github.com/home-server-project/justvoxel-base/blob/testing/docs/SYSTEM.md#rpm-ostree-package-layering).
+
 ## Tailscale and NetBird
 
 JustVoxel already includes both **Tailscale** and **NetBird** clients. Neither is configured or enabled by default.
