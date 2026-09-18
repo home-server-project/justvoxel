@@ -206,10 +206,10 @@ jobs:
             /bin/bash -c '
               set -euo pipefail
               dnf install -y gcc golang pam-devel libpwquality-devel diffutils authselect authselect-libs shadow-utils
-              mkdir -p /work
+              mkdir -p /work /tmp/go-home /tmp/go-build-cache /tmp/go-path
               cp -a /src/. /work/
               cd /work
-              go mod tidy
+              HOME=/tmp/go-home GOCACHE=/tmp/go-build-cache GOPATH=/tmp/go-path GOENV=off go mod tidy
               dirty=0
               diff -u /src/go.mod /work/go.mod || dirty=1
               diff -u /src/go.sum /work/go.sum || dirty=1
@@ -217,9 +217,9 @@ jobs:
                 echo "ERROR: AlmaLinux Go requires module metadata changes shown above." >&2
                 exit 1
               fi
-              CGO_ENABLED=1 go test -mod=readonly ./...
+              HOME=/tmp/go-home GOCACHE=/tmp/go-build-cache GOPATH=/tmp/go-path GOENV=off CGO_ENABLED=1 go test -mod=readonly ./...
               bash /run-pam-integration-alma.sh
-              CGO_ENABLED=1 go build -mod=readonly -trimpath -o /out/management-agent ./cmd/justvoxel-management-agent
+              HOME=/tmp/go-home GOCACHE=/tmp/go-build-cache GOPATH=/tmp/go-path GOENV=off CGO_ENABLED=1 go build -mod=readonly -trimpath -o /out/management-agent ./cmd/justvoxel-management-agent
             '
           sudo chmod 0755 build_artifacts/management/management-agent
 
