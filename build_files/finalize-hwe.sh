@@ -32,7 +32,10 @@ source "${OS_RELEASE_USR}"
 # Preserve the Base and VM trust inherited from the parent and add HWE trust.
 # install-image-trust.sh rewrites the sigstore registry mapping from its inputs,
 # so pass all three repositories explicitly.
- /ctx/build_files/install-image-trust.sh     "${JUSTVOXEL_BASE_REPOSITORY}"     "${JUSTVOXEL_VM_REPOSITORY}"     "${JUSTVOXEL_HWE_REPOSITORY}"
+/ctx/build_files/install-image-trust.sh \
+    "${JUSTVOXEL_BASE_REPOSITORY}" \
+    "${JUSTVOXEL_VM_REPOSITORY}" \
+    "${JUSTVOXEL_HWE_REPOSITORY}"
 
 OS_RELEASE_FILES=("${OS_RELEASE_USR}")
 if [[ -e "${OS_RELEASE_ETC}" ]] && ! [[ "${OS_RELEASE_ETC}" -ef "${OS_RELEASE_USR}" ]]; then
@@ -57,7 +60,10 @@ chmod 0644 /usr/lib/justvoxel/variant
 
 # External repositories are build inputs only. Keep the immutable product from
 # drifting through ad-hoc package installation after composition.
-for repo_file in     /etc/yum.repos.d/epel*.repo     /etc/yum.repos.d/tailscale.repo     /etc/yum.repos.d/netbird.repo; do
+for repo_file in \
+    /etc/yum.repos.d/epel*.repo \
+    /etc/yum.repos.d/tailscale.repo \
+    /etc/yum.repos.d/netbird.repo; do
     [[ -e "${repo_file}" ]] || continue
     sed -Ei 's/^[[:space:]]*enabled[[:space:]]*=[[:space:]]*1[[:space:]]*$/enabled=0/' "${repo_file}"
 done
@@ -80,7 +86,10 @@ test "$(stat -c '%a %U %G' /var/tmp)" = "1777 root root"
 jq empty /etc/containers/policy.json
 test -f /usr/lib/pki/containers/home-server-project.pub
 test -f /etc/containers/registries.d/ghcr.io-home-server-project.yaml
-for trust_repository in     "${JUSTVOXEL_BASE_REPOSITORY}"     "${JUSTVOXEL_VM_REPOSITORY}"     "${JUSTVOXEL_HWE_REPOSITORY}"; do
+for trust_repository in \
+    "${JUSTVOXEL_BASE_REPOSITORY}" \
+    "${JUSTVOXEL_VM_REPOSITORY}" \
+    "${JUSTVOXEL_HWE_REPOSITORY}"; do
     grep -Fq "${trust_repository}:" /etc/containers/registries.d/ghcr.io-home-server-project.yaml
 done
 grep -Fq "use-sigstore-attachments: true" /etc/containers/registries.d/ghcr.io-home-server-project.yaml
