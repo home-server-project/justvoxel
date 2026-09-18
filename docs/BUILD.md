@@ -1,12 +1,16 @@
 # JustVoxel build model
 
-JustVoxel follows the Home Server Project's proven AlmaLinux bootc composition pattern.
+JustVoxel follows the Home Server Project's shared Home Server Base 10 bootc composition model.
 
 ## Base
 
-Both variants are composed from AlmaLinux 10 repositories using the minimal-plus content tier plus the standard system-configuration, persistent-journal, and generic-growfs fragments.
+Both variants consume [Home Server Base 10](https://github.com/home-server-project/home-server-base-10) as their direct bootc parent.
 
-The root filesystem is built with `bootc-base-imagectl`. `rpm-ostree` exists only in the ephemeral builder stage as upstream build plumbing; it is not the JustVoxel host management model and no rpm-ostree layering workflow is supported.
+Home Server Base 10 owns the shared AlmaLinux 10 Minimal Plus rootfs composition, including the standard system-configuration, persistent-journal, and generic-growfs fragments. AlmaLinux 10 remains the upstream Enterprise Linux source for the kernel and core operating-system packages.
+
+JustVoxel does not maintain a second local Minimal Plus manifest or rootfs-builder path. CI resolves the Home Server Base `:stable` image to one exact digest, verifies that digest with Cosign, and supplies the same verified parent to both the VM and Bare Metal image builds.
+
+The supported host-management model is bootc. No host-side rpm-ostree layering workflow is supported.
 
 ## Variants
 
@@ -28,7 +32,7 @@ This matches the Passive Black Box build pattern.
 
 ## Branches
 
-`testing` publishes only development `:testing` images. `main` publishes stable `:10` plus immutable dated/commit tags and is the only branch allowed to create GitHub Releases.
+`testing` builds on push, manual dispatch, and daily at 14:40 UTC. It publishes moving `:testing` tags plus immutable `testing-YYYYMMDD-<git-sha>` tags for both variants and never creates GitHub Releases. Testing immutable images older than 45 days are eligible for cleanup while at least seven recent tagged builds per variant are retained. `main` publishes stable `:10` images and is the only branch allowed to create GitHub Releases.
 
 ## Signing
 
