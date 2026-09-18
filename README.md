@@ -1,157 +1,96 @@
 # JustVoxel
 
-JustVoxel is a purpose-built immutable server appliance for running and managing a Minecraft server workload.
+JustVoxel is a purpose-built immutable Minecraft server appliance for home and small-community servers.
 
-It is designed for people who are comfortable installing an operating system and following normal computer instructions, but who do not want to become Linux, container, systemd, firewall, SELinux, or Minecraft-server administrators just to run a reliable family or small-community server.
+It is designed for people who are comfortable installing an operating system and following normal computer instructions, but who do not want to become Linux, container, systemd, firewall, SELinux, or Minecraft-server administrators just to run a reliable server.
 
-> **Development status:** active implementation is on the `testing` branch. The project is still being validated in VMs and on physical hardware before stable promotion.
+JustVoxel provides the same appliance experience through two editions:
 
-## What JustVoxel is
+- **JustVoxel VM** — for Proxmox, KVM/libvirt, VMware, Hyper-V, VirtualBox, and other supported hypervisors.
+- **JustVoxel HWE** — for installation directly on physical hardware where additional hardware-support packages are useful.
 
-JustVoxel is a complete server appliance, not an RPM, a shell script, or a container bundle that is installed on top of an arbitrary existing Linux system.
+Both editions use the same JustVoxel management experience, including the WebUI, `mjust`, Minecraft management, backups and restore, storage management, migration, updates, validation, and recovery tools.
 
-The operating system, management layer, update model, storage safety rules, backup/recovery logic, and container runtime integration are built and versioned together. The goal is to give users a predictable system that can be installed, configured, operated, updated, and recovered without requiring deep knowledge of the technologies underneath it.
+## Which edition should I choose?
 
-Under the hood, JustVoxel is built on [Home Server Base 10](https://github.com/home-server-project/home-server-base-10), which provides the shared AlmaLinux 10 Minimal Plus bootc foundation. AlmaLinux 10 remains the upstream Enterprise Linux source for the kernel and core operating-system packages. JustVoxel uses standard Linux components such as Podman, systemd, NetworkManager, firewalld, and SELinux, but normal users are not expected to manage those pieces directly.
+Choose **JustVoxel VM** when the server will run as a virtual machine.
 
-For the technical design and the reasons behind it, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+Choose **JustVoxel HWE** when JustVoxel will run directly on a physical computer and you want the additional hardware-oriented package set.
 
-## Minecraft is a separate workload
+**HWE is simply JustVoxel's name for the edition with extra physical-hardware packages.** It does not mean that the underlying Base is a separate "hardware-enabled" operating system.
 
-JustVoxel does **not** ship Minecraft server binaries, Mojang server software, a pre-created world, or pre-accepted Minecraft EULA state inside the operating-system image.
+<details>
+<summary><strong>What does HWE add?</strong></summary>
 
-The JustVoxel image provides the appliance operating system, management tools, runtime templates, and safety mechanisms. During first setup, the administrator accepts the Minecraft EULA and JustVoxel creates the active configuration for a separate containerized Paper-based server workload.
+HWE adds packages useful on physical machines, including:
 
-Minecraft/Paper maintenance is intentionally separate from JustVoxel operating-system maintenance.
+- UPS support through Network UPS Tools (NUT)
+- SMART, NVMe, Btrfs, and disk-management utilities
+- hardware sensors and diagnostics
+- firmware and UEFI update tooling
+- CPU microcode support
+- additional Wi-Fi and device firmware
+- USB, PCI, Ethernet, and hardware-identification tools
+- power-management and disk-tuning utilities
 
-For the runtime boundary and implementation details, see [`docs/MINECRAFT_RUNTIME.md`](docs/MINECRAFT_RUNTIME.md).
+The normal JustVoxel appliance functionality remains the same. These packages extend what the system can work with when physical hardware is present.
 
-## Who JustVoxel is for
+For the exact current package list, see [`build_files/packages.env`](build_files/packages.env).
 
-The main audience is an advanced home user rather than a professional Linux administrator.
+</details>
 
-If you can install Windows or Linux yourself, create a VM, write an ISO to a USB drive, follow installation instructions, and understand basic ideas such as an IP address and a disk, JustVoxel is intended to handle the deeper appliance work for you.
+## What JustVoxel provides
 
-Experienced administrators are not locked out. JustVoxel remains a normal immutable EL10 server built on Home Server Base 10 / AlmaLinux 10, and standard Linux administration tools remain available when deeper control or troubleshooting is wanted.
+JustVoxel is installed as a complete server appliance rather than as a package or setup script on top of an arbitrary Linux installation.
+
+The normal interface is designed around server tasks instead of Linux internals. Common operations include:
+
+- first-time Minecraft setup
+- Java and optional Bedrock cross-play
+- player and whitelist management
+- start, stop, and restart
+- automatic and manual backups
+- world and full-data restore
+- import and export of existing Minecraft servers
+- local and network storage management
+- Minecraft/Paper updates
+- operating-system updates
+- health/status and validation
+- Web-based management
+- terminal management through `mjust`
+
+Advanced administrators can still use the normal underlying Linux tools when needed.
+
+## Minecraft software and EULA
+
+JustVoxel does **not** ship Minecraft server binaries, Mojang server software, a pre-created world, or a pre-accepted Minecraft EULA.
+
+During setup, the administrator accepts the Minecraft EULA and JustVoxel configures a separate containerized Paper-based Minecraft workload.
+
+Minecraft/Paper updates remain separate from JustVoxel operating-system updates.
 
 ## Install JustVoxel
 
-For a fresh installation, use the dedicated [JustVoxel ISO Builder](https://github.com/home-server-project/justvoxel-iso).
+For normal installation, use the [JustVoxel ISO Builder](https://github.com/home-server-project/justvoxel-iso).
 
-The ISO project owns the installation side of JustVoxel, including:
-
-- VM versus Bare Metal installation
-- CPU, memory, and disk guidance
-- installer-media creation
-- installation-disk safety
-- SSH and first-access guidance
-- installer options
-- first boot
-
-The normal user path is to install JustVoxel from its installer media rather than manually rebasing another operating system to the JustVoxel image.
-
-Advanced bootc users can still work directly with the published images, but that is not the primary installation path documented for normal users.
-
-## VM or Bare Metal
-
-JustVoxel is built in two variants from the same appliance core.
-
-**JustVoxel VM** is intended for KVM/libvirt, Proxmox, VMware, Hyper-V, VirtualBox, and similar hypervisors.
-
-**JustVoxel Bare Metal** is intended for installation directly on physical hardware and adds physical-machine administration support that does not make sense inside a VM.
-
-The normal JustVoxel and Minecraft management experience is the same on both.
-
-For the exact technical differences, see [`docs/VARIANTS.md`](docs/VARIANTS.md).
-
-## Operate the appliance with mjust
-
-`mjust` is JustVoxel's built-in administration interface.
-
-Run `mjust` with no arguments to open the interactive terminal interface and choose what you want to do. It is designed so common appliance operations can be completed without knowing the Linux commands underneath them.
-
-The interface covers first setup, Minecraft configuration and service control, players and whitelist management, backups and restore, storage, Minecraft updates, appliance health/status, operating-system maintenance, system resources, validation, and other appliance tasks.
-
-The underlying safety checks remain active whether an operation is started from the menu or from a direct `mjust` command.
-
-The interaction model is inspired by Universal Blue's `ujust` / `ugum` work in [ublue-os/packages](https://github.com/ublue-os/packages), while JustVoxel uses its own server-focused implementation.
-
-For the complete interface and command reference, see [`docs/MJUST.md`](docs/MJUST.md).
-
-## Web management
-
-JustVoxel WebUI is intended for administration from a trusted local network. By default, Web management uses plain HTTP on TCP port `8099`, allowing direct access from the appliance LAN address without a self-signed certificate warning.
-
-The default administrator is `voxel`. In the recommended/default **System account** authentication mode, the same real Linux `voxel` password is used by the WebUI, local console, and SSH password login when SSH password authentication is enabled. Authentication is performed through the AlmaLinux/RHEL PAM stack by the privileged JustVoxel Management Agent; the unprivileged WebUI does not keep a synchronized copy of that password.
-
-An optional **Separate WebUI password** mode is available for administrators who intentionally want browser authentication to differ from the Linux/SSH password.
-
-Because the default local WebUI does not use TLS, administrator credentials and sessions should only be used on a network you trust. Do not forward TCP port `8099` directly to the public Internet.
-
-For the local-access, authentication, and security model, see [`docs/WEBUI.md`](docs/WEBUI.md).
-
-## Storage, backups, and recovery
-
-JustVoxel separates Minecraft data from backup storage so users can choose a layout that fits their machine or hypervisor.
-
-The appliance can use supported local storage or network storage for backups, and Minecraft data can remain on the system filesystem or be migrated to supported local storage later.
-
-Storage operations are guarded with device validation and exact typed confirmations for destructive actions. Backup and restore workflows use their own validation and safety checks rather than relying on the user to assemble commands manually.
-
-See:
-
-- [`docs/STORAGE.md`](docs/STORAGE.md) for storage and migration
-- [`docs/RESTORE.md`](docs/RESTORE.md) for world and full Minecraft-data recovery
-
-## Updates
-
-JustVoxel keeps operating-system updates and Minecraft workload updates separate.
-
-The appliance operating system is updated through bootc and can be managed through `mjust` system-management commands.
-
-The separate Minecraft/Paper workload has its own update flow, backup safeguards, version policy, and rollback handling.
-
-See [`docs/SYSTEM.md`](docs/SYSTEM.md) for operating-system maintenance and [`docs/MJUST.md`](docs/MJUST.md) for the Minecraft update workflow.
+The installer project contains the installation-media workflow, VM and physical-machine installation guidance, disk requirements, first-boot information, and SSH/access guidance.
 
 ## Documentation
 
-Start with the document that matches what you are trying to do:
+Detailed appliance documentation is maintained with the JustVoxel source in [JustVoxel Base](https://github.com/home-server-project/justvoxel-base).
 
-- [JustVoxel ISO Builder](https://github.com/home-server-project/justvoxel-iso) — install JustVoxel on a VM or physical machine
-- [`docs/MJUST.md`](docs/MJUST.md) — operate the appliance
-- [`docs/STATUS.md`](docs/STATUS.md) — understand the appliance health dashboard
-- [`docs/SYSTEM.md`](docs/SYSTEM.md) — OS status, updates, resources, reboot, poweroff, and firmware controls
-- [`docs/STORAGE.md`](docs/STORAGE.md) — storage choices, provisioning, mounts, and migration
-- [`docs/RESTORE.md`](docs/RESTORE.md) — world and full Minecraft-data recovery
-- [`docs/MANAGEMENT.md`](docs/MANAGEMENT.md) — management layers and native Linux administration
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — why JustVoxel is built as an immutable appliance
-- [`docs/VARIANTS.md`](docs/VARIANTS.md) — VM versus Bare Metal technical differences
-- [`docs/BUILD.md`](docs/BUILD.md) — image composition, signing, CI, branches, and release mechanics
-- [`docs/ROADMAP.md`](docs/ROADMAP.md) — current priorities, future features, and project non-goals
+That documentation covers `mjust`, WebUI management, Minecraft runtime behavior, backups and restore, migration, storage, system management, validation, architecture, and the project roadmap.
 
-## Branch and release model
+For installation-media documentation, use the [JustVoxel ISO Builder](https://github.com/home-server-project/justvoxel-iso).
 
-- `testing` — active development and Testing images
-- `main` — validated promotions and stable `:10` images
-- GitHub Releases are created from `main` only
+## Source
 
-Testing builds run on pushes to `testing`, manual **Run workflow** invocations, and the daily **14:40 UTC** schedule. Both VM and Bare Metal variants publish a moving `:testing` tag plus an immutable tag:
+The common JustVoxel appliance implementation is developed in [JustVoxel Base](https://github.com/home-server-project/justvoxel-base).
 
-```text
-testing-YYYYMMDD-<git-sha>
-```
-
-Testing never creates GitHub Releases. Immutable `testing-*` image versions older than 45 days are eligible for cleanup while at least seven recent tagged builds are retained for each variant. The moving `:testing` tags are preserved.
-
-Stable image targets are intended to be:
-
-```text
-ghcr.io/home-server-project/justvoxel-vm:10
-ghcr.io/home-server-project/justvoxel-baremetal:10
-```
+This repository contains the final JustVoxel product layer and release-facing project files.
 
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).
 
-Minecraft, Mojang software, Paper, plugins, and other third-party components retain their own licenses and distribution terms. JustVoxel does not embed Minecraft server binaries or Mojang server software in its bootc images.
+Minecraft, Mojang software, Paper, plugins, and other third-party components retain their own licenses and distribution terms. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
