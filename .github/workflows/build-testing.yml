@@ -218,6 +218,10 @@ jobs:
                 exit 1
               fi
               HOME=/tmp/go-home GOCACHE=/tmp/go-build-cache GOPATH=/tmp/go-path GOENV=off CGO_ENABLED=1 go test -mod=readonly ./...
+              HOME=/tmp/go-home \
+              GOCACHE=/tmp/go-build-cache \
+              GOPATH=/tmp/go-path \
+              GOENV=off \
               bash /run-pam-integration-alma.sh
               HOME=/tmp/go-home GOCACHE=/tmp/go-build-cache GOPATH=/tmp/go-path GOENV=off CGO_ENABLED=1 go build -mod=readonly -trimpath -o /out/management-agent ./cmd/justvoxel-management-agent
             '
