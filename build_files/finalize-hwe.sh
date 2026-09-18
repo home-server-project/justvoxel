@@ -2,7 +2,6 @@
 set -ouex pipefail
 
 : "${JUSTVOXEL_BASE_REPOSITORY:?JUSTVOXEL_BASE_REPOSITORY must be set}"
-: "${JUSTVOXEL_VM_REPOSITORY:?JUSTVOXEL_VM_REPOSITORY must be set}"
 : "${JUSTVOXEL_HWE_REPOSITORY:?JUSTVOXEL_HWE_REPOSITORY must be set}"
 
 OS_RELEASE_USR=/usr/lib/os-release
@@ -29,13 +28,30 @@ source "${OS_RELEASE_USR}"
     exit 1
 }
 
-# Preserve the Base and VM trust inherited from the parent and add HWE trust.
-# install-image-trust.sh rewrites the sigstore registry mapping from its inputs,
-# so pass all three repositories explicitly.
+# HWE is a separate final product. Replace inherited JustVoxel product trust
+# with the exact repositories this image is allowed to consume.
 /ctx/build_files/install-image-trust.sh \
     "${JUSTVOXEL_BASE_REPOSITORY}" \
-    "${JUSTVOXEL_VM_REPOSITORY}" \
     "${JUSTVOXEL_HWE_REPOSITORY}"
+
+POLICY=/etc/containers/policy.json
+justvoxel_repository_prefix="${JUSTVOXEL_BASE_REPOSITORY%/justvoxel-base}/justvoxel-"
+policy_tmp="$(mktemp)"
+jq \
+    --arg prefix "${justvoxel_repository_prefix}" \
+    --arg base "${JUSTVOXEL_BASE_REPOSITORY}" \
+    --arg hwe "${JUSTVOXEL_HWE_REPOSITORY}" \
+    '.transports.docker |= ((. // {}) | with_entries(
+        . as $entry |
+        select(
+            ((($entry.key | startswith($prefix)) | not)
+             or $entry.key == $base
+             or $entry.key == $hwe)
+        )
+    ))' \
+    "${POLICY}" > "${policy_tmp}"
+install -m0644 "${policy_tmp}" "${POLICY}"
+rm -f "${policy_tmp}"
 
 OS_RELEASE_FILES=("${OS_RELEASE_USR}")
 if [[ -e "${OS_RELEASE_ETC}" ]] && ! [[ "${OS_RELEASE_ETC}" -ef "${OS_RELEASE_USR}" ]]; then
@@ -83,13 +99,23 @@ install -d -m0755 /var
 install -d -m1777 /var/tmp
 
 test "$(stat -c '%a %U %G' /var/tmp)" = "1777 root root"
-jq empty /etc/containers/policy.json
+jq empty "${POLICY}"
 test -f /usr/lib/pki/containers/home-server-project.pub
 test -f /etc/containers/registries.d/ghcr.io-home-server-project.yaml
 for trust_repository in \
     "${JUSTVOXEL_BASE_REPOSITORY}" \
-    "${JUSTVOXEL_VM_REPOSITORY}" \
     "${JUSTVOXEL_HWE_REPOSITORY}"; do
     grep -Fq "${trust_repository}:" /etc/containers/registries.d/ghcr.io-home-server-project.yaml
 done
+
+expected_trust="$(printf '%s\n' "${JUSTVOXEL_BASE_REPOSITORY}" "${JUSTVOXEL_HWE_REPOSITORY}" | sort)"
+actual_trust="$(jq -r \
+    --arg prefix "${justvoxel_repository_prefix}" \
+    '(.transports.docker // {}) | keys[] | select(startswith($prefix))' \
+    "${POLICY}" | sort)"
+[[ "${actual_trust}" == "${expected_trust}" ]] || {
+    echo "ERROR: HWE image trust is not scoped to the exact Base + HWE repository set." >&2
+    printf 'Expected:\n%s\nActual:\n%s\n' "${expected_trust}" "${actual_trust}" >&2
+    exit 1
+}
 grep -Fq "use-sigstore-attachments: true" /etc/containers/registries.d/ghcr.io-home-server-project.yaml
