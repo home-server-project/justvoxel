@@ -35,7 +35,9 @@ HWE adds packages useful on physical machines, including:
 
 The normal JustVoxel appliance functionality remains the same. These packages extend what the system can work with when physical hardware is present.
 
-For the exact current package list, see [`build_files/packages.env`](build_files/packages.env).
+For the exact HWE package list, see [`build_files/packages.env`](build_files/packages.env).
+
+For the packages already included in the common JustVoxel Base, see the [JustVoxel Base package reference](https://github.com/home-server-project/justvoxel-base/blob/testing/docs/PACKAGES.md).
 
 </details>
 
@@ -60,6 +62,22 @@ The normal interface is designed around server tasks instead of Linux internals.
 - terminal management through `mjust`
 
 Advanced administrators can still use the normal underlying Linux tools when needed.
+
+## Tailscale and NetBird
+
+JustVoxel already includes both **Tailscale** and **NetBird** clients. Neither is configured or enabled by default.
+
+If you want to use either one for private remote access or to let friends reach your Minecraft server without normal router port forwarding, use the upstream guides:
+
+**Tailscale**
+- [Getting started with Tailscale](https://tailscale.com/docs/how-to/quickstart)
+- [Share a private game server with friends](https://tailscale.com/docs/use-cases/personal-or-at-home-use/share-private-game-server)
+
+**NetBird**
+- [Getting started with NetBird](https://docs.netbird.io/get-started)
+- [Minecraft server without port forwarding](https://netbird.io/knowledge-hub/minecraft-server-without-port-forwarding)
+
+The clients are already present in JustVoxel, so the relevant parts of those guides are account/network setup, authentication, access policy, and Minecraft connectivity rather than installing another host package.
 
 ## Minecraft software and EULA
 
