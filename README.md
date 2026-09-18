@@ -12,7 +12,7 @@ JustVoxel is a complete server appliance, not an RPM, a shell script, or a conta
 
 The operating system, management layer, update model, storage safety rules, backup/recovery logic, and container runtime integration are built and versioned together. The goal is to give users a predictable system that can be installed, configured, operated, updated, and recovered without requiring deep knowledge of the technologies underneath it.
 
-Under the hood, JustVoxel is built on AlmaLinux 10 and bootc. It uses standard Linux components such as Podman, systemd, NetworkManager, firewalld, and SELinux, but normal users are not expected to manage those pieces directly.
+Under the hood, JustVoxel is built on [Home Server Base 10](https://github.com/home-server-project/home-server-base-10), which provides the shared AlmaLinux 10 Minimal Plus bootc foundation. AlmaLinux 10 remains the upstream Enterprise Linux source for the kernel and core operating-system packages. JustVoxel uses standard Linux components such as Podman, systemd, NetworkManager, firewalld, and SELinux, but normal users are not expected to manage those pieces directly.
 
 For the technical design and the reasons behind it, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -32,7 +32,7 @@ The main audience is an advanced home user rather than a professional Linux admi
 
 If you can install Windows or Linux yourself, create a VM, write an ISO to a USB drive, follow installation instructions, and understand basic ideas such as an IP address and a disk, JustVoxel is intended to handle the deeper appliance work for you.
 
-Experienced administrators are not locked out. JustVoxel remains a normal immutable AlmaLinux server and standard Linux administration tools remain available when deeper control or troubleshooting is wanted.
+Experienced administrators are not locked out. JustVoxel remains a normal immutable EL10 server built on Home Server Base 10 / AlmaLinux 10, and standard Linux administration tools remain available when deeper control or troubleshooting is wanted.
 
 ## Install JustVoxel
 
@@ -131,9 +131,17 @@ Start with the document that matches what you are trying to do:
 
 ## Branch and release model
 
-- `testing` — active development and `:testing` images
+- `testing` — active development and Testing images
 - `main` — validated promotions and stable `:10` images
 - GitHub Releases are created from `main` only
+
+Testing builds run on pushes to `testing`, manual **Run workflow** invocations, and the daily **14:40 UTC** schedule. Both VM and Bare Metal variants publish a moving `:testing` tag plus an immutable tag:
+
+```text
+testing-YYYYMMDD-<git-sha>
+```
+
+Testing never creates GitHub Releases. Immutable `testing-*` image versions older than 45 days are eligible for cleanup while at least seven recent tagged builds are retained for each variant. The moving `:testing` tags are preserved.
 
 Stable image targets are intended to be:
 
@@ -141,8 +149,6 @@ Stable image targets are intended to be:
 ghcr.io/home-server-project/justvoxel-vm:10
 ghcr.io/home-server-project/justvoxel-baremetal:10
 ```
-
-Development images use the corresponding `:testing` tag.
 
 ## License
 
