@@ -72,13 +72,30 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cosign verify             --new-bundle-format=false             --key cosign.pub             "${JUSTVOXEL_BASE_IMAGE}" >/dev/null
+          cosign verify \
+            --new-bundle-format=false \
+            --key cosign.pub \
+            "${JUSTVOXEL_BASE_IMAGE}" >/dev/null
 
       - name: Build JustVoxel HWE
         shell: bash
         run: |
           set -euo pipefail
-          sudo podman build             --pull=always             --security-opt=label=disable             --cap-add=all             --device /dev/fuse             --build-arg "JUSTVOXEL_BASE_IMAGE=${JUSTVOXEL_BASE_IMAGE}"             --build-arg "JUSTVOXEL_BASE_REPOSITORY=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/justvoxel-base"             --build-arg "JUSTVOXEL_VM_REPOSITORY=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/justvoxel-vm"             --build-arg "JUSTVOXEL_HWE_REPOSITORY=${IMAGE_REPOSITORY}"             --label "org.opencontainers.image.revision=${GITHUB_SHA}"             --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)"             --target justvoxel-hwe             --tag justvoxel-hwe:unrechunked             --file Containerfile             .
+          sudo podman build \
+            --pull=always \
+            --security-opt=label=disable \
+            --cap-add=all \
+            --device /dev/fuse \
+            --build-arg "JUSTVOXEL_BASE_IMAGE=${JUSTVOXEL_BASE_IMAGE}" \
+            --build-arg "JUSTVOXEL_BASE_REPOSITORY=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/justvoxel-base" \
+            --build-arg "JUSTVOXEL_VM_REPOSITORY=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/justvoxel-vm" \
+            --build-arg "JUSTVOXEL_HWE_REPOSITORY=${IMAGE_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --target justvoxel-hwe \
+            --tag justvoxel-hwe:unrechunked \
+            --file Containerfile \
+            .
 
       - name: Rechunk JustVoxel HWE
         id: rechunk
@@ -88,7 +105,15 @@ jobs:
           rechunk_tmp="${RUNNER_TEMP}/justvoxel-hwe-rechunk"
           sudo mkdir -p "${rechunk_tmp}"
           sudo chmod 1777 "${rechunk_tmp}"
-          sudo podman run --rm --privileged             -v /var/lib/containers:/var/lib/containers             -v "${rechunk_tmp}:/var/tmp"             --entrypoint /usr/libexec/bootc-base-imagectl             localhost/justvoxel-hwe:unrechunked             rechunk             --max-layers "${RECHUNK_MAX_LAYERS}"             localhost/justvoxel-hwe:unrechunked             localhost/justvoxel-hwe:test
+          sudo podman run --rm --privileged \
+            -v /var/lib/containers:/var/lib/containers \
+            -v "${rechunk_tmp}:/var/tmp" \
+            --entrypoint /usr/libexec/bootc-base-imagectl \
+            localhost/justvoxel-hwe:unrechunked \
+            rechunk \
+            --max-layers "${RECHUNK_MAX_LAYERS}" \
+            localhost/justvoxel-hwe:unrechunked \
+            localhost/justvoxel-hwe:test
           layer_count="$(sudo skopeo inspect --raw containers-storage:localhost/justvoxel-hwe:test | jq -r '.layers | length')"
           [[ "${layer_count}" =~ ^[0-9]+$ ]]
           (( layer_count <= OCI_LAYER_LIMIT ))
@@ -98,7 +123,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo podman run --rm             --entrypoint /bin/bash             justvoxel-hwe:test             -c '/usr/libexec/justvoxel/health/common && /usr/libexec/justvoxel/health/hwe && bootc container lint --fatal-warnings'
+          sudo podman run --rm \
+            --entrypoint /bin/bash \
+            justvoxel-hwe:test \
+            -c '/usr/libexec/justvoxel/health/common && /usr/libexec/justvoxel/health/hwe && bootc container lint --fatal-warnings'
 
       - name: Login to GHCR
         shell: bash
@@ -107,7 +135,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "${HOME}/.docker"
-          printf '%s' "${GHCR_TOKEN}" | podman login             --authfile "${HOME}/.docker/config.json"             ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+          printf '%s' "${GHCR_TOKEN}" | podman login \
+            --authfile "${HOME}/.docker/config.json" \
+            ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
           chmod 600 "${HOME}/.docker/config.json"
 
       - name: Push HWE testing image
@@ -121,8 +151,13 @@ jobs:
           sudo podman tag justvoxel-hwe:test "${IMAGE_REPOSITORY}:${build_tag}"
           sudo podman tag justvoxel-hwe:test "${IMAGE_REPOSITORY}:${CURRENT_TAG}"
 
-          sudo podman push             --authfile "${HOME}/.docker/config.json"             --digestfile /tmp/digest             "${IMAGE_REPOSITORY}:${build_tag}"
-          sudo podman push             --authfile "${HOME}/.docker/config.json"             "${IMAGE_REPOSITORY}:${CURRENT_TAG}"
+          sudo podman push \
+            --authfile "${HOME}/.docker/config.json" \
+            --digestfile /tmp/digest \
+            "${IMAGE_REPOSITORY}:${build_tag}"
+          sudo podman push \
+            --authfile "${HOME}/.docker/config.json" \
+            "${IMAGE_REPOSITORY}:${CURRENT_TAG}"
 
           digest="$(cat /tmp/digest)"
           [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
@@ -135,7 +170,11 @@ jobs:
           DIGEST: ${{ steps.push.outputs.digest }}
         run: |
           set -euo pipefail
-          cosign sign -y             --new-bundle-format=false             --use-signing-config=false             --key env://COSIGN_PRIVATE_KEY             "${IMAGE_REPOSITORY}@${DIGEST}"
+          cosign sign -y \
+            --new-bundle-format=false \
+            --use-signing-config=false \
+            --key env://COSIGN_PRIVATE_KEY \
+            "${IMAGE_REPOSITORY}@${DIGEST}"
 
       - name: Verify HWE testing signature
         shell: bash
@@ -143,7 +182,10 @@ jobs:
           DIGEST: ${{ steps.push.outputs.digest }}
         run: |
           set -euo pipefail
-          cosign verify             --new-bundle-format=false             --key cosign.pub             "${IMAGE_REPOSITORY}@${DIGEST}"
+          cosign verify \
+            --new-bundle-format=false \
+            --key cosign.pub \
+            "${IMAGE_REPOSITORY}@${DIGEST}"
 
       - name: Build summary
         if: always()
