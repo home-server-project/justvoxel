@@ -2,16 +2,7 @@
 name: Build signed JustVoxel stable images
 
 on:
-  pull_request:
-    branches: [main]
-  push:
-    branches: [main]
-    paths-ignore:
-      - '**/README.md'
-      - 'docs/**'
   workflow_dispatch:
-  schedule:
-    - cron: '20 4 * * 6'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
