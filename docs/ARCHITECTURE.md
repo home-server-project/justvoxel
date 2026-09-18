@@ -14,15 +14,15 @@ JustVoxel takes a different approach.
 
 The operating system and the JustVoxel management layer are built, tested, versioned, and updated together. That gives the project a known starting point and allows the normal user experience to focus on appliance tasks such as first setup, Minecraft configuration, backups, storage, updates, and recovery instead of requiring the user to assemble a server from individual Linux components.
 
-This does not make JustVoxel a closed platform. Advanced administrators still have normal access to the AlmaLinux host and its standard administration tools.
+This does not make JustVoxel a closed platform. Advanced administrators still have normal access to the underlying Home Server Base 10 / AlmaLinux 10 host and its standard administration tools.
 
-## Why AlmaLinux 10
+## Why Home Server Base 10 and AlmaLinux 10
 
-JustVoxel uses AlmaLinux 10 as its server foundation.
+JustVoxel consumes Home Server Base 10 as its direct operating-system parent. Home Server Base 10 provides the Home Server Project's shared AlmaLinux 10 Minimal Plus bootc foundation, while AlmaLinux 10 remains the upstream Enterprise Linux source for the kernel and core packages.
 
-The project needs a conservative server-oriented base with systemd, NetworkManager, firewalld, SELinux, Podman, and the normal Linux administration model expected on a long-lived home server. AlmaLinux provides that foundation while allowing JustVoxel to build the system as a bootc image rather than as a traditional manually maintained package installation.
+The project needs a conservative server-oriented base with systemd, NetworkManager, firewalld, SELinux, Podman, and the normal Linux administration model expected on a long-lived home server. Home Server Base 10 centralizes that generic EL10 foundation so JustVoxel can focus on the Minecraft-appliance layer instead of maintaining its own duplicate rootfs composition.
 
-JustVoxel is composed from the AlmaLinux minimal-plus content set and then adds only the appliance components required by the VM and Bare Metal variants.
+JustVoxel adds only the appliance components and policy required by the shared core, VM variant, and Bare Metal variant.
 
 For exact image composition and build details, see [BUILD.md](BUILD.md).
 
