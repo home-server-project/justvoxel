@@ -2,14 +2,7 @@
 name: testing
 
 on:
-  push:
-    branches: [testing]
-    paths-ignore:
-      - '**/README.md'
-      - 'docs/**'
   workflow_dispatch:
-  schedule:
-    - cron: '40 14 * * *'
 
 concurrency:
   group: ${{ github.workflow }}-testing
