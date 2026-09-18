@@ -79,7 +79,9 @@ If you want to use either one for private remote access or to let friends reach 
 - [Getting started with NetBird](https://docs.netbird.io/get-started)
 - [Minecraft server without port forwarding](https://netbird.io/knowledge-hub/minecraft-server-without-port-forwarding)
 
-The clients are already present in JustVoxel, so the relevant parts of those guides are account/network setup, authentication, access policy, and Minecraft connectivity rather than installing another host package.
+Tailscale and NetBird are already included in the JustVoxel system image and are disabled and unconfigured by default.
+
+JustVoxel is an image-managed immutable appliance. Installing additional host packages is not part of the supported administration model. When following the upstream guides, skip any package-installation steps and use only the account setup, authentication, network/access-policy, and Minecraft connectivity instructions.
 
 ## Minecraft software and EULA
 
