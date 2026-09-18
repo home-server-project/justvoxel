@@ -1,6 +1,25 @@
 #!/usr/bin/bash
 set -euo pipefail
 
+# Validate JustVoxel product identity, direct Home Server Base parent, and
+# inherited AlmaLinux upstream provenance.
+# shellcheck disable=SC1091
+source /usr/lib/os-release
+[[ "${ID:-}" == "justvoxel" ]]
+[[ "${VERSION_ID%%.*}" == "10" ]]
+[[ "${PLATFORM_ID:-}" == "platform:el10" ]]
+[[ "${JUSTVOXEL_BASE_ID:-}" == "home-server-base" ]]
+[[ "${JUSTVOXEL_BASE_PRETTY_NAME:-}" == "Home Server Base 10" ]]
+[[ "${JUSTVOXEL_BASE_VERSION_ID%%.*}" == "10" ]]
+[[ "${JUSTVOXEL_BASE_PLATFORM_ID:-}" == "platform:el10" ]]
+[[ "${JUSTVOXEL_BASE_CPE_NAME:-}" == "cpe:/o:home-server-project:home-server-base:10" ]]
+[[ "${JUSTVOXEL_BASE_PROFILE:-}" == "almalinux-10-minimal-plus" ]]
+[[ "${JUSTVOXEL_BASE_CHANNEL:-}" == "stable" ]]
+[[ "${HOME_SERVER_BASE_UPSTREAM_ID:-}" == "almalinux" ]]
+[[ "${HOME_SERVER_BASE_UPSTREAM_VERSION_ID%%.*}" == "10" ]]
+[[ "${HOME_SERVER_BASE_UPSTREAM_PLATFORM_ID:-}" == "platform:el10" ]]
+[[ "${HOME_SERVER_BASE_UPSTREAM_CPE_NAME:-}" == cpe:/o:almalinux:* ]]
+
 for cmd in \
     bootc podman skopeo nmcli nmtui resolvectl firewall-cmd sshd sudo just mjust fzf gum \
     tailscale netbird curl jq openssl tar gzip rsync ping dig traceroute nc tcpdump lsof \
