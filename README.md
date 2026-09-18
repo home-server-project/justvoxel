@@ -37,7 +37,7 @@ The normal JustVoxel appliance functionality remains the same. These packages ex
 
 For the exact HWE package list, see [`build_files/packages.env`](build_files/packages.env).
 
-For the packages already included in the common JustVoxel Base, see the [JustVoxel Base package reference](https://github.com/home-server-project/justvoxel-base/blob/testing/docs/PACKAGES.md).
+For the packages already included in the common JustVoxel Base, see the [JustVoxel Base package reference](https://github.com/home-server-project/justvoxel-base/blob/main/docs/PACKAGES.md).
 
 </details>
 
