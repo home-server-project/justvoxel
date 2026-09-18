@@ -1,35 +1,11 @@
 # Third-party notices
 
-## AlmaLinux / bootc foundation
+JustVoxel includes and integrates software from multiple upstream projects. Those projects retain their own licenses, trademarks, and distribution terms.
 
-JustVoxel composes an AlmaLinux 10 minimal-plus bootc root filesystem using AlmaLinux repositories and the upstream `bootc-base-imagectl` build pattern.
+The shared JustVoxel appliance implementation and its detailed third-party notices are maintained in [JustVoxel Base](https://github.com/home-server-project/justvoxel-base/blob/testing/THIRD_PARTY_NOTICES.md).
 
-- AlmaLinux: https://almalinux.org/
-- bootc: https://github.com/bootc-dev/bootc
+The HWE edition additionally uses operating-system packages for physical-hardware support, including UPS/NUT, storage-health and NVMe tooling, sensors, firmware management, CPU microcode, device firmware, hardware diagnostics, and power-management utilities. The exact current package set is listed in [`build_files/packages.env`](build_files/packages.env).
 
-## Passive Black Box / Home Server Rose build references
+Minecraft, Mojang software, Paper, Geyser, Floodgate, ViaVersion, container images, operating-system packages, firmware packages, and other third-party components remain subject to their respective upstream licenses and terms.
 
-The repository/build layout and immutable-template-to-local-configuration model are adapted from proven Home Server Project / Highway to IT AlmaLinux bootc patterns:
-
-- https://github.com/highwaytoit/pasiv-black-box
-- https://github.com/home-server-project/home-server-rose
-
-JustVoxel reuses only patterns useful to this purpose-built Minecraft appliance rather than the broader Rose/Cockpit/HCI stack.
-
-## Minecraft runtime projects
-
-JustVoxel ships configuration templates that reference upstream runtime projects. Their Minecraft/Paper/Geyser/Floodgate/ViaVersion artifacts are fetched from their proper upstream sources at runtime; those server binaries are not redistributed in the bootc image.
-
-- itzg/minecraft-server: https://github.com/itzg/docker-minecraft-server
-- Paper: https://papermc.io/
-- Geyser: https://geysermc.org/
-- Floodgate: https://geysermc.org/wiki/floodgate/
-- ViaVersion: https://viaversion.com/
-
-## Universal Blue `ujust` / `ugum`
-
-The `mjust` interaction model is inspired by Universal Blue's `ujust` / `ugum` implementation:
-
-- https://github.com/ublue-os/packages/tree/main/packages/ublue-os-just
-
-JustVoxel currently uses its own wrapper, justfile, menus, and administration scripts and does not copy `ujust` or `ugum` source code. If future JustVoxel work directly reuses or adapts Universal Blue source, the applicable Apache-2.0 license and attribution will be retained with those files.
+JustVoxel does not redistribute Minecraft server binaries or Mojang server software inside its bootc images.
