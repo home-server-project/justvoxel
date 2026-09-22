@@ -1,0 +1,28 @@
+name: Validate HWS filesystem package boundary
+
+on:
+  pull_request:
+    branches: [testing]
+    paths:
+      - '.github/workflows/validate-storage-filesystems.yml'
+
+jobs:
+  validate:
+    name: HWS filesystem boundary validation
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout validation branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Validate HWS source boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n build_files/build-hws.sh
+          bash -n build_files/validate/hws.sh
+          ! grep -Fq 'btrfs-progs' build_files/packages.env
+          ! grep -Fq 'btrfs-progs' build_files/validate/hws.sh
+          ! grep -Eq '(^|[[:space:]])btrfs([[:space:]]|$)' build_files/validate/hws.sh
+          grep -Fq '# The complete VM-ready appliance is inherited from justvoxel-base.' build_files/packages.env
