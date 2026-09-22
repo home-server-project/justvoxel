@@ -1,5 +1,5 @@
 ---
-name: HWE testing
+name: HWS testing
 
 on:
   push:
@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/justvoxel-hwe
+  IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/justvoxel-hws
   CURRENT_TAG: testing
   JUSTVOXEL_BASE_IMAGE: ghcr.io/home-server-project/justvoxel-base:testing
   RECHUNK_MAX_LAYERS: '127'
@@ -22,7 +22,7 @@ env:
 
 jobs:
   source-tests:
-    name: HWE source checks
+    name: HWS source checks
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -32,7 +32,7 @@ jobs:
         with:
           ref: testing
 
-      - name: Validate HWE build scripts
+      - name: Validate HWS build scripts
         shell: bash
         run: |
           set -euo pipefail
@@ -42,7 +42,7 @@ jobs:
           done
 
   build:
-    name: Build JustVoxel HWE testing
+    name: Build JustVoxel HWS testing
     needs: [source-tests]
     runs-on: ubuntu-24.04
     permissions:
@@ -77,7 +77,7 @@ jobs:
             --key cosign.pub \
             "${JUSTVOXEL_BASE_IMAGE}" >/dev/null
 
-      - name: Build JustVoxel HWE
+      - name: Build JustVoxel HWS
         shell: bash
         run: |
           set -euo pipefail
@@ -88,44 +88,44 @@ jobs:
             --device /dev/fuse \
             --build-arg "JUSTVOXEL_BASE_IMAGE=${JUSTVOXEL_BASE_IMAGE}" \
             --build-arg "JUSTVOXEL_BASE_REPOSITORY=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/justvoxel-base" \
-            --build-arg "JUSTVOXEL_HWE_REPOSITORY=${IMAGE_REPOSITORY}" \
+            --build-arg "JUSTVOXEL_HWS_REPOSITORY=${IMAGE_REPOSITORY}" \
             --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
             --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --target justvoxel-hwe \
-            --tag justvoxel-hwe:unrechunked \
+            --target justvoxel-hws \
+            --tag justvoxel-hws:unrechunked \
             --file Containerfile \
             .
 
-      - name: Rechunk JustVoxel HWE
+      - name: Rechunk JustVoxel HWS
         id: rechunk
         shell: bash
         run: |
           set -euo pipefail
-          rechunk_tmp="${RUNNER_TEMP}/justvoxel-hwe-rechunk"
+          rechunk_tmp="${RUNNER_TEMP}/justvoxel-hws-rechunk"
           sudo mkdir -p "${rechunk_tmp}"
           sudo chmod 1777 "${rechunk_tmp}"
           sudo podman run --rm --privileged \
             -v /var/lib/containers:/var/lib/containers \
             -v "${rechunk_tmp}:/var/tmp" \
             --entrypoint /usr/libexec/bootc-base-imagectl \
-            localhost/justvoxel-hwe:unrechunked \
+            localhost/justvoxel-hws:unrechunked \
             rechunk \
             --max-layers "${RECHUNK_MAX_LAYERS}" \
-            localhost/justvoxel-hwe:unrechunked \
-            localhost/justvoxel-hwe:test
-          layer_count="$(sudo skopeo inspect --raw containers-storage:localhost/justvoxel-hwe:test | jq -r '.layers | length')"
+            localhost/justvoxel-hws:unrechunked \
+            localhost/justvoxel-hws:test
+          layer_count="$(sudo skopeo inspect --raw containers-storage:localhost/justvoxel-hws:test | jq -r '.layers | length')"
           [[ "${layer_count}" =~ ^[0-9]+$ ]]
           (( layer_count <= OCI_LAYER_LIMIT ))
           echo "layers=${layer_count}" >> "${GITHUB_OUTPUT}"
 
-      - name: Validate completed HWE image
+      - name: Validate completed HWS image
         shell: bash
         run: |
           set -euo pipefail
           sudo podman run --rm \
             --entrypoint /bin/bash \
-            justvoxel-hwe:test \
-            -c '/usr/libexec/justvoxel/health/common && /usr/libexec/justvoxel/health/hwe && bootc container lint --fatal-warnings'
+            justvoxel-hws:test \
+            -c '/usr/libexec/justvoxel/health/common && /usr/libexec/justvoxel/health/hws && bootc container lint --fatal-warnings'
 
       - name: Login to GHCR
         shell: bash
@@ -139,7 +139,7 @@ jobs:
             ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
           chmod 600 "${HOME}/.docker/config.json"
 
-      - name: Push HWE testing image
+      - name: Push HWS testing image
         id: push
         shell: bash
         run: |
@@ -147,8 +147,8 @@ jobs:
           build_tag="testing-$(date -u +%Y%m%d)-${GITHUB_SHA:0:7}"
           echo "BUILD_TAG=${build_tag}" >> "${GITHUB_ENV}"
 
-          sudo podman tag justvoxel-hwe:test "${IMAGE_REPOSITORY}:${build_tag}"
-          sudo podman tag justvoxel-hwe:test "${IMAGE_REPOSITORY}:${CURRENT_TAG}"
+          sudo podman tag justvoxel-hws:test "${IMAGE_REPOSITORY}:${build_tag}"
+          sudo podman tag justvoxel-hws:test "${IMAGE_REPOSITORY}:${CURRENT_TAG}"
 
           sudo podman push \
             --authfile "${HOME}/.docker/config.json" \
@@ -162,7 +162,7 @@ jobs:
           [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
           echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
 
-      - name: Sign HWE testing image
+      - name: Sign HWS testing image
         shell: bash
         env:
           COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
@@ -175,7 +175,7 @@ jobs:
             --key env://COSIGN_PRIVATE_KEY \
             "${IMAGE_REPOSITORY}@${DIGEST}"
 
-      - name: Verify HWE testing signature
+      - name: Verify HWS testing signature
         shell: bash
         env:
           DIGEST: ${{ steps.push.outputs.digest }}
@@ -194,10 +194,10 @@ jobs:
           DIGEST: ${{ steps.push.outputs.digest }}
         run: |
           {
-            echo "## JustVoxel HWE testing"
+            echo "## JustVoxel HWS testing"
             echo
             echo "- Base input: ${JUSTVOXEL_BASE_IMAGE}"
-            echo "- HWE package delta: 24 declared packages"
+            echo "- HWS package delta: 24 declared packages"
             echo "- Rechunked layers: ${LAYERS:-unknown} / ${OCI_LAYER_LIMIT}"
             echo "- Moving tag: ${IMAGE_REPOSITORY}:${CURRENT_TAG}"
             echo "- Immutable tag: ${IMAGE_REPOSITORY}:${BUILD_TAG:-n/a}"
@@ -211,11 +211,11 @@ jobs:
     permissions:
       packages: write
     steps:
-      - name: Remove expired HWE testing images
+      - name: Remove expired HWS testing images
         uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          packages: justvoxel-hwe
+          packages: justvoxel-hws
           delete-tags: 'testing-*'
           exclude-tags: 'testing,stable,stable-*'
           older-than: 45 days

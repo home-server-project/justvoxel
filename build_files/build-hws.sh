@@ -2,13 +2,13 @@
 set -ouex pipefail
 
 source /ctx/build_files/packages.env
-: "${JUSTVOXEL_HWE_PACKAGES:?JUSTVOXEL_HWE_PACKAGES must be set}"
+: "${JUSTVOXEL_HWS_PACKAGES:?JUSTVOXEL_HWS_PACKAGES must be set}"
 
-read -r -a hwe_packages <<< "${JUSTVOXEL_HWE_PACKAGES}"
+read -r -a hws_packages <<< "${JUSTVOXEL_HWS_PACKAGES}"
 
 # justvoxel-base intentionally ships external repositories disabled.
-# Enable EPEL only for composition; finalize-hwe.sh disables it again.
-dnf --enablerepo=epel install -y "${hwe_packages[@]}"
+# Enable EPEL only for composition; finalize-hws.sh disables it again.
+dnf --enablerepo=epel install -y "${hws_packages[@]}"
 
 # EL10 bootc stores vendor groups under /usr/lib/group. Keep the package-declared
 # NUT service account memberships usable for common USB/serial UPS hardware.
@@ -45,4 +45,4 @@ for unit in nut-server.service nut-monitor.service nut-driver@.service; do
 done
 
 install -d -m0755 /usr/libexec/justvoxel/health
-install -m0755 /ctx/build_files/validate/hwe.sh /usr/libexec/justvoxel/health/hwe
+install -m0755 /ctx/build_files/validate/hws.sh /usr/libexec/justvoxel/health/hws

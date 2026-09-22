@@ -7,7 +7,7 @@ It is designed for people who are comfortable installing an operating system and
 JustVoxel provides the same appliance experience through two editions:
 
 - **JustVoxel VM** — for Proxmox, KVM/libvirt, VMware, Hyper-V, VirtualBox, and other supported hypervisors.
-- **JustVoxel HWE** — for installation directly on physical hardware where additional hardware-support packages are useful.
+- **JustVoxel HWS** — for installation directly on physical hardware where additional hardware-support packages are useful.
 
 Both editions use the same JustVoxel management experience, including the WebUI, `mjust`, Minecraft management, backups and restore, storage management, migration, updates, validation, and recovery tools.
 
@@ -15,14 +15,14 @@ Both editions use the same JustVoxel management experience, including the WebUI,
 
 Choose **JustVoxel VM** when the server will run as a virtual machine.
 
-Choose **JustVoxel HWE** when JustVoxel will run directly on a physical computer and you want the additional hardware-oriented package set.
+Choose **JustVoxel HWS** when JustVoxel will run directly on a physical computer and you want the additional hardware-oriented package set.
 
-**HWE is simply JustVoxel's name for the edition with extra physical-hardware packages.** It does not mean that the underlying Base is a separate "hardware-enabled" operating system.
+**HWS means Hardware Support and is JustVoxel's name for the edition with extra physical-hardware packages.** It does not mean that the underlying Base is a separate "hardware-enabled" operating system.
 
 <details>
-<summary><strong>What does HWE add?</strong></summary>
+<summary><strong>What does HWS add?</strong></summary>
 
-HWE adds packages useful on physical machines, including:
+HWS adds packages useful on physical machines, including:
 
 - UPS support through Network UPS Tools (NUT)
 - SMART, NVMe, Btrfs, and disk-management utilities
@@ -35,7 +35,7 @@ HWE adds packages useful on physical machines, including:
 
 The normal JustVoxel appliance functionality remains the same. These packages extend what the system can work with when physical hardware is present.
 
-For the exact HWE package list, see [`build_files/packages.env`](build_files/packages.env).
+For the exact HWS package list, see [`build_files/packages.env`](build_files/packages.env).
 
 For the packages already included in the common JustVoxel Base, see the [JustVoxel Base package reference](https://github.com/home-server-project/justvoxel-base/blob/main/docs/PACKAGES.md).
 

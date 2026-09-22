@@ -2,7 +2,7 @@
 set -ouex pipefail
 
 : "${JUSTVOXEL_BASE_REPOSITORY:?JUSTVOXEL_BASE_REPOSITORY must be set}"
-: "${JUSTVOXEL_HWE_REPOSITORY:?JUSTVOXEL_HWE_REPOSITORY must be set}"
+: "${JUSTVOXEL_HWS_REPOSITORY:?JUSTVOXEL_HWS_REPOSITORY must be set}"
 
 OS_RELEASE_USR=/usr/lib/os-release
 OS_RELEASE_ETC=/etc/os-release
@@ -28,11 +28,11 @@ source "${OS_RELEASE_USR}"
     exit 1
 }
 
-# HWE is a separate final product. Replace inherited JustVoxel product trust
+# HWS is a separate final product. Replace inherited JustVoxel product trust
 # with the exact repositories this image is allowed to consume.
 /ctx/build_files/install-image-trust.sh \
     "${JUSTVOXEL_BASE_REPOSITORY}" \
-    "${JUSTVOXEL_HWE_REPOSITORY}"
+    "${JUSTVOXEL_HWS_REPOSITORY}"
 
 POLICY=/etc/containers/policy.json
 justvoxel_repository_prefix="${JUSTVOXEL_BASE_REPOSITORY%/justvoxel-base}/justvoxel-"
@@ -40,13 +40,13 @@ policy_tmp="$(mktemp)"
 jq \
     --arg prefix "${justvoxel_repository_prefix}" \
     --arg base "${JUSTVOXEL_BASE_REPOSITORY}" \
-    --arg hwe "${JUSTVOXEL_HWE_REPOSITORY}" \
+    --arg hws "${JUSTVOXEL_HWS_REPOSITORY}" \
     '.transports.docker |= ((. // {}) | with_entries(
         . as $entry |
         select(
             ((($entry.key | startswith($prefix)) | not)
              or $entry.key == $base
-             or $entry.key == $hwe)
+             or $entry.key == $hws)
         )
     ))' \
     "${POLICY}" > "${policy_tmp}"
@@ -66,12 +66,12 @@ osr_set() {
     done
 }
 
-osr_set PRETTY_NAME "JustVoxel HWE 10"
-osr_set VARIANT "JustVoxel HWE"
-osr_set VARIANT_ID "justvoxel-hwe"
-osr_set IMAGE_ID "justvoxel-hwe"
+osr_set PRETTY_NAME "JustVoxel HWS 10"
+osr_set VARIANT "JustVoxel HWS"
+osr_set VARIANT_ID "justvoxel-hws"
+osr_set IMAGE_ID "justvoxel-hws"
 
-printf '%s\n' "justvoxel-hwe" > /usr/lib/justvoxel/variant
+printf '%s\n' "justvoxel-hws" > /usr/lib/justvoxel/variant
 chmod 0644 /usr/lib/justvoxel/variant
 
 # External repositories are build inputs only. Keep the immutable product from
@@ -85,7 +85,7 @@ for repo_file in \
 done
 
 if dnf repolist --enabled | grep -Eiq 'epel|tailscale|netbird'; then
-    echo "ERROR: an external package repository remains enabled in the HWE image." >&2
+    echo "ERROR: an external package repository remains enabled in the HWS image." >&2
     dnf repolist --enabled
     exit 1
 fi
@@ -104,17 +104,17 @@ test -f /usr/lib/pki/containers/home-server-project.pub
 test -f /etc/containers/registries.d/ghcr.io-home-server-project.yaml
 for trust_repository in \
     "${JUSTVOXEL_BASE_REPOSITORY}" \
-    "${JUSTVOXEL_HWE_REPOSITORY}"; do
+    "${JUSTVOXEL_HWS_REPOSITORY}"; do
     grep -Fq "${trust_repository}:" /etc/containers/registries.d/ghcr.io-home-server-project.yaml
 done
 
-expected_trust="$(printf '%s\n' "${JUSTVOXEL_BASE_REPOSITORY}" "${JUSTVOXEL_HWE_REPOSITORY}" | sort)"
+expected_trust="$(printf '%s\n' "${JUSTVOXEL_BASE_REPOSITORY}" "${JUSTVOXEL_HWS_REPOSITORY}" | sort)"
 actual_trust="$(jq -r \
     --arg prefix "${justvoxel_repository_prefix}" \
     '(.transports.docker // {}) | keys[] | select(startswith($prefix))' \
     "${POLICY}" | sort)"
 [[ "${actual_trust}" == "${expected_trust}" ]] || {
-    echo "ERROR: HWE image trust is not scoped to the exact Base + HWE repository set." >&2
+    echo "ERROR: HWS image trust is not scoped to the exact Base + HWS repository set." >&2
     printf 'Expected:\n%s\nActual:\n%s\n' "${expected_trust}" "${actual_trust}" >&2
     exit 1
 }
