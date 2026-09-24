@@ -33,8 +33,7 @@ RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
     JUSTVOXEL_HWS_REPOSITORY="${JUSTVOXEL_HWS_REPOSITORY}" \
     /ctx/build_files/finalize-hws.sh
 
-RUN /usr/libexec/justvoxel/health/common \
-    && /usr/libexec/justvoxel/health/hws \
+RUN /usr/libexec/justvoxel/health/hws \
     && bootc container lint --fatal-warnings
 
 STOPSIGNAL SIGRTMIN+3
