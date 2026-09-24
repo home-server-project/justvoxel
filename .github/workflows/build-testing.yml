@@ -118,15 +118,6 @@ jobs:
           (( layer_count <= OCI_LAYER_LIMIT ))
           echo "layers=${layer_count}" >> "${GITHUB_OUTPUT}"
 
-      - name: Validate completed HWS image
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo podman run --rm \
-            --entrypoint /bin/bash \
-            justvoxel-hws:test \
-            -c '/usr/libexec/justvoxel/health/common && /usr/libexec/justvoxel/health/hws && bootc container lint --fatal-warnings'
-
       - name: Login to GHCR
         shell: bash
         env:
@@ -197,7 +188,8 @@ jobs:
             echo "## JustVoxel HWS testing"
             echo
             echo "- Base input: ${JUSTVOXEL_BASE_IMAGE}"
-            echo "- HWS package delta: 24 declared packages"
+            echo "- HWS package delta: 21 explicit packages + 3 inherited capabilities"
+            echo "- Completed-image validation: 1 HWS health + 1 strict bootc lint before rechunk"
             echo "- Rechunked layers: ${LAYERS:-unknown} / ${OCI_LAYER_LIMIT}"
             echo "- Moving tag: ${IMAGE_REPOSITORY}:${CURRENT_TAG}"
             echo "- Immutable tag: ${IMAGE_REPOSITORY}:${BUILD_TAG:-n/a}"
