@@ -84,6 +84,8 @@ for repo_file in \
     sed -Ei 's/^[[:space:]]*enabled[[:space:]]*=[[:space:]]*1[[:space:]]*$/enabled=0/' "${repo_file}"
 done
 
+# This is an execution guard for the repository transformation above, not a
+# completed-image health validation. Run it before DNF state is removed.
 if dnf repolist --enabled | grep -Eiq 'epel|tailscale|netbird'; then
     echo "ERROR: an external package repository remains enabled in the HWS image." >&2
     dnf repolist --enabled
@@ -92,30 +94,7 @@ fi
 
 dnf clean all
 rm -rf /var/cache/* /var/log/* /var/tmp/* /var/lib/dnf /var/lib/rpm-state
-bootc container lint
 
 rm -rf /var
 install -d -m0755 /var
 install -d -m1777 /var/tmp
-
-test "$(stat -c '%a %U %G' /var/tmp)" = "1777 root root"
-jq empty "${POLICY}"
-test -f /usr/lib/pki/containers/home-server-project.pub
-test -f /etc/containers/registries.d/ghcr.io-home-server-project.yaml
-for trust_repository in \
-    "${JUSTVOXEL_BASE_REPOSITORY}" \
-    "${JUSTVOXEL_HWS_REPOSITORY}"; do
-    grep -Fq "${trust_repository}:" /etc/containers/registries.d/ghcr.io-home-server-project.yaml
-done
-
-expected_trust="$(printf '%s\n' "${JUSTVOXEL_BASE_REPOSITORY}" "${JUSTVOXEL_HWS_REPOSITORY}" | sort)"
-actual_trust="$(jq -r \
-    --arg prefix "${justvoxel_repository_prefix}" \
-    '(.transports.docker // {}) | keys[] | select(startswith($prefix))' \
-    "${POLICY}" | sort)"
-[[ "${actual_trust}" == "${expected_trust}" ]] || {
-    echo "ERROR: HWS image trust is not scoped to the exact Base + HWS repository set." >&2
-    printf 'Expected:\n%s\nActual:\n%s\n' "${expected_trust}" "${actual_trust}" >&2
-    exit 1
-}
-grep -Fq "use-sigstore-attachments: true" /etc/containers/registries.d/ghcr.io-home-server-project.yaml
