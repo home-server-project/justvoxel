@@ -3,9 +3,9 @@ set -euo pipefail
 
 test "$(cat /usr/lib/justvoxel/variant)" = "justvoxel-hws"
 
-# HWS explicitly installs these 21 physical-hardware packages.
+# HWS explicitly installs these 22 physical-hardware packages.
 rpm -q \
-    nut nut-client smartmontools smartmontools-selinux nvme-cli \
+    nut nut-client libusb1-devel smartmontools smartmontools-selinux nvme-cli \
     lm_sensors ethtool usbutils dmidecode fwupd-efi udisks2 \
     NetworkManager-wifi amd-ucode-firmware atheros-firmware \
     brcmfmac-firmware iwlwifi-dvm-firmware iwlwifi-mvm-firmware \
@@ -14,9 +14,11 @@ rpm -q \
 # HWS requires these capabilities but inherits them from its parent stack.
 rpm -q pciutils fwupd microcode_ctl >/dev/null
 
-for cmd in upsc smartctl nvme sensors ethtool lsusb lspci dmidecode fwupdmgr udisksctl hdparm powertop; do
+for cmd in upsc nut-scanner smartctl nvme sensors ethtool lsusb lspci dmidecode fwupdmgr udisksctl hdparm powertop; do
     command -v "${cmd}" >/dev/null
 done
+
+test -e /usr/lib64/libusb-1.0.so
 
 for unit in nut-server.service nut-monitor.service; do
     [[ "$(systemctl is-enabled "${unit}" 2>/dev/null || true)" != "enabled" ]]
