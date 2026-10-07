@@ -1,5 +1,5 @@
 ---
-name: HWS testing
+name: JustVoxel testing
 
 on:
   push:
@@ -14,7 +14,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/justvoxel-hws
+  VM_IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/justvoxel-vm
+  HWS_IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/justvoxel-hws
   CURRENT_TAG: testing
   JUSTVOXEL_BASE_IMAGE: ghcr.io/home-server-project/justvoxel-base:testing
   RECHUNK_MAX_LAYERS: '127'
@@ -22,7 +23,7 @@ env:
 
 jobs:
   source-tests:
-    name: HWS source checks
+    name: Product source checks
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -32,7 +33,7 @@ jobs:
         with:
           ref: testing
 
-      - name: Validate HWS build scripts
+      - name: Validate product build scripts
         shell: bash
         run: |
           set -euo pipefail
@@ -42,7 +43,7 @@ jobs:
           done
 
   build:
-    name: Build JustVoxel HWS testing
+    name: Build JustVoxel VM + HWS testing
     needs: [source-tests]
     runs-on: ubuntu-24.04
     permissions:
@@ -77,6 +78,21 @@ jobs:
             --key cosign.pub \
             "${JUSTVOXEL_BASE_IMAGE}" >/dev/null
 
+      - name: Build JustVoxel VM
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo podman build \
+            --pull=always \
+            --security-opt=label=disable \
+            --build-arg "JUSTVOXEL_BASE_IMAGE=${JUSTVOXEL_BASE_IMAGE}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --target justvoxel-vm \
+            --tag justvoxel-vm:test \
+            --file Containerfile \
+            .
+
       - name: Build JustVoxel HWS
         shell: bash
         run: |
@@ -88,7 +104,7 @@ jobs:
             --device /dev/fuse \
             --build-arg "JUSTVOXEL_BASE_IMAGE=${JUSTVOXEL_BASE_IMAGE}" \
             --build-arg "JUSTVOXEL_BASE_REPOSITORY=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/justvoxel-base" \
-            --build-arg "JUSTVOXEL_HWS_REPOSITORY=${IMAGE_REPOSITORY}" \
+            --build-arg "JUSTVOXEL_HWS_REPOSITORY=${HWS_IMAGE_REPOSITORY}" \
             --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
             --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --target justvoxel-hws \
@@ -130,70 +146,108 @@ jobs:
             ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
           chmod 600 "${HOME}/.docker/config.json"
 
-      - name: Push HWS testing image
-        id: push
+      - name: Push VM testing image
+        id: push-vm
         shell: bash
         run: |
           set -euo pipefail
           build_tag="testing-$(date -u +%Y%m%d)-${GITHUB_SHA:0:7}"
-          echo "BUILD_TAG=${build_tag}" >> "${GITHUB_ENV}"
+          echo "VM_BUILD_TAG=${build_tag}" >> "${GITHUB_ENV}"
 
-          sudo podman tag justvoxel-hws:test "${IMAGE_REPOSITORY}:${build_tag}"
-          sudo podman tag justvoxel-hws:test "${IMAGE_REPOSITORY}:${CURRENT_TAG}"
+          sudo podman tag justvoxel-vm:test "${VM_IMAGE_REPOSITORY}:${build_tag}"
+          sudo podman tag justvoxel-vm:test "${VM_IMAGE_REPOSITORY}:${CURRENT_TAG}"
 
           sudo podman push \
             --authfile "${HOME}/.docker/config.json" \
-            --digestfile /tmp/digest \
-            "${IMAGE_REPOSITORY}:${build_tag}"
+            --digestfile /tmp/vm-digest \
+            "${VM_IMAGE_REPOSITORY}:${build_tag}"
           sudo podman push \
             --authfile "${HOME}/.docker/config.json" \
-            "${IMAGE_REPOSITORY}:${CURRENT_TAG}"
+            "${VM_IMAGE_REPOSITORY}:${CURRENT_TAG}"
 
-          digest="$(cat /tmp/digest)"
+          digest="$(cat /tmp/vm-digest)"
           [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
           echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
 
-      - name: Sign HWS testing image
+      - name: Push HWS testing image
+        id: push-hws
+        shell: bash
+        run: |
+          set -euo pipefail
+          build_tag="testing-$(date -u +%Y%m%d)-${GITHUB_SHA:0:7}"
+          echo "HWS_BUILD_TAG=${build_tag}" >> "${GITHUB_ENV}"
+
+          sudo podman tag justvoxel-hws:test "${HWS_IMAGE_REPOSITORY}:${build_tag}"
+          sudo podman tag justvoxel-hws:test "${HWS_IMAGE_REPOSITORY}:${CURRENT_TAG}"
+
+          sudo podman push \
+            --authfile "${HOME}/.docker/config.json" \
+            --digestfile /tmp/hws-digest \
+            "${HWS_IMAGE_REPOSITORY}:${build_tag}"
+          sudo podman push \
+            --authfile "${HOME}/.docker/config.json" \
+            "${HWS_IMAGE_REPOSITORY}:${CURRENT_TAG}"
+
+          digest="$(cat /tmp/hws-digest)"
+          [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+
+      - name: Sign VM testing image
         shell: bash
         env:
           COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
-          DIGEST: ${{ steps.push.outputs.digest }}
+          DIGEST: ${{ steps.push-vm.outputs.digest }}
         run: |
           set -euo pipefail
           cosign sign -y \
             --new-bundle-format=false \
             --use-signing-config=false \
             --key env://COSIGN_PRIVATE_KEY \
-            "${IMAGE_REPOSITORY}@${DIGEST}"
+            "${VM_IMAGE_REPOSITORY}@${DIGEST}"
+
+      - name: Sign HWS testing image
+        shell: bash
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
+          DIGEST: ${{ steps.push-hws.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cosign sign -y \
+            --new-bundle-format=false \
+            --use-signing-config=false \
+            --key env://COSIGN_PRIVATE_KEY \
+            "${HWS_IMAGE_REPOSITORY}@${DIGEST}"
 
       - name: Verify HWS testing signature
         shell: bash
         env:
-          DIGEST: ${{ steps.push.outputs.digest }}
+          DIGEST: ${{ steps.push-hws.outputs.digest }}
         run: |
           set -euo pipefail
           cosign verify \
             --new-bundle-format=false \
             --key cosign.pub \
-            "${IMAGE_REPOSITORY}@${DIGEST}"
+            "${HWS_IMAGE_REPOSITORY}@${DIGEST}"
 
       - name: Build summary
         if: always()
         shell: bash
         env:
-          LAYERS: ${{ steps.rechunk.outputs.layers }}
-          DIGEST: ${{ steps.push.outputs.digest }}
+          HWS_LAYERS: ${{ steps.rechunk.outputs.layers }}
+          VM_DIGEST: ${{ steps.push-vm.outputs.digest }}
+          HWS_DIGEST: ${{ steps.push-hws.outputs.digest }}
         run: |
           {
-            echo "## JustVoxel HWS testing"
+            echo "## JustVoxel testing"
             echo
             echo "- Base input: ${JUSTVOXEL_BASE_IMAGE}"
-            echo "- HWS package delta: 21 explicit packages + 3 inherited capabilities"
-            echo "- Completed-image validation: 1 HWS health + 1 strict bootc lint before rechunk"
-            echo "- Rechunked layers: ${LAYERS:-unknown} / ${OCI_LAYER_LIMIT}"
-            echo "- Moving tag: ${IMAGE_REPOSITORY}:${CURRENT_TAG}"
-            echo "- Immutable tag: ${IMAGE_REPOSITORY}:${BUILD_TAG:-n/a}"
-            echo "- Digest: ${DIGEST:-not-published}"
+            echo "- VM: ${VM_IMAGE_REPOSITORY}:${CURRENT_TAG}"
+            echo "- VM immutable tag: ${VM_IMAGE_REPOSITORY}:${VM_BUILD_TAG:-n/a}"
+            echo "- VM digest: ${VM_DIGEST:-not-published}"
+            echo "- HWS: ${HWS_IMAGE_REPOSITORY}:${CURRENT_TAG}"
+            echo "- HWS immutable tag: ${HWS_IMAGE_REPOSITORY}:${HWS_BUILD_TAG:-n/a}"
+            echo "- HWS digest: ${HWS_DIGEST:-not-published}"
+            echo "- HWS rechunked layers: ${HWS_LAYERS:-unknown} / ${OCI_LAYER_LIMIT}"
           } >> "${GITHUB_STEP_SUMMARY}"
 
   cleanup:
@@ -203,6 +257,17 @@ jobs:
     permissions:
       packages: write
     steps:
+      - name: Remove expired VM testing images
+        uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          packages: justvoxel-vm
+          delete-tags: 'testing-*'
+          exclude-tags: 'testing,stable,stable-*'
+          older-than: 45 days
+          keep-n-tagged: 7
+          validate: true
+
       - name: Remove expired HWS testing images
         uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
         with:

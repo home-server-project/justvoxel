@@ -6,6 +6,25 @@ FROM scratch AS ctx
 COPY build_files /build_files
 COPY cosign.pub /cosign.pub
 
+FROM ${JUSTVOXEL_BASE_IMAGE} AS justvoxel-vm
+
+LABEL containers.bootc=1 \
+      ostree.bootable=1 \
+      org.opencontainers.image.vendor="Home Server Project" \
+      org.opencontainers.image.source="https://github.com/home-server-project/justvoxel" \
+      org.opencontainers.image.title="JustVoxel VM" \
+      org.opencontainers.image.description="JustVoxel Minecraft server appliance for virtual machines" \
+      io.home-server-project.justvoxel.role="product" \
+      io.home-server-project.justvoxel.variant="vm" \
+      io.home-server-project.justvoxel.product-base="justvoxel-base" \
+      io.home-server-project.justvoxel.product-base-channel="testing" \
+      io.home-server-project.justvoxel.status="development"
+
+RUN test "$(cat /usr/lib/justvoxel/variant)" = "justvoxel-vm"
+
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]
+
 FROM ${JUSTVOXEL_BASE_IMAGE} AS justvoxel-hws
 ARG JUSTVOXEL_BASE_REPOSITORY
 ARG JUSTVOXEL_HWS_REPOSITORY
