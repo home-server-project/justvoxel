@@ -3,13 +3,14 @@ set -euo pipefail
 
 test "$(cat /usr/lib/justvoxel/variant)" = "justvoxel-hws"
 
-# HWS explicitly installs these 22 physical-hardware packages.
+# HWS explicitly installs these 25 physical-hardware packages.
 rpm -q \
     nut nut-client libusb1-devel smartmontools smartmontools-selinux nvme-cli \
     lm_sensors ethtool usbutils dmidecode fwupd-efi udisks2 \
     NetworkManager-wifi amd-ucode-firmware atheros-firmware \
-    brcmfmac-firmware iwlwifi-dvm-firmware iwlwifi-mvm-firmware \
-    realtek-firmware mt7xxx-firmware hdparm powertop >/dev/null
+    brcmfmac-firmware iwlegacy-firmware iwlwifi-dvm-firmware \
+    iwlwifi-mvm-firmware realtek-firmware mt7xxx-firmware \
+    nxpwireless-firmware tiwilink-firmware hdparm powertop >/dev/null
 
 # HWS requires these capabilities but inherits them from its parent stack.
 rpm -q pciutils fwupd microcode_ctl >/dev/null
