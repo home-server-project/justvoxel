@@ -241,17 +241,29 @@ func TestGatewayHelpReferenceSectionsStayCompact(t *testing.T) {
 			t.Errorf("Network access guidance missing: %s", phrase)
 		}
 	}
-	for _, title := range []string{"Access levels", "Minecraft scope", "Authentication", "Network access"} {
-		if !strings.Contains(normal, "<h3>"+title+"</h3>") {
-			t.Errorf("visible reference section missing: %s", title)
+	if !strings.Contains(normal, `<section class="panel"><h3>Access levels</h3>`) {
+		t.Error("Access levels must remain an open section panel")
+	}
+	panels := regexp.MustCompile(`<(section|details) class="panel"[^>]*><(?:h3|summary)>([^<]+)</(?:h3|summary)>`).FindAllStringSubmatch(help, -1)
+	titles := []string{"Access levels", "Minecraft scope", "Authentication", "Network access", "Provider reference", "Developer integration"}
+	if len(panels) != len(titles) {
+		t.Fatalf("Help must retain exactly its six panels, got %d", len(panels))
+	}
+	for i, title := range titles {
+		kind := "details"
+		if i == 0 {
+			kind = "section"
+		}
+		if panels[i][1] != kind || panels[i][2] != title {
+			t.Errorf("Help panel %d must be %s %q", i+1, kind, title)
 		}
 	}
 	for _, title := range []string{"Minecraft scope", "Authentication", "Network access"} {
-		sectionStart := strings.Index(normal, "<section class=\"panel\"><h3>"+title+"</h3>")
+		sectionStart := strings.Index(normal, "<details class=\"panel\"><summary>"+title+"</summary>")
 		if sectionStart < 0 {
 			t.Fatalf("Help fact section missing: %s", title)
 		}
-		sectionEnd := strings.Index(normal[sectionStart:], "</section>")
+		sectionEnd := strings.Index(normal[sectionStart:], "</details>")
 		if sectionEnd < 0 {
 			t.Fatalf("Help fact section not closed: %s", title)
 		}

@@ -188,7 +188,8 @@ test('cards contain human summaries while technical fields and endpoints stay of
 });
 
 test('help uses compact sections and a comparison table with collapsed developer details', () => {
-  for (const section of ['Access levels', 'Minecraft scope', 'Authentication', 'Network access']) assert.ok(help.includes(`<h3>${section}</h3>`), section);
+  assert.ok(help.includes('<section class="panel"><h3>Access levels</h3>'));
+  for (const section of ['Minecraft scope', 'Authentication', 'Network access']) assert.ok(help.includes(`<details class="panel"><summary>${section}</summary>`), section);
   assert.match(help, /data-gateway-help-providers/);
   assert.equal((help.match(/data-gateway-help-guide/g) || []).length, 1);
   const table = help.match(/<table[\s\S]*?<\/table>/)[0];
@@ -795,8 +796,8 @@ test('Help selects one guide without any connection mutation or saved state', ()
   const h = guideHarness(); h.context.setup();
   const buttons = h.find('[data-gateway-help-providers]').children;
   const guide = h.find('[data-gateway-help-guide]');
-  assert.equal(buttons.length, 8);
-  assert.deepEqual(buttons.map(button => button.children[1].textContent), ['OpenAI', 'Claude', 'Grok', 'Gemini', 'GitHub Copilot', 'OpenClaw', 'Other AI / MCP app', 'Automation / REST API']);
+  assert.equal(buttons.length, 9);
+  assert.deepEqual(buttons.map(button => button.children[1].textContent), ['OpenAI', 'Claude', 'Grok', 'Gemini', 'GitHub Copilot', 'OpenClaw', 'Other AI / MCP app', 'Automation / REST API', 'Telegram']);
   for (const button of buttons) {
     button.listeners.click();
     assert.equal(buttons.filter(item => item['aria-pressed'] === 'true').length, 1);
@@ -805,6 +806,48 @@ test('Help selects one guide without any connection mutation or saved state', ()
   }
   const setup = js.slice(js.indexOf('  const setupHelpGuide ='), js.indexOf('  const renderSettings ='));
   assert.doesNotMatch(setup, /mutate|send\(|snapshot|selectedID|fetch\(/);
+});
+
+test('Telegram is Help-only and never an ordinary connection purpose or client mode', () => {
+  const h = guideHarness();
+  const purposes = ['OpenAI', 'Claude', 'Grok', 'Gemini', 'GitHub Copilot', 'OpenClaw', 'Other AI / MCP app', 'Automation / REST API'];
+  assert.deepEqual(Array.from(vm.runInContext('[...providers.keys()]', h.context)), purposes);
+  assert.deepEqual(Array.from(vm.runInContext('Object.keys(clientModes)', h.context)).sort(), [...purposes].sort());
+  assert.equal(vm.runInContext('providers.has("Telegram") || Object.hasOwn(clientModes, "Telegram")', h.context), false);
+  assert.doesNotMatch(form, /name="purpose" value="[Tt]elegram"/);
+  const settings = settingsHarness({name: '', purpose: 'OpenAI', enabled: true, all_instances: true});
+  settings.node('[data-telegram-select]').listeners.change();
+  assert.equal(settings.requests.length, 0);
+  assert.equal(settings.node('[data-gateway-telegram]').hidden, false);
+});
+
+test('Telegram Help uses its local icon and a dedicated guide without gateway connection setup', () => {
+  const h = guideHarness(); h.context.setup();
+  const buttons = h.find('[data-gateway-help-providers]').children;
+  assert.equal(buttons[7].children[1].textContent, 'Automation / REST API');
+  assert.equal(buttons[8].children[1].textContent, 'Telegram');
+  assert.equal(buttons[8].children[0].src, '/static/ai-providers/telegram.svg');
+  // Selecting Telegram must not generate a gateway endpoint.
+  Object.defineProperty(h.context.location, 'origin', {get() { throw new Error('endpoint generated'); }});
+  buttons[8].listeners.click();
+  const guide = h.find('[data-gateway-help-guide]');
+  const content = guideText(guide);
+  assert.equal(guide.children[0].children[0].src, '/static/ai-providers/telegram.svg');
+  for (const phrase of [
+    'AI & API Connections → Add → Telegram', 'dedicated Telegram bot with BotFather',
+    'Save or replace token', 'Verify bot', 'Enable Telegram', 'Pair user',
+    'one-time /start <challenge>', 'private chat', 'primary administrator',
+    'check and explicitly approve the numeric Telegram user ID', 'Read Only or Server Management',
+    'Notifications are optional', 'outbound long polling', 'No webhook, inbound port, or AI model is required',
+    'independently of the AI/API Gateway switch', 'does not use AI/API Levels 1–4',
+    'Unknown or unapproved Telegram users are silently ignored',
+    'Only the exact active pairing challenge receives the pending-approval acknowledgement',
+  ]) assert.ok(content.includes(phrase), phrase);
+  assert.doesNotMatch(content, /MCP address|REST API address|https?:|\/mcp|\/api\/v1|OAuth|connection token|Bearer|Level [1-4]\b/);
+  assert.equal(descendants(guide).filter(node => ['input', 'select', 'button', 'textarea'].includes(node.tagName)).length, 0);
+  const renderer = js.slice(js.indexOf('  const renderTelegramHelpGuide ='), js.indexOf('  const setupHelpGuide ='));
+  assert.doesNotMatch(renderer, /auth_mode|renderProviderGuide|providerAuthMode|mutate|fetch|send\(/);
+  assert.equal(h.copied.length, 0);
 });
 
 test('private host detection is independent of HTTP and HTTPS security', () => {
@@ -1442,7 +1485,8 @@ test('default Help is a reference with provider manuals and developer integratio
   assert.ok(referenceStart > 0);
   const normal = help.slice(0, referenceStart);
   assert.doesNotMatch(normal, /Getting connected|Choose your app|data-gateway-help-providers|data-gateway-help-guide|How to connect/);
-  for (const section of ['Access levels', 'Minecraft scope', 'Authentication', 'Network access']) assert.ok(normal.includes(`<h3>${section}</h3>`));
+  assert.ok(normal.includes('<section class="panel"><h3>Access levels</h3>'));
+  for (const section of ['Minecraft scope', 'Authentication', 'Network access']) assert.ok(normal.includes(`<details class="panel"><summary>${section}</summary>`));
   for (const phrase of ['Selected servers', 'OAuth connections', 'Token connections', 'shown once', 'Local clients', 'Cloud clients']) assert.ok(normal.includes(phrase));
   const local = normal.match(/<strong>Local clients<\/strong>\s*<p>(.*?)<\/p>/)[1];
   for (const name of ['Codex', 'Claude Code', 'GitHub Copilot CLI', 'VS Code', 'OpenClaw', 'other local MCP clients']) assert.ok(local.includes(name), name);
@@ -1700,9 +1744,9 @@ test('Help facts share a label-above-description structure and concise content',
     ], 'See Provider reference for the exact connection options for each provider.'],
   ];
   for (const [title, facts, note] of sections) {
-    const start = help.indexOf(`<section class="panel"><h3>${title}</h3>`);
+    const start = help.indexOf(`<details class="panel"><summary>${title}</summary>`);
     assert.ok(start >= 0, title);
-    const section = help.slice(start, help.indexOf('</section>', start));
+    const section = help.slice(start, help.indexOf('</details>', start));
     assert.equal((section.match(/class="gateway-help-facts"/g) || []).length, 1, title);
     assert.doesNotMatch(section, /<\/?(?:dl|dt|dd)\b|style=|notice|warning/);
     const items = [...section.matchAll(/<div class="gateway-help-fact">\s*<strong>(.*?)<\/strong>\s*<p>(.*?)<\/p>\s*<\/div>/g)];

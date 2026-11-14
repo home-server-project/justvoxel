@@ -534,17 +534,44 @@
     };
     allServers.addEventListener('change', sync); sync();
   };
+  const telegramHelpIcon = () => {
+    const icon = document.createElement('img');
+    icon.className = 'gateway-provider-icon'; icon.alt = '';
+    icon.src = '/static/ai-providers/telegram.svg';
+    return icon;
+  };
+  const renderTelegramHelpGuide = host => {
+    host.replaceChildren();
+    const identity = text('div', ''); identity.className = 'gateway-connection-identity';
+    const titles = text('div', ''); titles.append(text('h3', 'Telegram'));
+    identity.append(telegramHelpIcon(), titles); host.append(identity);
+    host.append(text('h4', 'How to connect'));
+    const steps = text('ol', '');
+    for (const step of [
+      'Open AI & API Connections → Add → Telegram.',
+      'Create a dedicated Telegram bot with BotFather.',
+      'Enter the bot token and choose Save or replace token, then Verify bot.',
+      'Enable Telegram, then select Pair user.',
+      'Send the generated one-time /start <challenge> in a private chat with the bot.',
+      'The primary administrator must check and explicitly approve the numeric Telegram user ID. Choose Read Only or Server Management. Notifications are optional.',
+    ]) steps.append(text('li', step));
+    host.append(steps,
+      text('p', 'Telegram uses outbound long polling. No webhook, inbound port, or AI model is required.'),
+      text('p', 'Telegram operates independently of the AI/API Gateway switch and does not use AI/API Levels 1–4.'),
+      text('p', 'Unknown or unapproved Telegram users are silently ignored. Only the exact active pairing challenge receives the pending-approval acknowledgement.'));
+  };
   const setupHelpGuide = () => {
     const selector = find('[data-gateway-help-providers]');
     const guide = find('[data-gateway-help-guide]');
     const buttons = [];
     const select = purpose => {
       buttons.forEach(([name, button]) => button.setAttribute('aria-pressed', String(name === purpose)));
-      renderProviderGuide(guide, purpose, location.origin + (purpose === 'Automation / REST API' ? '/api/v1' : '/mcp'), {help: true});
+      if (purpose === 'Telegram') renderTelegramHelpGuide(guide);
+      else renderProviderGuide(guide, purpose, location.origin + (purpose === 'Automation / REST API' ? '/api/v1' : '/mcp'), {help: true});
     };
-    for (const purpose of providers.keys()) {
+    for (const purpose of [...providers.keys(), 'Telegram']) {
       const button = text('button', ''); button.type = 'button'; button.className = 'secondary';
-      button.append(providerIcon(purpose), text('span', purpose));
+      button.append(purpose === 'Telegram' ? telegramHelpIcon() : providerIcon(purpose), text('span', purpose));
       button.addEventListener('click', () => select(purpose)); selector.append(button); buttons.push([purpose, button]);
     }
     select('OpenAI');

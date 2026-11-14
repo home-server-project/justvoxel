@@ -7,6 +7,8 @@ polling in the existing Management Agent. It needs no AI model, inbound port,
 webhook, additional container, or separate daemon. The WebUI continues to use the
 existing local Unix-socket Management API.
 
+A short setup guide is available in **AI & API Connections → Help → Provider reference → Telegram**.
+
 ## Connect and pair
 
 1. Create a dedicated bot using Telegram's BotFather. Do not run another polling
