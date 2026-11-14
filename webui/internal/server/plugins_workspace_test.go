@@ -883,11 +883,41 @@ func TestPluginsWorkspaceToolbarCapacityAndPagination(t *testing.T) {
 			t.Fatal("obsolete or fake catalog behavior", forbidden)
 		}
 	}
-	page := strings.Index(header, "<span data-plugins-page>")
-	previous := strings.Index(header, "data-plugins-previous")
-	next := strings.Index(header, "data-plugins-next")
-	if page < 0 || previous <= page || next <= previous {
-		t.Fatal("pagination order changed")
+	_, footer, ok := strings.Cut(header, `<div class="plugins-pagination" data-plugins-pagination>`)
+	if !ok {
+		t.Fatal("pagination footer missing")
+	}
+	footer, _, ok = strings.Cut(footer, "\n        </div>")
+	if !ok {
+		t.Fatal("pagination footer closing tag missing")
+	}
+	for _, want := range []string{
+		`<span class="plugins-pagination-support">Can't find the plugin or mod you need, or did JustVoxel fail to install it? `,
+		`<a href="https://github.com/home-server-project/justvoxel/issues/new?template=minecraft.yml" target="_blank" rel="noopener noreferrer">Report an issue</a>`,
+	} {
+		if !strings.Contains(footer, want) {
+			t.Fatal("pagination support text or protected external link missing", want)
+		}
+	}
+	support := strings.Index(footer, `class="plugins-pagination-support"`)
+	link := strings.Index(footer, `>Report an issue</a>`)
+	controls := strings.Index(footer, `<div class="plugins-pagination-controls">`)
+	page := strings.Index(footer, "<span data-plugins-page>")
+	previous := strings.Index(footer, "data-plugins-previous")
+	next := strings.Index(footer, "data-plugins-next")
+	if support < 0 || link <= support || controls <= link || page <= controls || previous <= page || next <= previous {
+		t.Fatal("support link must precede the grouped page, Previous, and Next controls")
+	}
+	for _, want := range []string{
+		`.plugins-pagination{display:flex;flex:none;flex-wrap:wrap;`,
+		`font-size:.82rem;width:100%;max-width:1800px;margin-inline:auto`,
+		`.plugins-pagination-support{flex:1 1 30rem;min-width:0;color:var(--jv-muted,#aeb8c0);line-height:1.4}`,
+		`.plugins-pagination-support a{color:var(--jv-accent,#68bd8e);text-decoration:underline;text-underline-offset:2px}`,
+		`.plugins-pagination-controls{display:flex;flex:none;align-items:center;gap:.6rem;margin-left:auto;white-space:nowrap}`,
+	} {
+		if !strings.Contains(css, want) {
+			t.Fatal("pagination support wrapping, link, or control grouping rule missing", want)
+		}
 	}
 	for _, want := range []string{`display:flex;flex-direction:column;gap:.55rem;flex:1`, `.plugins-search{display:flex;flex:none;align-items:center;flex-wrap:wrap`, `flex:1 1 38%`, `.plugins-search-filters{display:flex;flex:1 1 auto;flex-wrap:wrap;min-width:0;align-items:center;gap:.5rem;margin-left:auto}`, `--plugins-card-height:144px`, `height:var(--plugins-card-height)`, `.plugins-result-card.is-selected{border-color:var(--jv-success)`, `color-mix(in srgb,var(--jv-success) 18%,var(--jv-surface-sunken))`, `.plugins-result-card:focus-visible`, `justify-content:flex-end;gap:.6rem;margin-top:auto`, `@container(max-width:680px){.plugins-search{flex-wrap:wrap}`} {
 		if !strings.Contains(css, want) {
