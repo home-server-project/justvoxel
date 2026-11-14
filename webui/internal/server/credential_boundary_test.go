@@ -187,7 +187,7 @@ func TestPasswordScriptOptOutAndRealPasswords(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Exercise both enhancers with real password-field markup, preserving the
-	// standalone CurseForge opt-out and dashboard shared enhancement.
+	// standalone API-secret opt-outs and dashboard shared reveal enhancement.
 	harness := `
 const assert = require("node:assert/strict");
 const shared = process.argv[2] === "shared";
@@ -204,7 +204,7 @@ const make = () => ({children: [], listeners: {}, attributes: {},
  }});
 const inputs = JSON.parse(process.argv[1]).map(attributes => Object.assign(make(), {
  type: "password", name: attributes.name || "", minLength: 8, value: "", attributes,
- dataset: {}, autocomplete: attributes.name === "new_password" ? "new-password" : "",
+ dataset: {}, autocomplete: attributes.autocomplete || "",
  parentNode: make()
 }));
 const document = {
@@ -262,6 +262,7 @@ for (const input of inputs) {
 }
 `
 	var fields []map[string]string
+	telegramFields := 0
 	for _, template := range []string{"templates/login.html", "templates/password.html", "templates/header.html"} {
 		markup, err := assets.ReadFile(template)
 		if err != nil {
@@ -273,7 +274,7 @@ for (const input of inputs) {
 				continue
 			}
 			attributes := map[string]string{}
-			for _, name := range []string{"name", "data-password-ui"} {
+			for _, name := range []string{"name", "data-password-ui", "autocomplete"} {
 				if _, value, found := strings.Cut(field, name+`="`); found {
 					attributes[name] = strings.SplitN(value, `"`, 2)[0]
 				}
@@ -281,14 +282,24 @@ for (const input of inputs) {
 			if strings.Contains(field, "data-curseforge-key") && attributes["data-password-ui"] != "off" {
 				t.Fatal("CurseForge input did not opt out")
 			}
-			if attributes["name"] != "" && attributes["data-password-ui"] == "off" {
+			telegramSecret := strings.Contains(field, "data-telegram-token")
+			if telegramSecret {
+				telegramFields++
+				if attributes["name"] != "token" || attributes["data-password-ui"] != "off" || attributes["autocomplete"] != "off" || strings.Contains(field, "value=") {
+					t.Fatal("Telegram token must remain an empty masked API secret with password UI and autocomplete disabled")
+				}
+			}
+			if !telegramSecret && attributes["name"] != "" && attributes["data-password-ui"] == "off" {
 				t.Fatal("real password field opted out")
 			}
 			fields = append(fields, attributes)
 		}
 	}
-	if len(fields) != 5 {
-		t.Fatalf("expected login, three change-password fields, and CurseForge field; got %d", len(fields))
+	if telegramFields != 1 {
+		t.Fatalf("expected one masked Telegram token field; got %d", telegramFields)
+	}
+	if len(fields) != 6 {
+		t.Fatalf("expected login, three change-password fields, CurseForge field, and Telegram token field; got %d", len(fields))
 	}
 	encoded, err := json.Marshal(fields)
 	if err != nil {

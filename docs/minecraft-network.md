@@ -319,3 +319,17 @@ Source tests are included but were not run for this implementation, as requested
 Compilation, image builds, Java/Bedrock login enforcement, selector interaction,
 SELinux behavior, firewall transitions, backup/restore/import, crash recovery and
 visual acceptance still require human-directed validation before release.
+
+## AI/API and Telegram
+
+AI/API Level 1 connections can read a sanitized, instance-scoped Network/Velocity
+status. Level 2 adds no Network mutations. Levels 3 and 4 with all-instance scope
+can use the existing configure, whitelist and recovery handlers through the
+shared REST/MCP catalog. See [AI/API Connections](AI-API-CONNECTIONS.md).
+
+[Native Telegram](TELEGRAM.md) has independent Read Only and Server Management
+permissions. Its Network controls change only enabled state or selected members.
+For membership changes, disable Network and stop affected servers first. Ports,
+welcome message, whitelist configuration, compatibility and recovery remain under
+the authoritative Network operations. Network recovery and whitelist management
+remain available through the established WebUI/mjust and authorized AI/API paths.

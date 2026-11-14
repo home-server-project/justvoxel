@@ -41,6 +41,11 @@ func (s *server) gatewayOperations() []gatewayOperation {
 	add("backups", "GET", "/instances/{id}/backups", 1, true, false, s.instanceBackupRead)
 	add("backup_settings", "GET", "/instances/{id}/backups/settings", 1, true, false, s.instanceBackupRead)
 	add("backup_status", "GET", "/instances/{id}/backups/status", 1, true, false, s.instanceBackupRead)
+	add("minecraft_network_status", "GET", "/minecraft/network", 1, false, false, s.gatewayMinecraftNetworkStatus)
+	add("minecraft_network_configure", "PUT", "/minecraft/network", 3, false, true, s.minecraftNetworkConfigure)
+	add("minecraft_network_whitelist_status", "GET", "/minecraft/network/whitelist", 3, false, true, s.minecraftNetworkStatus)
+	add("minecraft_network_whitelist", "POST", "/minecraft/network/whitelist", 3, false, true, s.minecraftNetworkWhitelist)
+	add("minecraft_network_recover", "POST", "/minecraft/network/recover", 3, false, true, s.minecraftNetworkRecover)
 	add("whitelist", "GET", "/instances/{id}/whitelist", 2, true, false, s.whitelistList)
 	add("whitelist_change", "POST", "/instances/{id}/whitelist", 2, true, false, s.whitelistChange)
 	for _, action := range []string{"start", "restart", "stop"} {
@@ -360,7 +365,7 @@ func (s *server) gatewayExecute(w http.ResponseWriter, r *http.Request) {
 		}
 		query.Set(key, value)
 	}
-	req, _ := http.NewRequestWithContext(context.WithValue(r.Context(), gatewayPrincipalKey{}, actor), op.Method, "http://gateway"+path, bytes.NewReader(body))
+	req, _ := http.NewRequestWithContext(context.WithValue(context.WithValue(r.Context(), gatewayScopeKey{}, c), gatewayPrincipalKey{}, actor), op.Method, "http://gateway"+path, bytes.NewReader(body))
 	req.URL.RawQuery = query.Encode()
 	req.Header.Set("Content-Type", "application/json")
 	for k, v := range parameters {
@@ -389,7 +394,12 @@ func (s *server) gatewayExecute(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 502, "operation returned an unsupported response")
 		return
 	}
-	safe, e := s.store.gatewayPublicResult(c.ID, data)
+	var safe any
+	if op.Name == "minecraft_network_status" || op.Name == "minecraft_network_whitelist_status" {
+		safe = gatewayNetworkPublicValue(data)
+	} else {
+		safe, e = s.store.gatewayPublicResult(c.ID, data)
+	}
 	if e != nil {
 		if !audit(false) {
 			return

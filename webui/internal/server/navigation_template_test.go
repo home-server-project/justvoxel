@@ -1257,6 +1257,53 @@ func TestApprovedControlCenterLayout(t *testing.T) {
 			t.Fatalf("%s menu order: %v", heading, got)
 		}
 	}
+	// Telegram is an integration inside Add, never a Control Center workspace
+	// or an ordinary gateway connection with levels and Minecraft scope.
+	if strings.Contains(markup, `data-telegram-open`) || strings.Contains(markup, `data-workspace-window="telegram"`) || strings.Contains(markup, `data-telegram-dialog`) {
+		t.Fatal("Telegram must not have a separate Control Center tile or workspace")
+	}
+	gateway := regexp.MustCompile(`(?s)<dialog[^>]*data-agent-gateway-dialog.*?</dialog>`).FindString(markup)
+	telegram := regexp.MustCompile(`(?s)<section data-gateway-telegram.*?<section data-gateway-help`).FindString(gateway)
+	if telegram == "" || !strings.Contains(telegram, `data-telegram-back>Back to Add`) || !strings.Contains(telegram, "independently of the Gateway switch") {
+		t.Fatal("Telegram management and Back must remain inside AI & API Connections")
+	}
+	for _, field := range []string{`name="name"`, `name="level"`, `name="enabled"`, `name="server_scope"`, `data-gateway-oauth`} {
+		if strings.Contains(telegram, field) {
+			t.Fatalf("ordinary connection field assigned to Telegram: %s", field)
+		}
+	}
+	for _, control := range []string{"status", "token", "verify", "enabled", "disconnect", "pair", "pending", "users", "operation"} {
+		if !strings.Contains(telegram, "data-telegram-"+control) {
+			t.Fatalf("Telegram management control missing: %s", control)
+		}
+	}
+	grid := regexp.MustCompile(`(?s)<div class="gateway-provider-grid"[^>]*>.*?</div>`).FindString(markup)
+	providerCards := regexp.MustCompile(`(?s)<label class="gateway-provider-card".*?</label>`).FindAllString(grid, -1)
+	if len(providerCards) != 9 || !strings.Contains(providerCards[7], "Automation / REST API") || !strings.Contains(providerCards[8], `data-telegram-select`) || !strings.Contains(providerCards[8], `/static/ai-providers/telegram.svg`) || strings.Contains(providerCards[8], `name="purpose"`) {
+		t.Fatal("Telegram must follow Automation / REST API using the shared provider card and a local icon, without a gateway purpose")
+	}
+	gatewayScript, err := assets.ReadFile("static/agent-gateway.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	telegramScript, err := assets.ReadFile("static/telegram.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	selection := regexp.MustCompile(`(?s)else form.querySelector\('\[data-telegram-select\]'\).*?\n    \}\);`).FindString(string(gatewayScript))
+	if !strings.Contains(selection, "details.replaceChildren();") || !strings.Contains(selection, "showSurface('telegram')") || strings.Contains(selection, "mutate(") || strings.Contains(selection, "snapshot.enabled") {
+		t.Fatal("selecting Telegram must replace the ordinary form without creating a gateway connection or requiring Gateway enabled")
+	}
+	for _, required := range []string{"[data-agent-gateway-dialog]", "[data-gateway-telegram]", "fetch('/api/telegram'", "['read_only', 'Read Only']", "['server_management', 'Server Management']"} {
+		if !strings.Contains(string(telegramScript), required) {
+			t.Fatalf("Telegram integration contract missing: %s", required)
+		}
+	}
+	for _, forbidden := range []string{"setupWorkspaceWindow", "/api/agent-gateway", "data-gateway-enabled"} {
+		if strings.Contains(string(telegramScript), forbidden) {
+			t.Fatalf("Telegram must retain independent API and enable state: %s", forbidden)
+		}
+	}
 	for id, label := range map[string]string{"version": "Minecraft Update", "system": "System Settings", "network": "System Network", "files": "File Browser"} {
 		if !strings.Contains(markup, `<h2 id="`+id+`-workspace-title">`+label+`</h2>`) ||
 			!strings.Contains(markup, `data-workspace-window="`+id+`"`) ||

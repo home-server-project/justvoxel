@@ -12,7 +12,8 @@ JustVoxel can be administered through these surfaces:
 2. **Interactive `mjust` menu** — terminal UI with descriptions, selectors, and guarded workflows.
 3. **Direct `mjust` commands** — the same operations can be called directly without opening the menu.
 4. **AI Agents & API Connections** — curated MCP and REST operations on the existing unprivileged WebUI listener, with Agent-owned credentials and live authorization.
-5. **Native Linux administration** — advanced users can use standard tools such as `systemctl`, `journalctl`, `podman`, `bootc`, `nmcli`, `firewall-cmd`, `findmnt`, and `lsblk` directly over SSH or the local console.
+5. **Native Telegram** — optional outbound bot polling inside the Management Agent, with numeric-ID pairing and independent Read Only/Server Management permissions. See [TELEGRAM.md](TELEGRAM.md).
+6. **Native Linux administration** — advanced users can use standard tools such as `systemctl`, `journalctl`, `podman`, `bootc`, `nmcli`, `firewall-cmd`, `findmnt`, and `lsblk` directly over SSH or the local console.
 
 A typical supported appliance relationship is:
 

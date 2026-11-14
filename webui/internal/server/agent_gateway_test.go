@@ -26,6 +26,11 @@ func gatewayTestOperations() []api.GatewayOperation {
 		{Name: "appliance_status", Method: "GET", Path: "/api/v1/status", MinLevel: 1},
 		{Name: "instance_restart", Method: "POST", Path: "/api/v1/instances/{id}/restart", MinLevel: 2, Instance: true},
 		{Name: "instance_stop", Method: "POST", Path: "/api/v1/instances/{id}/stop", MinLevel: 3, Instance: true},
+		{Name: "minecraft_network_status", Method: "GET", Path: "/api/v1/minecraft/network", MinLevel: 1},
+		{Name: "minecraft_network_configure", Method: "PUT", Path: "/api/v1/minecraft/network", MinLevel: 3, AllInstances: true},
+		{Name: "minecraft_network_whitelist_status", Method: "GET", Path: "/api/v1/minecraft/network/whitelist", MinLevel: 3, AllInstances: true},
+		{Name: "minecraft_network_whitelist", Method: "POST", Path: "/api/v1/minecraft/network/whitelist", MinLevel: 3, AllInstances: true},
+		{Name: "minecraft_network_recover", Method: "POST", Path: "/api/v1/minecraft/network/recover", MinLevel: 3, AllInstances: true},
 		{Name: "systemd", Method: "POST", Path: "/api/v1/system/systemd", MinLevel: 4, AllInstances: true},
 	}
 }
@@ -107,9 +112,16 @@ func TestGatewayRESTAuthorizationAndOpenAPI(t *testing.T) {
 		}
 		paths := document["paths"].(map[string]any)
 		for _, op := range gatewayTestOperations() {
-			_, visible := paths[op.Path]
+			item, _ := paths[op.Path].(map[string]any)
+			operation, visible := item[strings.ToLower(op.Method)]
 			if visible != (level >= op.MinLevel) {
-				t.Fatal("OpenAPI/catalog authorization drift")
+				t.Fatalf("OpenAPI/catalog authorization drift: level %d %s %s", level, op.Method, op.Path)
+			}
+			if visible {
+				details := operation.(map[string]any)
+				if details["operationId"] != op.Name || details["x-justvoxel-min-level"] != float64(op.MinLevel) || details["x-justvoxel-all-instances"] != op.AllInstances {
+					t.Fatalf("OpenAPI/catalog operation contract drift: %s", op.Name)
+				}
 			}
 		}
 		f.disabled = true

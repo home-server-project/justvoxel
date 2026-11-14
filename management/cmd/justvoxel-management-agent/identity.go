@@ -21,6 +21,7 @@ const (
 	authSourceWebUI     authSource = "webui"
 	authSourceLocalRoot authSource = "local-root"
 	authSourceExternal  authSource = "external"
+	authSourceTelegram  authSource = "telegram"
 )
 
 type identityAuthResult struct {

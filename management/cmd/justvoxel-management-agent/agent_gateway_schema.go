@@ -24,8 +24,12 @@ func gatewayRequestSchema(name, method string) map[string]any {
 		}, "action")
 	case "instance_start", "instance_restart", "instance_stop":
 		return object(map[string]any{"confirm_players": map[string]any{"type": "boolean"}})
-	case "whitelist_change":
+	case "whitelist_change", "minecraft_network_whitelist":
 		return object(map[string]any{"platform": map[string]any{"type": "string", "enum": []string{"java", "bedrock"}}, "action": map[string]any{"type": "string", "enum": []string{"add", "remove"}}, "name": stringField}, "platform", "action", "name")
+	case "minecraft_network_configure":
+		return object(map[string]any{"enabled": map[string]any{"type": "boolean"}, "members": map[string]any{"type": "array", "items": stringField}, "java_port": map[string]any{"type": "integer"}, "bedrock_port": map[string]any{"type": "integer"}, "welcome_message": stringField, "whitelist_enforced": map[string]any{"type": "boolean"}}, "enabled", "members", "java_port", "bedrock_port", "welcome_message")
+	case "minecraft_network_recover":
+		return object(map[string]any{})
 	case "instance_rename":
 		return object(map[string]any{"display_name": stringField}, "display_name")
 	case "instance_configure":

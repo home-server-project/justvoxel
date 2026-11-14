@@ -16,3 +16,6 @@ Simple Icons artwork is copied without modifying its paths. See its
 [CC0 license](https://github.com/simple-icons/simple-icons/blob/15.0.0/LICENSE.md).
 CC0 does not grant trademark rights. The generic choices reuse the existing local
 JustVoxel logo at `/static/justvoxel-logo.png`.
+
+`telegram.svg` is a locally drawn Telegram paper-plane mark for the integration
+card. The Telegram name and mark belong to Telegram. It is bundled locally.

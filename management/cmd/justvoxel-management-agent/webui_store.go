@@ -176,6 +176,14 @@ var webUIStoreMigrations = []webUIStoreMigration{
 			`CREATE TABLE gateway_oauth_refresh (digest BLOB PRIMARY KEY, connection_id TEXT NOT NULL REFERENCES gateway_connections(id) ON DELETE CASCADE, client_id TEXT NOT NULL REFERENCES gateway_oauth_clients(id) ON DELETE CASCADE, resource TEXT NOT NULL, expires INTEGER NOT NULL)`,
 		},
 	},
+	{
+		version: 7,
+		name:    "native_telegram",
+		statements: []string{
+			`CREATE TABLE telegram_state (id INTEGER PRIMARY KEY CHECK(id=1), record_json TEXT NOT NULL)`,
+			`INSERT INTO telegram_state(id,record_json) VALUES(1,'{"schema":1,"users":[],"status":"disconnected"}')`,
+		},
+	},
 }
 
 func openWebUIStore(path string) (*webUIStore, error) {
@@ -340,6 +348,7 @@ func (s *webUIStore) resetFactoryState() error {
 	defer func() { _ = tx.Rollback() }()
 
 	for _, statement := range []string{
+		`UPDATE telegram_state SET record_json = '{"schema":1,"users":[],"status":"disconnected"}' WHERE id=1`,
 		`UPDATE gateway_settings SET enabled = 0 WHERE id = 1`,
 		`DELETE FROM gateway_connections`,
 		`DELETE FROM gateway_oauth_clients`,

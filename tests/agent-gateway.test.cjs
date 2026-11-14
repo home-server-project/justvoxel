@@ -34,7 +34,22 @@ class Node {
 test('workspace reuses movable workspace infrastructure and primary-only Control Center tile', () => {
   assert.match(header, /data-primary-admin-only data-agent-gateway-open/);
   assert.match(header, /class="workspace-window system-workspace-dialog" data-workspace-window="agent-gateway"/);
-  assert.match(js, /setupWorkspaceWindow\(dialog, \{onOpen: load\}\)/);
+  const setup = js.match(/^  const workspace = setupWorkspaceWindow\(dialog, .*$/m);
+  assert.ok(setup, 'uses the existing workspace');
+  const dialog = {};
+  const calls = [];
+  let onOpen;
+  const context = vm.createContext({
+    dialog, surface: 'telegram', load: () => calls.push('load'),
+    showSurface: surface => calls.push(surface),
+    setupWorkspaceWindow(target, options) { assert.equal(target, dialog); onOpen = options.onOpen; },
+  });
+  vm.runInContext(setup[0], context);
+  onOpen();
+  assert.deepEqual(calls, ['load', 'telegram']);
+  context.surface = 'settings';
+  onOpen();
+  assert.deepEqual(calls, ['load', 'telegram', 'load', 'settings']);
   assert.match(js, /if \(!primary\(\)\) return;/);
   assert.match(transport, /a\.fileBrowserIdentity\(w,\s*r\)/);
   assert.match(backend, /s\.requirePrimaryAdministrator\(w,\s*r\)/);
@@ -186,6 +201,11 @@ test('help uses compact sections and a comparison table with collapsed developer
 test('provider cards replace the purpose dropdown with one OpenAI choice for ChatGPT and Codex', () => {
   const purposes = [...form.matchAll(/type="radio" name="purpose" value="([^"]+)"/g)].map(match => match[1]);
   assert.deepEqual(purposes, ['OpenAI', 'Claude', 'Grok', 'Gemini', 'GitHub Copilot', 'OpenClaw', 'Other AI / MCP app', 'Automation / REST API']);
+  const providerGrid = form.match(/<div class="gateway-provider-grid"[^>]*>([\s\S]*?)<\/div>/)[1];
+  const cards = [...providerGrid.matchAll(/<label class="gateway-provider-card"[^>]*>([\s\S]*?)<\/label>/g)].map(match => match[1]);
+  assert.deepEqual(cards.map(card => card.match(/<strong>([^<]+)<\/strong>/)[1]), [...purposes, 'Telegram']);
+  assert.match(cards[8], /name="integration" value="telegram" data-telegram-select/);
+  assert.doesNotMatch(cards[8], /name="purpose"|name="auth_mode"/);
   assert.equal((form.match(/<strong>OpenAI<\/strong>/g) || []).length, 1);
   assert.equal(purposes.filter(purpose => purpose === 'OpenClaw').length, 1);
   assert.match(form, /<strong>OpenClaw<\/strong><small>Control UI &amp; CLI<\/small>/);
@@ -301,10 +321,13 @@ function settingsHarness(connection, inventory = [], gatewayEnabled = true) {
   details.querySelector = () => settings;
   const requests = [];
   const confirmations = [];
+  const events = [];
   const context = vm.createContext({
     setTimeout: () => 1, clearTimeout() {}, details, structuredClone, busy: false, instances: inventory, snapshot: {enabled: gatewayEnabled},
     URL, location: {origin: 'https://voxel.example', protocol: 'https:', hostname: 'voxel.example'}, navigator: {clipboard: {async writeText() {}}},
-    content: node('[data-gateway-content]'), find: node,
+    content: node('[data-gateway-content]'), find: node, feedback: node('[data-gateway-feedback]'),
+    dialog: {dispatchEvent(event) { events.push(event); return true; }},
+    CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
     document: {createElement: create, querySelector: () => ({content: {cloneNode() { return new Node('form'); }}})},
     text: create, activityLabel: value => value || 'No activity yet',
     mutate: payload => requests.push(payload), requestLevel4: payload => confirmations.push(payload),
@@ -320,8 +343,27 @@ function settingsHarness(connection, inventory = [], gatewayEnabled = true) {
   node('[data-gateway-help]').hidden = true;
   vm.runInContext(surfaces + helpers + renderer + navigation + '\nglobalThis.render = renderSettings;', context);
   if (connection) context.render(connection);
-  return {node, field, details, settings, created, requests, confirmations, scope(value) { const toggle = node('[data-gateway-all-servers]'); toggle.checked = value === 'all'; toggle.listeners.change(); }, preview(purpose) { field('purpose').value = purpose; providerRadio.listeners.change?.(); }, submit() { settings.listeners.submit({preventDefault() {}}); }};
+  return {node, field, details, settings, created, requests, confirmations, events, scope(value) { const toggle = node('[data-gateway-all-servers]'); toggle.checked = value === 'all'; toggle.listeners.change(); }, preview(purpose) { field('purpose').value = purpose; providerRadio.listeners.change?.(); }, submit() { settings.listeners.submit({preventDefault() {}}); }};
 }
+
+test('Telegram selection uses the internal surface and restores feedback on return', () => {
+  const h = settingsHarness({name: '', purpose: 'OpenAI', enabled: true, all_instances: true});
+  h.node('[data-telegram-select]').listeners.change();
+  assert.equal(h.details.hidden, true);
+  assert.equal(h.node('[data-gateway-telegram]').hidden, false);
+  assert.equal(h.node('[data-gateway-feedback]').hidden, true);
+  assert.equal(h.node('[data-gateway-add]')['aria-selected'], 'true');
+  assert.equal(h.node('[data-telegram-back]').focused, true);
+  assert.equal(h.events.at(-1).type, 'gateway-surface-change');
+  assert.equal(h.events.at(-1).detail, 'telegram');
+  h.node('[data-telegram-back]').listeners.click();
+  assert.equal(h.details.hidden, false);
+  assert.equal(h.node('[data-gateway-telegram]').hidden, true);
+  assert.equal(h.node('[data-gateway-feedback]').hidden, false);
+  assert.equal(h.events.at(-1).type, 'gateway-surface-change');
+  assert.equal(h.events.at(-1).detail, 'settings');
+  assert.equal(h.requests.length, 0);
+});
 
 test('branded providers submit local OAuth while generic MCP and automation retain tokens', () => {
   for (const purpose of ['OpenAI', 'Claude', 'Grok', 'Gemini', 'GitHub Copilot', 'OpenClaw', 'Other AI / MCP app', 'Automation / REST API']) {
@@ -960,7 +1002,7 @@ test('Add has no provider onboarding, addresses, commands or network callouts be
 
 test('Add has one neutral summary immediately below provider cards, with no setup controls', () => {
   assert.equal((form.match(/data-gateway-compatibility-summary/g) || []).length, 1);
-  assert.match(form, /value="Automation \/ REST API"[^\n]+\n\s*<\/div>\n\s*<p class="muted gateway-compatibility-summary" data-gateway-compatibility-summary aria-live="polite" hidden><\/p>/);
+  assert.match(form, /value="Automation \/ REST API"[^\n]+\n\s*<label class="gateway-provider-card" data-telegram-card>[^\n]+\n\s*<\/div>\n\s*<p class="muted gateway-compatibility-summary" data-gateway-compatibility-summary aria-live="polite" hidden><\/p>/);
   const summary = form.match(/<p[^>]*data-gateway-compatibility-summary[^>]*><\/p>/)[0];
   assert.doesNotMatch(summary, /warning|notice|icon|<svg|<img/);
   assert.doesNotMatch(form, /data-gateway-copy|MCP address|https?:\/\/|codex mcp|claude mcp|openclaw mcp|copilot mcp/);
@@ -970,7 +1012,7 @@ test('Add has one neutral summary immediately below provider cards, with no setu
   assert.doesNotMatch(rule, /background|border|yellow|warning|height|padding/);
 });
 
-test('Add immediately previews all eight exact summaries without persisting purpose or auth', () => {
+test('Add immediately previews all eight gateway purpose summaries without persisting purpose or auth', () => {
   const summaries = new Map([
     ['OpenAI', 'ChatGPT: Secure MCP Tunnel or reachable public HTTPS · Codex: local/LAN supported'],
     ['Claude', 'Claude: remotely reachable MCP required · Claude Code: local/LAN supported'],

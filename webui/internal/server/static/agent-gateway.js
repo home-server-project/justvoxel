@@ -21,10 +21,13 @@
     find('[data-gateway-overview]').hidden = name !== 'overview';
     details.hidden = name !== 'settings';
     find('[data-gateway-help]').hidden = name !== 'help';
+    find('[data-gateway-telegram]').hidden = name !== 'telegram';
+    feedback.hidden = name === 'telegram';
     find('[data-gateway-connections]').setAttribute('aria-selected', String(name === 'overview' || (name === 'settings' && Boolean(selectedID))));
     find('[data-gateway-help-open]').setAttribute('aria-selected', String(name === 'help'));
-    find('[data-gateway-add]').setAttribute('aria-selected', String(name === 'settings' && !selectedID));
+    find('[data-gateway-add]').setAttribute('aria-selected', String((name === 'settings' && !selectedID) || name === 'telegram'));
     content.scrollTop = 0;
+    dialog.dispatchEvent(new CustomEvent('gateway-surface-change', {detail: name}));
   };
   const showOverview = () => { if (busy) return; selectedID = ''; details.replaceChildren(); showSurface('overview'); };
   const levelLabel = level => ({1: 'Level 1', 2: 'Level 2', 3: 'Level 3', 4: 'Level 4'}[level] || 'Unknown access level');
@@ -550,6 +553,14 @@
     const c = structuredClone(connection);
     details.replaceChildren(document.querySelector('[data-gateway-settings-template]').content.cloneNode(true));
     const form = details.querySelector('form');
+    const telegramCard = form.querySelector('[data-telegram-card]');
+    if (c.id) telegramCard.remove();
+    else form.querySelector('[data-telegram-select]').addEventListener('change', () => {
+      if (busy) return;
+      details.replaceChildren();
+      showSurface('telegram');
+      find('[data-telegram-back]').focus();
+    });
     const field = name => form.elements.namedItem(name);
     form.className = c.id ? 'gateway-edit-settings' : 'gateway-add-settings';
     for (const name of ['name', 'level']) field(name).value = c[name] ?? '';
@@ -656,10 +667,15 @@
     });
     showSurface('settings');
   };
-  find('[data-gateway-add]').addEventListener('click', () => {
+  const showAdd = () => {
     if (busy) return;
     selectedID = '';
     renderSettings({name: '', purpose: 'OpenAI', auth_mode: 'oauth_local', level: 1, enabled: true, all_instances: true, instance_ids: []});
+  };
+  find('[data-gateway-add]').addEventListener('click', showAdd);
+  find('[data-telegram-back]').addEventListener('click', () => {
+    showAdd();
+    details.querySelector('[data-telegram-select]')?.focus();
   });
   find('[data-gateway-connections]').addEventListener('click', showOverview);
   find('[data-gateway-help-open]').addEventListener('click', () => { if (!busy) showSurface('help'); });
@@ -679,14 +695,17 @@
     if (element.tagName === 'A') element.href = path;
   }
   setupHelpGuide();
-  const workspace = setupWorkspaceWindow(dialog, {onOpen: load});
+  const workspace = setupWorkspaceWindow(dialog, {onOpen: () => { load(); showSurface(surface); }});
   launcher.addEventListener('click', () => {
     if (!primary()) return;
     const center = document.querySelector('[data-control-center]'); if (center) center.open = false;
     workspace.open();
   });
   find('[data-gateway-close]').addEventListener('click', () => workspace.close());
-  find('[data-gateway-refresh]').addEventListener('click', () => { if (!busy) load(); });
+  find('[data-gateway-refresh]').addEventListener('click', () => {
+    if (surface === 'telegram') dialog.dispatchEvent(new Event('telegram-refresh'));
+    else if (!busy) load();
+  });
   const restore = () => {
     if (document.body.classList.contains('role-pending')) return false;
     if (primary() && readWorkspaceWindowState('agent-gateway').open) workspace.open();

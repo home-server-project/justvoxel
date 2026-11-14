@@ -217,6 +217,40 @@
             <div class="minecraft-server-inventory"><div class="minecraft-server-entries" data-gateway-cards></div></div>
           </section>
           <section class="panel" data-gateway-details hidden></section>
+          <section data-gateway-telegram hidden aria-labelledby="telegram-title">
+            <div class="form-actions">
+              <button class="button" type="button" data-telegram-back>Back to Add</button>
+              <h3 id="telegram-title">Telegram</h3>
+            </div>
+            <p class="muted">Telegram works independently of the Gateway switch. It uses Read Only and Server Management permissions, not AI/API access levels.</p>
+            <p role="status" data-telegram-feedback></p>
+            <div data-telegram-content data-telegram-csrf="{{.CSRF}}">
+              <section class="panel">
+                <h3>Bot connection</h3>
+                <p class="muted">Use a dedicated Telegram bot. JustVoxel connects outward; no webhook or AI service is needed.</p>
+                <p data-telegram-status>Disconnected</p>
+                <form data-telegram-token-form autocomplete="off">
+                  <label>Bot token <input type="password" name="token" autocomplete="off" data-password-ui="off" data-telegram-token required></label>
+                  <button class="button" type="submit">Save or replace token</button>
+                </form>
+                <div class="form-actions">
+                  <button class="button" type="button" data-telegram-verify>Verify bot</button>
+                  <label><input type="checkbox" data-telegram-enabled> Enable Telegram</label>
+                  <button class="button" type="button" data-telegram-disconnect>Disconnect completely</button>
+                </div>
+                <p class="muted">Replacing the token removes approved users. Disconnection removes the saved token, approvals and pairing requests.</p>
+              </section>
+              <section class="panel">
+                <h3>Approved Telegram users</h3>
+                <p class="muted">Read Only can view appliance and server information. Server Management can also control existing servers, backups, Network and supported updates or reboot. Notifications are optional.</p>
+                <button class="button" type="button" data-telegram-pair>Pair user</button>
+                <p data-telegram-challenge></p>
+                <div data-telegram-pending></div>
+                <div data-telegram-users></div>
+              </section>
+              <section class="panel"><h3>Operation status</h3><p data-telegram-operation>No Telegram operations yet.</p></section>
+            </div>
+          </section>
           <section data-gateway-help hidden>
             <h3>Help</h3>
             <p class="muted">Create connections in Add. Connection-specific setup instructions are available in Settings.</p>
@@ -310,6 +344,7 @@
             <label class="gateway-provider-card"><input type="radio" name="purpose" value="OpenClaw"><img class="gateway-provider-icon" src="/static/ai-providers/openclaw.svg" alt=""><span><strong>OpenClaw</strong><small>Control UI &amp; CLI</small></span></label>
             <label class="gateway-provider-card"><input type="radio" name="purpose" value="Other AI / MCP app"><img class="gateway-provider-icon" src="/static/justvoxel-logo.png" alt=""><span><strong>Other AI / MCP app</strong></span></label>
             <label class="gateway-provider-card"><input type="radio" name="purpose" value="Automation / REST API"><img class="gateway-provider-icon" src="/static/justvoxel-logo.png" alt=""><span><strong>Automation / REST API</strong></span></label>
+            <label class="gateway-provider-card" data-telegram-card><input type="radio" name="integration" value="telegram" data-telegram-select><img class="gateway-provider-icon" src="/static/ai-providers/telegram.svg" alt=""><span><strong>Telegram</strong></span></label>
           </div>
           <p class="muted gateway-compatibility-summary" data-gateway-compatibility-summary aria-live="polite" hidden></p>
         </section>
@@ -367,6 +402,7 @@
   </dialog>
   <link rel="stylesheet" href="/static/agent-gateway.css">
   <script src="/static/agent-gateway.js" defer></script>
+  <script src="/static/telegram.js" defer></script>
 
   <dialog class="workspace-window system-workspace-dialog" data-workspace-window="terminal" data-terminal-workspace-dialog aria-labelledby="terminal-workspace-title">
     <div class="system-workspace-shell">

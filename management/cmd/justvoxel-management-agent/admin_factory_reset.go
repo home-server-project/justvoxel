@@ -532,6 +532,11 @@ func executeFactoryReset(ctx context.Context, s *server, operationID, expectedFi
 		return errors.New("factory reset plan changed before execution")
 	}
 
+	if err := s.telegramFactoryRevoke(); err != nil {
+		_, _ = s.operations.transition(operationID, operationNeedsAttention, "telegram_revocation_failed", "Telegram access could not be revoked. No destructive cleanup was started. Retry Factory Reset.")
+		return err
+	}
+
 	s.gatewayMu.Lock()
 	revokeErr := s.store.gatewayFactoryRevoke()
 	s.gatewayMu.Unlock()

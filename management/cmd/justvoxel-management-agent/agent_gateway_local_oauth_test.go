@@ -108,7 +108,7 @@ func TestLocalOAuthMigration5PreservesConnectionsAndUsers(t *testing.T) {
 		t.Fatal("migration altered legacy connection")
 	}
 	var version int
-	if err = upgraded.db.QueryRow(`SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != 6 {
+	if err = upgraded.db.QueryRow(`SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != 7 {
 		t.Fatal("missing migration 6")
 	}
 }

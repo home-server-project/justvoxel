@@ -244,3 +244,22 @@ Full Factory Reset commits independent gateway revocation before destructive
 cleanup so later failure or retry cannot restore credentials. Its public review
 fields extend the plan without changing persistent reset fingerprints, preserving
 deployed recovery compatibility. See [AI-API-CONNECTIONS.md](AI-API-CONNECTIONS.md).
+
+## Native Telegram
+
+The existing Management Agent optionally runs one outbound Telegram Bot API
+long-polling loop. It exposes no new network listener and uses no AI model,
+container or separate daemon. The authenticated primary-administrator WebUI
+configures it through the existing Unix socket. Credentials, numeric-ID approvals,
+one-time pairing evidence, expiring single-use callback bindings, update cursor,
+notification observations and pending reboot evidence use an additive singleton
+record in the existing protected SQLite database.
+
+Telegram's explicit operation allowlist and two permissions are independent of
+the AI/API gateway catalog and Levels 1–4. It calls existing authoritative
+operations. Its only narrow configuration adapters change Start on Boot or
+Network enabled/membership fields while retaining existing locks, publication and
+recovery. Reset revokes Telegram credentials before destructive work. Post-reboot
+notifications verify the new boot identity, actual deployment and appliance health;
+they do not infer success from request acceptance. See [TELEGRAM.md](TELEGRAM.md)
+for setup, security, operation limits and recovery.

@@ -62,10 +62,13 @@ type server struct {
 	store      *webUIStore
 	operations *operationStore
 
-	gatewayMu      sync.RWMutex
-	systemUpdateMu sync.Mutex
-	fileBrowserMu  sync.Mutex
-	terminalMu     sync.Mutex
+	telegramMu          sync.Mutex
+	telegramExecutionMu sync.RWMutex
+	telegramPollCancel  context.CancelFunc
+	gatewayMu           sync.RWMutex
+	systemUpdateMu      sync.Mutex
+	fileBrowserMu       sync.Mutex
+	terminalMu          sync.Mutex
 
 	networkMu           sync.Mutex
 	networkTransactions map[string]networkCheckpointTransaction
@@ -258,6 +261,7 @@ func serve(socket string) error {
 	mux.HandleFunc("GET /v1/info", s.info)
 	mux.HandleFunc("GET /v1/status", s.status)
 	registerGatewayRoutes(mux, s)
+	registerTelegramRoutes(mux, s)
 	registerAdminUserRoutes(mux, s)
 	registerAdminActivityRoutes(mux, s)
 	registerAdminDiscoveryRoutes(mux, s)
@@ -298,6 +302,9 @@ func serve(socket string) error {
 			return context.WithValue(ctx, peerUIDKey{}, uid)
 		},
 	}
+	telegramContext, stopTelegram := context.WithCancel(context.Background())
+	telegramDone := s.startTelegram(telegramContext)
+	defer func() { stopTelegram(); <-telegramDone }()
 	log.Printf("JustVoxel Management API %s listening on %s", managementAPI, socket)
 	return httpServer.Serve(listener)
 }

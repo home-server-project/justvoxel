@@ -156,9 +156,9 @@ Full Factory Reset through the gateway.
 
 | Level | Capabilities | Boundaries |
 | --- | --- | --- |
-| **1 — Read Only** | Safe appliance status; scoped registered inventory; public instance configuration/status; players; sanitized logs; backup inventory/status | No mutation; whitelist access begins at Level 2 |
+| **1 — Read Only** | Safe appliance status; scoped registered inventory; public instance configuration/status; players; sanitized logs; backup inventory/status; scoped Minecraft Network/Velocity status | No mutation; whitelist access begins at Level 2 |
 | **2 — Basic Management** | Level 1; start/restart; whitelist list/add/remove; request manual backup | Existing Operator protections; **no Stop**, configuration, restore, delete, storage, network, system, users or security changes |
-| **3 — Full Management** | Levels 1–2; Administrator start/restart/**Stop**; create/configure/rename/activate/recover/delete instances; Minecraft version/container updates and acknowledgements; implemented plugin/add-on workflows; backup configuration/restore planning/apply/status/recovery; supported export/import/recovery; normal storage/provision/mount/data-migration and network workflows | Appliance-wide operations require all-instance scope. No host systemd/power/OS maintenance, user/password or gateway administration |
+| **3 — Full Management** | Levels 1–2; Administrator start/restart/**Stop**; create/configure/rename/activate/recover/delete instances; Minecraft version/container updates and acknowledgements; implemented plugin/add-on workflows; backup configuration/restore planning/apply/status/recovery; supported export/import/recovery; normal storage/provision/mount/data-migration and network workflows; Minecraft Network configuration, whitelist and recovery | Appliance-wide operations require all-instance scope. No host systemd/power/OS maintenance, user/password or gateway administration |
 | **4 — Full System Control (Developer Mode)** | Level 3; supported host update/check and reboot/power-off workflows; explicit typed systemd inspection/control | Highly privileged. No self-permission changes, new connections, credential rotation, AI/API security-policy changes, Full Factory Reset or root shell |
 
 The current Level 2 restart and manual-backup allowances are **two accepted
@@ -371,3 +371,36 @@ Source tests are separate from image/VM acceptance. Gateway tests live beside
 the Management Agent/WebUI packages and in `tests/agent-gateway.test.cjs`. Passing
 source tests does not establish image-build, runtime, or visual acceptance; CI
 image build and VM validation remain separate.
+
+## Minecraft Network capabilities
+
+The shared REST/MCP catalog includes these explicit operations:
+
+| Operation | REST route | Permission |
+| --- | --- | --- |
+| `minecraft_network_status` | `GET /api/v1/minecraft/network` | Level 1 and above; filtered to the connection's immutable instance scope |
+| `minecraft_network_configure` | `PUT /api/v1/minecraft/network` | Level 3 or 4, all-instance scope |
+| `minecraft_network_whitelist_status` | `GET /api/v1/minecraft/network/whitelist` | Level 3 or 4, all-instance scope |
+| `minecraft_network_whitelist` | `POST /api/v1/minecraft/network/whitelist` | Level 3 or 4, all-instance scope |
+| `minecraft_network_recover` | `POST /api/v1/minecraft/network/recover` | Level 3 or 4, all-instance scope |
+
+Status exposes enabled state, public ports, Velocity runtime readiness, recovery
+requirement, scoped selected members and scoped server eligibility/state. It
+excludes private forwarding/Floodgate material and whitelist identities. A scoped
+connection receives neither unauthorized member IDs nor their eligibility/state.
+The appliance-wide whitelist read requires the same scope as its management.
+Level 2 gains no Network mutation.
+
+Configuration uses the existing typed Network configuration: `enabled`,
+`java_port`, `bedrock_port`, `members`, `welcome_message`, and optional explicit
+`whitelist_enforced`. Whitelist changes use `action` (`add`/`remove`), `platform`
+(`java`/`bedrock`), and `name`; player resolution remains authoritative. Recovery
+takes an empty object and uses the existing Network recovery operation. These are
+catalog entries for existing handlers, not an arbitrary privileged API proxy.
+Existing compatibility, player-aware stop-before-publication, memory, transaction,
+locking, identity and recovery protections remain in force. See
+[Minecraft Network](minecraft-network.md) for the full lifecycle.
+
+[Native Telegram](TELEGRAM.md) is configured through **Control Center → AI & API Connections → Add → Telegram**.
+It has an independent backend and authorization: disabling this gateway does not disable
+Telegram, and Levels 1–4 grant no Telegram configuration or pairing privileges.
