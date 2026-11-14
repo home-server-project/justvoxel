@@ -78,8 +78,8 @@ func TestWallpaperUIContracts(t *testing.T) {
 	if strings.Contains(dashboard, "/static/justvoxel-default-wallpaper.jpg") {
 		t.Fatal("Old JPG must not remain the configured-dashboard fallback")
 	}
-	if _, err := assets.ReadFile("static/justvoxel-default-wallpaper.jpg"); err != nil {
-		t.Fatal("Old JPG must remain embedded:", err)
+	if _, err := assets.ReadFile("static/justvoxel-default-wallpaper.jpg"); err == nil {
+		t.Fatal("Old JPG must not remain embedded")
 	}
 
 	js := read("static/wallpaper.js")

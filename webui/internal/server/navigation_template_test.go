@@ -613,8 +613,8 @@ func TestDashboardCompactResponsiveLayout(t *testing.T) {
 	if !strings.Contains(markup, `<img class="dashboard-wallpaper" data-dashboard-wallpaper hidden alt="" aria-hidden="true">`) {
 		t.Fatal("dashboard must leave wallpaper hidden and unset for preference restoration")
 	}
-	if _, err := assets.ReadFile("static/justvoxel-default-wallpaper.jpg"); err != nil {
-		t.Fatal(err)
+	if _, err := assets.ReadFile("static/justvoxel-default-wallpaper.jpg"); err == nil {
+		t.Fatal("Old JPG must not remain embedded")
 	}
 	if strings.Contains(styles, "conic-gradient(") {
 		t.Fatal("dashboard must not retain the generated voxel wallpaper")

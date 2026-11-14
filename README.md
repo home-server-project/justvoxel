@@ -188,16 +188,3 @@ Minecraft, Mojang software, supported server projects, plugins, and other
 third-party components retain their own licenses and distribution terms.
 JustVoxel does not embed upstream Minecraft server binaries or Mojang server
 software in its bootc images.
-
-<details>
-<summary>Bundled wallpaper source</summary>
-
-The default voxel wallpaper has been widely circulated online since at least 2016, including Imgur, WallpaperCave, and many Pinterest reposts.
-
-- Imgur: https://imgur.com/gallery/voxel-art-room-Fm2wC
-- WallpaperCave page used by JustVoxel: https://wallpapercave.com/w/wp9946194
-- Direct image: https://wallpapercave.com/wp/wp9946194.jpg
-
-This note records the public sources where the bundled wallpaper was found.
-
-</details>
