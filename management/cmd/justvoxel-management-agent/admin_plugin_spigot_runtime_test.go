@@ -24,6 +24,21 @@ func TestSpigotPluginInventory(t *testing.T) {
 				expected  []string
 				ok        bool
 			}{
+				{"real RCON Geyser", "Plugins (4): \x1b[32mViaVersion\x1b[37m, \x1b[32mfloodgate\x1b[37m, \x1b[32mViaBackwards\x1b[37m, \x1b[32mGeyser-Spigot\n\x1b[0m\n", []string{"Geyser-Spigot"}, true},
+				{"real RCON ViaVersion", "Plugins (4): \x1b[32mViaVersion\x1b[37m, \x1b[32mfloodgate\x1b[37m, \x1b[32mViaBackwards\x1b[37m, \x1b[32mGeyser-Spigot\n\x1b[0m\n", []string{"ViaVersion"}, true},
+				{"CRLF trailer", "Plugins (1): ExamplePlugin\r\n\x1b[0m\r\n", []string{"ExamplePlugin"}, true},
+				{"Minecraft trailer", "Plugins (1): ExamplePlugin\n§r§l\n", []string{"ExamplePlugin"}, true},
+				{"trailer text", "Plugins (1): ExamplePlugin\n\x1b[0mhello\n", []string{"ExamplePlugin"}, false},
+				{"inventory after trailer", "Plugins (1): ExamplePlugin\n\x1b[0m\nPlugins (1): ExamplePlugin\n", []string{"ExamplePlugin"}, false},
+				{"trailer unknown control", "Plugins (1): ExamplePlugin\n\x1b[2J\n", []string{"ExamplePlugin"}, false},
+				{"trailer unknown SGR", "Plugins (1): ExamplePlugin\n\x1b[34m\n", []string{"ExamplePlugin"}, false},
+				{"trailer NUL", "Plugins (1): ExamplePlugin\n\x1b[0m\x00\n", []string{"ExamplePlugin"}, false},
+				{"trailer whitespace", "Plugins (1): ExamplePlugin\n \x1b[0m\n", []string{"ExamplePlugin"}, false},
+				{"empty trailer", "Plugins (1): ExamplePlugin\n\n", []string{"ExamplePlugin"}, false},
+				{"unterminated trailer", "Plugins (1): ExamplePlugin\n\x1b[0m", []string{"ExamplePlugin"}, false},
+				{"repeated trailer", "Plugins (1): ExamplePlugin\n\x1b[0m\n\x1b[0m\n", []string{"ExamplePlugin"}, false},
+				{"reset trailer cannot enable", "Plugins (1): \x1b[31mExamplePlugin\n\x1b[0m\n", []string{"ExamplePlugin"}, false},
+				{"red trailer cannot disable", "Plugins (1): \x1b[32mExamplePlugin\n\x1b[31m\n", []string{"ExamplePlugin"}, true},
 				{"ordinary", "Plugins (1): ExamplePlugin\n", []string{"ExamplePlugin"}, true},
 				{"normalized", "Plugins (1): exampleplugin", []string{"ExamplePlugin"}, true},
 				{"multiple", "Plugins (2): ExamplePlugin, Dependency", []string{"ExamplePlugin", "Dependency"}, true},

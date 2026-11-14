@@ -458,7 +458,7 @@ func exactCurseForgeModrinthVersion(ctx context.Context, a pluginInstallArtifact
 	if err := modrinthPluginJSON(ctx, "/version_file/"+a.SHA1, url.Values{"algorithm": {"sha1"}}, &v); err != nil {
 		return nil
 	}
-	if !modrinthPluginID.MatchString(v.ProjectID) || !modrinthPluginID.MatchString(v.ID) || v.Type != "release" || !pluginVersionCompatible(v, server) || !modrinthServerEnvironment(v.Environment) {
+	if !modrinthPluginID.MatchString(v.ProjectID) || !modrinthPluginID.MatchString(v.ID) || v.Type != "release" || !pluginVersionCompatible(v, server) || !modrinthContentEnvironment(v.Environment, server.ServerType) {
 		return nil
 	}
 	for _, f := range v.Files {

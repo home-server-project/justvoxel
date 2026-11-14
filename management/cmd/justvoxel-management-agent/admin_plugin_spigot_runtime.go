@@ -76,13 +76,43 @@ func spigotPluginDecoration(code string) (color int, valid bool) {
 	return color, true
 }
 
+// A trailer is presentation state only; never feed its color back into inventory
+// evaluation. Every byte must belong to the same approved decoration grammar.
+func spigotFormattingOnlyTrailer(trailer string) bool {
+	if trailer == "" {
+		return false
+	}
+	for len(trailer) > 0 {
+		code := spigotFormatting.FindString(trailer)
+		if code == "" {
+			return false
+		}
+		if _, valid := spigotPluginDecoration(code); !valid {
+			return false
+		}
+		trailer = trailer[len(code):]
+	}
+	return true
+}
+
 func spigotPluginNamesLoaded(raw []byte, expected []string) bool {
 	if len(raw) == 0 || len(raw) >= spigotPluginListLimit || !utf8.Valid(raw) || len(expected) == 0 || len(expected) > pluginMaxArtifacts {
 		return false
 	}
-	// One inventory only. Permit a single transport line ending, never extra
-	// messages, repeated headers, embedded controls or multiline player content.
-	line := strings.TrimSuffix(strings.TrimSuffix(string(raw), "\n"), "\r")
+	// One inventory and at most one formatting-only trailer. A trailer requires
+	// a final LF/CRLF; no extra text, blank lines or bare carriage returns pass.
+	response := string(raw)
+	finalNewline := strings.HasSuffix(response, "\n")
+	line := strings.TrimSuffix(response, "\n")
+	if finalNewline {
+		line = strings.TrimSuffix(line, "\r")
+	}
+	if inventory, trailer, found := strings.Cut(line, "\n"); found {
+		if !finalNewline || !spigotFormattingOnlyTrailer(trailer) {
+			return false
+		}
+		line = strings.TrimSuffix(inventory, "\r")
+	}
 	if strings.ContainsAny(line, "\r\n\x00") {
 		return false
 	}

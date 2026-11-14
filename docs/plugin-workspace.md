@@ -274,10 +274,14 @@ displayed only. External downloads and external-only required dependencies are n
 followed. Numeric project/release IDs remain separate from Modrinth identities. Hangar uses the existing no-redirect,
 bounded-timeout client with a 2 MiB JSON body cap and needs no API key.
 
-Exact Modrinth versions, including required dependencies, must declare a
-server-capable `environment`. Client-only and singleplayer-only versions are
-excluded from the dedicated-server catalog regardless of Compatible only.
-Unknown, empty and unrecognized environments cannot be installed.
+Exact Modrinth plugin compatibility, including required dependencies, comes from
+exact Minecraft version and accepted Bukkit/Spigot/Paper-family loader metadata.
+An unknown or absent `environment` does not erase that explicit platform evidence.
+Explicit client-only and singleplayer-only environments remain excluded; unrecognized
+non-empty environment values fail closed. Mods still require an explicitly recognized
+server-capable environment: unknown, empty and unrecognized values remain rejected.
+Downloaded JAR validation before downtime and runtime activation proof after restart
+remain mandatory.
 
 CurseForge Minecraft/loader compatibility does not establish server eligibility.
 For mods, Discover needs candidate identity and Minecraft/loader release metadata;

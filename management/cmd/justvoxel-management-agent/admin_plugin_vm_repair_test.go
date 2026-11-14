@@ -274,7 +274,7 @@ func TestModrinthRequiredDependencyEnvironment(t *testing.T) {
 				server := pluginContentContext("paper")
 				server.MinecraftVersion = "1.21.8"
 				_, err := resolvePluginInstallPlan(context.Background(), server, f.data, "root", "release")
-				if (err == nil) != (environment == "server_only") {
+				if (err == nil) != (environment == "server_only" || environment == "unknown" || environment == "") {
 					t.Fatal("dependency environment bypass", err)
 				}
 			})

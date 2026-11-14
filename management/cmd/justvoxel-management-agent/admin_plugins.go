@@ -560,6 +560,22 @@ func modrinthServerEnvironment(environment string) bool {
 	return false
 }
 
+// Plugin platform evidence is independent of optional environment metadata.
+// Mods still require an explicit recognized dedicated-server environment.
+func modrinthContentEnvironment(environment, serverType string) bool {
+	switch javaServerContentKind(serverType) {
+	case "plugins":
+		switch environment {
+		case "", "unknown":
+			return true
+		}
+		return modrinthServerEnvironment(environment)
+	case "mods":
+		return modrinthServerEnvironment(environment)
+	}
+	return false
+}
+
 func pluginVersionCompatible(v pluginCatalogVersion, server pluginServerContext) bool {
 	if server.MinecraftVersion == "" || !slices.Contains(v.GameVersions, server.MinecraftVersion) {
 		return false
@@ -847,10 +863,7 @@ func discoverModrinthPlugins(ctx context.Context, server pluginServerContext, se
 			}
 			sort.SliceStable(versions, func(i, j int) bool { return versions[i].Published > versions[j].Published })
 			for _, v := range versions {
-				if kind == "mod" && !modrinthServerEnvironment(v.Environment) {
-					continue
-				}
-				if kind != "mod" && (v.Environment == "client_only" || v.Environment == "singleplayer_only") {
+				if !modrinthContentEnvironment(v.Environment, server.ServerType) {
 					continue
 				}
 				if release && v.Type != "release" {
@@ -872,7 +885,7 @@ func discoverModrinthPlugins(ctx context.Context, server pluginServerContext, se
 					continue
 				}
 				_, fileErr := selectPluginArtifact(v.Files)
-				project.InstallAvailable = modrinthServerEnvironment(v.Environment) && matches && server.Supported && v.Type == "release" && v.ProjectID == project.ID && modrinthPluginID.MatchString(v.ID) && fileErr == nil && managedPluginSlug(project.Slug) == ""
+				project.InstallAvailable = modrinthContentEnvironment(v.Environment, server.ServerType) && matches && server.Supported && v.Type == "release" && v.ProjectID == project.ID && modrinthPluginID.MatchString(v.ID) && fileErr == nil && managedPluginSlug(project.Slug) == ""
 				if kind == "mod" {
 					project.ReviewAvailable, project.InstallAvailable = project.InstallAvailable, false
 				}
@@ -884,7 +897,7 @@ func discoverModrinthPlugins(ctx context.Context, server pluginServerContext, se
 				} else if server.MinecraftVersion != "" {
 					project.Compatibility = "Not listed as compatible according to publisher metadata"
 				}
-				if !modrinthServerEnvironment(v.Environment) {
+				if !modrinthContentEnvironment(v.Environment, server.ServerType) {
 					project.Compatibility = modrinthServerEnvironmentRejection
 					if kind == "mod" && v.Environment == "client_only" {
 						project.Compatibility = clientOnlyModRejection

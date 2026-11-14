@@ -395,7 +395,7 @@ func resolvePluginInstallPlan(ctx context.Context, serverContext pluginServerCon
 			if v.ID != version || !modrinthPluginID.MatchString(v.ProjectID) || (project != "" && v.ProjectID != project) {
 				return errors.New("Modrinth project/version identity mismatch")
 			}
-			if !modrinthServerEnvironment(v.Environment) {
+			if !modrinthContentEnvironment(v.Environment, serverContext.ServerType) {
 				if v.Environment == "client_only" && javaServerContentKind(serverContext.ServerType) == "mods" {
 					return errors.New(clientOnlyModRejection)
 				}
@@ -441,7 +441,7 @@ func resolvePluginInstallPlan(ctx context.Context, serverContext pluginServerCon
 			})
 			found := false
 			for _, candidate := range versions {
-				if candidate.Type == "release" && modrinthServerEnvironment(candidate.Environment) && pluginVersionCompatible(candidate, serverContext) {
+				if candidate.Type == "release" && modrinthContentEnvironment(candidate.Environment, serverContext.ServerType) && pluginVersionCompatible(candidate, serverContext) {
 					v = candidate
 					found = true
 					break
@@ -465,7 +465,7 @@ func resolvePluginInstallPlan(ctx context.Context, serverContext pluginServerCon
 				return errors.New("Modrinth dependency project/version identity mismatch")
 			}
 		}
-		if !modrinthServerEnvironment(v.Environment) {
+		if !modrinthContentEnvironment(v.Environment, serverContext.ServerType) {
 			if v.Environment == "client_only" && javaServerContentKind(serverContext.ServerType) == "mods" {
 				return errors.New(clientOnlyModRejection)
 			}

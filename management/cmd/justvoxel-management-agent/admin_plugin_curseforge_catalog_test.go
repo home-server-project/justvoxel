@@ -629,3 +629,41 @@ func TestCurseForgeDiscoverServerEnvironment(t *testing.T) {
 		}
 	}
 }
+
+func TestCurseForgeExactModrinthContentEnvironment(t *testing.T) {
+	for _, game := range []string{"1.21.8", "26.3", "26.99"} {
+		for _, software := range []string{"spigot", "fabric", "forge", "neoforge", "quilt"} {
+			for _, environment := range []string{"", "unknown", "server_only", "client_and_server", "client_only", "singleplayer_only", "future_environment"} {
+				for _, evidence := range []string{"exact", "wrong loader", "wrong game"} {
+					t.Run(strings.Join([]string{game, software, environment, evidence}, "/"), func(t *testing.T) {
+						f := newPluginInstallFixtureFor(t, software, game)
+						server := pluginContentContext(software)
+						server.MinecraftVersion = game
+						v := f.versions["release"]
+						v.Environment, v.Loaders, v.GameVersions = environment, []string{software}, []string{server.MinecraftVersion}
+						if evidence == "wrong loader" {
+							v.Loaders = []string{"paper"}
+						}
+						if evidence == "wrong game" {
+							v.GameVersions = []string{"different-game"}
+						}
+						sum := sha1.Sum(f.jars["root.jar"])
+						v.Files[0].Hashes.SHA1 = hex.EncodeToString(sum[:])
+						a := pluginInstallArtifact{Source: "CurseForge", ProjectID: "10", VersionID: "20", Filename: "root.jar", Size: v.Files[0].Size, SHA1: v.Files[0].Hashes.SHA1, URL: "https://edge.forgecdn.net/files/1234/567/root.jar"}
+						pluginCatalogClient.Transport = pluginTestTransport(func(r *http.Request) (*http.Response, error) {
+							if r.URL.Path != "/v2/version_file/"+a.SHA1 || r.URL.Query().Get("algorithm") != "sha1" {
+								t.Fatal("unexpected exact hash request", r.URL)
+							}
+							raw, err := json.Marshal(v)
+							return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(raw))}, err
+						})
+						want := evidence == "exact" && (environment == "server_only" || environment == "client_and_server" || server.ContentKind == "plugins" && (environment == "" || environment == "unknown"))
+						if got := exactCurseForgeModrinthVersion(context.Background(), a, server); (got != nil) != want {
+							t.Fatal("exact hash environment policy", got, want)
+						}
+					})
+				}
+			}
+		}
+	}
+}
