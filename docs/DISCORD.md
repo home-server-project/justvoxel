@@ -108,5 +108,111 @@ controls and records; cleanup failure prevents a successful trust-change result.
 Factory Reset blocks request submission, review, decisions, and notifications.
 No interaction token, Discord role, message content, or raw backend failure is
 stored with a request. This remains Guilds intent only, with no Message Content
-intent, ordinary message reading, or channel-history reading. Stage 4 advanced
-administration is not implemented.
+intent, ordinary message reading, or channel-history reading.
+
+
+## Advanced administration (Stage 4)
+
+Only currently approved JustVoxel Discord administrators can open **Advanced**
+for a selected Minecraft server, or **Minecraft Network** and **System** from
+**/jv**. Ordinary community members keep the same status, player, Minecraft access,
+and admin access request controls. Stage 4 reads and actions recheck current
+approval, enabled and verified state, bound guild, runtime generation, Factory
+Reset exclusion, and the exact registered immutable instance ID where applicable.
+Old buttons fail closed. Discord remains an interaction surface over the existing
+Management Agent operations, with no second management backend or WebUI changes.
+
+**Advanced** provides **Server details**, **Backup inventory**, **Backup status**,
+**Start on Boot**, **Minecraft updates**, **Container updates**, and **Back**.
+Details show a small public configuration summary. Backup inventory displays at
+most ten entries, newest first, without archive paths. Backup status shows recent
+attempt/success and restart requirements. Manual Backup retains its existing
+behavior. Start on Boot shows the current preference and requires confirmation
+of the exact desired state; a newer preference cannot be overwritten by a stale
+review.
+
+Minecraft and container update status use the existing authoritative status
+handlers. **Review Minecraft update** reviews the server's current configured
+selection; Discord cannot choose arbitrary versions, images, URLs, or policies.
+**Review container update** always requests a restart after update and a backup
+before restart. Both require explicit confirmation, store the reviewed fingerprint
+only on the server, and let the existing update handler revalidate it before
+acceptance. Changed update information requires a fresh review. No restore image
+selection or retention changes are exposed. **Update progress** reads the existing
+operation journal's bounded status; detailed diagnostics and recovery remain in
+JustVoxel WebUI. Discord does not retry updates or acknowledge failed operations.
+
+**Minecraft Network** means only the JustVoxel **Minecraft Network / Velocity**
+entrance and its member servers. It does **not** configure LAN, Ethernet, Wi-Fi,
+firewall, DNS, routes, VPNs, or remote access. The panel shows enabled state,
+Java/Bedrock ports, selected member count, bounded server names/IDs, recovery
+requirements, and runtime readiness. Enable and Disable require confirmation.
+**Change members** presents at most 25 eligible/current servers sorted by friendly
+name and immutable ID; additional membership management is available in WebUI.
+Each reviewed action adds or removes one member, with the complete resulting
+membership and configuration fingerprint stored server-side. Disable Network and
+stop affected servers before changing membership. The shared backend transaction
+retains compatibility, publication, maintenance, and recovery checks. If the
+configuration changed, review it again.
+
+**System** offers **OS updates**, **Check OS updates**, **Download & stage update**,
+and **Reboot options**. OS status summarizes running, staged, and available
+versions, check state, reboot requirements, and activation state. Checking
+availability may take around two minutes and needs no destructive confirmation.
+Downloading and staging requires confirmation and can take around 15 minutes.
+Discord returns immediately after accepting the download invocation: use
+**System → OS updates** to refresh authoritative state. The bounded background
+invocation uses the existing system update handler and locks, retains no
+interaction token, and attempts one fixed completion message in the originating
+channel only while the same Discord generation and guild remain usable. Mentions
+are disabled; send failure changes nothing. There is no download retry queue,
+second update engine, service, or separate durable download journal.
+
+Reboot options always offer **Ordinary reboot**. When an update is staged and a
+reboot is required, the exact four additional choices are:
+
+- **Update reboot · 60s warning · backup first**
+- **Update reboot · 60s warning · no backup**
+- **Update reboot · 10s warning · backup first**
+- **Update reboot · 10s warning · no backup**
+
+Every reboot requires deliberate confirmation. The reviewed staged digest,
+warning, and backup choice stay server-side; a changed staged deployment requires
+a fresh review. For reboot and update operations, when the authoritative handler
+returns a players-online confirmation requirement, Discord asks a **second explicit
+player-interruption confirmation**, bound to the same user, guild, generation,
+instance or system operation, fingerprint/digest, and reviewed options. Discord
+does not discover players independently or bypass the existing safety contract.
+Existing Minecraft/container handlers may accept an operation whose player safety
+is handled by their authoritative worker rather than a preflight confirmation.
+
+Before invoking a reboot, JustVoxel saves a singleton verification record in the
+existing protected SQLite database (migration 10, `discord_reboot_state`). If that
+save fails, Discord does not request a reboot. The record stores boot identity,
+expected deployment where applicable, Discord trust identity, originating channel,
+request time, operation, and acceptance state. It contains no tokens or backend
+output. A players-online response clears the unaccepted record before the second
+confirmation. Ambiguous results retain evidence for reconciliation.
+
+Reboot evidence survives Management Agent restart and disable/enable with the same
+credential and guild; generation changes update the evidence. Saving the same
+guild retains it. Token replacement, disconnect, binding a different guild, and
+Factory Reset clear it atomically, and a clear failure prevents the trust change.
+The existing connected Discord runtime opportunistically reconciles at most once
+per minute, with one reconciliation at a time. A changed boot, the expected
+running digest when recorded, activation state, and the existing authenticated
+appliance health validation determine success. **HTTP acceptance alone never
+confirms reboot or OS update success.** An unchanged boot or unavailable health /
+deployment evidence is bounded by a 20-minute verification window. An explicitly
+failed update-reboot workflow can finish verification earlier. Terminal results
+remove the record before one best-effort sanitized channel message with mentions
+disabled. Changed trust prevents delivery; failed delivery never restores evidence
+or creates a retry queue.
+
+Stage 4 keeps only **/jv** and **/help**, **Guilds intent only**, and no ordinary
+message ingestion or channel-history reading. It does not expose poweroff,
+firmware reboot, Factory Reset, shell, terminal, arbitrary commands/REST/RCON,
+files or logs, storage administration, server creation/deletion, restore/migration,
+plugin/mod installation, version conversion, container rollback selection, image
+retention mutation, or host network / remote access configuration. Stage 5 remains
+integration testing and cleanup after Stage 4.

@@ -3,8 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -169,12 +167,20 @@ func (s *server) telegramStartOnBoot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "Choose Start on Boot.")
 		return
 	}
+	s.setInstanceStartOnBoot(w, r, id, *input.Enabled, nil)
+}
+
+// Shared narrow mutation; expected is optional for existing Telegram behavior.
+func (s *server) setInstanceStartOnBoot(w http.ResponseWriter, r *http.Request, id string, enabled bool, expected *bool) {
 	s.withInstanceMutation(w, r, id, func(ctx context.Context) error {
 		old, err := instanceRuntimes.readRecord(id)
 		if err != nil {
 			return err
 		}
-		if err = networkProtectBootPreference(old, *input.Enabled); err != nil {
+		if expected != nil && old.Runtime.StartOnBoot != *expected {
+			return instanceRuntimeFailure("Start on Boot changed. Review it again.")
+		}
+		if err = networkProtectBootPreference(old, enabled); err != nil {
 			return err
 		}
 		snapshot, _, _, err := instanceRuntimes.snapshot(ctx)
@@ -186,7 +192,7 @@ func (s *server) telegramStartOnBoot(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		next := old
-		next.Runtime.StartOnBoot = *input.Enabled
+		next.Runtime.StartOnBoot = enabled
 		return instanceRuntimes.apply(ctx, old, instanceReplaceRecord(records, next), snapshot)
 	})
 }
@@ -207,25 +213,38 @@ func (s *server) telegramNetworkChange(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "Choose enabled or membership.")
 		return
 	}
-	release, unlock, err := s.lockPhasedInstanceRuntime()
-	if err != nil {
+	if err := s.changeMinecraftNetwork(r.Context(), input.Enabled, input.Members, input.Expected, false); err != nil {
 		instanceRuntimeError(w, err, "")
 		return
+	}
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+var errMinecraftNetworkReviewChanged = instanceRuntimeFailure("Minecraft Network changed; review the current menu again.")
+
+// Both interaction surfaces use the same transaction and stopped-member checks.
+func (s *server) changeMinecraftNetwork(ctx context.Context, enabled *bool, members *[]string, expected string, requireDisabledMembership bool) error {
+	release, unlock, err := s.lockPhasedInstanceRuntime()
+	if err != nil {
+		return err
 	}
 	err = func() error {
 		n, err := networkRead(instanceRuntimes)
 		if err != nil {
 			return err
 		}
-		if input.Expected != telegramNetworkFingerprint(n.Config) {
-			return instanceRuntimeFailure("Minecraft Network changed; review the current menu again.")
+		if expected != minecraftNetworkFingerprint(n.Config) {
+			return errMinecraftNetworkReviewChanged
+		}
+		if members != nil && requireDisabledMembership && n.Config.Enabled {
+			return instanceRuntimeFailure("Disable Minecraft Network, then stop affected servers before changing membership.")
 		}
 		c := n.Config
-		if input.Enabled != nil {
-			c.Enabled = *input.Enabled
+		if enabled != nil {
+			c.Enabled = *enabled
 		}
-		if input.Members != nil {
-			c.Members = append([]string{}, (*input.Members)...)
+		if members != nil {
+			c.Members = append([]string{}, (*members)...)
 		}
 		if err = networkValidateConfig(c); err != nil {
 			return err
@@ -240,23 +259,18 @@ func (s *server) telegramNetworkChange(w http.ResponseWriter, r *http.Request) {
 			affected[id] = true
 		}
 		for id := range affected {
-			changed := input.Members != nil
+			changed := members != nil
 			if !changed {
 				continue
 			}
-			state, err := instanceRuntimes.observe(r.Context(), id)
+			state, err := instanceRuntimes.observe(ctx, id)
 			if err != nil || state.State != "stopped" {
 				return instanceRuntimeFailure("Disable Minecraft Network, then stop affected servers before changing membership.")
 			}
 		}
-		return networkApplyWithMaintenanceRelease(r.Context(), instanceRuntimes, c, release)
+		return networkApplyWithMaintenanceRelease(ctx, instanceRuntimes, c, release)
 	}()
-	err = errors.Join(err, unlock())
-	if err != nil {
-		instanceRuntimeError(w, err, "")
-		return
-	}
-	writeJSON(w, 200, map[string]any{"ok": true})
+	return errors.Join(err, unlock())
 }
 
 // Telegram never forwards a raw operation payload. Only these presentation fields
@@ -315,9 +329,5 @@ func telegramResultText(operation string, code int, raw json.RawMessage) string 
 }
 
 func telegramNetworkFingerprint(config minecraftNetworkConfig) string {
-	enforced := config.whitelistEnforced()
-	config.WhitelistEnforced = &enforced
-	raw, _ := json.Marshal(config)
-	sum := sha256.Sum256(raw)
-	return hex.EncodeToString(sum[:])
+	return minecraftNetworkFingerprint(config)
 }

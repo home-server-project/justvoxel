@@ -77,6 +77,9 @@ type server struct {
 	fileBrowserMu       sync.Mutex
 	terminalMu          sync.Mutex
 
+	discordRebootReconciling bool
+	discordRebootAfter       time.Time
+
 	networkMu           sync.Mutex
 	networkTransactions map[string]networkCheckpointTransaction
 

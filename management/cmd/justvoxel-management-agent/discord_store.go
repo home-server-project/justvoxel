@@ -81,10 +81,16 @@ func (s *webUIStore) discordSave(v discordState, actor *session, action string) 
 	validPrevious := readErr == nil && json.Unmarshal([]byte(previousRaw), &previous) == nil
 	clear := action == "credential" || action == "disconnect" || action == "factory_revocation" || !validPrevious || previous.Token != v.Token || previous.GuildID != v.GuildID
 	if clear {
+		if _, err = tx.Exec(`DELETE FROM discord_reboot_state`); err != nil {
+			return errDiscordState
+		}
 		if _, err = tx.Exec(`DELETE FROM discord_access_requests`); err != nil {
 			return errDiscordState
 		}
 	} else if action == "enabled" && previous.Generation != v.Generation {
+		if _, err = tx.Exec(`UPDATE discord_reboot_state SET discord_generation=? WHERE discord_generation=? AND guild_id=?`, v.Generation, previous.Generation, v.GuildID); err != nil {
+			return errDiscordState
+		}
 		if err = discordAccessPrune(tx, s.now().Unix()); err != nil {
 			return errDiscordState
 		}

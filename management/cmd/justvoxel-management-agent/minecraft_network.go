@@ -5,7 +5,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -665,4 +667,12 @@ func networkEnrollWhitelist(state minecraftNetworkState, id string, load func() 
 	next.Whitelist = players
 	next.Imported = append(append([]string{}, state.Imported...), id)
 	return next, nil
+}
+
+func minecraftNetworkFingerprint(config minecraftNetworkConfig) string {
+	enforced := config.whitelistEnforced()
+	config.WhitelistEnforced = &enforced
+	raw, _ := json.Marshal(config)
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
 }

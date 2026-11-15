@@ -207,6 +207,16 @@ var webUIStoreMigrations = []webUIStoreMigration{
 			`CREATE UNIQUE INDEX discord_access_pending ON discord_access_requests(guild_id,user_id,instance_id,platform) WHERE state='pending'`,
 		},
 	},
+	{
+		version: 10,
+		name:    "discord_reboot_state",
+		statements: []string{`CREATE TABLE discord_reboot_state (
+ id INTEGER PRIMARY KEY CHECK(id=1), discord_generation INTEGER NOT NULL,
+ guild_id TEXT NOT NULL, user_id TEXT NOT NULL, channel_id TEXT NOT NULL,
+ operation TEXT NOT NULL CHECK(operation IN ('reboot','update_reboot')),
+ boot_id TEXT NOT NULL, expected_digest TEXT NOT NULL, requested_at INTEGER NOT NULL,
+ state TEXT NOT NULL CHECK(state IN ('requesting','accepted','unverified')))`},
+	},
 }
 
 func openWebUIStore(path string) (*webUIStore, error) {
@@ -372,6 +382,7 @@ func (s *webUIStore) resetFactoryState() error {
 
 	for _, statement := range []string{
 		`DELETE FROM discord_access_requests`,
+		`DELETE FROM discord_reboot_state`,
 		`UPDATE discord_state SET record_json = '{"schema":1,"status":"disconnected"}' WHERE id=1`,
 		`UPDATE telegram_state SET record_json = '{"schema":1,"users":[],"status":"disconnected"}' WHERE id=1`,
 		`UPDATE gateway_settings SET enabled = 0 WHERE id = 1`,

@@ -91,10 +91,18 @@ func discordActor(v discordState, user string) session {
 }
 
 type discordPendingAction struct {
-	Generation                             int64
-	GuildID, UserID, InstanceID, Operation string
-	CreatedAt, ExpiresAt                   time.Time
-	PlayersConfirmed                       bool
+	Generation                                  int64
+	GuildID, UserID, InstanceID, Operation      string
+	CreatedAt, ExpiresAt                        time.Time
+	PlayersConfirmed                            bool
+	ReviewOnly                                  bool
+	DesiredEnabled, EnabledSet, PreviousEnabled bool
+	Fingerprint, Policy, Version                string
+	NetworkExpected                             string
+	NetworkMembers                              []string
+	WarningSeconds                              int
+	BackupMinecraft                             bool
+	StagedDigest, ChannelID                     string
 }
 
 func (s *server) discordInvalidateUserLocked(user string) {
@@ -363,11 +371,11 @@ func discordReadPanel(v discordState, user string, instances []discordInstance, 
 		}
 		panel.components = append(panel.components, discord.NewActionRow(discordButton(v, "Status", "status", id), discordButton(v, "Players", "players", id), discordButton(v, "Refresh", "refresh", id), discordButton(v, "Request Minecraft Access", "access", id)))
 		if v.administrator(user) {
-			panel.components = append(panel.components, discord.NewActionRow(discordButton(v, "Start", "start", id), discordButton(v, "Stop", "stop", id), discordButton(v, "Restart", "restart", id), discordButton(v, "Backup", "backup", id)))
+			panel.components = append(panel.components, discord.NewActionRow(discordButton(v, "Start", "start", id), discordButton(v, "Stop", "stop", id), discordButton(v, "Restart", "restart", id), discordButton(v, "Backup", "backup", id), discordButton(v, "Advanced", "adv_menu", id)))
 		}
 	}
 	if v.administrator(user) {
-		panel.components = append(panel.components, discord.NewActionRow(discordButton(v, "Access requests", "access_review", "")))
+		panel.components = append(panel.components, discord.NewActionRow(discordButton(v, "Access requests", "access_review", ""), discordButton(v, "Minecraft Network", "adv_network", ""), discordButton(v, "System", "adv_system", "")))
 	}
 	if !v.administrator(user) {
 		panel.components = append(panel.components, discord.NewActionRow(discordButton(v, "Request admin access", "request", "")))
@@ -409,7 +417,7 @@ func (s *server) discordHandleLocked(ctx context.Context, rt *discordRuntime, i 
 			return discordFailure()
 		}
 		op, id = parts[2], parts[3]
-		if op == "select" || op == "access_detail" {
+		if op == "select" || op == "access_detail" || op == "adv_member" {
 			data, ok := interaction.Data.(discord.StringSelectMenuInteractionData)
 			if !ok || len(data.Values) != 1 || id != "" {
 				return discordFailure()
@@ -420,6 +428,9 @@ func (s *server) discordHandleLocked(ctx context.Context, rt *discordRuntime, i 
 		}
 	default:
 		return discordFailure()
+	}
+	if strings.HasPrefix(op, "adv_") {
+		return s.discordAdvancedLocked(ctx, rt, v, i, guild, user, op, id)
 	}
 	if strings.HasPrefix(op, "access") {
 		return s.discordAccessHandleLocked(ctx, rt, v, i, guild, user, op, id)

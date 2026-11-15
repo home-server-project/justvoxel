@@ -214,6 +214,7 @@ func (s *server) discordLoop(ctx context.Context) {
 					}
 				}
 				s.discordSyncLocked(rt, v)
+				s.discordReconcileRebootLocked(rt, v)
 				s.discordMu.Unlock()
 				if !s.discordWait(ctx, 250*time.Millisecond) {
 					return

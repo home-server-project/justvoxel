@@ -131,7 +131,11 @@ func TestDiscordAccessMigrationV9AndRestart(t *testing.T) {
 	if _, err := store.db.Exec(`DROP TABLE discord_access_requests`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.db.Exec(`DELETE FROM schema_migrations WHERE version=9`); err != nil {
+	// Remove later schema too so this remains a real v8 upgrade fixture.
+	if _, err := store.db.Exec(`DROP TABLE discord_reboot_state`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`DELETE FROM schema_migrations WHERE version>=9`); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.close(); err != nil {
