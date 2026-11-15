@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"net/url"
 )
 
 var errDiscordState = errors.New("Discord state unavailable")
@@ -10,6 +11,9 @@ var errDiscordState = errors.New("Discord state unavailable")
 // Private record in the existing root-owned identity DB. Never return this as
 // an HTTP response; discordPublicState deliberately excludes the credential.
 type discordState struct {
+	Enabled         bool   `json:"enabled"`
+	GuildID         string `json:"guild_id"`
+	GuildName       string `json:"guild_name"`
 	Schema          int    `json:"schema"`
 	Token           string `json:"token,omitempty"`
 	BotID           string `json:"bot_id"`
@@ -38,6 +42,9 @@ func (s *webUIStore) discordRead() (discordState, error) {
 		return discordState{}, errDiscordState
 	}
 	if v.Verified && (v.Token == "" || !validDiscordSnowflake(v.BotID) || !validDiscordSnowflake(v.ApplicationID) || v.BotUsername == "" || v.Status != "verified") {
+		return discordState{}, errDiscordState
+	}
+	if (v.Enabled && !v.Verified) || (v.GuildID != "" && !validDiscordSnowflake(v.GuildID)) {
 		return discordState{}, errDiscordState
 	}
 	return v, nil
@@ -71,7 +78,15 @@ func (s *webUIStore) discordSave(v discordState, actor *session, action string) 
 }
 
 func discordPublicState(v discordState) map[string]any {
-	return map[string]any{"configured": v.Token != "", "verified": v.Verified, "status": v.Status, "bot_id": v.BotID, "bot_username": v.BotUsername, "bot_name": v.BotName, "application_id": v.ApplicationID, "application_name": v.ApplicationName}
+	status := "disabled"
+	if v.Enabled {
+		status = "connecting"
+	}
+	install := ""
+	if v.Verified && validDiscordSnowflake(v.ApplicationID) {
+		install = "https://discord.com/oauth2/authorize?" + url.Values{"client_id": {v.ApplicationID}, "scope": {"bot"}, "permissions": {"3072"}}.Encode()
+	}
+	return map[string]any{"enabled": v.Enabled, "runtime_status": status, "guilds_ready": false, "guild_id": v.GuildID, "guild_name": v.GuildName, "bound_guild_available": false, "guilds": []discordGuild{}, "install_url": install, "configured": v.Token != "", "verified": v.Verified, "status": v.Status, "bot_id": v.BotID, "bot_username": v.BotUsername, "bot_name": v.BotName, "application_id": v.ApplicationID, "application_name": v.ApplicationName}
 }
 
 func (s *server) discordFactoryRevoke() error {
@@ -79,6 +94,7 @@ func (s *server) discordFactoryRevoke() error {
 	defer s.discordMu.Unlock()
 	// Do not parse state being revoked: a corrupt Discord record must remain
 	// removable through supported disconnect and Factory Reset recovery.
+	s.discordStopLocked()
 	actor := session{Username: systemAdminUsername, Role: roleAdministrator}
 	return s.store.discordSave(discordState{Schema: 1, Status: "disconnected"}, &actor, "factory_revocation")
 }

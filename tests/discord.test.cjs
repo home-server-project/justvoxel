@@ -148,16 +148,80 @@ test('a response after closing cannot restore stale identity', async () => {
   assert.equal(h.find('[data-discord-status]').textContent, 'Disconnected');
 });
 
-test('Discord stays within Stage 1B and reuses existing static styles', () => {
+test('Discord stays within Stage 2A and reuses existing static styles', () => {
   assert.doesNotMatch(source, /localStorage|sessionStorage|console\.|innerHTML|insertAdjacentHTML|setInterval|setTimeout|\.style\.|cssText|insertRule|<style/);
-  assert.deepEqual([...source.matchAll(/action: '([^']+)'/g)].map(match => match[1]), ['credential', 'verify', 'disconnect']);
+  assert.deepEqual([...source.matchAll(/action: '([^']+)'/g)].map(match => match[1]), ['credential', 'verify', 'enabled', 'guild', 'disconnect']);
   assert.match(header, /<script src="\/static\/discord.js" defer><\/script>/);
   assert.match(header, /type="password" name="token" autocomplete="off" data-password-ui="off" data-discord-token/);
   const surface = header.slice(header.indexOf('<section data-gateway-discord'), header.indexOf('<section data-gateway-help'));
   assert.match(surface, /class="panel"/);
   assert.match(surface, /class="form-actions"/);
-  assert.doesNotMatch(surface, /style=|<style|data-discord-enabled|data-discord-pair|guild|channel|permissions|notifications/);
+  assert.doesNotMatch(surface, /style=|<style|data-discord-pair|data-discord-channel|notifications/);
   const icon = readFileSync(`${__dirname}/../webui/internal/server/static/ai-providers/discord.svg`, 'utf8');
   assert.match(icon, /<svg/);
   assert.doesNotMatch(icon, /<script|<style|<animate|<foreignObject|\bhref=|\bsrc=|\bon\w+=|<text|font/);
+});
+
+test('Stage 2A enable and guild binding are explicit and readiness gated', async () => {
+  const h = harness(); h.open(); await flush();
+  const enabled = h.find('[data-discord-enabled]');
+  const guild = h.find('[data-discord-guild]');
+  const bind = h.find('[data-discord-bind]');
+  assert.equal(enabled.disabled, true);
+  const waiting = {...verified, application_id: '456', enabled: true, runtime_status: 'connecting', guilds_ready: false, guilds: []};
+  h.replies.push(waiting);
+  h.click('verify'); await flush();
+  assert.equal(enabled.disabled, false);
+  assert.equal(guild.disabled, true);
+  assert.equal(bind.disabled, true);
+  assert.equal(h.find('[data-discord-runtime]').textContent, 'Connecting');
+  const ready = {...waiting, runtime_status: 'connected', guilds_ready: true, guilds: [{id: '111', name: '<b>My server</b>'}]};
+  h.replies.push(ready); h.dispatch('discord-refresh'); await flush();
+  assert.equal(guild.disabled, false);
+  assert.equal(bind.disabled, true);
+  assert.equal(guild.children[1].textContent, '<b>My server</b>');
+  const count = h.calls.length;
+  guild.value = '111'; guild.listeners.change();
+  assert.equal(bind.disabled, false);
+  assert.equal(h.calls.length, count);
+  h.replies.push({...ready, guild_id: '111', guild_name: '<b>My server</b>', bound_guild_available: true});
+  h.click('bind'); await flush();
+  assert.deepEqual(JSON.parse(h.calls.at(-1).options.body.get('request')), {action: 'guild', guild_id: '111'});
+  assert.equal(h.find('[data-discord-bound]').textContent, '<b>My server</b>');
+  h.replies.push({...ready, enabled: false, runtime_status: 'disabled', guilds_ready: false, guilds: []});
+  enabled.checked = false; enabled.listeners.change(); await flush();
+  assert.deepEqual(JSON.parse(h.calls.at(-1).options.body.get('request')), {action: 'enabled', enabled: false});
+  assert.equal(guild.disabled, true);
+  assert.equal(bind.disabled, true);
+});
+
+test('Stage 2A install link has a fixed origin and minimum bot permissions', async () => {
+  const h = harness();
+  h.replies.push({...verified, application_id: '456', install_url: 'https://untrusted.example/'});
+  h.open(); await flush();
+  const install = h.find('[data-discord-install]');
+  const url = new URL(install.href);
+  assert.equal(install.hidden, false);
+  assert.equal(url.origin, 'https://discord.com');
+  assert.equal(url.pathname, '/oauth2/authorize');
+  assert.deepEqual(Object.fromEntries(url.searchParams), {client_id: '456', scope: 'bot', permissions: '3072'});
+  assert.match(header, /data-discord-install hidden target="_blank" rel="noopener noreferrer"/);
+  h.replies.push({...verified, application_id: 'https://untrusted.example/'});
+  h.dispatch('discord-refresh'); await flush();
+  assert.equal(install.hidden, true);
+});
+
+test('Stage 2A reports empty discovery and lost bound access without changing binding', async () => {
+  const h = harness();
+  const empty = {...verified, enabled: true, runtime_status: 'connected', guilds_ready: true, guilds: [], guild_id: '111', guild_name: 'Saved server', bound_guild_available: false};
+  h.replies.push(empty); h.open(); await flush();
+  assert.equal(h.find('[data-discord-empty]').hidden, false);
+  assert.equal(h.find('[data-discord-bound-unavailable]').hidden, false);
+  assert.equal(h.find('[data-discord-bound]').textContent, 'Saved server');
+  assert.equal(h.find('[data-discord-guild]').disabled, true);
+  assert.equal(h.find('[data-discord-bind]').disabled, true);
+  assert.equal(h.calls.length, 1);
+  h.replies.push({...empty, runtime_status: 'connection_paused', guilds_ready: false});
+  h.dispatch('discord-refresh'); await flush();
+  assert.match(h.find('[data-discord-runtime]').textContent, /disable and enable Discord/);
 });

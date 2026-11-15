@@ -23,8 +23,10 @@ func (s *server) discordAdmin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
-		Action string `json:"action"`
-		Token  string `json:"token,omitempty"`
+		Action  string `json:"action"`
+		Token   string `json:"token,omitempty"`
+		Enabled *bool  `json:"enabled,omitempty"`
+		GuildID string `json:"guild_id,omitempty"`
 	}
 	if r.Method == http.MethodPost && decodeContainerJSON(r.Body, &input) != nil {
 		writeError(w, 400, "Invalid Discord request.")
@@ -41,7 +43,7 @@ func (s *server) discordAdmin(w http.ResponseWriter, r *http.Request) {
 		v = discordState{Schema: 1}
 	}
 	if r.Method == http.MethodGet {
-		writeJSON(w, 200, discordPublicState(v))
+		writeJSON(w, 200, s.discordSnapshot(v))
 		return
 	}
 	if s.operations != nil {
@@ -85,6 +87,26 @@ func (s *server) discordAdmin(w http.ResponseWriter, r *http.Request) {
 		}
 		v.ApplicationID, v.ApplicationName = app.ID, app.Name
 		v.Verified, v.Status = true, "verified"
+	case "enabled":
+		if input.Enabled == nil {
+			writeError(w, 400, "Choose whether to enable Discord.")
+			return
+		}
+		if *input.Enabled && (!v.Verified || v.Token == "" || !validDiscordSnowflake(v.ApplicationID)) {
+			writeError(w, 409, "Verify the bot before enabling Discord.")
+			return
+		}
+		v.Enabled = *input.Enabled
+		v.Generation++
+	case "guild":
+		if input.GuildID == "" {
+			writeError(w, 400, "Choose a Discord server.")
+			return
+		}
+		if s.discordBind(&v, input.GuildID) != nil {
+			writeError(w, 409, errDiscordGuild.Error())
+			return
+		}
 	case "disconnect":
 		v = discordState{Schema: 1, Generation: v.Generation + 1, Status: "disconnected"}
 	default:
@@ -95,5 +117,9 @@ func (s *server) discordAdmin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 503, "Discord settings could not be saved.")
 		return
 	}
-	writeJSON(w, 200, discordPublicState(v))
+	if input.Action == "credential" || input.Action == "enabled" || input.Action == "disconnect" {
+		s.discordStopLocked()
+		s.discordWakeLocked()
+	}
+	writeJSON(w, 200, s.discordSnapshot(v))
 }

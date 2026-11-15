@@ -11,14 +11,53 @@
   const identity = find('[data-discord-identity]');
   const status = find('[data-discord-status]');
   const labels = {disconnected: 'Disconnected', unverified: 'Token saved — verify the bot', verified: 'Bot verified'};
+  const enabled = find('[data-discord-enabled]');
+  const guild = find('[data-discord-guild]');
+  const bind = find('[data-discord-bind]');
+  const install = find('[data-discord-install]');
+  const runtimeLabels = {disabled: 'Disabled', connecting: 'Connecting', connected: 'Connected', connection_retry: 'Retrying connection', connection_paused: 'Connection paused — disable and enable Discord to retry'};
+  let availableGuilds = new Set();
   let busy = false;
   let generation = 0;
   const clearToken = () => { token.value = ''; };
   const clearIdentity = () => { identity.replaceChildren(); identity.hidden = true; };
-  const unavailable = () => { status.textContent = 'Connection unavailable'; clearIdentity(); };
+  const unavailable = () => {
+    status.textContent = 'Connection unavailable'; clearIdentity();
+    enabled.disabled = true; enabled.checked = false;
+    guild.disabled = true; guild.replaceChildren(); availableGuilds.clear(); bind.disabled = true;
+    install.hidden = true; install.href = '';
+    find('[data-discord-runtime]').textContent = 'Connection unavailable';
+    find('[data-discord-bound]').textContent = 'Unavailable';
+    find('[data-discord-empty]').hidden = true;
+    find('[data-discord-bound-unavailable]').hidden = true;
+  };
   const node = (tag, text) => { const element = document.createElement(tag); element.textContent = text; return element; };
   const render = snapshot => {
     clearIdentity();
+    const previous = guild.value;
+    availableGuilds = new Set();
+    guild.replaceChildren();
+    const placeholder = node('option', 'Choose a Discord server'); placeholder.value = ''; guild.append(placeholder);
+    const guilds = Array.isArray(snapshot?.guilds) ? snapshot.guilds.slice(0, 200) : [];
+    for (const entry of guilds) {
+      if (typeof entry?.id !== 'string' || !/^[1-9][0-9]{0,19}$/.test(entry.id) || typeof entry.name !== 'string') continue;
+      const option = node('option', entry.name); option.value = entry.id; guild.append(option); availableGuilds.add(entry.id);
+    }
+    guild.value = availableGuilds.has(previous) ? previous : '';
+    enabled.checked = snapshot?.enabled === true;
+    enabled.disabled = snapshot?.verified !== true;
+    guild.disabled = snapshot?.enabled !== true || snapshot?.guilds_ready !== true || availableGuilds.size === 0;
+    bind.disabled = guild.disabled || !availableGuilds.has(guild.value);
+    const runtime = snapshot?.runtime_status;
+    find('[data-discord-runtime]').textContent = typeof runtime === 'string' && Object.hasOwn(runtimeLabels, runtime) ? runtimeLabels[runtime] : 'Connection unavailable';
+    find('[data-discord-empty]').hidden = snapshot?.guilds_ready !== true || availableGuilds.size !== 0;
+    find('[data-discord-bound]').textContent = typeof snapshot?.guild_name === 'string' && snapshot.guild_name ? snapshot.guild_name : 'None';
+    find('[data-discord-bound-unavailable]').hidden = !snapshot?.guild_id || snapshot?.enabled !== true || snapshot?.guilds_ready !== true || snapshot?.bound_guild_available === true;
+    install.hidden = true; install.href = '';
+    if (snapshot?.verified === true && typeof snapshot.application_id === 'string' && /^[1-9][0-9]{0,19}$/.test(snapshot.application_id)) {
+      install.href = `https://discord.com/oauth2/authorize?client_id=${snapshot.application_id}&scope=bot&permissions=3072`;
+      install.hidden = false;
+    }
     const state = snapshot && typeof snapshot.status === 'string' && Object.hasOwn(labels, snapshot.status) ? snapshot.status : '';
     status.textContent = labels[state] || 'Connection unavailable';
     find('[data-discord-verify]').disabled = snapshot?.configured !== true;
@@ -74,5 +113,8 @@
     request({action: 'credential', token: value});
   });
   find('[data-discord-verify]').addEventListener('click', () => request({action: 'verify'}));
+  enabled.addEventListener('change', () => request({action: 'enabled', enabled: enabled.checked}));
+  guild.addEventListener('change', () => { bind.disabled = busy || guild.disabled || !availableGuilds.has(guild.value); });
+  bind.addEventListener('click', () => { if (!guild.disabled && availableGuilds.has(guild.value)) request({action: 'guild', guild_id: guild.value}); });
   find('[data-discord-disconnect]').addEventListener('click', () => request({action: 'disconnect'}));
 })();

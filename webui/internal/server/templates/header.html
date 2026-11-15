@@ -264,6 +264,7 @@
                 <p class="muted">Use a dedicated Discord application and bot. JustVoxel connects outward to Discord.</p>
                 <p>Status: <span data-discord-status>Connection unavailable</span></p>
                 <div data-discord-identity hidden></div>
+                <p><a class="button" data-discord-install hidden target="_blank" rel="noopener noreferrer">Add bot to Discord server</a></p>
                 <form data-discord-token-form autocomplete="off">
                   <label>Bot token <input type="password" name="token" autocomplete="off" data-password-ui="off" data-discord-token required></label>
                   <button class="button" type="submit">Save or replace token</button>
@@ -273,6 +274,16 @@
                   <button class="button" type="button" data-discord-disconnect>Disconnect completely</button>
                 </div>
                 <p class="muted">Replacing the token removes the previously verified bot/application identity.</p>
+              </section>
+              <section class="panel">
+                <h3>Discord connection</h3>
+                <label><input class="date-time-switch" type="checkbox" role="switch" data-discord-enabled disabled> Enable Discord</label>
+                <p>Connection: <span data-discord-runtime>Disabled</span></p>
+                <label>Discord server <select data-discord-guild disabled><option value="">Choose a Discord server</option></select></label>
+                <button class="button" type="button" data-discord-bind disabled>Use this server</button>
+                <p data-discord-empty hidden>No Discord servers found. Add the bot to a Discord server, then Refresh.</p>
+                <p>Bound server: <span data-discord-bound>None</span></p>
+                <p data-discord-bound-unavailable hidden>The bot no longer has access to this Discord server.</p>
               </section>
             </div>
           </section>

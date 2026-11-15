@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"os/user"
 	"path/filepath"
 	"strconv"
@@ -64,6 +65,10 @@ type server struct {
 
 	telegramMu          sync.Mutex
 	discordMu           sync.Mutex
+	discordRuntime      *discordRuntime
+	discordWake         chan struct{}
+	discordUnavailable  bool
+	discordNewGateway   discordGatewayFactory
 	telegramExecutionMu sync.RWMutex
 	telegramPollCancel  context.CancelFunc
 	gatewayMu           sync.RWMutex
@@ -307,8 +312,24 @@ func serve(socket string) error {
 	telegramContext, stopTelegram := context.WithCancel(context.Background())
 	telegramDone := s.startTelegram(telegramContext)
 	defer func() { stopTelegram(); <-telegramDone }()
+	discordContext, stopDiscord := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	discordDone := s.startDiscord(discordContext)
+	defer func() { stopDiscord(); <-discordDone }()
 	log.Printf("JustVoxel Management API %s listening on %s", managementAPI, socket)
-	return httpServer.Serve(listener)
+	serveDone := make(chan struct{})
+	defer close(serveDone)
+	go func() {
+		select {
+		case <-discordContext.Done():
+			_ = listener.Close()
+		case <-serveDone:
+		}
+	}()
+	err = httpServer.Serve(listener)
+	if discordContext.Err() != nil && errors.Is(err, net.ErrClosed) {
+		return nil
+	}
+	return err
 }
 
 func (s *server) requirePeer(next http.Handler) http.Handler {

@@ -21,6 +21,11 @@ func TestFactoryResetDiscordRevocationBoundary(t *testing.T) {
 			operations := openTestOperationStore(t)
 			attachTestOperationStore(t, s, operations)
 			configureTestDiscord(t, s)
+			initial := discordVerifiedState()
+			initial.Enabled = true
+			discordSaveTestState(t, s, initial)
+			client := &discordFakeGateway{}
+			s.discordRuntime = &discordRuntime{generation: initial.Generation, client: client}
 			if err := s.store.telegramSave(telegramTestState(), nil, ""); err != nil {
 				t.Fatal(err)
 			}
@@ -38,6 +43,9 @@ func TestFactoryResetDiscordRevocationBoundary(t *testing.T) {
 					return []byte(validFactoryResetPlanHelper), nil
 				}
 				cleanupCalls++
+				if client.closes.Load() == 0 || s.discordRuntime != nil {
+					t.Fatal("cleanup began with a live Discord runtime")
+				}
 				if failRevoke {
 					t.Fatal("destructive cleanup continued after Discord revocation failure")
 				}
@@ -56,6 +64,9 @@ func TestFactoryResetDiscordRevocationBoundary(t *testing.T) {
 			}
 			if err := executeFactoryReset(context.Background(), s, operation.OperationID, fingerprint); err == nil {
 				t.Fatal("expected reset failure")
+			}
+			if client.closes.Load() == 0 || s.discordRuntime != nil {
+				t.Fatal("Factory Reset failed to stop Discord")
 			}
 			finished, err := operations.get(operation.OperationID)
 			if err != nil || finished.State != operationNeedsAttention {

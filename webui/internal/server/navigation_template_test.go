@@ -1291,7 +1291,7 @@ func TestApprovedControlCenterLayout(t *testing.T) {
 			t.Fatalf("Discord setup surface missing: %s", required)
 		}
 	}
-	for _, forbidden := range []string{`style=`, `data-discord-enabled`, `name="purpose"`, `name="level"`, `data-gateway-oauth`, `data-discord-users`, `data-discord-pair`} {
+	for _, forbidden := range []string{`style=`, `name="purpose"`, `name="level"`, `data-gateway-oauth`, `data-discord-users`, `data-discord-pair`} {
 		if strings.Contains(discord, forbidden) {
 			t.Fatalf("unexpected Discord setup control: %s", forbidden)
 		}
