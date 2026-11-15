@@ -23,6 +23,7 @@
   const clearIdentity = () => { identity.replaceChildren(); identity.hidden = true; };
   const unavailable = () => {
     status.textContent = 'Connection unavailable'; clearIdentity();
+    find('[data-discord-pending]').replaceChildren(); find('[data-discord-administrators]').replaceChildren();
     enabled.disabled = true; enabled.checked = false;
     guild.disabled = true; guild.replaceChildren(); availableGuilds.clear(); bind.disabled = true;
     install.hidden = true; install.href = '';
@@ -34,6 +35,24 @@
   const node = (tag, text) => { const element = document.createElement(tag); element.textContent = text; return element; };
   const render = snapshot => {
     clearIdentity();
+    const renderAdministrators = (selector, entries, pending) => {
+      const list = find(selector); list.replaceChildren();
+      for (const entry of (Array.isArray(entries) ? entries.slice(0, 32) : [])) {
+        if (typeof entry?.user_id !== 'string' || !/^[1-9][0-9]{0,19}$/.test(entry.user_id)) continue;
+        const row = node('div', '');
+        row.append(node('p', (typeof entry.name === 'string' && entry.name) || (typeof entry.username === 'string' && entry.username) || 'Discord user'));
+        const secondary = node('p', entry.user_id); secondary.className = 'muted'; row.append(secondary);
+        const actions = node('div', ''); actions.className = 'form-actions';
+        for (const [label, action] of (pending ? [['Approve', 'admin_approve'], ['Reject', 'admin_reject']] : [['Remove', 'admin_remove']])) {
+          const button = node('button', label); button.type = 'button'; button.className = 'button';
+          button.addEventListener('click', () => request({action, user_id: entry.user_id})); actions.append(button);
+        }
+        row.append(actions); list.append(row);
+      }
+      if (!list.children.length) list.append(node('p', 'None'));
+    };
+    renderAdministrators('[data-discord-pending]', snapshot?.pending, true);
+    renderAdministrators('[data-discord-administrators]', snapshot?.administrators, false);
     const previous = guild.value;
     availableGuilds = new Set();
     guild.replaceChildren();

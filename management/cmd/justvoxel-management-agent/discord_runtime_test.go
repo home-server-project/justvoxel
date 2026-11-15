@@ -62,6 +62,7 @@ func discordEventually(t *testing.T, predicate func() bool) {
 func discordLoopForTest(t *testing.T, s *server, fail bool) <-chan *discordFakeGateway {
 	t.Helper()
 	clients := make(chan *discordFakeGateway, 10)
+	s.discordNewREST = func(string) discordREST { return newDiscordFakeREST() }
 	s.discordNewGateway = func(ctx context.Context, token string, handler gateway.EventHandlerFunc, _ func()) discordGatewayClient {
 		if token != discordTestToken {
 			t.Error("unexpected credential")

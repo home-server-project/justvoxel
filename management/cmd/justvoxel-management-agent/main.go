@@ -69,6 +69,7 @@ type server struct {
 	discordWake         chan struct{}
 	discordUnavailable  bool
 	discordNewGateway   discordGatewayFactory
+	discordNewREST      func(string) discordREST
 	telegramExecutionMu sync.RWMutex
 	telegramPollCancel  context.CancelFunc
 	gatewayMu           sync.RWMutex

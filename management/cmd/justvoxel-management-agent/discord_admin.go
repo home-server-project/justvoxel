@@ -27,6 +27,7 @@ func (s *server) discordAdmin(w http.ResponseWriter, r *http.Request) {
 		Token   string `json:"token,omitempty"`
 		Enabled *bool  `json:"enabled,omitempty"`
 		GuildID string `json:"guild_id,omitempty"`
+		UserID  string `json:"user_id,omitempty"`
 	}
 	if r.Method == http.MethodPost && decodeContainerJSON(r.Body, &input) != nil {
 		writeError(w, 400, "Invalid Discord request.")
@@ -107,6 +108,11 @@ func (s *server) discordAdmin(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 409, errDiscordGuild.Error())
 			return
 		}
+	case "admin_approve", "admin_reject", "admin_remove":
+		if !v.adminAction(input.Action, input.UserID) {
+			writeError(w, 409, "Discord administrator request unavailable or limit reached.")
+			return
+		}
 	case "disconnect":
 		v = discordState{Schema: 1, Generation: v.Generation + 1, Status: "disconnected"}
 	default:
@@ -120,6 +126,19 @@ func (s *server) discordAdmin(w http.ResponseWriter, r *http.Request) {
 	if input.Action == "credential" || input.Action == "enabled" || input.Action == "disconnect" {
 		s.discordStopLocked()
 		s.discordWakeLocked()
+	}
+	if input.Action == "guild" && s.discordRuntime != nil {
+		rt := s.discordRuntime
+		if rt.generation != v.Generation {
+			rt.actions = nil
+			rt.syncedGuild = ""
+			rt.syncAfter = time.Time{}
+			rt.generation = v.Generation
+		}
+		s.discordSyncLocked(rt, v)
+	}
+	if input.Action == "admin_remove" {
+		s.discordInvalidateUserLocked(input.UserID)
 	}
 	writeJSON(w, 200, s.discordSnapshot(v))
 }

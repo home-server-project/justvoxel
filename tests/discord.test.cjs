@@ -225,3 +225,42 @@ test('Stage 2A reports empty discovery and lost bound access without changing bi
   h.dispatch('discord-refresh'); await flush();
   assert.match(h.find('[data-discord-runtime]').textContent, /disable and enable Discord/);
 });
+
+test('Discord administrator approval stays in the existing provider and submits only fixed action and user ID', async () => {
+  for (const [pending, label, action] of [[true, 'Approve', 'admin_approve'], [true, 'Reject', 'admin_reject'], [false, 'Remove', 'admin_remove']]) {
+    const h = harness();
+    const identity = {user_id: '777', name: '<img src=x onerror=bad()>', username: 'friendly'};
+    h.replies.push({...verified, pending: pending ? [identity] : [], administrators: pending ? [] : [identity]});
+    h.open(); await flush();
+    const list = h.find(pending ? '[data-discord-pending]' : '[data-discord-administrators]');
+    assert.equal(list.children.length, 1);
+    const row = list.children[0];
+    assert.equal(row.children[0].textContent, identity.name);
+    assert.equal(row.children[1].textContent, '777');
+    assert.equal(row.children[1].className, 'muted');
+    const actions = row.children[2];
+    assert.equal(actions.className, 'form-actions');
+    const button = actions.children.find(button => button.textContent === label);
+    assert.equal(button.className, 'button');
+    button.listeners.click(); await flush();
+    const payload = JSON.parse(h.calls[1].options.body.get('request'));
+    assert.deepEqual(payload, {action, user_id: '777'});
+    assert.equal(h.calls[1].url, '/api/discord');
+  }
+  const surface = header.slice(header.indexOf('<section data-gateway-discord'), header.indexOf('<section data-gateway-help'));
+  assert.match(surface, /<section class="panel">\s*<h3>Discord administrators<\/h3>/);
+  assert.ok(surface.indexOf('Discord administrators') > surface.indexOf('Discord connection'));
+  assert.doesNotMatch(surface, /<style|style=|<dialog|sidebar|workspace/);
+});
+
+test('Discord administrator rows are bounded and cleared after connection failure', async () => {
+  const h = harness();
+  h.replies.push({...verified, pending: Array.from({length: 40}, (_, index) => ({user_id: String(index + 1), name: 'Person'})), administrators: [{user_id: 'invalid', name: 'Rejected'}]});
+  h.open(); await flush();
+  assert.equal(h.find('[data-discord-pending]').children.length, 32);
+  assert.equal(h.find('[data-discord-administrators]').children[0].textContent, 'None');
+  h.replies.push(new Error('private failure'));
+  h.dispatch('discord-refresh'); await flush();
+  assert.equal(h.find('[data-discord-pending]').children.length, 0);
+  assert.equal(h.find('[data-discord-administrators]').children.length, 0);
+});

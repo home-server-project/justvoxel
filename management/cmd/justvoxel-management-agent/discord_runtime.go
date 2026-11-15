@@ -31,6 +31,12 @@ type discordRuntime struct {
 	discoveryDeadline time.Time
 	cancel            context.CancelFunc
 	client            discordGatewayClient
+	api               discordREST
+	actions           map[string]discordPendingAction
+	syncing           bool
+	syncedGuild       string
+	syncAfter         time.Time
+	workers           int
 }
 type discordGuild struct {
 	ID        string `json:"id"`
@@ -206,6 +212,7 @@ func (s *server) discordLoop(ctx context.Context) {
 						rt.pending = nil
 					}
 				}
+				s.discordSyncLocked(rt, v)
 				s.discordMu.Unlock()
 				if !s.discordWait(ctx, 250*time.Millisecond) {
 					return
@@ -220,6 +227,7 @@ func (s *server) discordLoop(ctx context.Context) {
 			rt.status = "connection_retry"
 		}
 		s.discordRuntime = rt
+		rt.api = s.discordRESTClient(v.Token)
 		factory := s.discordNewGateway
 		if factory == nil {
 			factory = newDiscordGateway
@@ -269,8 +277,12 @@ func (s *server) discordLoop(ctx context.Context) {
 
 // DisGo's low-level READY/GUILD_CREATE/UPDATE/DELETE events provide the same
 // discovery, join, available, rename, unavailable and leave semantics without
-// installing handlers for messages, interactions, members, channels or roles.
+// installing handlers for messages, members, channels or roles.
 func (s *server) discordEvent(rt *discordRuntime, _ gateway.EventType, event gateway.EventData) {
+	if e, ok := event.(gateway.EventInteractionCreate); ok {
+		s.discordInteraction(rt, e.Interaction)
+		return
+	}
 	s.discordMu.Lock()
 	defer s.discordMu.Unlock()
 	v, err := s.store.discordRead()
@@ -280,6 +292,8 @@ func (s *server) discordEvent(rt *discordRuntime, _ gateway.EventType, event gat
 	switch e := event.(type) {
 	case gateway.EventReady:
 		rt.status = "connected"
+		rt.syncedGuild = ""
+		rt.syncAfter = time.Time{}
 		rt.guilds = map[string]discordGuild{}
 		rt.pending = map[string]bool{}
 		for _, guild := range e.Guilds {
@@ -390,6 +404,11 @@ func (s *server) discordBind(v *discordState, id string) error {
 	guild, ok := rt.guilds[id]
 	if !ok || !guild.Available {
 		return errDiscordGuild
+	}
+	if v.GuildID != guild.ID {
+		v.Pending = nil
+		v.Administrators = nil
+		v.Generation++
 	}
 	v.GuildID, v.GuildName = guild.ID, guild.Name
 	return nil

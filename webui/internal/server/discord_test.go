@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 
@@ -99,5 +100,58 @@ func TestDiscordWorkspaceRejectsInvalidOrOversizedRequests(t *testing.T) {
 		if rr.Code < 400 || f.calls != 0 {
 			t.Fatal("invalid request reached Discord", rr.Code)
 		}
+	}
+}
+
+func TestDiscordApprovalActionsUseExistingPrimarySurface(t *testing.T) {
+	for _, action := range []string{"admin_approve", "admin_reject", "admin_remove"} {
+		f := &discordTestAPI{filesTestAPI: filesTestAPI{role: "administrator", username: "voxel"}}
+		a, err := New(f, Config{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload := `{"action":"` + action + `","user_id":"777"}`
+		rr := httptest.NewRecorder()
+		a.Handler().ServeHTTP(rr, authenticatedSystemActionRequest("POST", "/api/discord", url.Values{"csrf": {"token"}, "request": {payload}}.Encode()))
+		if rr.Code != 200 || string(f.last) != payload {
+			t.Fatal("approval action did not reach existing endpoint", action, rr.Code)
+		}
+	}
+}
+
+func TestDiscordAdministratorPanelUsesExistingModalStyles(t *testing.T) {
+	header, err := os.ReadFile("templates/header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(header)
+	start := strings.Index(markup, "data-gateway-discord")
+	if start < 0 {
+		t.Fatal("existing provider missing")
+	}
+	end := strings.Index(markup[start:], "data-gateway-help")
+	if end < 0 {
+		t.Fatal("existing modal help missing")
+	}
+	surface := markup[start : start+end]
+	if strings.Count(surface, `<h3>Discord administrators</h3>`) != 1 || !strings.Contains(surface, `<section class="panel">`) || strings.Index(surface, "Discord administrators") < strings.Index(surface, "Discord connection") {
+		t.Fatal("administrator panel moved outside provider")
+	}
+	for _, marker := range []string{"data-discord-pending", "data-discord-administrators", "data-discord-enabled", "data-discord-bind"} {
+		if !strings.Contains(surface, marker) {
+			t.Fatal("existing provider control missing", marker)
+		}
+	}
+	script, err := os.ReadFile("static/discord.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range []string{"admin_approve", "admin_reject", "admin_remove"} {
+		if !strings.Contains(string(script), action) {
+			t.Fatal("fixed action missing", action)
+		}
+	}
+	if strings.Contains(string(script), "innerHTML") || strings.Contains(string(script), "createElement('style')") {
+		t.Fatal("unsafe identity rendering or new styles")
 	}
 }

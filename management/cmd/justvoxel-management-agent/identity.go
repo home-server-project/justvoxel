@@ -22,6 +22,7 @@ const (
 	authSourceLocalRoot authSource = "local-root"
 	authSourceExternal  authSource = "external"
 	authSourceTelegram  authSource = "telegram"
+	authSourceDiscord   authSource = "discord"
 )
 
 type identityAuthResult struct {
