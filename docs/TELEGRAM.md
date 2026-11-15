@@ -9,6 +9,13 @@ existing local Unix-socket Management API.
 
 A short setup guide is available in **AI & API Connections → Help → Provider reference → Telegram**.
 
+Discord and Telegram are independent interaction surfaces over the same
+authoritative JustVoxel management operations and may be enabled simultaneously.
+Telegram approval does not grant Discord approval, and Discord approval does not
+grant Telegram approval. Shared backend operation locks and reviewed
+fingerprints/digests remain authoritative regardless of which surface changed
+backend state.
+
 ## Connect and pair
 
 1. Create a dedicated bot using Telegram's BotFather. Do not run another polling

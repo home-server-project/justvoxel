@@ -50,7 +50,7 @@ message content, or interaction tokens are returned to the WebUI. Failures shown
 in Discord use safe fixed messages rather than internal errors or command output.
 Browser state is refreshed using the existing Refresh action, without polling.
 
-## Community Minecraft access (Stage 3)
+## Community Minecraft access
 
 In **/jv**, select a Minecraft server and press **Request Minecraft Access**.
 Choose **Java Edition** or **Bedrock / Xbox**, then enter the one Minecraft
@@ -111,12 +111,12 @@ stored with a request. This remains Guilds intent only, with no Message Content
 intent, ordinary message reading, or channel-history reading.
 
 
-## Advanced administration (Stage 4)
+## Advanced administration
 
 Only currently approved JustVoxel Discord administrators can open **Advanced**
 for a selected Minecraft server, or **Minecraft Network** and **System** from
 **/jv**. Ordinary community members keep the same status, player, Minecraft access,
-and admin access request controls. Stage 4 reads and actions recheck current
+and admin access request controls. Advanced reads and actions recheck current
 approval, enabled and verified state, bound guild, runtime generation, Factory
 Reset exclusion, and the exact registered immutable instance ID where applicable.
 Old buttons fail closed. Discord remains an interaction surface over the existing
@@ -209,10 +209,40 @@ remove the record before one best-effort sanitized channel message with mentions
 disabled. Changed trust prevents delivery; failed delivery never restores evidence
 or creates a retry queue.
 
-Stage 4 keeps only **/jv** and **/help**, **Guilds intent only**, and no ordinary
+Discord supports only **/jv** and **/help**, **Guilds intent only**, and no ordinary
 message ingestion or channel-history reading. It does not expose poweroff,
 firmware reboot, Factory Reset, shell, terminal, arbitrary commands/REST/RCON,
 files or logs, storage administration, server creation/deletion, restore/migration,
 plugin/mod installation, version conversion, container rollback selection, image
-retention mutation, or host network / remote access configuration. Stage 5 remains
-integration testing and cleanup after Stage 4.
+retention mutation, or host network / remote access configuration.
+
+
+## Telegram interoperability
+
+Discord and Telegram can be enabled simultaneously, independently of the AI/API
+Gateway switch. They retain independent identities, credentials, and permissions:
+Telegram approval grants no Discord approval, and Discord approval grants no
+Telegram approval. Community Minecraft access requests do not grant management
+permissions in either integration.
+
+Both surfaces use the same authoritative JustVoxel Minecraft and system
+operations. Reviewed plans, configuration fingerprints, and staged deployment
+digests are revalidated against current backend state, regardless of which
+integration changed it. Existing backend operation locks remain the concurrency
+authority; enabling a second integration does not permit conflicting work or
+bypass player-interruption confirmations.
+
+Notification delivery remains integration-specific. A failed Discord send does
+not change Telegram configuration or delivery, and vice versa. Durable credentials,
+approvals, community requests, and each integration's separate reboot evidence
+survive Management Agent restart according to their existing retention rules.
+Telegram also retains its polling cursor and notification observations. Discord
+confirmation actions, interaction tokens, runtime pointers, and guild discovery
+are not persisted: after restart it starts connecting with the bound guild
+unavailable until fresh READY and guild rediscovery. Reconnect retains the saved
+binding and requires fresh availability; it never silently selects another guild.
+
+Automated source and integration tests use local fake Discord REST/Gateway and
+Telegram transports and authoritative backend test fixtures. They do not establish
+real Discord or Telegram network acceptance, appliance runtime acceptance, or
+successful real reboots. Those require separate human verification.
