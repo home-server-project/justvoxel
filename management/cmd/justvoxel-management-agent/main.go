@@ -63,6 +63,7 @@ type server struct {
 	operations *operationStore
 
 	telegramMu          sync.Mutex
+	discordMu           sync.Mutex
 	telegramExecutionMu sync.RWMutex
 	telegramPollCancel  context.CancelFunc
 	gatewayMu           sync.RWMutex
@@ -262,6 +263,7 @@ func serve(socket string) error {
 	mux.HandleFunc("GET /v1/status", s.status)
 	registerGatewayRoutes(mux, s)
 	registerTelegramRoutes(mux, s)
+	registerDiscordRoutes(mux, s)
 	registerAdminUserRoutes(mux, s)
 	registerAdminActivityRoutes(mux, s)
 	registerAdminDiscoveryRoutes(mux, s)

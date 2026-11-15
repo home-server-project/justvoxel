@@ -184,6 +184,14 @@ var webUIStoreMigrations = []webUIStoreMigration{
 			`INSERT INTO telegram_state(id,record_json) VALUES(1,'{"schema":1,"users":[],"status":"disconnected"}')`,
 		},
 	},
+	{
+		version: 8,
+		name:    "native_discord",
+		statements: []string{
+			`CREATE TABLE discord_state (id INTEGER PRIMARY KEY CHECK(id=1), record_json TEXT NOT NULL)`,
+			`INSERT INTO discord_state(id,record_json) VALUES(1,'{"schema":1,"status":"disconnected"}')`,
+		},
+	},
 }
 
 func openWebUIStore(path string) (*webUIStore, error) {
@@ -348,6 +356,7 @@ func (s *webUIStore) resetFactoryState() error {
 	defer func() { _ = tx.Rollback() }()
 
 	for _, statement := range []string{
+		`UPDATE discord_state SET record_json = '{"schema":1,"status":"disconnected"}' WHERE id=1`,
 		`UPDATE telegram_state SET record_json = '{"schema":1,"users":[],"status":"disconnected"}' WHERE id=1`,
 		`UPDATE gateway_settings SET enabled = 0 WHERE id = 1`,
 		`DELETE FROM gateway_connections`,
