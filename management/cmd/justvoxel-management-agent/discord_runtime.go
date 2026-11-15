@@ -33,6 +33,7 @@ type discordRuntime struct {
 	client            discordGatewayClient
 	api               discordREST
 	actions           map[string]discordPendingAction
+	accessApprovals   map[string]bool
 	syncing           bool
 	syncedGuild       string
 	syncAfter         time.Time

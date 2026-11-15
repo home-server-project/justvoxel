@@ -22,9 +22,10 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 )
 
-// The REST seam contains only guild command reconciliation and ephemeral replies.
+// The REST seam contains guild commands, interaction replies and fixed decision notifications.
 // Interaction tokens are stack-local, never part of persistent or runtime state.
 type discordREST interface {
+	CreateMessage(snowflake.ID, discord.MessageCreate, ...rest.RequestOpt) (*discord.Message, error)
 	SetGuildCommands(snowflake.ID, snowflake.ID, []discord.ApplicationCommandCreate, ...rest.RequestOpt) ([]discord.ApplicationCommand, error)
 	CreateInteractionResponse(snowflake.ID, string, discord.InteractionResponse, ...rest.RequestOpt) error
 	UpdateInteractionResponse(snowflake.ID, string, discord.MessageUpdate, ...rest.RequestOpt) (*discord.Message, error)
@@ -186,15 +187,20 @@ func (s *server) discordInteraction(rt *discordRuntime, i discord.Interaction) {
 		s.discordMu.Unlock()
 		return
 	}
+	modal, hasModal := s.discordAccessModalLocked(rt, v, i, guild, user)
 	acceptedGeneration := v.Generation
 	rt.workers++
 	s.discordMu.Unlock()
 	go func() {
 		defer func() { s.discordMu.Lock(); rt.workers--; s.discordMu.Unlock() }()
 		ackCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		err := rt.api.CreateInteractionResponse(i.ID(), i.Token(), discord.InteractionResponse{Type: discord.InteractionResponseTypeDeferredCreateMessage, Data: discord.MessageCreate{Flags: discord.MessageFlagEphemeral}}, rest.WithCtx(ackCtx))
+		response := discord.InteractionResponse{Type: discord.InteractionResponseTypeDeferredCreateMessage, Data: discord.MessageCreate{Flags: discord.MessageFlagEphemeral}}
+		if hasModal {
+			response = discord.InteractionResponse{Type: discord.InteractionResponseTypeModal, Data: modal}
+		}
+		err := rt.api.CreateInteractionResponse(i.ID(), i.Token(), response, rest.WithCtx(ackCtx))
 		cancel()
-		if err != nil {
+		if err != nil || hasModal {
 			return
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 330*time.Second)
@@ -355,10 +361,13 @@ func discordReadPanel(v discordState, user string, instances []discordInstance, 
 		if !found {
 			return discordFailure()
 		}
-		panel.components = append(panel.components, discord.NewActionRow(discordButton(v, "Status", "status", id), discordButton(v, "Players", "players", id), discordButton(v, "Refresh", "refresh", id)))
+		panel.components = append(panel.components, discord.NewActionRow(discordButton(v, "Status", "status", id), discordButton(v, "Players", "players", id), discordButton(v, "Refresh", "refresh", id), discordButton(v, "Request Minecraft Access", "access", id)))
 		if v.administrator(user) {
 			panel.components = append(panel.components, discord.NewActionRow(discordButton(v, "Start", "start", id), discordButton(v, "Stop", "stop", id), discordButton(v, "Restart", "restart", id), discordButton(v, "Backup", "backup", id)))
 		}
+	}
+	if v.administrator(user) {
+		panel.components = append(panel.components, discord.NewActionRow(discordButton(v, "Access requests", "access_review", "")))
 	}
 	if !v.administrator(user) {
 		panel.components = append(panel.components, discord.NewActionRow(discordButton(v, "Request admin access", "request", "")))
@@ -381,10 +390,12 @@ func (s *server) discordHandleLocked(ctx context.Context, rt *discordRuntime, i 
 		switch interaction.Data.CommandName() {
 		case "jv":
 		case "help":
-			return discordPanel{text: "Use /jv to select a Minecraft server, view Status or Players, and Refresh. Members of the bound Discord server have read-only access. Request admin access, then ask the primary JustVoxel WebUI administrator to approve it. Approved Discord administrators can Start, Stop, Restart, or create a manual Backup, with confirmation."}
+			return discordPanel{text: "Use /jv to select a Minecraft server, view Status or Players, and Refresh. Members of the bound Discord server can request Minecraft access: choose Request Minecraft Access, select an edition, and enter a Minecraft identity. A JustVoxel Discord administrator reviews it through Access requests; it does not automatically whitelist you or grant administration. Request admin access, then ask the primary JustVoxel WebUI administrator to approve it. Approved Discord administrators can Start, Stop, Restart, or create a manual Backup, with confirmation."}
 		default:
 			return discordFailure()
 		}
+	case discord.ModalSubmitInteraction:
+		return s.discordAccessSubmitLocked(rt, v, interaction, guild, user)
 	case discord.ComponentInteraction:
 		if interaction.Data == nil {
 			return discordFailure()
@@ -398,7 +409,7 @@ func (s *server) discordHandleLocked(ctx context.Context, rt *discordRuntime, i 
 			return discordFailure()
 		}
 		op, id = parts[2], parts[3]
-		if op == "select" {
+		if op == "select" || op == "access_detail" {
 			data, ok := interaction.Data.(discord.StringSelectMenuInteractionData)
 			if !ok || len(data.Values) != 1 || id != "" {
 				return discordFailure()
@@ -409,6 +420,9 @@ func (s *server) discordHandleLocked(ctx context.Context, rt *discordRuntime, i 
 		}
 	default:
 		return discordFailure()
+	}
+	if strings.HasPrefix(op, "access") {
+		return s.discordAccessHandleLocked(ctx, rt, v, i, guild, user, op, id)
 	}
 	if op == "request" {
 		if id != "" {
@@ -483,7 +497,7 @@ func (s *server) discordHandleLocked(ctx context.Context, rt *discordRuntime, i 
 		if id != "" {
 			return discordFailure()
 		}
-		return discordReadPanel(v, user, instances, "")
+		return s.discordAccessRecent(v, user, discordReadPanel(v, user, instances, ""))
 	case "select", "refresh", "status", "players":
 		if id == "" {
 			return discordFailure()
@@ -499,7 +513,7 @@ func (s *server) discordHandleLocked(ctx context.Context, rt *discordRuntime, i 
 				instances[index].State = selected.State
 			}
 		}
-		panel := discordReadPanel(v, user, instances, id)
+		panel := s.discordAccessRecent(v, user, discordReadPanel(v, user, instances, id))
 		if op == "players" {
 			code, raw = s.discordInvokeLocked(ctx, rt, guild, user, "players", id, false)
 			var p instancePlayers

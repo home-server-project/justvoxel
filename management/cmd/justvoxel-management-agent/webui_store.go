@@ -192,6 +192,21 @@ var webUIStoreMigrations = []webUIStoreMigration{
 			`INSERT INTO discord_state(id,record_json) VALUES(1,'{"schema":1,"status":"disconnected"}')`,
 		},
 	},
+	{
+		version: 9,
+		name:    "discord_access_requests",
+		statements: []string{
+			`CREATE TABLE discord_access_requests (
+ request_id TEXT PRIMARY KEY NOT NULL, discord_generation INTEGER NOT NULL,
+ guild_id TEXT NOT NULL, user_id TEXT NOT NULL, user_name TEXT NOT NULL,
+ channel_id TEXT NOT NULL, instance_id TEXT NOT NULL,
+ platform TEXT NOT NULL CHECK(platform IN ('java','bedrock')),
+ player_identity TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('pending','approved','rejected')),
+ requested_at INTEGER NOT NULL, decided_at INTEGER NOT NULL DEFAULT 0,
+ expires_at INTEGER NOT NULL, result_expires_at INTEGER NOT NULL DEFAULT 0)`,
+			`CREATE UNIQUE INDEX discord_access_pending ON discord_access_requests(guild_id,user_id,instance_id,platform) WHERE state='pending'`,
+		},
+	},
 }
 
 func openWebUIStore(path string) (*webUIStore, error) {
@@ -356,6 +371,7 @@ func (s *webUIStore) resetFactoryState() error {
 	defer func() { _ = tx.Rollback() }()
 
 	for _, statement := range []string{
+		`DELETE FROM discord_access_requests`,
 		`UPDATE discord_state SET record_json = '{"schema":1,"status":"disconnected"}' WHERE id=1`,
 		`UPDATE telegram_state SET record_json = '{"schema":1,"users":[],"status":"disconnected"}' WHERE id=1`,
 		`UPDATE gateway_settings SET enabled = 0 WHERE id = 1`,

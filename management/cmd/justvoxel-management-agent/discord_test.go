@@ -413,10 +413,13 @@ func TestDiscordMigrationFromTelegramDatabasePreservesExistingState(t *testing.T
 	}
 	// Reconstruct the deployed v7 schema by removing only the new migration's
 	// objects and history. Reopen must apply v8 without altering existing state.
+	if _, err := store.db.Exec(`DROP TABLE discord_access_requests`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := store.db.Exec(`DROP TABLE discord_state`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.db.Exec(`DELETE FROM schema_migrations WHERE version=8`); err != nil {
+	if _, err := store.db.Exec(`DELETE FROM schema_migrations WHERE version>=8`); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.close(); err != nil {

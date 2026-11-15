@@ -74,6 +74,26 @@ func (s *webUIStore) discordSave(v discordState, actor *session, action string) 
 		return errDiscordState
 	}
 	defer tx.Rollback()
+	// Change the credential/binding and its community trust records atomically.
+	var previousRaw string
+	var previous discordState
+	readErr := tx.QueryRow(`SELECT record_json FROM discord_state WHERE id=1`).Scan(&previousRaw)
+	validPrevious := readErr == nil && json.Unmarshal([]byte(previousRaw), &previous) == nil
+	clear := action == "credential" || action == "disconnect" || action == "factory_revocation" || !validPrevious || previous.Token != v.Token || previous.GuildID != v.GuildID
+	if clear {
+		if _, err = tx.Exec(`DELETE FROM discord_access_requests`); err != nil {
+			return errDiscordState
+		}
+	} else if action == "enabled" && previous.Generation != v.Generation {
+		if err = discordAccessPrune(tx, s.now().Unix()); err != nil {
+			return errDiscordState
+		}
+		// Stage 2 fences transient controls on enable/disable. Durable community
+		// requests retain the same credential/guild trust across that fence.
+		if _, err = tx.Exec(`UPDATE discord_access_requests SET discord_generation=? WHERE discord_generation=? AND guild_id=?`, v.Generation, previous.Generation, v.GuildID); err != nil {
+			return errDiscordState
+		}
+	}
 	if _, err = tx.Exec(`INSERT INTO discord_state(id,record_json) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET record_json=excluded.record_json`, string(raw)); err != nil {
 		return errDiscordState
 	}

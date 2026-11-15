@@ -31,6 +31,9 @@ type discordFakeREST struct {
 func newDiscordFakeREST() *discordFakeREST {
 	return &discordFakeREST{acknowledgements: make(chan discord.InteractionResponse, 32), replies: make(chan discord.MessageUpdate, 32)}
 }
+func (f *discordFakeREST) CreateMessage(_ snowflake.ID, _ discord.MessageCreate, _ ...rest.RequestOpt) (*discord.Message, error) {
+	return nil, nil
+}
 func (f *discordFakeREST) SetGuildCommands(app, guild snowflake.ID, c []discord.ApplicationCommandCreate, _ ...rest.RequestOpt) ([]discord.ApplicationCommand, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
