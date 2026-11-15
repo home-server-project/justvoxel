@@ -96,28 +96,40 @@ public network ports.
 
 ## Whitelists
 
-**Enforce Network whitelist** controls whether the network player list is used as
-a Velocity login gate. It defaults on for existing and new configurations. When
-off, players may enter the lobby without a network-list entry, but every backend's
-own whitelist remains independent and still applies. Turning enforcement off does
-not delete saved Java or Bedrock entries; turning it back on reuses them.
+A standalone server owns its whitelist settings and `whitelist.json`; these are
+authoritative for standalone access. First Setup and Add Server create Java servers
+with standalone whitelist and enforcement enabled by default. Administrators may
+disable the standalone whitelist later.
 
-When enforcement is on, the network whitelist is checked at Velocity login before
-a player reaches the lobby or a backend. Java and Bedrock player operations are
+For every server currently included in Minecraft Network, **Network Whitelist**
+is the single source of truth for admission to the lobby and selected servers.
+Member runtime generation temporarily disables backend whitelist enforcement,
+regardless of the saved standalone settings or Network Whitelist enforcement.
+Saved backend settings and `whitelist.json` contents are preserved. Adding or
+removing a Network player never synchronizes or rewrites backend whitelist files.
+
+Network Whitelist enforcement defaults on. When enabled, Velocity checks the
+Network list before admitting players. Java and Bedrock player operations are
 separate. Player identities are resolved through the corresponding Mojang/Geyser
 identity services; a lookup failure does not add an unverified identity.
+Removing a Network player blocks Network admission regardless of backend entries.
+Changing the Network list restarts Velocity to enforce removal for existing sessions.
 
-On first enrollment, each selected backend's existing whitelist is imported into
-the union of network players. A later member is imported once. Re-enrollment,
-backend whitelist edits and backend removal do not re-import, synchronize or
-subtract network players. Each backend's existing whitelist API remains
-independent and authoritative for that backend.
+On first enrollment, each selected backend's existing verified whitelist players
+are imported into the Network whitelist once. Reconfiguration, re-enrollment,
+backend whitelist edits and backend removal do not re-import or synchronize either
+list. Import-once evidence is retained.
 
-With enforcement on, adding a player to the network whitelist grants entry to the
-lobby. They also need permission from each backend's own whitelist to join that
-server. Removing a network player blocks the entire network regardless of backend
-entries. Changing the network whitelist restarts Velocity to enforce removal for
-existing sessions; the backend servers and their whitelists are preserved.
+When a server leaves Minecraft Network or Network is disabled, its exact saved
+standalone whitelist policy becomes active again. Its original backend players
+remain unless an administrator separately removed them from that backend.
+
+When Network Whitelist is disabled, players may access the lobby and selected
+Network servers through the Network without whitelist restriction. Backend
+whitelist enforcement stays off while enrolled, and standalone whitelist state
+remains preserved for later standalone use. Disabling Network Whitelist does not
+delete saved Network players; enabling it again reuses them. Member backends
+remain isolated on the private bridge without a host-published game port.
 
 ## Terminal administration
 

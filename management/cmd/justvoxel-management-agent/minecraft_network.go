@@ -261,6 +261,27 @@ func networkOverlay(f minecraftInstanceRuntimeFiles, r instanceRuntimeRecord) (m
 	f.Quadlet = regexp.MustCompile(`(?m)^PublishPort=.*\n`).ReplaceAll(f.Quadlet, nil)
 	f.Quadlet = bytes.Replace(f.Quadlet, []byte("[Container]\n"), []byte("[Container]\nNetwork="+minecraftNetworkName+".network\nNetworkAlias="+r.Runtime.ID+"\n"), 1)
 	f.Environment = bytes.Replace(f.Environment, []byte("ONLINE_MODE=TRUE\n"), []byte("ONLINE_MODE=FALSE\n"), 1)
+	// Network admission belongs to Velocity. Preserve the saved standalone policy
+	// and player file; override only the two generated member environment lines.
+	lines := strings.SplitAfter(string(f.Environment), "\n")
+	for _, key := range []string{"ENABLE_WHITELIST", "ENFORCE_WHITELIST"} {
+		found := -1
+		for i, line := range lines {
+			name := strings.Fields(strings.SplitN(line, "=", 2)[0])
+			if len(name) == 0 || name[0] != key {
+				continue
+			}
+			if found >= 0 || (line != key+"=TRUE\n" && line != key+"=FALSE\n") {
+				return f, instanceRuntimeFailure("Generated member whitelist settings are malformed or duplicated.")
+			}
+			found = i
+		}
+		if found < 0 {
+			return f, instanceRuntimeFailure("Generated member whitelist settings are missing.")
+		}
+		lines[found] = key + "=FALSE\n"
+	}
+	f.Environment = []byte(strings.Join(lines, ""))
 	return networkBackendOverlay(f, profile)
 }
 

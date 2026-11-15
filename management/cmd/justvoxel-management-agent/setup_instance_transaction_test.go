@@ -77,6 +77,9 @@ func testFreshSetupCreatesOneNormalInstance(t *testing.T, existing bool, name st
 	if record.Storage.DataPath != filepath.Join(f.snapshot.StorageRoot, "minecraft-instances", id, "data") || !record.Runtime.StartOnBoot || len(record.Firewall) == 0 {
 		t.Fatal("first server skipped normal activation", record.Storage)
 	}
+	if !record.Runtime.Whitelist || !record.Runtime.EnforceWhitelist {
+		t.Fatal("normal fresh setup must enable standalone whitelist enforcement")
+	}
 	if record.Backups == nil || record.Backups.Root != r.Backups.Path || record.Backups.Path != filepath.Join(r.Backups.Path, id) {
 		t.Fatal("resolved first-server backups not persisted", record.Backups)
 	}
@@ -687,8 +690,11 @@ func TestAdditionalSetupPersistsManualPlacementWithoutChangingSiblings(t *testin
 	if record.Storage.Root != dataRoot || record.Storage.UUID != "selected-data-uuid" || record.Backups == nil || record.Backups.Root != backupRoot || record.Backups.Path != filepath.Join(backupRoot, record.Runtime.ID) || record.Backups.Source != "nas:/selected" {
 		t.Fatal("placement not persisted", record.Storage, record.Backups)
 	}
-	if record.Runtime.StartOnBoot || record.Runtime.Whitelist || record.Runtime.EnforceWhitelist {
+	if record.Runtime.StartOnBoot {
 		t.Fatal("existing add-server startup settings changed")
+	}
+	if !record.Runtime.Whitelist || !record.Runtime.EnforceWhitelist {
+		t.Fatal("Add Server did not preserve secure whitelist defaults")
 	}
 	for path, want := range preserved {
 		got, err := os.ReadFile(path)

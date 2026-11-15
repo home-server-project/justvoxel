@@ -193,7 +193,6 @@ func runSetupInstanceAction(ctx context.Context, action string, r setupRuntimeTr
 		if r.AddServer {
 			// Preserve Add Server's existing startup settings while sharing
 			// the storage and activation transaction.
-			c.Whitelist, c.EnforceWhitelist = false, false
 			if c.VersionPolicy == "latest" {
 				c.Version = "LATEST"
 			}

@@ -59,7 +59,7 @@
     </div>
   </div>
   <div class="minecraft-player-controls">
-    <p class="muted minecraft-network-help">The network whitelist controls entry to the lobby. Each backend server keeps its own whitelist. Adding a player here does not add them to a server whitelist.</p>
+    <p class="muted minecraft-network-help">Network Whitelist controls access to the lobby and every server included in Minecraft Network. When disabled, players can access selected Network servers without whitelist restriction. Standalone whitelist settings and players are preserved and become active again when a server leaves Minecraft Network.</p>
     <form class="minecraft-player-add" method="post" action="/workspace/minecraft-network">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <label class="minecraft-player-platform">Platform<select name="platform"><option value="java">Java Edition</option><option value="bedrock">Bedrock</option></select></label>

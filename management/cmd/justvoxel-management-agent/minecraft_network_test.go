@@ -99,14 +99,14 @@ func TestMinecraftNetworkBackendProfileOverlay(t *testing.T) {
 		for _, version := range []string{"1.13", "1.18.2", "1.19", "LATEST"} {
 			config := minecraftInstanceRuntimeConfig{ID: "jv-a1b2c3", Software: software, Version: version}
 			input := minecraftInstanceRuntimeFiles{
-				Environment: []byte("ONLINE_MODE=TRUE\nEXISTING=value\n"),
+				Environment: []byte("ONLINE_MODE=TRUE\nENABLE_WHITELIST=TRUE\nENFORCE_WHITELIST=TRUE\nEXISTING=value\n"),
 				Quadlet:     []byte("[Container]\nPublishPort=25566:25565\nVolume=/data:Z\n[Install]\nWantedBy=multi-user.target\n"),
 			}
 			got, err := networkOverlay(input, instanceRuntimeRecord{Runtime: config, NetworkMember: true})
 			if err != nil {
 				t.Fatal(software, version, err)
 			}
-			if string(got.Environment) != "ONLINE_MODE=FALSE\nEXISTING=value\nPATCH_DEFINITIONS=/data/.justvoxel-network-patches.json\n" ||
+			if string(got.Environment) != "ONLINE_MODE=FALSE\nENABLE_WHITELIST=FALSE\nENFORCE_WHITELIST=FALSE\nEXISTING=value\nPATCH_DEFINITIONS=/data/.justvoxel-network-patches.json\n" ||
 				string(got.Quadlet) != "[Container]\nNetwork=justvoxel-minecraft-network.network\nNetworkAlias=jv-a1b2c3\nVolume=/data:Z\n[Install]\nWantedBy=multi-user.target\n" {
 				t.Fatal("Paper-family overlay changed", software, version)
 			}
@@ -1744,9 +1744,9 @@ func TestMinecraftNetworkPreflightBeforeDowntime(t *testing.T) {
 func TestMinecraftNetworkManagedProfilesOverlayAndExactLoader(t *testing.T) {
 	for _, software := range []string{"fabric", "quilt", "forge", "neoforge"} {
 		c := minecraftInstanceRuntimeConfig{ID: "jv-a1b2c3", Software: software, Version: "1.20.6", VersionPolicy: "pinned", LoaderVersion: "0.16.14", ImageTag: "java21", StartOnBoot: true, JavaPort: 25566}
-		input := minecraftInstanceRuntimeFiles{Environment: []byte("ONLINE_MODE=TRUE\nEXISTING=value\n"), Quadlet: []byte("[Container]\nPublishPort=25566:25565\nVolume=/data:Z\n[Install]\nWantedBy=multi-user.target\n")}
+		input := minecraftInstanceRuntimeFiles{Environment: []byte("ONLINE_MODE=TRUE\nENABLE_WHITELIST=TRUE\nENFORCE_WHITELIST=TRUE\nEXISTING=value\n"), Quadlet: []byte("[Container]\nPublishPort=25566:25565\nVolume=/data:Z\n[Install]\nWantedBy=multi-user.target\n")}
 		got, err := networkOverlay(input, instanceRuntimeRecord{Runtime: c, NetworkMember: true})
-		if err != nil || string(got.Environment) != "ONLINE_MODE=FALSE\nEXISTING=value\n" || string(got.Quadlet) != "[Container]\nNetwork=justvoxel-minecraft-network.network\nNetworkAlias=jv-a1b2c3\nVolume=/data:Z\n[Install]\nWantedBy=multi-user.target\n" {
+		if err != nil || string(got.Environment) != "ONLINE_MODE=FALSE\nENABLE_WHITELIST=FALSE\nENFORCE_WHITELIST=FALSE\nEXISTING=value\n" || string(got.Quadlet) != "[Container]\nNetwork=justvoxel-minecraft-network.network\nNetworkAlias=jv-a1b2c3\nVolume=/data:Z\n[Install]\nWantedBy=multi-user.target\n" {
 			t.Fatal("managed profile common overlay or Paper-only patch boundary", software, err)
 		}
 		for _, loader := range []string{"", "LATEST", "arbitrary"} {
@@ -1778,5 +1778,185 @@ func TestMinecraftNetworkForgeSelectionPolicy(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestMinecraftNetworkGenericWhitelistAuthority(t *testing.T) {
+	store, ctx, configs := instanceRuntimeFixture(t)
+	for _, software := range []string{"paper", "purpur", "pufferfish", "leaf", "fabric", "quilt", "forge", "neoforge"} {
+		for _, whitelist := range []bool{false, true} {
+			for _, enforce := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%t/%t", software, whitelist, enforce), func(t *testing.T) {
+					c := configs[0]
+					c.Software, c.Whitelist, c.EnforceWhitelist = software, whitelist, enforce
+					capabilities, ok := javaServerSoftware(software)
+					if !ok || !networkEligible(software) {
+						t.Fatal("fixture must cover supported Network software")
+					}
+					if capabilities.ModLoader {
+						c.Version, c.VersionPolicy, c.LoaderVersion, c.ImageTag = "1.20.6", "pinned", "0.16.14", "java21"
+					}
+					files, err := store.renderInstanceRuntimes(ctx, []minecraftInstanceRuntimeConfig{c})
+					if err != nil {
+						t.Fatal(err)
+					}
+					standalone, err := networkOverlay(files[0], instanceRuntimeRecord{Runtime: c})
+					if err != nil || !reflect.DeepEqual(standalone, files[0]) {
+						t.Fatal("standalone rendering changed", err)
+					}
+					for _, want := range []string{"ENABLE_WHITELIST=" + instanceRuntimeBool(whitelist), "ENFORCE_WHITELIST=" + instanceRuntimeBool(enforce)} {
+						if !bytes.Contains(standalone.Environment, []byte(want+"\n")) {
+							t.Fatal("saved standalone policy was not rendered", want)
+						}
+					}
+					member, err := networkOverlay(files[0], instanceRuntimeRecord{Runtime: c, NetworkMember: true})
+					if err != nil {
+						t.Fatal(err)
+					}
+					for _, want := range []string{"ONLINE_MODE=FALSE\n", "ENABLE_WHITELIST=FALSE\n", "ENFORCE_WHITELIST=FALSE\n"} {
+						if bytes.Count(member.Environment, []byte(want)) != 1 {
+							t.Fatal("member admission is not exclusively controlled by Network", want)
+						}
+					}
+					if bytes.Contains(member.Quadlet, []byte("PublishPort=")) {
+						t.Fatal("member exposes a public game port")
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestMinecraftNetworkWhitelistOverlayRejectsAmbiguousEnvironment(t *testing.T) {
+	for _, key := range []string{"ENABLE_WHITELIST", "ENFORCE_WHITELIST"} {
+		for _, replacement := range []string{"", key + "=true\n", key + "=TRUE\n" + key + "=FALSE\n", key + "=TRUE\n" + key + " FALSE\n", " " + key + "=TRUE\n", key + " =TRUE\n", key + "=TRUE", key + "=TRUE\r\n"} {
+			t.Run(key+"/"+replacement, func(t *testing.T) {
+				env := "ONLINE_MODE=TRUE\nENABLE_WHITELIST=TRUE\nENFORCE_WHITELIST=TRUE\n"
+				env = strings.Replace(env, key+"=TRUE\n", replacement, 1)
+				_, err := networkOverlay(minecraftInstanceRuntimeFiles{Environment: []byte(env)}, instanceRuntimeRecord{NetworkMember: true, Runtime: minecraftInstanceRuntimeConfig{Software: "paper", Version: "1.21.4"}})
+				if err == nil {
+					t.Fatal("invalid generated whitelist environment accepted")
+				}
+			})
+		}
+	}
+}
+
+func TestMinecraftNetworkWhitelistTransactionPreservesStandaloneState(t *testing.T) {
+	for _, disable := range []bool{false, true} {
+		t.Run(fmt.Sprintf("disable=%t", disable), func(t *testing.T) {
+			f, c := networkTransactionFixture(t, true)
+			b, ctx := f.backend, context.Background()
+			c.Members = []string{f.configs[0].ID, f.configs[1].ID}
+			// Keep the Network entrance distinct so leaving members can restore
+			// their standalone ports while Network remains enabled.
+			for c.JavaPort == f.configs[0].JavaPort || c.JavaPort == f.configs[1].JavaPort || c.JavaPort == c.BedrockPort {
+				c.JavaPort = instanceTestPort(t)
+			}
+			alice := minecraftNetworkPlayer{UUID: "11111111-1111-1111-1111-111111111111", Name: "Alice"}
+			bob := minecraftNetworkPlayer{UUID: "22222222-2222-2222-2222-222222222222", Name: "Bob"}
+			charlie := minecraftNetworkPlayer{UUID: "33333333-3333-3333-3333-333333333333", Name: "Charlie"}
+			players, err := json.MarshalIndent([]minecraftNetworkPlayer{alice, bob}, "", "  ")
+			if err != nil {
+				t.Fatal(err)
+			}
+			players = append(players, '\n')
+			originals := map[string]instanceRuntimeRecord{}
+			for _, id := range c.Members {
+				r, err := b.readRecord(id)
+				if err != nil || !r.Runtime.Whitelist || !r.Runtime.EnforceWhitelist {
+					t.Fatal("fixture must start with standalone enforcement enabled", err)
+				}
+				originals[id] = r
+				if err := os.WriteFile(filepath.Join(r.Storage.DataPath, "whitelist.json"), players, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			check := func(member bool) {
+				t.Helper()
+				for id, before := range originals {
+					r, err := b.readRecord(id)
+					if err != nil || r.NetworkMember != member || r.Runtime != before.Runtime {
+						t.Fatal("saved standalone policy changed", id, err)
+					}
+					_, envPath, quadletPath := b.paths(id)
+					env, err := b.readPrivate(envPath)
+					if err != nil {
+						t.Fatal(err)
+					}
+					for _, key := range []string{"ENABLE_WHITELIST", "ENFORCE_WHITELIST"} {
+						if !bytes.Contains(env, []byte(key+"="+instanceRuntimeBool(!member)+"\n")) {
+							t.Fatal("runtime enforcement does not match enrollment", id, key)
+						}
+					}
+					quadlet, err := b.readPrivate(quadletPath)
+					if err != nil || bytes.Contains(quadlet, []byte("PublishPort=")) == member {
+						t.Fatal("game port isolation does not match enrollment", id, err)
+					}
+					contents, err := os.ReadFile(filepath.Join(r.Storage.DataPath, "whitelist.json"))
+					if err != nil || !bytes.Equal(contents, players) {
+						t.Fatal("Network changed backend whitelist bytes", id, err)
+					}
+				}
+			}
+			if err := networkApply(ctx, b, c); err != nil {
+				t.Fatal(err)
+			}
+			check(true)
+			n, err := networkRead(b)
+			if err != nil || !reflect.DeepEqual(n.Whitelist, []minecraftNetworkPlayer{alice, bob}) {
+				t.Fatal("first enrollment did not import Alice and Bob", err, n.Whitelist)
+			}
+			for id := range originals {
+				if !networkContains(n.Imported, id) {
+					t.Fatal("missing import-once evidence", id)
+				}
+			}
+			// Exercise the publication used by Network player add and remove.
+			for _, nextPlayers := range [][]minecraftNetworkPlayer{{alice, bob, charlie}, {bob, charlie}} {
+				next := n
+				next.Whitelist = nextPlayers
+				if err := networkPublishWhitelist(ctx, b, n, next); err != nil {
+					t.Fatal(err)
+				}
+				n, err = networkRead(b)
+				if err != nil || !reflect.DeepEqual(n.Whitelist, nextPlayers) {
+					t.Fatal("Network whitelist mutation did not persist", err)
+				}
+				generated, err := b.readPrivate(filepath.Join(b.networkDirectory(), "generated.json"))
+				var files map[string][]byte
+				var velocityPlayers []minecraftNetworkPlayer
+				if err != nil || json.Unmarshal(generated, &files) != nil || json.Unmarshal(files["velocity/plugins/global-whitelist/whitelist.json"], &velocityPlayers) != nil || !reflect.DeepEqual(velocityPlayers, nextPlayers) {
+					t.Fatal("Network mutation did not update Velocity players", err)
+				}
+				check(true)
+			}
+			// Both enforcement choices leave backend whitelist enforcement off.
+			for _, enforced := range []bool{false, true} {
+				c.WhitelistEnforced = &enforced
+				if err := networkApply(ctx, b, c); err != nil {
+					t.Fatal(err)
+				}
+				check(true)
+			}
+			leave := c
+			if disable {
+				leave.Enabled = false
+			} else {
+				leave.Members = nil
+			}
+			if err := networkApply(ctx, b, leave); err != nil {
+				t.Fatal(err)
+			}
+			check(false)
+			if err := networkApply(ctx, b, c); err != nil {
+				t.Fatal(err)
+			}
+			check(true)
+			n, err = networkRead(b)
+			if err != nil || !reflect.DeepEqual(n.Whitelist, []minecraftNetworkPlayer{bob, charlie}) {
+				t.Fatal("reconfiguration or re-enrollment synchronized backend players", err, n.Whitelist)
+			}
+		})
 	}
 }

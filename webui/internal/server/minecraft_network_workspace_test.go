@@ -504,6 +504,9 @@ func TestMinecraftNetworkWhitelistConfigureAndFragment(t *testing.T) {
 				heading, `class="badge" data-network-whitelist-badge>` + badge + `</span>`,
 				`class="minecraft-whitelist-switch" role="switch"`, fmt.Sprintf(`aria-checked="%t"`, enforced),
 				fmt.Sprintf(`name="whitelist_enforced" form="minecraft-network-configure" value="%t"`, enforced),
+				`Network Whitelist controls access to the lobby and every server included in Minecraft Network.`,
+				`When disabled, players can access selected Network servers without whitelist restriction.`,
+				`Standalone whitelist settings and players are preserved and become active again when a server leaves Minecraft Network.`,
 				`Lobby: Java + Bedrock server selector`, `data-minecraft-network-cancel disabled>Cancel</button>`,
 				`name="action" value="configure" disabled>Apply</button>`,
 			} {
@@ -511,7 +514,7 @@ func TestMinecraftNetworkWhitelistConfigureAndFragment(t *testing.T) {
 					t.Errorf("missing %q", want)
 				}
 			}
-			for _, forbidden := range []string{"Lobby: JustVoxel virtual lobby", "Network whitelist: Enforced", "<h2>Lobby</h2>"} {
+			for _, forbidden := range []string{"Lobby: JustVoxel virtual lobby", "Network whitelist: Enforced", "<h2>Lobby</h2>", "Each backend server keeps its own whitelist.", "Adding a player here does not add them to a server whitelist."} {
 				if strings.Contains(rr.Body.String(), forbidden) {
 					t.Errorf("old summary remains: %s", forbidden)
 				}
