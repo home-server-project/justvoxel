@@ -19,3 +19,6 @@ JustVoxel logo at `/static/justvoxel-logo.png`.
 
 `telegram.svg` is a locally drawn Telegram paper-plane mark for the integration
 card. The Telegram name and mark belong to Telegram. It is bundled locally.
+
+`discord.svg` is a locally drawn Discord-style controller/face mark for the
+integration card. The Discord name and mark belong to Discord. It is bundled locally.

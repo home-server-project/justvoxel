@@ -263,6 +263,7 @@ for (const input of inputs) {
 `
 	var fields []map[string]string
 	telegramFields := 0
+	discordFields := 0
 	for _, template := range []string{"templates/login.html", "templates/password.html", "templates/header.html"} {
 		markup, err := assets.ReadFile(template)
 		if err != nil {
@@ -289,8 +290,15 @@ for (const input of inputs) {
 					t.Fatal("Telegram token must remain an empty masked API secret with password UI and autocomplete disabled")
 				}
 			}
-			if !telegramSecret && attributes["name"] != "" && attributes["data-password-ui"] == "off" {
-				t.Fatal("real password field opted out")
+			discordSecret := strings.Contains(field, "data-discord-token")
+			if discordSecret {
+				discordFields++
+				if attributes["name"] != "token" || attributes["data-password-ui"] != "off" || attributes["autocomplete"] != "off" || strings.Contains(field, "value=") {
+					t.Fatal("Discord token must remain an empty masked API secret with password UI and autocomplete disabled")
+				}
+			}
+			if !telegramSecret && !discordSecret && attributes["name"] != "" && attributes["data-password-ui"] == "off" {
+				t.Fatal("real password field opted out; only Telegram and Discord API-secret fields may opt out")
 			}
 			fields = append(fields, attributes)
 		}
@@ -298,8 +306,11 @@ for (const input of inputs) {
 	if telegramFields != 1 {
 		t.Fatalf("expected one masked Telegram token field; got %d", telegramFields)
 	}
-	if len(fields) != 6 {
-		t.Fatalf("expected login, three change-password fields, CurseForge field, and Telegram token field; got %d", len(fields))
+	if discordFields != 1 {
+		t.Fatalf("expected one masked Discord token field; got %d", discordFields)
+	}
+	if len(fields) != 7 {
+		t.Fatalf("expected login, three change-password fields, CurseForge field, and Telegram and Discord API-secret fields; got %d", len(fields))
 	}
 	encoded, err := json.Marshal(fields)
 	if err != nil {

@@ -251,6 +251,31 @@
               <section class="panel"><h3>Operation status</h3><p data-telegram-operation>No Telegram operations yet.</p></section>
             </div>
           </section>
+          <section data-gateway-discord hidden aria-labelledby="discord-title">
+            <div class="form-actions">
+              <button class="button" type="button" data-discord-back>Back to Add</button>
+              <h3 id="discord-title">Discord</h3>
+            </div>
+            <p class="muted">Discord works independently of the Gateway switch. Community and server-management features will be added after the bot connection is configured.</p>
+            <p role="status" data-discord-feedback></p>
+            <div data-discord-content data-discord-csrf="{{.CSRF}}">
+              <section class="panel">
+                <h3>Bot connection</h3>
+                <p class="muted">Use a dedicated Discord application and bot. JustVoxel connects outward to Discord.</p>
+                <p>Status: <span data-discord-status>Connection unavailable</span></p>
+                <div data-discord-identity hidden></div>
+                <form data-discord-token-form autocomplete="off">
+                  <label>Bot token <input type="password" name="token" autocomplete="off" data-password-ui="off" data-discord-token required></label>
+                  <button class="button" type="submit">Save or replace token</button>
+                </form>
+                <div class="form-actions">
+                  <button class="button" type="button" data-discord-verify disabled>Verify bot</button>
+                  <button class="button" type="button" data-discord-disconnect>Disconnect completely</button>
+                </div>
+                <p class="muted">Replacing the token removes the previously verified bot/application identity.</p>
+              </section>
+            </div>
+          </section>
           <section data-gateway-help hidden>
             <h3>Help</h3>
             <p class="muted">Create connections in Add. Connection-specific setup instructions are available in Settings.</p>
@@ -345,6 +370,7 @@
             <label class="gateway-provider-card"><input type="radio" name="purpose" value="Other AI / MCP app"><img class="gateway-provider-icon" src="/static/justvoxel-logo.png" alt=""><span><strong>Other AI / MCP app</strong></span></label>
             <label class="gateway-provider-card"><input type="radio" name="purpose" value="Automation / REST API"><img class="gateway-provider-icon" src="/static/justvoxel-logo.png" alt=""><span><strong>Automation / REST API</strong></span></label>
             <label class="gateway-provider-card" data-telegram-card><input type="radio" name="integration" value="telegram" data-telegram-select><img class="gateway-provider-icon" src="/static/ai-providers/telegram.svg" alt=""><span><strong>Telegram</strong></span></label>
+            <label class="gateway-provider-card" data-discord-card><input type="radio" name="integration" value="discord" data-discord-select><img class="gateway-provider-icon" src="/static/ai-providers/discord.svg" alt=""><span><strong>Discord</strong></span></label>
           </div>
           <p class="muted gateway-compatibility-summary" data-gateway-compatibility-summary aria-live="polite" hidden></p>
         </section>
@@ -403,6 +429,7 @@
   <link rel="stylesheet" href="/static/agent-gateway.css">
   <script src="/static/agent-gateway.js" defer></script>
   <script src="/static/telegram.js" defer></script>
+  <script src="/static/discord.js" defer></script>
 
   <dialog class="workspace-window system-workspace-dialog" data-workspace-window="terminal" data-terminal-workspace-dialog aria-labelledby="terminal-workspace-title">
     <div class="system-workspace-shell">

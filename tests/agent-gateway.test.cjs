@@ -204,9 +204,12 @@ test('provider cards replace the purpose dropdown with one OpenAI choice for Cha
   assert.deepEqual(purposes, ['OpenAI', 'Claude', 'Grok', 'Gemini', 'GitHub Copilot', 'OpenClaw', 'Other AI / MCP app', 'Automation / REST API']);
   const providerGrid = form.match(/<div class="gateway-provider-grid"[^>]*>([\s\S]*?)<\/div>/)[1];
   const cards = [...providerGrid.matchAll(/<label class="gateway-provider-card"[^>]*>([\s\S]*?)<\/label>/g)].map(match => match[1]);
-  assert.deepEqual(cards.map(card => card.match(/<strong>([^<]+)<\/strong>/)[1]), [...purposes, 'Telegram']);
+  assert.deepEqual(cards.map(card => card.match(/<strong>([^<]+)<\/strong>/)[1]), [...purposes, 'Telegram', 'Discord']);
   assert.match(cards[8], /name="integration" value="telegram" data-telegram-select/);
   assert.doesNotMatch(cards[8], /name="purpose"|name="auth_mode"/);
+  assert.match(cards[9], /name="integration" value="discord" data-discord-select/);
+  assert.match(cards[9], /src="\/static\/ai-providers\/discord.svg"/);
+  assert.doesNotMatch(cards[9], /name="purpose"|name="auth_mode"/);
   assert.equal((form.match(/<strong>OpenAI<\/strong>/g) || []).length, 1);
   assert.equal(purposes.filter(purpose => purpose === 'OpenClaw').length, 1);
   assert.match(form, /<strong>OpenClaw<\/strong><small>Control UI &amp; CLI<\/small>/);
@@ -217,7 +220,7 @@ test('provider cards replace the purpose dropdown with one OpenAI choice for Cha
   assert.doesNotMatch(form, /<select name="purpose"|name="auth_mode"|Connection method|OAuth — Advanced|What do you want to call it/);
   for (const phrase of ['>Name</span>', 'What will use this connection?', 'Access level', 'Which Minecraft servers?', 'All servers']) assert.ok(form.includes(phrase), phrase);
   assert.match(form, /class="gateway-provider-grid"/);
-  for (const asset of ['openai', 'claude', 'grok', 'googlegemini', 'githubcopilot', 'openclaw']) {
+  for (const asset of ['openai', 'claude', 'grok', 'googlegemini', 'githubcopilot', 'openclaw', 'discord']) {
     assert.ok(form.includes(`/static/ai-providers/${asset}.svg`));
     const svg = readFileSync(`${base}webui/internal/server/static/ai-providers/${asset}.svg`, 'utf8');
     assert.match(svg, /<svg/);
@@ -319,7 +322,7 @@ function settingsHarness(connection, inventory = [], gatewayEnabled = true) {
   };
   settings.reportValidity = () => true;
   const details = new Node('section');
-  details.querySelector = () => settings;
+  details.querySelector = selector => selector === 'form' ? settings : node(selector);
   const requests = [];
   const confirmations = [];
   const events = [];
@@ -1045,7 +1048,7 @@ test('Add has no provider onboarding, addresses, commands or network callouts be
 
 test('Add has one neutral summary immediately below provider cards, with no setup controls', () => {
   assert.equal((form.match(/data-gateway-compatibility-summary/g) || []).length, 1);
-  assert.match(form, /value="Automation \/ REST API"[^\n]+\n\s*<label class="gateway-provider-card" data-telegram-card>[^\n]+\n\s*<\/div>\n\s*<p class="muted gateway-compatibility-summary" data-gateway-compatibility-summary aria-live="polite" hidden><\/p>/);
+  assert.match(form, /value="Automation \/ REST API"[^\n]+\n\s*<label class="gateway-provider-card" data-telegram-card>[^\n]+\n\s*<label class="gateway-provider-card" data-discord-card>[^\n]+\n\s*<\/div>\n\s*<p class="muted gateway-compatibility-summary" data-gateway-compatibility-summary aria-live="polite" hidden><\/p>/);
   const summary = form.match(/<p[^>]*data-gateway-compatibility-summary[^>]*><\/p>/)[0];
   assert.doesNotMatch(summary, /warning|notice|icon|<svg|<img/);
   assert.doesNotMatch(form, /data-gateway-copy|MCP address|https?:\/\/|codex mcp|claude mcp|openclaw mcp|copilot mcp/);
@@ -1766,4 +1769,50 @@ test('Help fact CSS uses equal desktop columns and the existing narrow container
   const rules = css.match(/[^{}]*\.gateway-help-facts?[^{}]*\{[^{}]*\}/g);
   assert.ok(rules.length >= 5);
   for (const rule of rules) assert.doesNotMatch(rule, /(?:^|[;{])\s*(?:(?:border|background|height)\s*:|text-align\s*:\s*(?:center|right)\b)/);
+});
+
+test('Discord selection opens only its surface and Back restores a fresh Add form', () => {
+  const h = settingsHarness({name: '', purpose: 'OpenAI', enabled: true, all_instances: true});
+  h.field('name').value = 'Discard this draft';
+  h.node('[data-discord-select]').listeners.change();
+  assert.equal(h.details.children.length, 0);
+  assert.equal(h.details.hidden, true);
+  assert.equal(h.node('[data-gateway-discord]').hidden, false);
+  assert.equal(h.node('[data-gateway-telegram]').hidden, true);
+  assert.equal(h.node('[data-gateway-feedback]').hidden, true);
+  assert.equal(h.node('[data-gateway-add]')['aria-selected'], 'true');
+  assert.equal(h.node('[data-discord-back]').focused, true);
+  assert.equal(h.events.at(-1).detail, 'discord');
+  h.node('[data-discord-back]').listeners.click();
+  assert.equal(h.field('name').value, '');
+  assert.equal(h.node('[data-gateway-discord]').hidden, true);
+  assert.equal(h.node('[data-gateway-feedback]').hidden, false);
+  assert.equal(h.node('[data-discord-select]').focused, true);
+  assert.equal(h.events.at(-1).detail, 'settings');
+  assert.equal(h.requests.length, 0);
+});
+
+test('existing normal connection settings remove both special integration cards', () => {
+  const h = settingsHarness({id: 'existing', name: 'App', purpose: 'OpenAI', enabled: true, all_instances: true});
+  assert.equal(h.node('[data-telegram-card]').removed, true);
+  assert.equal(h.node('[data-discord-card]').removed, true);
+  assert.equal(h.node('[data-discord-select]').listeners.change, undefined);
+});
+
+test('workspace Refresh routes independently to gateway, Telegram and Discord', () => {
+  const start = js.indexOf("  find('[data-gateway-refresh]').addEventListener");
+  const end = js.indexOf('  const restore =', start);
+  let refresh;
+  const events = [];
+  const context = vm.createContext({
+    surface: 'overview', busy: false, Event: class { constructor(type) { this.type = type; } },
+    find: () => ({addEventListener(type, callback) { refresh = callback; }}),
+    dialog: {dispatchEvent(event) { events.push(event.type); }}, load: () => events.push('gateway'),
+  });
+  vm.runInContext(js.slice(start, end), context);
+  refresh();
+  context.surface = 'telegram'; refresh();
+  context.surface = 'discord'; refresh();
+  context.surface = 'settings'; refresh();
+  assert.deepEqual(events, ['gateway', 'telegram-refresh', 'discord-refresh', 'gateway']);
 });

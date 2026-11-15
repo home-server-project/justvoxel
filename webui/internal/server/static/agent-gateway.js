@@ -22,10 +22,11 @@
     details.hidden = name !== 'settings';
     find('[data-gateway-help]').hidden = name !== 'help';
     find('[data-gateway-telegram]').hidden = name !== 'telegram';
-    feedback.hidden = name === 'telegram';
+    find('[data-gateway-discord]').hidden = name !== 'discord';
+    feedback.hidden = name === 'telegram' || name === 'discord';
     find('[data-gateway-connections]').setAttribute('aria-selected', String(name === 'overview' || (name === 'settings' && Boolean(selectedID))));
     find('[data-gateway-help-open]').setAttribute('aria-selected', String(name === 'help'));
-    find('[data-gateway-add]').setAttribute('aria-selected', String((name === 'settings' && !selectedID) || name === 'telegram'));
+    find('[data-gateway-add]').setAttribute('aria-selected', String((name === 'settings' && !selectedID) || name === 'telegram' || name === 'discord'));
     content.scrollTop = 0;
     dialog.dispatchEvent(new CustomEvent('gateway-surface-change', {detail: name}));
   };
@@ -588,6 +589,14 @@
       showSurface('telegram');
       find('[data-telegram-back]').focus();
     });
+    const discordCard = form.querySelector('[data-discord-card]');
+    if (c.id) discordCard.remove();
+    else form.querySelector('[data-discord-select]').addEventListener('change', () => {
+      if (busy) return;
+      details.replaceChildren();
+      showSurface('discord');
+      find('[data-discord-back]').focus();
+    });
     const field = name => form.elements.namedItem(name);
     form.className = c.id ? 'gateway-edit-settings' : 'gateway-add-settings';
     for (const name of ['name', 'level']) field(name).value = c[name] ?? '';
@@ -704,6 +713,10 @@
     showAdd();
     details.querySelector('[data-telegram-select]')?.focus();
   });
+  find('[data-discord-back]').addEventListener('click', () => {
+    showAdd();
+    details.querySelector('[data-discord-select]')?.focus();
+  });
   find('[data-gateway-connections]').addEventListener('click', showOverview);
   find('[data-gateway-help-open]').addEventListener('click', () => { if (!busy) showSurface('help'); });
   for (const button of dialog.querySelectorAll('[data-gateway-copy-address]')) {
@@ -731,6 +744,7 @@
   find('[data-gateway-close]').addEventListener('click', () => workspace.close());
   find('[data-gateway-refresh]').addEventListener('click', () => {
     if (surface === 'telegram') dialog.dispatchEvent(new Event('telegram-refresh'));
+    else if (surface === 'discord') dialog.dispatchEvent(new Event('discord-refresh'));
     else if (!busy) load();
   });
   const restore = () => {

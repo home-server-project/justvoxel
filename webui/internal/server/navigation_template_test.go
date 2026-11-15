@@ -1263,7 +1263,7 @@ func TestApprovedControlCenterLayout(t *testing.T) {
 		t.Fatal("Telegram must not have a separate Control Center tile or workspace")
 	}
 	gateway := regexp.MustCompile(`(?s)<dialog[^>]*data-agent-gateway-dialog.*?</dialog>`).FindString(markup)
-	telegram := regexp.MustCompile(`(?s)<section data-gateway-telegram.*?<section data-gateway-help`).FindString(gateway)
+	telegram := regexp.MustCompile(`(?s)<section data-gateway-telegram.*?<section data-gateway-discord`).FindString(gateway)
 	if telegram == "" || !strings.Contains(telegram, `data-telegram-back>Back to Add`) || !strings.Contains(telegram, "independently of the Gateway switch") {
 		t.Fatal("Telegram management and Back must remain inside AI & API Connections")
 	}
@@ -1279,8 +1279,25 @@ func TestApprovedControlCenterLayout(t *testing.T) {
 	}
 	grid := regexp.MustCompile(`(?s)<div class="gateway-provider-grid"[^>]*>.*?</div>`).FindString(markup)
 	providerCards := regexp.MustCompile(`(?s)<label class="gateway-provider-card".*?</label>`).FindAllString(grid, -1)
-	if len(providerCards) != 9 || !strings.Contains(providerCards[7], "Automation / REST API") || !strings.Contains(providerCards[8], `data-telegram-select`) || !strings.Contains(providerCards[8], `/static/ai-providers/telegram.svg`) || strings.Contains(providerCards[8], `name="purpose"`) {
+	if len(providerCards) != 10 || !strings.Contains(providerCards[7], "Automation / REST API") || !strings.Contains(providerCards[8], `data-telegram-select`) || !strings.Contains(providerCards[8], `/static/ai-providers/telegram.svg`) || strings.Contains(providerCards[8], `name="purpose"`) {
 		t.Fatal("Telegram must follow Automation / REST API using the shared provider card and a local icon, without a gateway purpose")
+	}
+	if !strings.Contains(providerCards[9], `name="integration" value="discord" data-discord-select`) || !strings.Contains(providerCards[9], `/static/ai-providers/discord.svg`) || strings.Contains(providerCards[9], `name="purpose"`) {
+		t.Fatal("Discord must immediately follow Telegram as a special integration with a local icon")
+	}
+	discord := regexp.MustCompile(`(?s)<section data-gateway-discord.*?<section data-gateway-help`).FindString(gateway)
+	for _, required := range []string{`data-discord-back>Back to Add`, `id="discord-title">Discord`, "independently of the Gateway switch", "Bot connection", `type="password" name="token" autocomplete="off" data-password-ui="off" data-discord-token`, "data-discord-identity", "data-discord-verify", "data-discord-disconnect"} {
+		if !strings.Contains(discord, required) {
+			t.Fatalf("Discord setup surface missing: %s", required)
+		}
+	}
+	for _, forbidden := range []string{`style=`, `data-discord-enabled`, `name="purpose"`, `name="level"`, `data-gateway-oauth`, `data-discord-users`, `data-discord-pair`} {
+		if strings.Contains(discord, forbidden) {
+			t.Fatalf("unexpected Discord setup control: %s", forbidden)
+		}
+	}
+	if !strings.Contains(markup, `<script src="/static/discord.js" defer></script>`) || strings.Contains(markup, `data-workspace-window="discord"`) || strings.Contains(markup, `data-discord-open`) {
+		t.Fatal("Discord must load inside the existing AI & API Connections workspace")
 	}
 	gatewayScript, err := assets.ReadFile("static/agent-gateway.js")
 	if err != nil {
