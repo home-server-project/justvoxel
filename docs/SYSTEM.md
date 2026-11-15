@@ -114,6 +114,28 @@ The WebUI uses the same capability/status endpoint. Its browser-facing label is 
 
 Display detection is advisory because KVM switches, EDID behavior, firmware and hardware can make Linux connector state imperfect.
 
+## HWS local display and laptop power
+
+Control Center → Display controls only the Linux console panel. Turn OFF now and
+Turn ON now run fixed `setterm` actions on `/dev/tty0`, without stopping Minecraft.
+Apply schedules display off in 1–3600 seconds (default 10) using a transient
+systemd timer. Closing the dialog does not cancel an already submitted action.
+Turn ON now is available regardless of the last requested display state.
+
+The Ignore laptop lid close switch immediately applies the JustVoxel-owned
+`/etc/systemd/logind.conf.d/90-justvoxel-lid.conf` policy. Disabling removes only
+that file, restoring the remaining vendor and administrator configuration. The
+switch reports the owned policy, not an inferred hardware state. Other administrator
+drop-ins retain their normal systemd precedence. Configuration is applied with
+`systemctl reload systemd-logind.service` using
+[logind’s notify-reload support](https://github.com/systemd/systemd/blob/v257/units/systemd-logind.service.in),
+without restarting logind or user sessions. Display and lid mutations require an
+administrator and the existing WebUI CSRF protection. These controls are HWS only.
+
+HWS also shows onboard batteries discovered by the kernel power_supply `type`
+attribute and the configured NUT UPS in Session & power. Both indicators can appear
+together; unavailable percentages are omitted. Missing onboard batteries are normal.
+
 ## Rollback
 
 JustVoxel-aware bootc rollback remains deliberately out of scope. It needs a separate design for `/etc` configuration preservation/reconciliation and post-rollback recovery behavior.

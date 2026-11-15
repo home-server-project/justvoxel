@@ -226,6 +226,13 @@ body.role-administrator .control-power-actions.nav-admin-only{display:flex!impor
 .control-session .nav-logout{margin-left:auto}
 .control-session .nav-logout .control-icon-button{font-size:1.05rem}
 
+/* Local Control Center battery indicators; reuse UPS state colors. */
+.control-battery-indicators{display:flex;align-items:center;gap:.65rem;flex-wrap:wrap}
+.control-battery-indicators[hidden]{display:none}
+.control-battery-indicator{display:inline-flex;align-items:center;gap:.3rem}
+.control-battery-icon{position:relative;display:inline-flex;align-items:center;justify-content:center;min-width:2.7rem;min-height:1.3rem;padding:0 .15rem;border:1px solid currentColor;border-radius:3px}
+.control-battery-icon::after{content:"";position:absolute;right:-4px;width:3px;height:.6rem;background:currentColor;border-radius:0 2px 2px 0}
+
 @media(max-width:900px){
   .dashboard-live-panels{grid-template-columns:1fr}
 }

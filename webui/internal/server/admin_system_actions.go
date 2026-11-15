@@ -17,6 +17,8 @@ type adminSystemActionsAPI interface {
 
 func (a *App) registerAdminSystemActionPages(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/system-actions", a.systemActionsStatus)
+	mux.HandleFunc("GET /api/system-hardware", a.systemHardwareStatus)
+	mux.HandleFunc("POST /api/system-actions/display", a.systemHardwareAction)
 	mux.HandleFunc("POST /api/system-actions/{action}", a.systemAction)
 }
 

@@ -58,6 +58,8 @@ var runAdminSystemActionHelper = func(ctx context.Context, args ...string) ([]by
 
 func registerAdminSystemActionRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("GET /v1/admin/system/actions", s.adminSystemActionsStatus)
+	mux.HandleFunc("GET /v1/system/hardware", s.systemHardwareStatus)
+	mux.HandleFunc("POST /v1/admin/system/display", s.systemHardwareAction)
 	mux.HandleFunc("POST /v1/admin/system/reboot", func(w http.ResponseWriter, r *http.Request) {
 		s.adminSystemAction(w, r, "reboot")
 	})
