@@ -126,6 +126,13 @@ for key in ALMALINUX_MANTISBT_PROJECT ALMALINUX_MANTISBT_PROJECT_VERSION REDHAT_
 done
 chmod 0644 "${OS_RELEASE_FILES[@]}"
 
+# bootupd uses /etc/system-release for the firmware/UEFI product name.
+# JustVoxel owns this file; AlmaLinux provenance remains in /etc/almalinux-release
+# and the existing os-release metadata.
+rm -f /etc/system-release
+printf '%s\n' 'JustVoxel release 10' > /etc/system-release
+chmod 0644 /etc/system-release
+
 install -d -m0755 /usr/lib/justvoxel
 printf '%s\n' "${IMAGE_VARIANT_ID}" > /usr/lib/justvoxel/variant
 chmod 0644 /usr/lib/justvoxel/variant

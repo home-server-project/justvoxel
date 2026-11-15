@@ -20,6 +20,13 @@ source /usr/lib/os-release
 [[ "${HOME_SERVER_BASE_UPSTREAM_PLATFORM_ID:-}" == "platform:el10" ]]
 [[ "${HOME_SERVER_BASE_UPSTREAM_CPE_NAME:-}" == cpe:/o:almalinux:* ]]
 
+test -e /etc/system-release
+test -f /etc/system-release
+test ! -L /etc/system-release
+cmp -s /etc/system-release <(printf '%s\n' 'JustVoxel release 10')
+test -f /etc/almalinux-release
+grep -Eq '^AlmaLinux release 10([.][0-9]+)?([[:space:]]|$)' /etc/almalinux-release
+
 for cmd in \
     bootc podman skopeo just mjust fzf gum btop glances \
     tar gzip less ip python3 ping \
