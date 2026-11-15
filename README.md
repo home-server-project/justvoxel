@@ -24,6 +24,7 @@ Choose **JustVoxel HWS** when JustVoxel will run directly on a physical computer
 
 HWS adds packages useful on physical machines, including:
 
+- AMD and Intel GPU firmware for physical displays
 - UPS support through Network UPS Tools (NUT)
 - SMART, NVMe, Btrfs, and disk-management utilities
 - hardware sensors and diagnostics
