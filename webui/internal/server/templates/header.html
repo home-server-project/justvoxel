@@ -224,37 +224,35 @@
           </section>
           <section class="panel" data-gateway-details hidden></section>
           <section data-gateway-telegram hidden aria-labelledby="telegram-title">
-            <div class="form-actions">
-              <button class="button" type="button" data-telegram-back>Back to Add</button>
-              <h3 id="telegram-title">Telegram</h3>
-            </div>
-            <p class="muted">Telegram works independently of the Gateway switch. It uses Read Only and Server Management permissions, not AI/API access levels.</p>
-            <p role="status" data-telegram-feedback></p>
             <div data-telegram-content data-telegram-csrf="{{.CSRF}}">
-              <section class="panel">
-                <h3>Bot connection</h3>
-                <p class="muted">Use a dedicated Telegram bot. JustVoxel connects outward; no webhook or AI service is needed.</p>
-                <p data-telegram-status>Disconnected</p>
-                <form data-telegram-token-form autocomplete="off">
-                  <label>Bot token <input type="password" name="token" autocomplete="off" data-password-ui="off" data-telegram-token required></label>
-                  <button class="button" type="submit">Save or replace token</button>
+              <div class="telegram-lane">
+                <img class="gateway-provider-icon" src="/static/ai-providers/telegram.svg" alt="">
+                <h3 id="telegram-title">Telegram</h3>
+                <label class="gateway-switch"><input type="checkbox" role="switch" data-telegram-enabled> Enable Telegram</label>
+                <span class="gateway-connection-state" data-telegram-status>Disconnected</span>
+              </div>
+              <div class="telegram-lane">
+                <strong>Bot</strong>
+                <form class="telegram-controls" data-telegram-token-form autocomplete="off">
+                  <input type="password" name="token" aria-label="Bot token" autocomplete="off" data-password-ui="off" data-telegram-token required>
+                  <button class="button" type="submit">Save</button>
+                  <button class="button" type="button" data-telegram-token-cancel hidden>Cancel</button>
                 </form>
-                <div class="form-actions">
-                  <button class="button" type="button" data-telegram-verify>Verify bot</button>
-                  <label><input type="checkbox" data-telegram-enabled> Enable Telegram</label>
-                  <button class="button" type="button" data-telegram-disconnect>Disconnect completely</button>
+                <div class="telegram-controls" data-telegram-bot-actions hidden>
+                  <button class="button" type="button" data-telegram-verify>Verify</button>
+                  <button class="button" type="button" data-telegram-replace>Replace token</button>
+                  <button class="button" type="button" data-telegram-disconnect>Disconnect</button>
                 </div>
-                <p class="muted">Replacing the token removes approved users. Disconnection removes the saved token, approvals and pairing requests.</p>
-              </section>
-              <section class="panel">
-                <h3>Approved Telegram users</h3>
-                <p class="muted">Read Only can view appliance and server information. Server Management can also control existing servers, backups, Network and supported updates or reboot. Notifications are optional.</p>
+              </div>
+              <div class="telegram-lane">
+                <strong>Access</strong>
                 <button class="button" type="button" data-telegram-pair>Pair user</button>
-                <p data-telegram-challenge></p>
-                <div data-telegram-pending></div>
-                <div data-telegram-users></div>
-              </section>
-              <section class="panel"><h3>Operation status</h3><p data-telegram-operation>No Telegram operations yet.</p></section>
+                <div class="telegram-controls" data-telegram-pending></div>
+                <span class="muted" data-telegram-challenge></span>
+              </div>
+              <div data-telegram-users></div>
+              <p class="telegram-status">Status: <span data-telegram-operation>No Telegram operations yet.</span></p>
+              <p role="status" data-telegram-feedback></p>
             </div>
           </section>
           <section data-gateway-discord hidden aria-labelledby="discord-title">

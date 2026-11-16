@@ -587,7 +587,7 @@
       if (busy) return;
       details.replaceChildren();
       showSurface('telegram');
-      find('[data-telegram-back]').focus();
+      find('[data-telegram-enabled]').focus();
     });
     const discordCard = form.querySelector('[data-discord-card]');
     if (c.id) discordCard.remove();
@@ -709,10 +709,6 @@
     renderSettings({name: '', purpose: 'OpenAI', auth_mode: 'oauth_local', level: 1, enabled: true, all_instances: true, instance_ids: []});
   };
   find('[data-gateway-add]').addEventListener('click', showAdd);
-  find('[data-telegram-back]').addEventListener('click', () => {
-    showAdd();
-    details.querySelector('[data-telegram-select]')?.focus();
-  });
   find('[data-discord-back]').addEventListener('click', () => {
     showAdd();
     details.querySelector('[data-discord-select]')?.focus();

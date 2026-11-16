@@ -1279,15 +1279,20 @@ func TestApprovedControlCenterLayout(t *testing.T) {
 	}
 	gateway := regexp.MustCompile(`(?s)<dialog[^>]*data-agent-gateway-dialog.*?</dialog>`).FindString(markup)
 	telegram := regexp.MustCompile(`(?s)<section data-gateway-telegram.*?<section data-gateway-discord`).FindString(gateway)
-	if telegram == "" || !strings.Contains(telegram, `data-telegram-back>Back to Add`) || !strings.Contains(telegram, "independently of the Gateway switch") {
-		t.Fatal("Telegram management and Back must remain inside AI & API Connections")
+	if telegram == "" || !strings.Contains(telegram, `class="telegram-lane"`) || !strings.Contains(telegram, `/static/ai-providers/telegram.svg`) {
+		t.Fatal("Telegram must use compact lanes inside AI & API Connections")
+	}
+	for _, obsolete := range []string{"data-telegram-back", "Back to Add", "Bot connection", "Approved Telegram users", "Operation status", `class="panel"`, "independently of the Gateway switch"} {
+		if strings.Contains(telegram, obsolete) {
+			t.Fatalf("obsolete Telegram surface structure: %s", obsolete)
+		}
 	}
 	for _, field := range []string{`name="name"`, `name="level"`, `name="enabled"`, `name="server_scope"`, `data-gateway-oauth`} {
 		if strings.Contains(telegram, field) {
 			t.Fatalf("ordinary connection field assigned to Telegram: %s", field)
 		}
 	}
-	for _, control := range []string{"status", "token", "verify", "enabled", "disconnect", "pair", "pending", "users", "operation"} {
+	for _, control := range []string{"status", "token", "token-cancel", "replace", "verify", "enabled", "disconnect", "pair", "pending", "users", "operation"} {
 		if !strings.Contains(telegram, "data-telegram-"+control) {
 			t.Fatalf("Telegram management control missing: %s", control)
 		}

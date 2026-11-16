@@ -357,10 +357,10 @@ test('Telegram selection uses the internal surface and restores feedback on retu
   assert.equal(h.node('[data-gateway-telegram]').hidden, false);
   assert.equal(h.node('[data-gateway-feedback]').hidden, true);
   assert.equal(h.node('[data-gateway-add]')['aria-selected'], 'true');
-  assert.equal(h.node('[data-telegram-back]').focused, true);
+  assert.equal(h.node('[data-telegram-enabled]').focused, true);
   assert.equal(h.events.at(-1).type, 'gateway-surface-change');
   assert.equal(h.events.at(-1).detail, 'telegram');
-  h.node('[data-telegram-back]').listeners.click();
+  h.node('[data-gateway-add]').listeners.click();
   assert.equal(h.details.hidden, false);
   assert.equal(h.node('[data-gateway-telegram]').hidden, true);
   assert.equal(h.node('[data-gateway-feedback]').hidden, false);
