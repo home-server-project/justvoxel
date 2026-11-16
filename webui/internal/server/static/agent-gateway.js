@@ -551,10 +551,10 @@
     for (const step of [
       'Open AI & API Connections → Add → Telegram.',
       'Create a dedicated Telegram bot with BotFather.',
-      'Enter the bot token and choose Save or replace token, then Verify bot.',
+      'Enter Bot Token and choose Save. Save automatically verifies the bot.',
       'Enable Telegram, then select Pair user.',
-      'Send the generated one-time /start <challenge> in a private chat with the bot.',
-      'The primary administrator must check and explicitly approve the numeric Telegram user ID. Choose Read Only or Server Management. Notifications are optional.',
+      'Copy the exact one-time /start <challenge> command and send it in a private chat with the bot.',
+      'Telegram acknowledges the request and WebUI automatically shows the numeric ID. The primary administrator must check and explicitly approve the numeric Telegram user ID. Choose Read Only or Server Management from the permission dropdown. Notifications are optional.',
     ]) steps.append(text('li', step));
     host.append(steps,
       text('p', 'Telegram uses outbound long polling. No webhook, inbound port, or AI model is required.'),

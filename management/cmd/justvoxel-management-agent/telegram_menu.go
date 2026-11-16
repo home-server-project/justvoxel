@@ -92,39 +92,93 @@ func (s *server) telegramCommand(ctx context.Context, v *telegramState, id int64
 		s.telegramSend(ctx, v, id, "Use /menu or /help.", nil)
 	}
 }
-func (s *server) telegramMenu(ctx context.Context, v *telegramState, id int64) {
-	if !telegramAllowed(v, id, "menu") {
-		return
+func telegramMainChoices() []telegramChoice {
+	return []telegramChoice{
+		telegramOption("Appliance", "appliance_menu", "", nil),
+		telegramOption("Minecraft servers", "servers_menu", "", nil),
+		telegramOption("Minecraft Network", "network_menu", "", nil),
+		telegramOption("OS updates", "os_menu", "", nil),
+		telegramOption("Notifications", "notifications", "", nil),
 	}
-	choices := []telegramChoice{telegramOption("Appliance status", "status", "", nil), telegramOption("Minecraft Network / Velocity", "network_menu", "", nil), telegramOption("OS updates", "system_updates", "", nil), telegramOption("Check OS updates", "system_update_check", "", nil), telegramOption("Download OS update", "system_download", "", nil), telegramOption("Reboot options", "reboot_menu", "", nil), telegramOption("Notifications", "notifications", "", nil)}
+}
+func (s *server) telegramMenu(ctx context.Context, v *telegramState, id int64) {
+	s.telegramSend(ctx, v, id, "JustVoxel", telegramMainChoices())
+}
+func (s *server) telegramServersMenu(ctx context.Context, v *telegramState, id int64) {
 	instances, err := minecraftInstances.listInstances("")
 	if err != nil {
 		s.telegramSend(ctx, v, id, "Server inventory unavailable.", nil)
 		return
 	}
+	names := map[string]int{}
 	for _, instance := range instances {
-		label := instance.DisplayName
-		if label == "" {
-			label = instance.ID
-		}
-		choices = append(choices, telegramOption(label+" ("+instance.ID+")", "instance_menu", instance.ID, nil))
-	}
-	s.telegramSend(ctx, v, id, "JustVoxel — choose an appliance or Minecraft server action.", choices)
-}
-func (s *server) telegramInstanceMenu(ctx context.Context, v *telegramState, id int64, instance string) {
-	if !instanceIDPattern.MatchString(instance) {
-		return
-	}
-	if _, err := instanceRuntimes.readRecord(instance); err != nil {
-		s.telegramSend(ctx, v, id, "That server is unavailable.", nil)
-		return
+		names[telegramHuman(instance.DisplayName)]++
 	}
 	choices := []telegramChoice{}
-	for _, item := range [][2]string{{"Status", "instance_status"}, {"Server details", "instance_details"}, {"Players", "players"}, {"Backup inventory", "backups"}, {"Backup status", "backup_status"}, {"Minecraft updates", "version_status"}, {"Container updates", "container_status"}, {"Minecraft update progress", "version_update_status"}, {"Container update progress", "container_update_status"}, {"Start", "instance_start"}, {"Stop", "instance_stop"}, {"Restart", "instance_restart"}, {"Back up now", "backup_now"}, {"Review Minecraft update", "version_review"}, {"Review container update", "container_review"}} {
+	for _, instance := range instances {
+		label := telegramHuman(instance.DisplayName)
+		if label == "" {
+			label = instance.ID
+		} else if names[label] > 1 {
+			label += " (" + instance.ID + ")"
+		}
+		choices = append(choices, telegramOption(label, "instance_menu", instance.ID, nil))
+	}
+	choices = append(choices, telegramOption("Main menu", "menu", "", nil))
+	s.telegramSend(ctx, v, id, "Minecraft servers", choices)
+}
+func telegramServerChoices(instance string, state instanceRuntimeStatus) []telegramChoice {
+	choices := []telegramChoice{}
+	for _, item := range [][2]string{{"Status", "instance_status"}, {"Players", "players"}, {"Backups", "backups_menu"}, {"Updates", "updates_menu"}} {
 		choices = append(choices, telegramOption(item[0], item[1], instance, nil))
 	}
-	choices = append(choices, telegramOption("Enable Start on Boot", "start_on_boot", instance, map[string]bool{"enabled": true}), telegramOption("Disable Start on Boot", "start_on_boot", instance, map[string]bool{"enabled": false}), telegramOption("Main menu", "menu", "", nil))
-	s.telegramSend(ctx, v, id, "Minecraft server "+instance, choices)
+	if state.State == "running" {
+		choices = append(choices, telegramOption("Stop", "instance_stop", instance, nil), telegramOption("Restart", "instance_restart", instance, nil))
+	} else if state.State == "stopped" || state.State == "configured" || state.State == "failed" {
+		choices = append(choices, telegramOption("Start", "instance_start", instance, nil))
+	}
+	choices = append(choices, telegramOption("Start on Boot: "+telegramEnabled(state.StartOnBoot), "start_on_boot", instance, map[string]bool{"enabled": !state.StartOnBoot}), telegramOption("Minecraft servers", "servers_menu", "", nil), telegramOption("Main menu", "menu", "", nil))
+	return choices
+}
+func (s *server) telegramInstanceMenu(ctx context.Context, v *telegramState, id int64, instance string) {
+	code, raw := s.telegramInvoke(ctx, v, id, telegramCallback{Operation: "instance_status", InstanceID: instance})
+	var state instanceRuntimeStatus
+	if code >= 400 || json.Unmarshal(raw, &state) != nil || state.State == "" {
+		s.telegramSend(ctx, v, id, telegramUnavailable, nil)
+		return
+	}
+	s.telegramSend(ctx, v, id, telegramInstanceName(instance), telegramServerChoices(instance, state))
+}
+func (s *server) telegramSubmenu(ctx context.Context, v *telegramState, id int64, cb telegramCallback) {
+	if !instanceIDPattern.MatchString(cb.InstanceID) {
+		return
+	}
+	title := "Backups"
+	items := [][2]string{{"Status", "backup_status"}, {"History", "backups"}, {"Back up now", "backup_now"}}
+	if cb.Operation == "updates_menu" {
+		title = "Updates"
+		items = [][2]string{{"Minecraft update", "version_status"}, {"Container update", "container_status"}}
+	}
+	choices := []telegramChoice{}
+	for _, item := range items {
+		choices = append(choices, telegramOption(item[0], item[1], cb.InstanceID, nil))
+	}
+	choices = append(choices, telegramOption("Server menu", "instance_menu", cb.InstanceID, nil), telegramOption("Main menu", "menu", "", nil))
+	s.telegramSend(ctx, v, id, telegramInstanceName(cb.InstanceID)+" — "+title, choices)
+}
+func (s *server) telegramOSMenu(ctx context.Context, v *telegramState, id int64, operation string) {
+	code, raw := s.telegramInvoke(ctx, v, id, telegramCallback{Operation: operation})
+	var status adminSystemUpdateStatus
+	choices := []telegramChoice{telegramOption("Check for updates", "system_update_check", "", nil)}
+	if code < 400 && json.Unmarshal(raw, &status) == nil {
+		if status.Staged != nil && status.RebootRequired {
+			choices = append(choices, telegramOption("Reboot options", "reboot_menu", "", nil))
+		} else if (status.Available != nil || status.CheckState == "update_available") && status.Staged == nil {
+			choices = append(choices, telegramOption("Download update", "system_download", "", nil))
+		}
+	}
+	choices = append(choices, telegramOption("Main menu", "menu", "", nil))
+	s.telegramSend(ctx, v, id, telegramResultText(operation, code, raw), choices)
 }
 func (s *server) telegramNetworkMenu(ctx context.Context, v *telegramState, id int64) {
 	code, raw := s.telegramInvoke(ctx, v, id, telegramCallback{Operation: "network_status"})
@@ -140,10 +194,15 @@ func (s *server) telegramNetworkMenu(ctx context.Context, v *telegramState, id i
 		} `json:"servers"`
 	}
 	if json.Unmarshal(raw, &status) != nil {
+		s.telegramSend(ctx, v, id, telegramUnavailable, nil)
 		return
 	}
 	expected := telegramNetworkFingerprint(status.Config)
-	choices := []telegramChoice{telegramOption("Enable Network", "network_change", "", map[string]any{"enabled": true, "expected": expected}), telegramOption("Disable Network", "network_change", "", map[string]any{"enabled": false, "expected": expected})}
+	label := "Enable Network"
+	if status.Config.Enabled {
+		label = "Disable Network"
+	}
+	choices := []telegramChoice{telegramOption(label, "network_change", "", map[string]any{"enabled": !status.Config.Enabled, "expected": expected})}
 	for _, server := range status.Servers {
 		selected := networkContains(status.Config.Members, server.ID)
 		if !selected && !server.Eligible {
@@ -155,10 +214,10 @@ func (s *server) telegramNetworkMenu(ctx context.Context, v *telegramState, id i
 				members = append(members, member)
 			}
 		}
-		label := "Remove " + server.ID
+		label := "Remove " + telegramInstanceName(server.ID)
 		if !selected {
 			members = append(members, server.ID)
-			label = "Select " + server.ID
+			label = "Select " + telegramInstanceName(server.ID)
 		}
 		choices = append(choices, telegramOption(label, "network_change", "", map[string]any{"members": members, "expected": expected}))
 	}
@@ -210,22 +269,23 @@ func (s *server) telegramRebootMenu(ctx context.Context, v *telegramState, id in
 	}
 	var status adminSystemUpdateStatus
 	if json.Unmarshal(raw, &status) != nil {
+		s.telegramSend(ctx, v, id, telegramUnavailable, nil)
 		return
 	}
-	choices := []telegramChoice{telegramOption("Ordinary reboot", "reboot", "", adminSystemActionRequest{ActionConfirmed: true})}
+	choices := []telegramChoice{}
 	if status.Staged != nil && status.RebootRequired {
 		for _, seconds := range []int{60, 10} {
 			for _, backup := range []bool{true, false} {
-				label := fmt.Sprintf("Update reboot · %ds warning", seconds)
+				label := fmt.Sprintf("Update reboot · %d sec", seconds)
 				if backup {
-					label += " · backup first"
+					label += " · backup"
 				}
 				choices = append(choices, telegramOption(label, "update_reboot", "", adminSystemUpdateRebootRequest{ActionConfirmed: true, WarningSeconds: seconds, BackupMinecraft: backup, StagedDigest: status.Staged.Digest}))
 			}
 		}
 	}
-	choices = append(choices, telegramOption("Cancel", "menu", "", nil))
-	s.telegramSend(ctx, v, id, telegramResultText("system_updates", code, raw)+"\nReboot needs explicit confirmation. Update reboot options apply only to a verified downloaded or staged update.", choices)
+	choices = append(choices, telegramOption("Ordinary reboot", "reboot", "", adminSystemActionRequest{ActionConfirmed: true}), telegramOption("Cancel", "menu", "", nil))
+	s.telegramSend(ctx, v, id, telegramRebootText(status), choices)
 }
 func (s *server) telegramDispatch(ctx context.Context, v *telegramState, id int64, cb telegramCallback) {
 	if !telegramAllowed(v, id, cb.Operation) {
@@ -237,6 +297,22 @@ func (s *server) telegramDispatch(ctx context.Context, v *telegramState, id int6
 	switch cb.Operation {
 	case "menu":
 		s.telegramMenu(ctx, v, id)
+		return
+	case "appliance_menu":
+		s.telegramSend(ctx, v, id, "Appliance", []telegramChoice{telegramOption("Status", "status", "", nil), telegramOption("Reboot options", "reboot_menu", "", nil), telegramOption("Main menu", "menu", "", nil)})
+		return
+	case "servers_menu":
+		s.telegramServersMenu(ctx, v, id)
+		return
+	case "backups_menu", "updates_menu":
+		s.telegramSubmenu(ctx, v, id, cb)
+		return
+	case "os_menu", "system_updates", "system_update_check":
+		operation := "system_updates"
+		if cb.Operation == "system_update_check" {
+			operation = cb.Operation
+		}
+		s.telegramOSMenu(ctx, v, id, operation)
 		return
 	case "instance_menu":
 		s.telegramInstanceMenu(ctx, v, id, cb.InstanceID)
@@ -267,7 +343,7 @@ func (s *server) telegramDispatch(ctx context.Context, v *telegramState, id int6
 		if user.Notifications {
 			label = "Disable notifications"
 		}
-		s.telegramSend(ctx, v, id, "Notifications: "+strconv.FormatBool(user.Notifications), []telegramChoice{telegramOption(label, "notifications_toggle", "", nil), telegramOption("Main menu", "menu", "", nil)})
+		s.telegramSend(ctx, v, id, "Notifications: "+telegramEnabled(user.Notifications), []telegramChoice{telegramOption(label, "notifications_toggle", "", nil), telegramOption("Main menu", "menu", "", nil)})
 		return
 	}
 	op, exists := s.telegramOperations()[cb.Operation]
@@ -279,14 +355,14 @@ func (s *server) telegramDispatch(ctx context.Context, v *telegramState, id int6
 		label := "Confirm " + strings.ReplaceAll(cb.Operation, "_", " ")
 		preview := "Confirm this action"
 		if cb.InstanceID != "" {
-			preview += " for " + cb.InstanceID
+			preview += " for " + telegramInstanceName(cb.InstanceID)
 		}
 		if cb.Operation == "update_reboot" {
 			var reboot adminSystemUpdateRebootRequest
 			if json.Unmarshal(cb.Body, &reboot) != nil {
 				return
 			}
-			preview += fmt.Sprintf(". Reboot into the reviewed update with a %d-second warning; backup before reboot: %t", reboot.WarningSeconds, reboot.BackupMinecraft)
+			preview += fmt.Sprintf(". Reboot into the reviewed update with a %d-second warning; backup before reboot: %s", reboot.WarningSeconds, telegramYes(reboot.BackupMinecraft))
 		}
 		preview += ". Existing player and safety checks will run before interruption."
 		s.telegramSend(ctx, v, id, preview, []telegramChoice{{label, cb}, telegramOption("Cancel", "menu", "", nil)})
@@ -374,6 +450,9 @@ func (s *server) telegramDispatch(ctx context.Context, v *telegramState, id int6
 		v.OperationStatus = cb.Operation + "_accepted"
 	}
 	text := telegramResultText(cb.Operation, code, raw)
+	if code < 400 && cb.InstanceID != "" && text != telegramUnavailable && (cb.Operation == "backup_status" || cb.Operation == "version_update_status" || cb.Operation == "container_update_status") {
+		text = telegramInstanceName(cb.InstanceID) + " — " + text
+	}
 	if reboot && v.Reboot != nil && v.Reboot.State == "unverified" {
 		v.OperationStatus = "reboot_result_unknown"
 		text = "The reboot result could not be verified. The pending request is saved; JustVoxel will verify boot and deployment state before reporting a result."
@@ -381,7 +460,33 @@ func (s *server) telegramDispatch(ctx context.Context, v *telegramState, id int6
 	if s.store.telegramSave(*v, nil, "") != nil {
 		return
 	}
-	s.telegramSend(ctx, v, id, text, []telegramChoice{telegramOption("Main menu", "menu", "", nil)})
+	choices := []telegramChoice{}
+	if cb.Operation == "system_download" {
+		var status adminSystemUpdateStatus
+		if code < 400 && json.Unmarshal(raw, &status) == nil && status.Staged != nil && status.RebootRequired {
+			choices = append(choices, telegramOption("Reboot options", "reboot_menu", "", nil))
+		}
+		choices = append(choices, telegramOption("OS updates", "os_menu", "", nil))
+	}
+	if cb.InstanceID != "" {
+		if cb.Operation == "version_status" {
+			var plan adminVersionStatus
+			if code < 400 && json.Unmarshal(raw, &plan) == nil && plan.UpdateAvailable && operationFingerprintPattern.MatchString(plan.PlanFingerprint) {
+				choices = append(choices, telegramOption("Review Minecraft update", "version_review", cb.InstanceID, nil))
+			}
+			choices = append(choices, telegramOption("Progress", "version_update_status", cb.InstanceID, nil))
+		}
+		if cb.Operation == "container_status" {
+			var plan minecraftContainerStatus
+			if code < 400 && json.Unmarshal(raw, &plan) == nil && operationFingerprintPattern.MatchString(plan.PlanFingerprint) && (plan.State == "update_available" || plan.State == "restart_needed" || plan.State == "image_missing") {
+				choices = append(choices, telegramOption("Review container update", "container_review", cb.InstanceID, nil))
+			}
+			choices = append(choices, telegramOption("Progress", "container_update_status", cb.InstanceID, nil))
+		}
+		choices = append(choices, telegramOption("Server menu", "instance_menu", cb.InstanceID, nil))
+	}
+	choices = append(choices, telegramOption("Main menu", "menu", "", nil))
+	s.telegramSend(ctx, v, id, text, choices)
 	if reboot && v.Reboot != nil && code < 400 && outcome.Accepted {
 		s.telegramNotify(ctx, v, "reboot_started", v.Reboot.RequestedAt.Format(time.RFC3339Nano), "Reboot workflow started. Return to service and any OS update result will be verified after restart.", false)
 	}

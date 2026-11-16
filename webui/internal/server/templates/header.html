@@ -225,21 +225,21 @@
           <section class="panel" data-gateway-details hidden></section>
           <section data-gateway-telegram hidden aria-labelledby="telegram-title">
             <div data-telegram-content data-telegram-csrf="{{.CSRF}}">
-              <div class="telegram-lane">
-                <img class="gateway-provider-icon" src="/static/ai-providers/telegram.svg" alt="">
-                <h3 id="telegram-title">Telegram</h3>
+              <div class="telegram-lane telegram-header">
+                <div class="telegram-title"><img class="gateway-provider-icon" src="/static/ai-providers/telegram.svg" alt="">
+                <h3 id="telegram-title">Telegram</h3></div>
                 <label class="gateway-switch"><input type="checkbox" role="switch" data-telegram-enabled> Enable Telegram</label>
                 <span class="gateway-connection-state" data-telegram-status>Disconnected</span>
               </div>
               <div class="telegram-lane">
-                <strong>Bot</strong>
+                <strong>Bot Token</strong>
                 <form class="telegram-controls" data-telegram-token-form autocomplete="off">
-                  <input type="password" name="token" aria-label="Bot token" autocomplete="off" data-password-ui="off" data-telegram-token required>
+                  <input type="password" name="token" aria-label="Bot Token" autocomplete="off" data-password-ui="off" spellcheck="false" autocapitalize="off" data-telegram-token required>
                   <button class="button" type="submit">Save</button>
                   <button class="button" type="button" data-telegram-token-cancel hidden>Cancel</button>
                 </form>
                 <div class="telegram-controls" data-telegram-bot-actions hidden>
-                  <button class="button" type="button" data-telegram-verify>Verify</button>
+                  <button class="button" type="button" data-telegram-verify hidden>Retry</button>
                   <button class="button" type="button" data-telegram-replace>Replace token</button>
                   <button class="button" type="button" data-telegram-disconnect>Disconnect</button>
                 </div>
@@ -248,7 +248,9 @@
                 <strong>Access</strong>
                 <button class="button" type="button" data-telegram-pair>Pair user</button>
                 <div class="telegram-controls" data-telegram-pending></div>
-                <span class="muted" data-telegram-challenge></span>
+                <code data-telegram-challenge></code>
+                <button class="button" type="button" data-telegram-copy hidden>Copy</button>
+                <small class="muted" data-telegram-expiry></small>
               </div>
               <div data-telegram-users></div>
               <p class="telegram-status">Status: <span data-telegram-operation>No Telegram operations yet.</span></p>

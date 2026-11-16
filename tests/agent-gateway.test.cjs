@@ -838,7 +838,7 @@ test('Telegram Help uses its local icon and a dedicated guide without gateway co
   assert.equal(guide.children[0].children[0].src, '/static/ai-providers/telegram.svg');
   for (const phrase of [
     'AI & API Connections → Add → Telegram', 'dedicated Telegram bot with BotFather',
-    'Save or replace token', 'Verify bot', 'Enable Telegram', 'Pair user',
+    'Enter Bot Token', 'Save automatically verifies', 'Enable Telegram', 'Pair user',
     'one-time /start <challenge>', 'private chat', 'primary administrator',
     'check and explicitly approve the numeric Telegram user ID', 'Read Only or Server Management',
     'Notifications are optional', 'outbound long polling', 'No webhook, inbound port, or AI model is required',

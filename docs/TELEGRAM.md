@@ -18,19 +18,32 @@ backend state.
 
 ## Connect and pair
 
-1. Create a dedicated bot using Telegram's BotFather. Do not run another polling
-   app or webhook with the same bot.
-2. Sign in to JustVoxel as the primary `voxel` administrator and open
-   **Control Center → AI & API Connections → Add → Telegram**.
-   Use **Back to Add** to return to the provider cards. The Gateway switch does
-   not disable Telegram, and Telegram does not create an AI/API connection.
-3. Enter the bot token, choose **Save or replace token**, then **Verify bot**.
-   Verification checks the bot identity and refuses a configured webhook.
-4. Enable Telegram. The connection status shows connection/retry/paused state.
-5. Choose **Pair user**. Give the intended person the one-time `/start …`
-   challenge, to send in a **private chat** with the bot within ten minutes.
-6. Refresh Telegram settings. Check the numeric Telegram user ID with that person,
-   choose a permission and notification preference, and explicitly approve them.
+Create a dedicated bot using Telegram's BotFather. Do not run another polling
+app or webhook with the same bot. Sign in as the primary `voxel` administrator
+and open **Control Center → AI & API Connections → Add → Telegram**.
+
+1. Enter **Bot Token**.
+2. Choose **Save**. JustVoxel automatically verifies the bot identity and checks
+   that it has no configured webhook. If verification fails, the token stays
+   saved; choose **Retry** or **Replace token**.
+3. Enable Telegram. **Bot verified** and **Connected** are distinct states.
+4. Choose **Pair user**.
+5. Choose **Copy** to copy the exact `/start <challenge>` command, then send it in
+   a **private chat** with the bot within ten minutes. On LAN HTTP, Copy uses a
+   clipboard fallback; if copying is unavailable, the command is selected for Ctrl+C.
+6. Telegram acknowledges the pairing request, which still requires approval.
+7. WebUI automatically shows the numeric Telegram user ID. Check it with that person.
+8. Choose **Read Only** or **Server Management** from the permission dropdown and
+   choose whether to enable Notifications. These choices survive automatic refresh.
+9. Choose **Approve**.
+
+The command is shown separately from prose and kept only in browser memory while
+waiting for a claim. It disappears on claim, expiry, credential replacement,
+disconnect, or leaving Telegram. Settings refresh cannot retrieve it again.
+Configured bots show **Replace token** and **Disconnect**; a verified bot needs no
+manual verification step. Replacement reveals a temporary token field with
+**Save** and **Cancel**. Saving a replacement automatically verifies it without
+enabling Telegram.
 
 Pressing Start alone never grants access. A pairing challenge can be claimed
 only once, and claiming it does not approve the user. Usernames and display names
@@ -48,7 +61,7 @@ Telegram's HTTPS protocol necessarily includes the token in requests to its fixe
 API host; redirects are refused and URL-bearing transport errors are discarded.
 
 Replacing the credential disables Telegram and removes old approvals and
-pairings; verify, enable and pair again. **Disconnect completely** removes the
+pairings; after automatic verification, enable and pair again. **Disconnect** removes the
 saved credential, approvals, challenges, buttons, observations, and pending
 Telegram notification state. It does not cancel an already accepted appliance
 operation. Full Factory Reset revokes Telegram access before destructive cleanup;
@@ -73,12 +86,26 @@ operations, unrestricted settings, or power off. The Management Agent's explicit
 Telegram allowlist enforces these boundaries; buttons are not authorization.
 There is no external Telegram execute endpoint or generic privileged proxy.
 
-Use `/menu`, `/status`, `/notifications`, or `/help`. The menu lists existing
-instances, then offers the permitted inline-button actions. `/version <instance
-ID> [recommended|latest|pinned] [version]` reviews a supported Minecraft update
-selection; the existing exact version/loader/software compatibility policy still
-applies. Container updates use the reviewed existing workflow with a backup and
-restart. Existing update operation tracking and recovery remain authoritative.
+Use `/menu`, `/status`, `/notifications`, or `/help`. The main menu contains
+**Appliance**, **Minecraft servers**, **Minecraft Network**, **OS updates**, and
+**Notifications**. Minecraft servers lists display names; selecting one loads its
+current state and shows Status, Players, Backups and Updates. Running servers
+have Stop and Restart; stopped servers have Start. A single **Start on Boot**
+button shows the current preference. Management actions are visible only to
+Server Management users.
+
+Backups contains Status, History and Back up now. Updates contains Minecraft
+update and Container update, with review/apply and progress actions. Each submenu
+has a route back to its parent and the main menu. Status responses are concise
+human summaries, without raw JSON, private paths, logs, fingerprints, image
+references or digests. Missing or unreadable status directs the user to WebUI.
+Notifications shows **Enabled** or **Disabled**.
+
+`/version <instance ID> [recommended|latest|pinned] [version]` reviews a supported
+Minecraft update selection; the existing exact version/loader/software
+compatibility policy still applies. Container updates use the reviewed existing
+workflow with a backup and restart. Existing update tracking and recovery remain
+authoritative.
 
 Every management action has a deliberate confirmation. Stop/restart first use
 explicit player-check mode; when players are online, a separate button confirms
@@ -154,67 +181,8 @@ recorded as consumed before dispatch, so interruption can leave a command result
 unconfirmed; review appliance status rather than blindly retrying it. Existing
 operation locks, fingerprints and recovery evidence remain authoritative.
 
-## Source verification
-
-Source verification covers focused tests and security/recovery boundaries. It
-does not establish image build, GitHub Actions, real Telegram interaction,
-reboot/activation, rendered workspace, or human VM acceptance; those require
-separate validation.
-
-New focused tests include:
-
-- `TestGatewayMinecraftNetworkCatalogLevelsAndApplianceScope`
-- `TestGatewayMinecraftNetworkProjectionOmitsUnauthorizedInstancesAndSecrets`
-- `TestTelegramIndependentPermissionAllowlist`
-- `TestTelegramPairingRequiresChallengeAndExplicitHumanApproval`
-- `TestTelegramPairChallengeExpiresAndIsNotRedisplayed`
-- `TestTelegramAdministrationRejectsNonHumanAndNonPrimaryPrincipals`
-- `TestTelegramCallbackBindsIdentityOperationInstanceAndExpires`
-- `TestTelegramRevocationAndDowngradeInvalidateOldButtons`
-- `TestTelegramCredentialReplacementAndCompleteDisconnect`
-- `TestTelegramVerificationRejectsWebhookAndNeverReturnsCredential`
-- `TestTelegramUpdateConsumptionAndUnknownStartCannotAuthorize`
-- `TestTelegramGroupAndForwardedCallbacksDoNotExposeInformation`
-- `TestTelegramNotificationOptInDedupAndRestartPersistence`
-- `TestTelegramRebootResultRequiresNewBootExpectedDeploymentAndHealth`
-- `TestTelegramPendingRebootSurvivesStoreReload`
-- `TestTelegramSanitizationDropsSecretsPathsAndRawLogs`
-- `TestTelegramFactoryRevocationIsDurableAndIndependentOfGateway`
-- `TestTelegramTransportNeverReturnsTokenBearingErrors`
-- `TestTelegramTransportRejectsUnlistedMethodsAndConsumerConflict`
-- `TestTelegramDisableCancelsPollingAndInvalidatesCallbacks`
-- `TestTelegramManagementRequiresConfirmationBeforeDispatch`
-- `TestTelegramRebootMenuBindsStagedDigestWarningAndBackupChoices`
-- `TestTelegramStartOnBootPreservesUnrelatedRuntimeSettings`
-- `TestTelegramNarrowSettingsRejectGeneralConfiguration`
-- `TestTelegramNetworkMembershipRequiresStoppedAffectedServers`
-- `TestTelegramNetworkFingerprintPreservesLegacyWhitelistDefault`
-- `TestTelegramWorkspacePrimaryAdministratorBoundary`
-- `TestTelegramWorkspaceCSRFAndTokenSubmission`
-- `TestTelegramAdministrationUsesExistingAuthenticatedUnixClient`
-
-The existing WebUI REST/MCP catalog tests also cover the Network routes. Existing
-identity migrations retain their history; the new additive migration defaults
-Telegram to disconnected and leaves gateway credentials/levels unchanged.
-
-Additional boundary/recovery tests:
-
-- `TestTelegramAgentDeniesUnconfirmedOrForbiddenManagementCalls`
-- `TestTelegramTransportRefusesRedirects`
-- `TestTelegramCorruptStateCanDisconnectWithoutStrandingReset`
-- `TestTelegramSettingsRejectDuplicateKeysAndTrailingJSON`
-
-If Telegram-only settings become unreadable, **Disconnect completely** remains
-available to the authenticated primary administrator. It removes only Telegram
-credentials and approvals; it does not edit appliance operation journals. Factory
-Reset revocation also removes malformed Telegram-only settings without trusting
-them, so they cannot permanently block reset recovery.
-
-`TestTelegramEnableIsIndependentOfDisabledAIGateway` covers the separate switches.
-
-Reboot uncertainty is also covered by
-`TestTelegramUncertainRebootRetainsPendingEvidence` and
-`TestTelegramUnavailableDeploymentEventuallyReportsUnverifiedResult`.
-
-`TestGatewayNetworkFieldsDoNotExpandExistingResponsePolicy` checks that the new
-Network response fields do not broaden established gateway response contracts.
+If Telegram-only settings become unreadable, **Disconnect** remains available to
+the authenticated primary administrator. It removes only Telegram credentials
+and approvals; it does not edit appliance operation journals. Factory Reset
+revocation also removes malformed Telegram-only settings without trusting them,
+so they cannot permanently block reset recovery.

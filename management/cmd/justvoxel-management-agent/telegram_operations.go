@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -55,7 +54,7 @@ func telegramManagementOperation(name string) (known, management bool) {
 		return true, op.Management
 	}
 	switch name {
-	case "menu", "instance_menu", "network_menu", "notifications", "notifications_toggle":
+	case "menu", "appliance_menu", "servers_menu", "backups_menu", "updates_menu", "instance_menu", "network_menu", "os_menu", "notifications", "notifications_toggle":
 		return true, false
 	case "version_review", "container_review", "reboot_menu":
 		return true, true
@@ -271,61 +270,6 @@ func (s *server) changeMinecraftNetwork(ctx context.Context, enabled *bool, memb
 		return networkApplyWithMaintenanceRelease(ctx, instanceRuntimes, c, release)
 	}()
 	return errors.Join(err, unlock())
-}
-
-// Telegram never forwards a raw operation payload. Only these presentation fields
-// can leave the appliance; credentials, paths, logs and arbitrary errors cannot.
-var telegramPublicFields = func() map[string]bool {
-	fields := strings.Fields(`operation operation_id operation_type stage started_at updated_at finished_at accepted confirmation_required action ok id instance_id display_name enabled state status start_on_boot software version loader_version java_port bedrock_port max_players online maximum configured servers config members eligible compatibility_status network_member recovery_required runtime_ready whitelist_enforced backups name created archive size last_attempt last_success archive_published restart_required installed available recommended selected_candidate update_available stack_state server_supported running staged reboot_required check_state activation_pending activation_failed activation_recoverable digest image image_state container minecraft system health uptime hostname release network runtime booted players count available_channel justvoxel webui management_api extended variant uptime_seconds physical_ram_kib failed_count`)
-	out := map[string]bool{}
-	for _, key := range fields {
-		out[key] = true
-	}
-	return out
-}()
-
-func telegramPublic(value any) any {
-	switch item := value.(type) {
-	case map[string]any:
-		out := map[string]any{}
-		for key, val := range item {
-			if telegramPublicFields[key] {
-				out[key] = telegramPublic(val)
-			}
-		}
-		return out
-	case []any:
-		out := []any{}
-		for i, val := range item {
-			if i >= 40 {
-				break
-			}
-			out = append(out, telegramPublic(val))
-		}
-		return out
-	case string:
-		if len(item) > 256 {
-			item = item[:256]
-		}
-		return gatewayCredentialText.ReplaceAllString(gatewayPrivatePath.ReplaceAllString(strings.ToValidUTF8(item, ""), "[private]"), "[private]")
-	default:
-		return value
-	}
-}
-func telegramResultText(operation string, code int, raw json.RawMessage) string {
-	if code >= 400 {
-		return "The operation could not complete. Review its current state and recovery information in JustVoxel."
-	}
-	var value any
-	if json.Unmarshal(raw, &value) != nil {
-		return "Status unavailable."
-	}
-	safe, _ := json.MarshalIndent(telegramPublic(value), "", "  ")
-	text := fmt.Sprintf("%s\n%s", strings.ReplaceAll(operation, "_", " "), safe)
-	if len(text) > 3500 {
-		text = strings.ToValidUTF8(text[:3500], "") + "\nMore details are available in JustVoxel."
-	}
-	return text
 }
 
 func telegramNetworkFingerprint(config minecraftNetworkConfig) string {

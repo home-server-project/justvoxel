@@ -19,25 +19,27 @@
   const userDrafts = new Map();
   let configured = false;
   let replacing = false;
+  let pairingCommand = '';
+  let pairingExpires = '';
+  let challengeTimer;
+  let verificationFailed = false;
   // Ignore responses from a surface session that has already been left.
   let generation = 0;
+  const clearPairingCommand = () => { pairingCommand = ''; pairingExpires = ''; clearTimeout(challengeTimer); challenge.textContent = ''; find('[data-telegram-copy]').hidden = true; find('[data-telegram-expiry]').textContent = ''; };
   const renderBot = () => {
     find('[data-telegram-token-form]').hidden = configured && !replacing;
     find('[data-telegram-bot-actions]').hidden = !configured || replacing;
     find('[data-telegram-token-cancel]').hidden = !configured || !replacing;
   };
   const permission = (draft, edited) => {
-    const group = node('div', ''); group.className = 'telegram-permission';
-    group.setAttribute('role', 'group'); group.setAttribute('aria-label', 'Permission');
-    const choices = [];
+    const group = node('label', 'Permission '); group.className = 'telegram-permission';
+    const select = document.createElement('select'); select.setAttribute('aria-label', 'Permission');
     for (const [key, label] of [['read_only', 'Read Only'], ['server_management', 'Server Management']]) {
-      const choice = button(label, () => {
-        draft.permission = key; edited();
-        for (const [value, control] of choices) control.setAttribute('aria-pressed', String(value === key));
-      });
-      choice.setAttribute('aria-pressed', String(draft.permission === key));
-      choices.push([key, choice]); group.append(choice);
+      const option = node('option', label); option.value = key; select.append(option);
     }
+    select.value = draft.permission;
+    select.addEventListener('change', () => { draft.permission = select.value; edited(); });
+    group.append(select);
     return group;
   };
   const notifications = (draft, edited) => {
@@ -63,12 +65,13 @@
     return response.json();
   };
   const render = snapshot => {
-    const labels = {disconnected: 'Disconnected', unverified: 'Token saved — verify the bot', verified: 'Bot verified', connecting: 'Connecting', connected: 'Connected', disabled: 'Disabled', connection_retry: 'Connection interrupted — retrying', connection_paused: 'Connection paused — verify the bot and enable again'};
+    const labels = {disconnected: 'Disconnected', unverified: 'Token saved — verification needed', verification_failed: 'Verification failed', verified: 'Bot verified', connecting: 'Connecting', connected: 'Connected', disabled: 'Disabled', connection_retry: 'Connection interrupted — retrying', connection_paused: 'Connection paused — verify the bot and enable again'};
     const status = find('[data-telegram-status]');
     status.textContent = `${snapshot.bot_name ? `@${snapshot.bot_name}  ` : ''}● ${labels[snapshot.status] || 'Connection unavailable'}`;
-    status.className = `gateway-connection-state${snapshot.status === 'connected' ? ' success' : ['connection_retry', 'connection_paused'].includes(snapshot.status) ? ' error' : ''}`;
+    status.className = `gateway-connection-state${['verified', 'connected'].includes(snapshot.status) ? ' success' : ['verification_failed', 'connection_retry', 'connection_paused'].includes(snapshot.status) ? ' error' : snapshot.status === 'unverified' ? ' warning' : ''}`;
     configured = Boolean(snapshot.configured); renderBot();
     enabled.checked = snapshot.enabled; enabled.disabled = !snapshot.verified;
+    find('[data-telegram-verify]').hidden = snapshot.verified;
     find('[data-telegram-verify]').disabled = !snapshot.configured;
     find('[data-telegram-pair]').disabled = !snapshot.enabled;
     find('[data-telegram-operation]').textContent = snapshot.operation_status ? snapshot.operation_status.replaceAll('_', ' ') : 'No Telegram operations yet.';
@@ -95,24 +98,43 @@
         pending.append(node('span', `User ${draft.id}`), permission(draft, () => {}), notifications(draft, () => {}),
           button('Approve', () => change({action: 'approve', user_id: draft.id, permission: draft.permission, notifications: draft.notifications})));
       }
-      const expiry = node('small', `Expires ${new Date(pairing.expires).toLocaleString()}`); expiry.className = 'muted'; pending.append(expiry);
-    } else challenge.textContent = '';
-    if (pairing && !pendingID && snapshot.pairing_command) challenge.textContent = `Send once in a private chat with the bot: ${snapshot.pairing_command}. Do not share this challenge. Verify the numeric user ID before approval.`;
+    }
+    if (!pairing || pendingID || !snapshot.configured || pairing.expires !== pairingExpires) clearPairingCommand();
+    challenge.textContent = pairingCommand;
+    find('[data-telegram-copy]').hidden = !pairingCommand;
+    find('[data-telegram-expiry]').textContent = pairing && !pendingID ? `Expires ${new Date(pairing.expires).toLocaleTimeString()}` : '';
   };
   const change = async payload => {
     if (busy || !active()) return;
     const requestGeneration = generation;
     busy = true; feedback.textContent = 'Saving…';
     try {
-      const snapshot = await send(payload);
+      let snapshot = await send(payload);
       if (requestGeneration !== generation || !active()) return;
       if (['approve', 'credential', 'disconnect'].includes(payload.action)) pendingDraft = null;
       const savedDraft = userDrafts.get(payload.user_id);
       if (payload.action === 'revoke' || (payload.action === 'user' && savedDraft?.permission === payload.permission && savedDraft?.notifications === payload.notifications)) userDrafts.delete(payload.user_id);
       if (['credential', 'disconnect'].includes(payload.action)) { userDrafts.clear(); replacing = false; }
-      render(snapshot); feedback.textContent = 'Saved.';
+      if (payload.action === 'pair') {
+        clearPairingCommand();
+        pairingCommand = snapshot.pairing_command || '';
+        pairingExpires = snapshot.pairing?.expires || '';
+        const remaining = new Date(pairingExpires).getTime() - Date.now();
+        if (pairingCommand && remaining > 0) challengeTimer = setTimeout(clearPairingCommand, remaining);
+        else clearPairingCommand();
+      }
+      if (['credential', 'disconnect'].includes(payload.action)) { clearPairingCommand(); verificationFailed = false; }
+      if (payload.action === 'credential') {
+        verificationFailed = false;
+        render(snapshot);
+        try { snapshot = await send({action: 'verify'}); }
+        catch (_) { verificationFailed = true; }
+        if (requestGeneration !== generation || !active()) return;
+      } else if (payload.action === 'verify') verificationFailed = false;
+      render(snapshot);
+      feedback.textContent = verificationFailed ? 'Token saved, but verification failed. Check the token or connection.' : 'Saved.';
     } catch (error) { if (requestGeneration === generation && active()) feedback.textContent = error.message; }
-    finally { if (payload && Object.hasOwn(payload, 'token')) payload.token = ''; token.value = ''; busy = false; if (!active()) clearSecrets(); }
+    finally { if (payload && Object.hasOwn(payload, 'token')) payload.token = ''; busy = false; if (!active()) clearSecrets(); }
   };
   const load = async () => {
     if (busy || !primary() || !active()) return;
@@ -120,19 +142,19 @@
     busy = true;
     try {
       const snapshot = await send();
-      if (requestGeneration === generation && active()) { render(snapshot); feedback.textContent = ''; }
+      if (requestGeneration === generation && active()) { render(snapshot); if (!verificationFailed) feedback.textContent = ''; }
     }
     catch (error) { if (requestGeneration === generation && active()) feedback.textContent = error.message; }
     finally { busy = false; if (!active()) clearSecrets(); }
   };
-  const clearSecrets = () => { token.value = ''; challenge.textContent = ''; };
-  const stop = () => { generation++; clearSecrets(); pendingDraft = null; userDrafts.clear(); replacing = false; renderBot(); clearInterval(refreshTimer); };
+  const clearSecrets = () => { token.value = ''; clearPairingCommand(); };
+  const stop = () => { generation++; verificationFailed = false; clearSecrets(); pendingDraft = null; userDrafts.clear(); replacing = false; renderBot(); clearInterval(refreshTimer); };
   dialog.addEventListener('gateway-surface-change', () => {
     stop();
     if (!active()) return;
     load();
     refreshTimer = setInterval(() => {
-      if (active() && !find('[data-telegram-content]').contains(document.activeElement)) load();
+      if (active()) load();
     }, 5000);
   });
   dialog.addEventListener('close', stop);
@@ -140,10 +162,30 @@
   dialog.addEventListener('telegram-refresh', load);
   window.addEventListener('pagehide', stop);
   find('[data-telegram-token-form]').addEventListener('submit', event => { event.preventDefault(); const value = token.value; token.value = ''; change({action: 'credential', token: value}); });
-  find('[data-telegram-replace]').addEventListener('click', () => { replacing = true; token.value = ''; renderBot(); token.focus(); });
+  find('[data-telegram-replace]').addEventListener('click', () => { replacing = true; clearPairingCommand(); token.value = ''; renderBot(); token.focus(); });
   find('[data-telegram-token-cancel]').addEventListener('click', () => { replacing = false; token.value = ''; renderBot(); find('[data-telegram-replace]').focus(); });
   find('[data-telegram-verify]').addEventListener('click', () => change({action: 'verify'}));
   enabled.addEventListener('change', () => change({action: 'enabled', enabled: enabled.checked}));
   find('[data-telegram-pair]').addEventListener('click', () => change({action: 'pair'}));
+  find('[data-telegram-copy]').addEventListener('click', async () => {
+    const command = pairingCommand;
+    if (!command) return;
+    let copied = false;
+    try { if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(command); copied = true; } } catch (_) { /* LAN HTTP fallback below. */ }
+    if (!copied) {
+      const textarea = document.createElement('textarea'); textarea.value = command;
+      textarea.setAttribute('readonly', ''); textarea.style.position = 'fixed'; textarea.style.opacity = '0';
+      document.body.append(textarea); textarea.select();
+      try { copied = document.execCommand('copy'); } catch (_) { /* Select the command below. */ }
+      textarea.remove();
+    }
+    if (command !== pairingCommand || !active()) return;
+    if (copied) { find('[data-telegram-copy]').textContent = 'Copied'; setTimeout(() => { find('[data-telegram-copy]').textContent = 'Copy'; }, 2000); }
+    else {
+      const range = document.createRange(); range.selectNodeContents(challenge);
+      const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+      feedback.textContent = 'Command selected. Press Ctrl+C to copy.';
+    }
+  });
   find('[data-telegram-disconnect]').addEventListener('click', () => change({action: 'disconnect'}));
 })();

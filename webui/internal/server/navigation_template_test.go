@@ -1292,6 +1292,14 @@ func TestApprovedControlCenterLayout(t *testing.T) {
 			t.Fatalf("ordinary connection field assigned to Telegram: %s", field)
 		}
 	}
+	for _, required := range []string{`<strong>Bot Token</strong>`, `class="telegram-lane telegram-header"`, `class="telegram-title"`, `data-telegram-copy`, `spellcheck="false"`, `autocapitalize="off"`, `data-telegram-verify hidden>Retry`} {
+		if !strings.Contains(telegram, required) {
+			t.Fatalf("Telegram setup contract missing: %s", required)
+		}
+	}
+	if strings.Contains(telegram, `<strong>Bot</strong>`) || strings.Contains(telegram, `>Verify</button>`) {
+		t.Fatal("obsolete Telegram token setup")
+	}
 	for _, control := range []string{"status", "token", "token-cancel", "replace", "verify", "enabled", "disconnect", "pair", "pending", "users", "operation"} {
 		if !strings.Contains(telegram, "data-telegram-"+control) {
 			t.Fatalf("Telegram management control missing: %s", control)

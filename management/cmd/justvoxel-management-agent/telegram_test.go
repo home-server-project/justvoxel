@@ -464,9 +464,9 @@ func TestTelegramPendingRebootSurvivesStoreReload(t *testing.T) {
 	}
 }
 func TestTelegramSanitizationDropsSecretsPathsAndRawLogs(t *testing.T) {
-	raw := json.RawMessage(`{"state":"running","rcon_password":"secret-rcon","token":"secret-token","floodgate_key":"secret-key","logs":"raw-sensitive-log","path":"/etc/private","config":{"members":["jv-abcdef"],"forwarding_secret":"private-forwarding"}}`)
+	raw := json.RawMessage(`{"state":"running","rcon_password":"secret-rcon","token":"secret-token","floodgate_key":"secret-key","logs":"raw-sensitive-log","path":"/etc/private","digest":"sha256:private-digest","image":"ghcr.io/private/image","config":{"members":["jv-abcdef"],"forwarding_secret":"private-forwarding"}}`)
 	text := telegramResultText("network_status", 200, raw)
-	for _, secret := range []string{"secret-rcon", "secret-token", "secret-key", "raw-sensitive-log", "/etc/private", "private-forwarding"} {
+	for _, secret := range []string{"secret-rcon", "secret-token", "secret-key", "raw-sensitive-log", "/etc/private", "private-forwarding", "sha256:", "ghcr.io/private/image", `"config":`, "{"} {
 		if strings.Contains(text, secret) {
 			t.Fatal("private payload leaked", secret)
 		}
