@@ -67,7 +67,7 @@
       const list = find(selector); list.replaceChildren();
       for (const entry of (Array.isArray(entries) ? entries.slice(0, 32) : [])) {
         if (typeof entry?.user_id !== 'string' || !/^[1-9][0-9]{0,19}$/.test(entry.user_id)) continue;
-        const row = node('div', ''); row.className = 'discord-lane';
+        const row = node('div', ''); row.className = 'integration-lane';
         row.append(node('strong', 'Access'), node('span', (typeof entry.name === 'string' && entry.name) || (typeof entry.username === 'string' && entry.username) || 'Discord user'));
         const secondary = node('span', `User ${entry.user_id}`); secondary.className = 'muted'; row.append(secondary);
         for (const [label, action] of (pending ? [['Approve', 'admin_approve'], ['Reject', 'admin_reject']] : [['Remove', 'admin_remove']])) {

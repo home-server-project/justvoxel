@@ -273,8 +273,8 @@ test('LAN clipboard fallback copies exactly, or selects the command for manual c
 
 test('header zones and scoped reveal suppression leave other passwords alone', async () => {
   const css = readFileSync(`${base}static/agent-gateway.css`, 'utf8');
-  assert.match(markup, /telegram-header/); assert.match(markup, /telegram-title/);
-  assert.match(css, /\[data-gateway-telegram\] \.telegram-header.*grid-template-columns: 1fr auto/);
+  assert.match(markup, /integration-header/); assert.match(markup, /integration-title/);
+  assert.match(css, /:is\(\[data-gateway-telegram\], \[data-gateway-discord\]\) \.integration-header.*grid-template-columns: 1fr auto/);
   for (const integration of ['telegram', 'discord']) {
     for (const pseudo of ['::-ms-reveal', '::-ms-clear', '::-webkit-credentials-auto-fill-button']) {
       assert.ok(css.includes(`[data-gateway-${integration}] [data-${integration}-token]${pseudo}`));
@@ -358,4 +358,10 @@ test('workspace refresh publishes only safe Telegram presentation state while se
   assert.deepEqual(JSON.parse(JSON.stringify(event.detail)), {configured: true, verified: true, enabled: true, status: 'connected', bot_name: 'test_bot'});
   assert.deepEqual(Object.keys(event.detail).sort(), ['bot_name', 'configured', 'enabled', 'status', 'verified']);
   assert.doesNotMatch(JSON.stringify(event.detail), /private|pairing|users|callback|token/);
+});
+
+
+test('Telegram generated user rows retain the shared compact lane', async () => {
+  const h = await harness({users: [user(12345)]});
+  assert.equal(h.row(12345).className, 'integration-lane');
 });

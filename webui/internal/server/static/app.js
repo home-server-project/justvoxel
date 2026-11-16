@@ -275,7 +275,7 @@ if (identityDashboard) {
 
 
 const enhancePasswordFields = (root = document) => {
-  root.querySelectorAll('input[type="password"]:not([data-password-reveal-ready])').forEach((input) => {
+  root.querySelectorAll('input[type="password"]:not([data-password-ui="off"]):not([data-password-reveal-ready])').forEach((input) => {
     input.dataset.passwordRevealReady = "true";
     const shell = document.createElement("span");
     shell.className = "password-field-shell";

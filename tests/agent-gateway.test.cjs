@@ -712,7 +712,7 @@ function guideHarness(origin = 'http://192.168.1.20:8099') {
   };
   const context = vm.createContext({setTimeout: () => 1, clearTimeout() {}, URL, location: {origin}, find,
     navigator: {clipboard: {async writeText(value) { copied.push(value); }}},
-    document: {createElement: tag => new Node(tag)}, text: (tag, value) => new Node(tag, value)});
+    document: {createElement: tag => new Node(tag), createTextNode: value => new Node('#text', value)}, text: (tag, value) => new Node(tag, value)});
   const providers = js.slice(js.indexOf('  const providers ='), js.indexOf('  const activityLabel'));
   const guide = js.slice(js.indexOf('  // Presentation only:'), js.indexOf('  const renderSettings ='));
   vm.runInContext(providers + guide + '\nglobalThis.render = renderProviderGuide; globalThis.setup = setupHelpGuide; globalThis.local = localAddress; globalThis.secure = secureAddress;', context);
@@ -1970,6 +1970,14 @@ test('Discord Help has its own final provider button, guide and accurate securit
   Object.defineProperty(h.context.location, 'origin', {get() { throw new Error('generic MCP endpoint generated'); }});
   buttons.at(-1).listeners.click();
   const guide = h.find('[data-gateway-help-guide]');
+  const links = descendants(guide).filter(node => node.tagName === 'a' && node.textContent === 'Discord Developer Portal');
+  assert.equal(links.length, 1);
+  assert.equal(links[0].href, 'https://discord.com/developers/home');
+  assert.equal(links[0].target, '_blank');
+  assert.deepEqual(links[0].rel.split(/\s+/).sort(), ['noopener', 'noreferrer']);
+  assert.equal(links[0].parentNode.tagName, 'li');
+  const renderer = js.slice(js.indexOf('  const renderDiscordHelpGuide ='), js.indexOf('  const setupHelpGuide ='));
+  assert.doesNotMatch(renderer, /innerHTML|insertAdjacentHTML/);
   const content = guideText(guide);
   for (const phrase of ['AI & API Connections → Add → Discord', 'Discord Developer Portal', 'Save', 'Retry', 'Add bot to Discord server', 'top navigation switch', 'Use this server', '/jv', '/help', 'administrator approval', 'no automatic binding', 'Discord roles are not JustVoxel authority', 'Guilds intent only', 'No Message Content, Guild Members, Presence, or Guild Messages intent', 'No DM reading', 'channel history are not read', '3072', 'View Channel + Send Messages', 'No Administrator permission', 'independent of AI/API Gateway levels', 'authoritative JustVoxel operations']) assert.ok(content.includes(phrase), phrase);
   assert.doesNotMatch(content, /MCP address|REST API address|Bearer|OAuth|network acceptance/);

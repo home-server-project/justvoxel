@@ -100,7 +100,7 @@
     const userIDs = new Set((snapshot.users || []).map(user => user.id));
     for (const id of userDrafts.keys()) if (!userIDs.has(id)) userDrafts.delete(id);
     for (const user of snapshot.users || []) {
-      const row = node('div', ''); row.className = 'telegram-lane';
+      const row = node('div', ''); row.className = 'integration-lane';
       const draft = userDrafts.get(user.id) || {permission: user.permission, notifications: user.notifications};
       const edited = () => userDrafts.set(user.id, draft);
       row.append(node('strong', 'Access'), node('span', `User ${user.id}`), permission(draft, edited), notifications(draft, edited),

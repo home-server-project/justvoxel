@@ -156,7 +156,7 @@ test('Discord uses compact lanes and one independent global switch', () => {
   assert.match(header, /<script src="\/static\/discord.js" defer><\/script>/);
   assert.match(header, /type="password" name="token" aria-label="Bot Token" autocomplete="off" data-password-ui="off" spellcheck="false" autocapitalize="off" data-discord-token/);
   const surface = header.slice(header.indexOf('<section data-gateway-discord'), header.indexOf('<section data-gateway-help'));
-  assert.match(surface, /class="discord-lane discord-header"/);
+  assert.match(surface, /class="integration-lane integration-header"/);
   assert.match(surface, /<strong>Bot Token<\/strong>/);
   assert.match(surface, /<strong>Discord server<\/strong>/);
   assert.doesNotMatch(surface, /class="panel"|data-discord-back|Back to Add|data-discord-enabled|Bot connection|Discord administrators|features will be added/);
@@ -242,11 +242,12 @@ test('Discord administrator approval stays in the existing provider and submits 
     const list = h.find(pending ? '[data-discord-pending]' : '[data-discord-administrators]');
     assert.equal(list.children.length, 1);
     const row = list.children[0];
-    assert.equal(row.className, 'discord-lane');
+    assert.equal(row.className, 'integration-lane');
     assert.equal(row.children[0].textContent, 'Access');
     assert.equal(row.children[1].textContent, identity.name);
     assert.equal(row.children[2].textContent, 'User 777');
     assert.equal(row.children[2].className, 'muted');
+    assert.deepEqual(row.children.slice(3).map(button => button.tagName), pending ? ['button', 'button'] : ['button']);
     const button = row.children.find(button => button.textContent === label);
     assert.equal(button.className, 'button');
     button.listeners.click(); await flush();
@@ -364,4 +365,91 @@ test('a restored open workspace loads Discord presentation without opening its s
   assert.equal(h.calls[0].url, '/api/discord');
   assert.equal(h.events.at(-1).type, 'discord-state');
   assert.equal(h.events.at(-1).detail.configured, false);
+});
+
+test('both providers use one shared compact layout with intrinsic actions and bounded controls', () => {
+  const css = readFileSync(`${__dirname}/../webui/internal/server/static/agent-gateway.css`, 'utf8');
+  const shared = ':is([data-gateway-telegram], [data-gateway-discord])';
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)];
+  const declarations = selector => rules.filter(([, selectors]) => selectors.includes(selector)).map(([, , body]) => body).join(' ');
+  for (const provider of ['telegram', 'discord']) {
+    const surface = header.match(new RegExp(`<section data-gateway-${provider}[\\s\\S]*?</section>`))[0];
+    for (const classes of ['integration-lane', 'integration-controls', 'integration-lane integration-header', 'integration-title']) {
+      assert.ok(surface.includes(`class="${classes}"`), `${provider}: ${classes}`);
+    }
+    assert.match(surface, new RegExp(`<form class="integration-controls" data-${provider}-token-form`));
+    assert.doesNotMatch(surface, /style=|class="(?:telegram|discord)-(?:lane|controls|header|title)"/);
+  }
+  // Provider selectors must never regain independent lane/control/header/title layout rules.
+  assert.doesNotMatch(css, /\.(?:telegram|discord)-(?:lane|controls|header|title)\b/);
+  for (const [, selectors] of rules.filter(([, selectors]) => /\.integration-(?:lane|controls|header|title)\b/.test(selectors))) {
+    if (selectors.includes('[data-discord-guild]')) continue;
+    assert.ok(selectors.includes(shared), `layout must be shared: ${selectors.trim()}`);
+  }
+  for (const kind of ['lane', 'controls']) {
+    const body = declarations(`${shared} .integration-${kind}`);
+    assert.match(body, /display: flex/);
+    assert.match(body, /flex-wrap: wrap/);
+    assert.match(body, /align-items: center/);
+    assert.match(body, /min-width: 0/);
+    assert.doesNotMatch(body, /(?:^|[;\s])(?:width|flex-basis): 100%/);
+  }
+  assert.match(declarations(`${shared} .integration-header`), /grid-template-columns: 1fr auto/);
+  assert.match(declarations(`${shared} .integration-title`), /display: flex; align-items: center/);
+  assert.match(css, /@media \(max-width: 600px\)\s*\{\s*:is\(\[data-gateway-telegram\], \[data-gateway-discord\]\) \.integration-header \{ display: flex; flex-wrap: wrap; justify-content: space-between/);
+  const margins = declarations(`${shared} .integration-lane :is(input, select, button, .button)`);
+  assert.match(margins, /margin: 0/);
+  assert.match(declarations(`${shared} .integration-lane :is(button, .button)`), /flex: 0 0 auto/);
+  // These scoped selectors override the global input/select width and top margin.
+  // Check width separately from max-width:100%, which is needed on small windows.
+  for (const [selector, size, grow] of [
+    [`${shared} .integration-controls input[data-password-ui="off"]`, '18rem', 0],
+    ['[data-gateway-discord] .integration-lane [data-discord-guild]', '14rem', 1],
+  ]) {
+    const body = declarations(selector);
+    assert.ok(body.includes(`width: ${size};`));
+    assert.ok(body.includes(`flex: ${grow} 1 ${size};`));
+    assert.match(body, /min-width: 0/);
+    assert.match(body, /max-width: 100%/);
+    assert.match(body, /box-sizing: border-box/);
+    assert.doesNotMatch(body, /(?:^|[;\s])width: 100%/);
+  }
+});
+
+test('global password enhancement excludes both bot tokens while keeping normal reveal controls', () => {
+  const app = readFileSync(`${__dirname}/../webui/internal/server/static/app.js`, 'utf8');
+  const enhancer = app.slice(app.indexOf('const enhancePasswordFields ='), app.indexOf('const initDestructiveConfirmations ='));
+  const selector = enhancer.match(/querySelectorAll\('([^']+)'\)/)[1];
+  assert.equal(selector, 'input[type="password"]:not([data-password-ui="off"]):not([data-password-reveal-ready])');
+  const fields = ['telegram', 'discord'].map(provider => {
+    const markup = header.match(new RegExp(`<input[^>]*data-${provider}-token[^>]*>`))[0];
+    assert.match(markup, /data-password-ui="off"/);
+    return {type: 'password', dataset: {passwordUi: 'off'}};
+  });
+  const normal = {type: 'password', name: 'password', autocomplete: 'current-password', dataset: {}};
+  fields.push(normal);
+  const shells = [];
+  for (const field of fields) field.parentNode = {insertBefore(shell, input) { shells.push(shell); input.parentNode = shell; }};
+  const document = {
+    // Model the attribute selector against actual token attributes and ordinary passwords.
+    querySelectorAll(query) {
+      assert.equal(query, selector);
+      const excluded = [...query.matchAll(/:not\(\[([^=\]]+)(?:="([^"]*)")?\]\)/g)];
+      return fields.filter(field => field.type === 'password' && excluded.every(([, attribute, value]) => {
+        const key = attribute.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+        return value === undefined ? !(key in field.dataset) : field.dataset[key] !== value;
+      }));
+    },
+    createElement(tag) {
+      return {tagName: tag, children: [], classList: {toggle() {}}, appendChild(child) { this.children.push(child); }, setAttribute(key, value) { this[key] = value; }, addEventListener(type, callback) { this[type] = callback; }};
+    },
+  };
+  vm.runInNewContext(`${enhancer}\nenhancePasswordFields(); enhancePasswordFields();`, {document});
+  assert.equal(shells.length, 1, 'normal password enhanced exactly once');
+  assert.equal(shells[0].children[0], normal);
+  for (const token of fields.slice(0, 2)) assert.equal(token.dataset.passwordRevealReady, undefined);
+  const reveal = shells[0].children[1];
+  assert.equal(reveal['aria-label'], 'Show password');
+  reveal.click(); assert.equal(normal.type, 'text');
+  reveal.click(); assert.equal(normal.type, 'password');
 });

@@ -229,28 +229,28 @@
           <section class="panel" data-gateway-details hidden></section>
           <section data-gateway-telegram hidden aria-labelledby="telegram-title">
             <div data-telegram-content data-telegram-csrf="{{.CSRF}}">
-              <div class="telegram-lane telegram-header">
-                <div class="telegram-title"><img class="gateway-provider-icon" src="/static/ai-providers/telegram.svg" alt="">
+              <div class="integration-lane integration-header">
+                <div class="integration-title"><img class="gateway-provider-icon" src="/static/ai-providers/telegram.svg" alt="">
                 <h3 id="telegram-title">Telegram</h3></div>
                 <span class="gateway-connection-state" data-telegram-status>Disconnected</span>
               </div>
-              <div class="telegram-lane">
+              <div class="integration-lane">
                 <strong>Bot Token</strong>
-                <form class="telegram-controls" data-telegram-token-form autocomplete="off">
+                <form class="integration-controls" data-telegram-token-form autocomplete="off">
                   <input type="password" name="token" aria-label="Bot Token" autocomplete="off" data-password-ui="off" spellcheck="false" autocapitalize="off" data-telegram-token required>
                   <button class="button" type="submit">Save</button>
                   <button class="button" type="button" data-telegram-token-cancel hidden>Cancel</button>
                 </form>
-                <div class="telegram-controls" data-telegram-bot-actions hidden>
+                <div class="integration-controls" data-telegram-bot-actions hidden>
                   <button class="button" type="button" data-telegram-verify hidden>Retry</button>
                   <button class="button" type="button" data-telegram-replace>Replace token</button>
                   <button class="button" type="button" data-telegram-disconnect>Disconnect</button>
                 </div>
               </div>
-              <div class="telegram-lane">
+              <div class="integration-lane">
                 <strong>Access</strong>
                 <button class="button" type="button" data-telegram-pair>Pair user</button>
-                <div class="telegram-controls" data-telegram-pending></div>
+                <div class="integration-controls" data-telegram-pending></div>
                 <code data-telegram-challenge></code>
                 <button class="button" type="button" data-telegram-copy hidden>Copy</button>
                 <small class="muted" data-telegram-expiry></small>
@@ -262,25 +262,25 @@
           </section>
           <section data-gateway-discord hidden aria-labelledby="discord-title">
             <div data-discord-content data-discord-csrf="{{.CSRF}}">
-              <div class="discord-lane discord-header">
-                <div class="discord-title"><img class="gateway-provider-icon" src="/static/ai-providers/discord.svg" alt="">
+              <div class="integration-lane integration-header">
+                <div class="integration-title"><img class="gateway-provider-icon" src="/static/ai-providers/discord.svg" alt="">
                 <h3 id="discord-title">Discord</h3></div>
                 <span class="gateway-connection-state" data-discord-status>Disconnected</span>
               </div>
-              <div class="discord-lane">
+              <div class="integration-lane">
                 <strong>Bot Token</strong>
-                <form class="discord-controls" data-discord-token-form autocomplete="off">
+                <form class="integration-controls" data-discord-token-form autocomplete="off">
                   <input type="password" name="token" aria-label="Bot Token" autocomplete="off" data-password-ui="off" spellcheck="false" autocapitalize="off" data-discord-token required>
                   <button class="button" type="submit">Save</button>
                   <button class="button" type="button" data-discord-token-cancel hidden>Cancel</button>
                 </form>
-                <div class="discord-controls" data-discord-bot-actions hidden>
+                <div class="integration-controls" data-discord-bot-actions hidden>
                   <button class="button" type="button" data-discord-verify hidden>Retry</button>
                   <button class="button" type="button" data-discord-replace>Replace token</button>
                   <button class="button" type="button" data-discord-disconnect>Disconnect</button>
                 </div>
               </div>
-              <div class="discord-lane">
+              <div class="integration-lane">
                 <strong>Discord server</strong>
                 <a class="button" data-discord-install hidden target="_blank" rel="noopener noreferrer">Add bot to Discord server</a>
                 <select aria-label="Discord server" data-discord-guild disabled><option value="">Choose a Discord server</option></select>

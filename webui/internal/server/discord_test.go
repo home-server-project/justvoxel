@@ -146,7 +146,7 @@ func TestDiscordAdministratorAccessUsesCompactExistingSurface(t *testing.T) {
 		t.Fatal("Discord surface closing tag missing")
 	}
 	surface := workspace[start : start+end]
-	for _, marker := range []string{`class="discord-lane discord-header"`, "data-discord-pending", "data-discord-administrators", "data-discord-bind"} {
+	for _, marker := range []string{`class="integration-lane integration-header"`, "data-discord-pending", "data-discord-administrators", "data-discord-bind"} {
 		if !strings.Contains(surface, marker) {
 			t.Fatal("existing provider control missing", marker)
 		}

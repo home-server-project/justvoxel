@@ -187,7 +187,7 @@ func TestPasswordScriptOptOutAndRealPasswords(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Exercise both enhancers with real password-field markup, preserving the
-	// standalone API-secret opt-outs and dashboard shared reveal enhancement.
+	// API-secret opt-outs and normal password reveal enhancement.
 	harness := `
 const assert = require("node:assert/strict");
 const shared = process.argv[2] === "shared";
@@ -211,16 +211,15 @@ const document = {
  createElement: make,
  querySelectorAll(selector) {
   assert.equal(selector, shared
-   ? 'input[type="password"]:not([data-password-reveal-ready])'
+   ? 'input[type="password"]:not([data-password-ui="off"]):not([data-password-reveal-ready])'
    : 'input[type="password"]:not([data-password-ui="off"])');
-  return inputs.filter(input => shared
-   ? input.type === "password" && !input.dataset.passwordRevealReady
-   : input.attributes["data-password-ui"] !== "off");
+  return inputs.filter(input => input.attributes["data-password-ui"] !== "off" && (!shared ||
+   input.type === "password" && !input.dataset.passwordRevealReady));
  }
 };
 ` + "\n__PASSWORD_ENHANCER__\n" + `
 for (const input of inputs) {
- if (!shared && input.attributes["data-password-ui"] === "off") {
+ if (input.attributes["data-password-ui"] === "off") {
   assert.equal(input.parentNode.children.length, 0);
   assert.equal(input.afterNode, undefined);
   assert.deepEqual(input.listeners, {});

@@ -1279,7 +1279,7 @@ func TestApprovedControlCenterLayout(t *testing.T) {
 	}
 	gateway := regexp.MustCompile(`(?s)<dialog[^>]*data-agent-gateway-dialog.*?</dialog>`).FindString(markup)
 	telegram := regexp.MustCompile(`(?s)<section data-gateway-telegram.*?<section data-gateway-discord`).FindString(gateway)
-	if telegram == "" || !strings.Contains(telegram, `class="telegram-lane"`) || !strings.Contains(telegram, `/static/ai-providers/telegram.svg`) {
+	if telegram == "" || !strings.Contains(telegram, `class="integration-lane"`) || !strings.Contains(telegram, `/static/ai-providers/telegram.svg`) {
 		t.Fatal("Telegram must use compact lanes inside AI & API Connections")
 	}
 	for _, obsolete := range []string{"data-telegram-back", "Back to Add", "Bot connection", "Approved Telegram users", "Operation status", `class="panel"`, "independently of the Gateway switch"} {
@@ -1292,7 +1292,7 @@ func TestApprovedControlCenterLayout(t *testing.T) {
 			t.Fatalf("ordinary connection field assigned to Telegram: %s", field)
 		}
 	}
-	for _, required := range []string{`<strong>Bot Token</strong>`, `class="telegram-lane telegram-header"`, `class="telegram-title"`, `data-telegram-copy`, `spellcheck="false"`, `autocapitalize="off"`, `data-telegram-verify hidden>Retry`} {
+	for _, required := range []string{`<strong>Bot Token</strong>`, `class="integration-lane integration-header"`, `class="integration-title"`, `data-telegram-copy`, `spellcheck="false"`, `autocapitalize="off"`, `data-telegram-verify hidden>Retry`} {
 		if !strings.Contains(telegram, required) {
 			t.Fatalf("Telegram setup contract missing: %s", required)
 		}
@@ -1323,7 +1323,7 @@ func TestApprovedControlCenterLayout(t *testing.T) {
 		t.Fatal("Discord must immediately follow Telegram as a special integration with a local icon")
 	}
 	discord := regexp.MustCompile(`(?s)<section data-gateway-discord.*?<section data-gateway-help`).FindString(gateway)
-	for _, required := range []string{`class="discord-lane discord-header"`, `class="discord-title"`, `/static/ai-providers/discord.svg`, `id="discord-title">Discord`, `<strong>Bot Token</strong>`, `<strong>Discord server</strong>`, `data-discord-status`, `aria-label="Bot Token" autocomplete="off" data-password-ui="off" spellcheck="false" autocapitalize="off" data-discord-token`, "data-discord-token-cancel", "data-discord-replace", "data-discord-verify", "data-discord-disconnect"} {
+	for _, required := range []string{`class="integration-lane integration-header"`, `class="integration-title"`, `/static/ai-providers/discord.svg`, `id="discord-title">Discord`, `<strong>Bot Token</strong>`, `<strong>Discord server</strong>`, `data-discord-status`, `aria-label="Bot Token" autocomplete="off" data-password-ui="off" spellcheck="false" autocapitalize="off" data-discord-token`, "data-discord-token-cancel", "data-discord-replace", "data-discord-verify", "data-discord-disconnect"} {
 		if !strings.Contains(discord, required) {
 			t.Fatalf("Discord setup surface missing: %s", required)
 		}

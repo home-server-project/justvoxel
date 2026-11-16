@@ -626,16 +626,22 @@
     identity.append(discordHelpIcon(), titles); host.append(identity);
     host.append(text('h4', 'How to connect'));
     const steps = text('ol', '');
+    const portalStep = text('li', 'Create a dedicated Discord application and bot in the ');
+    const portal = text('a', 'Discord Developer Portal');
+    portal.href = 'https://discord.com/developers/home';
+    portal.target = '_blank';
+    portal.rel = 'noopener noreferrer';
+    portalStep.append(portal, document.createTextNode('.'));
     for (const step of [
       'Open AI & API Connections → Add → Discord.',
-      'Create a dedicated Discord application and bot in the Discord Developer Portal.',
+      portalStep,
       'Copy the bot token into JustVoxel and choose Save. Use Retry to verify as needed.',
       'Use Add bot to Discord server to install the bot using JustVoxel’s fixed least-privilege install link.',
       'Enable Discord from the top navigation switch.',
       'Choose the intended Discord server and select Use this server.',
       'In Discord use /jv or /help.',
       'Ordinary members of the bound server get the allowed read-only and community experience. Management requires explicit JustVoxel administrator approval.',
-    ]) steps.append(text('li', step));
+    ]) steps.append(typeof step === 'string' ? text('li', step) : step);
     host.append(steps,
       text('p', 'JustVoxel uses one explicitly bound Discord server, with no automatic binding. Discord roles are not JustVoxel authority.'),
       text('p', 'Guilds intent only. No Message Content, Guild Members, Presence, or Guild Messages intent. No DM reading; ordinary messages and channel history are not read.'),
