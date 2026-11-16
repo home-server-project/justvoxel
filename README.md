@@ -76,8 +76,6 @@ For example, you can manually deploy services such as:
 
 These applications are **not managed by the JustVoxel Control Center**. Their Podman containers, Quadlets, storage, ports, updates, backups, reverse-proxy configuration, and application-specific requirements remain under the administrator's control.
 
-**OpenClaw** can be deployed manually as an additional workload and connected to AI providers using the authentication method that fits your account. Depending on the provider and current account capabilities, that can mean a normal API key or a supported account/subscription login flow such as ChatGPT/Codex sign-in. Model access, usage limits, and billing remain subject to the AI provider, subscription tier, and OpenClaw's current provider support.
-
 JustVoxel deliberately keeps this boundary simple: it manages the Minecraft appliance, while advanced users can still use normal Podman and Quadlet workflows for anything else.
 
 JustVoxel maintenance also treats unrelated containers as administrator-owned workloads rather than Minecraft resources. Operations such as Minecraft **Start Over** do not remove unrelated Podman containers.
