@@ -32,6 +32,7 @@ type discordRuntime struct {
 	cancel            context.CancelFunc
 	client            discordGatewayClient
 	api               discordREST
+	adminResponses    map[string]discordAdminResponse
 	actions           map[string]discordPendingAction
 	accessApprovals   map[string]bool
 	syncing           bool
@@ -108,6 +109,7 @@ func (s *server) discordStopLocked() {
 	if rt == nil {
 		return
 	}
+	rt.adminResponses = nil
 	if rt.client != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		// Let DisGo send its normal close frame first. If a dial, handshake or
@@ -213,6 +215,7 @@ func (s *server) discordLoop(ctx context.Context) {
 						rt.pending = nil
 					}
 				}
+				discordPruneAdminResponses(rt, time.Now())
 				s.discordSyncLocked(rt, v)
 				s.discordReconcileRebootLocked(rt, v)
 				s.discordMu.Unlock()

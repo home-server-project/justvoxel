@@ -2,18 +2,20 @@
 
 The primary WebUI administrator opens **AI & API Connections → Add → Discord**
 to configure a dedicated bot. The compact settings surface has **Bot Token**,
-**Discord server**, and **Access** lanes. Save the token and choose **Retry** to
-verify it as needed. **Replace token** opens an empty password field; **Cancel**
+**Discord server**, and **Access** lanes. Save the token to verify it automatically.
+**Retry** is available after failed verification; check the token and connection
+before trying again. **Replace token** opens an empty password field; **Cancel**
 discards it. Tokens are never redisplayed, and drafts clear when leaving settings
 or closing the workspace.
 
-Use **Add bot to Discord server**, then enable **Discord** using its independent
-switch in the workspace's top navigation. The switch appears once configured and
-is usable after verification from Connections, Add, Help, or Discord settings.
-Refresh to discover servers, choose the intended server, and select **Use this
-server**. JustVoxel supports one explicitly bound Discord server and never binds
-or switches it automatically. If access is lost, restore the bot's access or
-explicitly bind another available server.
+After verification, enable **Discord** using its independent switch in the
+workspace's top navigation. The switch appears once configured and is usable after verification from Connections, Add, Help, or Discord settings.
+Connection status updates automatically. Use **Add bot to Discord server**;
+the joined server appears automatically in the open Discord settings. Choose the
+intended server and select **Use this server**. Once bound and connected, settings
+show **Ready. In Discord, use /jv or /help.** JustVoxel supports one explicitly
+bound Discord server and never binds or switches it automatically. If access is
+lost, restore the bot's access or explicitly bind another available server.
 
 Configured Discord appears as a compact card in **Connections**, showing its bot
 username and current status. Open it to manage settings while Connections stays
@@ -36,6 +38,15 @@ additional servers remain available in JustVoxel WebUI.
 Any bound-server member has read-only access. **Request admin access** records a
 pending request. In the existing Discord connection surface, the primary WebUI
 administrator can approve or reject requests and remove approved administrators.
+Requests and approved administrators update automatically while Discord settings
+are open. After approval, JustVoxel attempts to refresh the existing ephemeral
+Discord response with the administrator panel when that response is still valid.
+Rejection attempts to replace it with an access-not-approved message. This is one
+best-effort update: a failed or expired response does not change the saved decision.
+The latest request response target per user is kept only in runtime memory, for at
+most ten minutes and at most 32 users. Interaction tokens are never persisted,
+logged, or returned to WebUI. Restart, credential replacement, disconnect, or
+rebinding invalidates these targets; users can always open **/jv** again.
 Discord user IDs identify people; names are presentation only. Discord roles do
 not grant management authority. Pending requests and approved administrators are
 each limited to 32.
@@ -67,7 +78,10 @@ JustVoxel does not read DMs.
 JustVoxel does not read ordinary messages or channel history. No Discord roles,
 message content, or interaction tokens are returned to the WebUI. Failures shown
 in Discord use safe fixed messages rather than internal errors or command output.
-Browser state is refreshed using the existing Refresh action, without polling.
+Open Discord settings refresh authoritative state every five seconds. Polling stops
+when leaving settings or closing the workspace. Manual **Refresh** remains available
+for an immediate refresh and is not required for normal setup. Guild selection
+and token replacement drafts are preserved during background refreshes.
 
 ## Community Minecraft access
 
@@ -89,7 +103,7 @@ nonempty identity up to 64 characters without control characters or newlines.
 Bedrock identities do not use Java username restrictions. No external Mojang,
 Microsoft, Xbox, or Geyser identity lookup dependency is added.
 
-Currently approved JustVoxel Discord administrators use **Access requests** in
+Currently approved JustVoxel Discord administrators use **Minecraft access requests** in
 **/jv**, select a pending request, and choose **Approve** or **Reject**. Review
 shows at most 25 requests, oldest first; review those before newer requests when
 the list is full. Approval invokes the existing authoritative Management Agent
@@ -164,8 +178,10 @@ JustVoxel WebUI. Discord does not retry updates or acknowledge failed operations
 **Minecraft Network** means only the JustVoxel **Minecraft Network / Velocity**
 entrance and its member servers. It does **not** configure LAN, Ethernet, Wi-Fi,
 firewall, DNS, routes, VPNs, or remote access. The panel shows enabled state,
-Java/Bedrock ports, selected member count, bounded server names/IDs, recovery
-requirements, and runtime readiness. Enable and Disable require confirmation.
+Java/Bedrock ports, bounded friendly server names, and runtime readiness. Instance
+IDs appear only to distinguish duplicate names. Recovery warnings appear only
+when needed. Only Enable or Disable is shown, according to current state, and
+either requires confirmation.
 **Change members** presents at most 25 eligible/current servers sorted by friendly
 name and immutable ID; additional membership management is available in WebUI.
 Each reviewed action adds or removes one member, with the complete resulting

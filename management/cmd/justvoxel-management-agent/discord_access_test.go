@@ -266,7 +266,7 @@ func TestDiscordAccessPanelAndModalSubmission(t *testing.T) {
 		if user == "777" {
 			accessComponent(t, p, "Request admin access")
 		} else {
-			accessComponent(t, p, "Access requests")
+			accessComponent(t, p, "Minecraft access requests")
 		}
 	}
 	for _, tc := range []struct{ user, edition, label, value, platform, identity string }{

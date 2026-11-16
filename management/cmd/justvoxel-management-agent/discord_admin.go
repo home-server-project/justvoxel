@@ -131,11 +131,15 @@ func (s *server) discordAdmin(w http.ResponseWriter, r *http.Request) {
 		rt := s.discordRuntime
 		if rt.generation != v.Generation {
 			rt.actions = nil
+			rt.adminResponses = nil
 			rt.syncedGuild = ""
 			rt.syncAfter = time.Time{}
 			rt.generation = v.Generation
 		}
 		s.discordSyncLocked(rt, v)
+	}
+	if input.Action == "admin_approve" || input.Action == "admin_reject" {
+		s.discordAdminResponseLocked(v, input.UserID, input.Action == "admin_approve")
 	}
 	if input.Action == "admin_remove" {
 		s.discordInvalidateUserLocked(input.UserID)

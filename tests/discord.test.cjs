@@ -28,7 +28,11 @@ function harness(primary = true, initiallyOpen = false) {
   const window = new Element();
   const calls = [];
   const replies = [];
+  const timers = new Map();
+  let nextTimer = 0;
   const context = vm.createContext({
+    setInterval(callback, delay) { const id = ++nextTimer; timers.set(id, {callback, delay}); return id; },
+    clearInterval(id) { timers.delete(id); },
     URLSearchParams, window, CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
     document: {querySelector: () => dialog, createElement: tag => new Element(tag), body: {classList: {contains: () => primary}}},
     fetch: async (url, options) => {
@@ -41,7 +45,8 @@ function harness(primary = true, initiallyOpen = false) {
   });
   vm.runInContext(source, context);
   const dispatch = type => dialog.listeners[type]();
-  return {find, surface, dialog, window, calls, replies, events, dispatch,
+  return {find, surface, dialog, window, calls, replies, events, dispatch, timers,
+    tick() { for (const {callback} of [...timers.values()]) callback(); },
     open() { dialog.open = true; surface.hidden = false; dispatch('gateway-surface-change'); },
     submit() { find('[data-discord-token-form]').listeners.submit({preventDefault() {}}); },
     click(control) { find(`[data-discord-${control}]`).listeners.click(); },
@@ -75,21 +80,21 @@ test('Discord loads on selection and Refresh using only its authenticated endpoi
 test('credential, verify and disconnect use form transport and never redisplay a token', async () => {
   const h = harness(); h.open(); await flush();
   h.find('[data-discord-token]').value = 'private-bot-token';
-  h.replies.push({configured: true, verified: false, status: 'unverified', token: 'must-not-redisplay'});
+  h.replies.push({configured: true, verified: false, status: 'unverified', token: 'must-not-redisplay'}, verified);
   h.submit();
   assert.equal(h.find('[data-discord-token]').value, '');
   await flush();
-  const save = h.calls.at(-1);
+  const save = h.calls.at(-2);
   assert.equal(save.url, '/api/discord');
   assert.equal(save.options.method, 'POST');
   assert.equal(save.options.body.get('csrf'), 'browser-csrf');
   assert.deepEqual(JSON.parse(save.options.body.get('request')), {action: 'credential', token: 'private-bot-token'});
   assert.equal(h.find('[data-discord-token]').value, '');
-  assert.equal(h.find('[data-discord-status]').textContent, '● Needs verification');
-  assert.equal(h.find('[data-discord-verify]').disabled, false);
-  h.replies.push(verified); h.click('verify'); await flush();
   assert.deepEqual(JSON.parse(h.calls.at(-1).options.body.get('request')), {action: 'verify'});
-  assert.equal(h.find('[data-discord-status]').textContent, '@voxel_bot  ● Disabled');
+  assert.equal(h.find('[data-discord-status]').textContent, '@voxel_bot  ● Bot verified');
+  assert.equal(h.find('[data-discord-verify]').hidden, true);
+  assert.equal(h.find('[data-discord-enabled]').disabled, false);
+  assert.equal(h.find('[data-discord-enabled]').checked, false);
   assert.equal(h.find('[data-discord-bot-actions]').hidden, false);
   assert.equal(h.find('[data-discord-token-form]').hidden, true);
   h.click('disconnect'); await flush();
@@ -113,7 +118,7 @@ test('identity is text and token clears whenever the surface closes or changes a
   const h = harness();
   h.replies.push({...verified, bot_username: '<img src=x onerror=bad()>', application_name: '<script>bad()</script>'});
   h.open(); await flush();
-  assert.equal(h.find('[data-discord-status]').textContent, '@<img src=x onerror=bad()>  ● Disabled');
+  assert.equal(h.find('[data-discord-status]').textContent, '@<img src=x onerror=bad()>  ● Bot verified');
   for (const event of ['close', 'cancel', 'gateway-surface-change']) {
     h.find('[data-discord-token]').value = 'unsaved-secret';
     h.surface.hidden = true; h.dispatch(event);
@@ -151,8 +156,8 @@ test('a response after closing cannot restore stale identity', async () => {
 });
 
 test('Discord uses compact lanes and one independent global switch', () => {
-  assert.doesNotMatch(source, /localStorage|sessionStorage|console\.|innerHTML|insertAdjacentHTML|setInterval|setTimeout|\.style\.|cssText|insertRule|<style/);
-  assert.deepEqual([...source.matchAll(/action: '([^']+)'/g)].map(match => match[1]), ['credential', 'verify', 'enabled', 'guild', 'disconnect']);
+  assert.doesNotMatch(source, /localStorage|sessionStorage|console\.|innerHTML|insertAdjacentHTML|setTimeout|\.style\.|cssText|insertRule|<style/);
+  assert.deepEqual([...source.matchAll(/action: '([^']+)'/g)].map(match => match[1]), ['verify', 'credential', 'verify', 'enabled', 'guild', 'disconnect']);
   assert.match(header, /<script src="\/static\/discord.js" defer><\/script>/);
   assert.match(header, /type="password" name="token" aria-label="Bot Token" autocomplete="off" data-password-ui="off" spellcheck="false" autocapitalize="off" data-discord-token/);
   const surface = header.slice(header.indexOf('<section data-gateway-discord'), header.indexOf('<section data-gateway-help'));
@@ -311,7 +316,7 @@ test('presentation events contain only safe allowlisted identity and human statu
   assert.doesNotMatch(JSON.stringify(event.detail), /secret|private error|application_id/);
   const cases = [
     [{...verified, verified: false, enabled: true}, 'Needs verification'],
-    [{...verified, enabled: false, runtime_status: 'connected'}, 'Disabled'],
+    [{...verified, enabled: false, runtime_status: 'connected'}, 'Bot verified'],
     [{...verified, enabled: true}, 'Bot verified'],
     ...Object.entries({connecting: 'Connecting', connected: 'Connected', connection_retry: 'Retrying', connection_paused: 'Needs attention', disconnected: 'Disconnected', unknown: 'Status unavailable'}).map(([runtime_status, label]) => [{...verified, enabled: true, runtime_status}, label]),
   ];
@@ -452,4 +457,76 @@ test('global password enhancement excludes both bot tokens while keeping normal 
   assert.equal(reveal['aria-label'], 'Show password');
   reveal.click(); assert.equal(normal.type, 'text');
   reveal.click(); assert.equal(normal.type, 'password');
+});
+
+
+test('failed automatic verification retains the saved credential and Retry recovers', async () => {
+  const h = harness(); h.open(); await flush();
+  h.replies.push({configured: true, verified: false, status: 'unverified'}, new Error('private transport failure'));
+  h.find('[data-discord-token]').value = 'secret'; h.submit(); await flush();
+  assert.equal(h.find('[data-discord-token]').value, '');
+  assert.equal(h.find('[data-discord-token-form]').hidden, true);
+  assert.equal(h.find('[data-discord-verify]').hidden, false);
+  assert.equal(h.find('[data-discord-verify]').disabled, false);
+  assert.equal(h.find('[data-discord-enabled]').disabled, true);
+  assert.match(h.find('[data-discord-feedback]').textContent, /Token saved, but verification failed/);
+  h.replies.push({configured: true, verified: false}); h.tick(); await flush();
+  assert.match(h.find('[data-discord-feedback]').textContent, /verification failed/);
+  h.replies.push(verified); h.click('verify'); await flush();
+  assert.equal(h.find('[data-discord-verify]').hidden, true);
+  h.click('replace');
+  h.replies.push({configured: true, verified: false}, verified);
+  h.find('[data-discord-token]').value = 'replacement'; h.submit(); await flush();
+  assert.equal(JSON.parse(h.calls.at(-1).options.body.get('request')).action, 'verify');
+  assert.equal(h.find('[data-discord-verify]').hidden, true);
+});
+
+test('one active five-second timer updates connection, guilds and admin rows without losing drafts', async () => {
+  const h = harness();
+  assert.equal(h.timers.size, 0);
+  const connected = {...verified, enabled: true, runtime_status: 'connected', guilds_ready: true, guilds: [{id: '111', name: 'Family'}]};
+  h.replies.push({...connected, runtime_status: 'connecting', guilds: []}); h.open(); await flush();
+  assert.equal(h.timers.size, 1);
+  assert.equal([...h.timers.values()][0].delay, 5000);
+  h.replies.push(connected); h.tick(); await flush();
+  assert.match(h.find('[data-discord-status]').textContent, /Connected$/);
+  assert.equal(h.find('[data-discord-guild]').children[1].value, '111');
+  h.find('[data-discord-guild]').value = '111';
+  h.click('replace'); h.find('[data-discord-token]').value = 'human draft';
+  h.replies.push({...connected, pending: [{user_id: '777', name: 'Friend'}]}); h.tick(); await flush();
+  assert.equal(h.find('[data-discord-guild]').value, '111');
+  assert.equal(h.find('[data-discord-token]').value, 'human draft');
+  assert.equal(h.find('[data-discord-token-form]').hidden, false);
+  const pending = h.find('[data-discord-pending]').children;
+  assert.equal(pending.length, 1);
+  assert.deepEqual(pending[0].children.map(node => node.textContent), ['Access', 'Friend', 'User 777', 'Approve', 'Reject']);
+  h.replies.push({...connected, pending: [], administrators: [{user_id: '777', name: 'Friend'}]}); h.tick(); await flush();
+  assert.equal(h.find('[data-discord-pending]').children.length, 0);
+  assert.equal(h.find('[data-discord-administrators]').children.length, 1);
+  h.replies.push(connected); h.tick(); await flush();
+  assert.equal(h.find('[data-discord-administrators]').children.length, 0);
+  h.replies.push(connected); h.open(); await flush();
+  assert.equal(h.timers.size, 1);
+  h.surface.hidden = true; h.dispatch('gateway-surface-change'); await flush();
+  assert.equal(h.timers.size, 0);
+  const calls = h.calls.length; h.tick(); await flush(); assert.equal(h.calls.length, calls);
+  for (const event of ['close', 'cancel']) {
+    h.open(); await flush(); assert.equal(h.timers.size, 1);
+    h.dialog.open = false; h.dispatch(event); assert.equal(h.timers.size, 0);
+  }
+});
+
+test('binding gives a persistent next step across polls and manual refresh', async () => {
+  const h = harness();
+  const connected = {...verified, enabled: true, runtime_status: 'connected', guilds_ready: true, guilds: [{id: '111', name: 'Family'}]};
+  h.replies.push(connected); h.open(); await flush();
+  h.find('[data-discord-guild]').value = '111';
+  const bound = {...connected, guild_id: '111', guild_name: 'Family', bound_guild_available: true};
+  h.replies.push(bound); h.click('bind'); await flush();
+  assert.equal(JSON.parse(h.calls.at(-1).options.body.get('request')).action, 'guild');
+  assert.equal(h.find('[data-discord-bound]').textContent, 'Family');
+  for (const refresh of [() => h.tick(), () => h.dispatch('discord-refresh')]) {
+    h.replies.push(bound); refresh(); await flush();
+    assert.equal(h.find('[data-discord-feedback]').textContent, 'Ready. In Discord, use /jv or /help.');
+  }
 });

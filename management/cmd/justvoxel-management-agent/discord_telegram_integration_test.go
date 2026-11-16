@@ -1317,8 +1317,8 @@ func TestDiscordTelegramSourceSecurityBoundary(t *testing.T) {
 							t.Error("integration bypassed authoritative handler", path, bad)
 						}
 					}
-					// Interaction tokens are allowed only in the two immediate REST
-					// response calls, never assigned or serialized as durable state.
+					// Token arguments go only to immediate REST responses. The sole
+					// retention exception is the private discordAdminResponse literal below.
 					for _, arg := range n.Args {
 						call, ok := arg.(*ast.CallExpr)
 						if !ok {
@@ -1327,6 +1327,26 @@ func TestDiscordTelegramSourceSecurityBoundary(t *testing.T) {
 						if tokenCall, ok := call.Fun.(*ast.SelectorExpr); ok && tokenCall.Sel.Name == "Token" && sel.Sel.Name != "CreateInteractionResponse" && sel.Sel.Name != "UpdateInteractionResponse" {
 							t.Error("interaction token escaped immediate response", path)
 						}
+					}
+				}
+			case *ast.CompositeLit:
+				for _, element := range n.Elts {
+					field, ok := element.(*ast.KeyValueExpr)
+					if !ok {
+						continue
+					}
+					call, ok := field.Value.(*ast.CallExpr)
+					if !ok {
+						continue
+					}
+					selector, ok := call.Fun.(*ast.SelectorExpr)
+					if !ok || selector.Sel.Name != "Token" {
+						continue
+					}
+					typ, typeOK := n.Type.(*ast.Ident)
+					key, keyOK := field.Key.(*ast.Ident)
+					if !typeOK || !keyOK || typ.Name != "discordAdminResponse" || key.Name != "token" || path != "discord_interactions.go" {
+						t.Error("interaction token retained outside private runtime response target", path)
 					}
 				}
 			case *ast.AssignStmt:

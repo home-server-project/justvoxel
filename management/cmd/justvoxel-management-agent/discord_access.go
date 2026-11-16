@@ -397,7 +397,7 @@ func (s *server) discordAccessHandleLocked(ctx context.Context, rt *discordRunti
 		return discordFailure()
 	}
 	if rt.accessApprovals[a.RequestID] {
-		return discordPanel{text: "This request is being reviewed. Open Access requests again shortly."}
+		return discordPanel{text: "This request is being reviewed. Open Minecraft access requests again shortly."}
 	}
 	state := "rejected"
 	if op == "access_approve" {

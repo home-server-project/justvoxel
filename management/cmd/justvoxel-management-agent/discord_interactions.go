@@ -23,7 +23,7 @@ import (
 )
 
 // The REST seam contains guild commands, interaction replies and fixed decision notifications.
-// Interaction tokens are stack-local, never part of persistent or runtime state.
+// Interaction tokens remain private: immediate replies and bounded runtime-only admin response targets.
 type discordREST interface {
 	CreateMessage(snowflake.ID, discord.MessageCreate, ...rest.RequestOpt) (*discord.Message, error)
 	SetGuildCommands(snowflake.ID, snowflake.ID, []discord.ApplicationCommandCreate, ...rest.RequestOpt) ([]discord.ApplicationCommand, error)
@@ -222,7 +222,14 @@ func (s *server) discordInteraction(rt *discordRuntime, i discord.Interaction) {
 		// Never send results from a revoked credential, binding or reset generation.
 		latest, readErr := s.store.discordRead()
 		usable := readErr == nil && latest.Generation == acceptedGeneration && s.discordUsableLocked(rt, latest, guild)
-		s.discordMu.Unlock()
+		target, adminResponse := rt.adminResponses[user]
+		// Serialize the initial request result with its decision update.
+		adminResponse = adminResponse && target.token == i.Token()
+		if !adminResponse {
+			s.discordMu.Unlock()
+		} else {
+			defer s.discordMu.Unlock()
+		}
 		if !usable {
 			return
 		}
@@ -375,7 +382,7 @@ func discordReadPanel(v discordState, user string, instances []discordInstance, 
 		}
 	}
 	if v.administrator(user) {
-		panel.components = append(panel.components, discord.NewActionRow(discordButton(v, "Access requests", "access_review", ""), discordButton(v, "Minecraft Network", "adv_network", ""), discordButton(v, "System", "adv_system", "")))
+		panel.components = append(panel.components, discord.NewActionRow(discordButton(v, "Minecraft access requests", "access_review", ""), discordButton(v, "Minecraft Network", "adv_network", ""), discordButton(v, "System", "adv_system", "")))
 	}
 	if !v.administrator(user) {
 		panel.components = append(panel.components, discord.NewActionRow(discordButton(v, "Request admin access", "request", "")))
@@ -398,7 +405,7 @@ func (s *server) discordHandleLocked(ctx context.Context, rt *discordRuntime, i 
 		switch interaction.Data.CommandName() {
 		case "jv":
 		case "help":
-			return discordPanel{text: "Use /jv to select a Minecraft server, view Status or Players, and Refresh. Members of the bound Discord server can request Minecraft access: choose Request Minecraft Access, select an edition, and enter a Minecraft identity. A JustVoxel Discord administrator reviews it through Access requests; it does not automatically whitelist you or grant administration. Request admin access, then ask the primary JustVoxel WebUI administrator to approve it. Approved Discord administrators can Start, Stop, Restart, or create a manual Backup, with confirmation."}
+			return discordPanel{text: "Use /jv to select a Minecraft server, view Status or Players, and Refresh. Members of the bound Discord server can request Minecraft access: choose Request Minecraft Access, select an edition, and enter a Minecraft identity. A JustVoxel Discord administrator reviews it through Minecraft access requests; it does not automatically whitelist you or grant administration. Request admin access, then ask the primary JustVoxel WebUI administrator to approve it. Approved Discord administrators can Start, Stop, Restart, or create a manual Backup, with confirmation."}
 		default:
 			return discordFailure()
 		}
@@ -444,6 +451,7 @@ func (s *server) discordHandleLocked(ctx context.Context, rt *discordRuntime, i 
 		}
 		for _, u := range v.Pending {
 			if u.UserID == user {
+				discordRememberAdminResponse(rt, v, i, guild, user, time.Now())
 				return discordPanel{text: "Your admin access request is pending in JustVoxel WebUI."}
 			}
 		}
@@ -456,6 +464,7 @@ func (s *server) discordHandleLocked(ctx context.Context, rt *discordRuntime, i 
 		if s.store.discordSave(v, &actor, "admin_request") != nil {
 			return discordFailure()
 		}
+		discordRememberAdminResponse(rt, v, i, guild, user, time.Now())
 		return discordPanel{text: "Admin access requested. The primary JustVoxel WebUI administrator must approve it."}
 	}
 	switch op {
@@ -570,4 +579,70 @@ func (s *server) discordHandleLocked(ctx context.Context, rt *discordRuntime, i 
 	default:
 		return discordFailure()
 	}
+}
+
+// This target never enters discordState, a journal, audit, or a WebUI payload.
+// Ten minutes leaves margin within Discord's interaction response lifetime.
+type discordAdminResponse struct {
+	generation                            int64
+	guildID, userID, applicationID, token string
+	expiresAt                             time.Time
+}
+
+func discordPruneAdminResponses(rt *discordRuntime, now time.Time) {
+	for user, target := range rt.adminResponses {
+		if target.generation != rt.generation || !now.Before(target.expiresAt) {
+			delete(rt.adminResponses, user)
+		}
+	}
+}
+
+func discordRememberAdminResponse(rt *discordRuntime, v discordState, i discord.Interaction, guild, user string, now time.Time) {
+	discordPruneAdminResponses(rt, now)
+	if rt.adminResponses == nil {
+		rt.adminResponses = map[string]discordAdminResponse{}
+	}
+	if _, exists := rt.adminResponses[user]; !exists && len(rt.adminResponses) >= 32 {
+		return
+	}
+	rt.adminResponses[user] = discordAdminResponse{generation: v.Generation, guildID: guild, userID: user, applicationID: i.ApplicationID().String(), token: i.Token(), expiresAt: now.Add(10 * time.Minute)}
+}
+
+// Caller holds discordMu, after the authoritative decision has been saved.
+// Consume once, then make one bounded best-effort send without a retry queue.
+func (s *server) discordAdminResponseLocked(v discordState, user string, approved bool) {
+	rt := s.discordRuntime
+	if rt == nil {
+		return
+	}
+	discordPruneAdminResponses(rt, time.Now())
+	target, ok := rt.adminResponses[user]
+	delete(rt.adminResponses, user)
+	if !ok || target.generation != v.Generation || target.guildID != v.GuildID || target.applicationID != v.ApplicationID || target.userID != user || !s.discordUsableLocked(rt, v, target.guildID) || rt.api == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		s.discordMu.Lock()
+		defer s.discordMu.Unlock()
+		latest, err := s.store.discordRead()
+		if err != nil || latest.Generation != target.generation || latest.ApplicationID != target.applicationID || !time.Now().Before(target.expiresAt) || !s.discordUsableLocked(rt, latest, target.guildID) || latest.administrator(user) != approved {
+			return
+		}
+		panel := discordPanel{text: "Administrator access was not approved. Contact the primary JustVoxel WebUI administrator."}
+		if approved {
+			instances, found := s.discordInstancesLocked(ctx, rt, target.guildID, user)
+			if !found {
+				return
+			}
+			latest, err = s.store.discordRead()
+			if err != nil || latest.Generation != target.generation || !time.Now().Before(target.expiresAt) || !s.discordUsableLocked(rt, latest, target.guildID) || !latest.administrator(user) {
+				return
+			}
+			panel = s.discordAccessRecent(latest, user, discordReadPanel(latest, user, instances, ""))
+		}
+		mentions := discord.AllowedMentions{}
+		_, _ = rt.api.UpdateInteractionResponse(discordID(target.applicationID), target.token, discord.MessageUpdate{Content: &panel.text, Components: &panel.components, AllowedMentions: &mentions}, rest.WithCtx(ctx))
+	}()
 }

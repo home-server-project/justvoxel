@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -682,4 +683,182 @@ func discordRegistryFixture(t *testing.T, registry *minecraftInstanceStore) {
 	minecraftInstances = registry
 	runAdminDiscoveryHelper = func(context.Context, string) ([]byte, error) { return []byte(`{"configured":false}`), nil }
 	t.Cleanup(func() { minecraftInstances = previousRegistry; runAdminDiscoveryHelper = previousDiscovery })
+}
+
+type discordDecisionREST struct {
+	*discordFakeREST
+	fail bool
+}
+
+func (f *discordDecisionREST) UpdateInteractionResponse(_ snowflake.ID, _ string, m discord.MessageUpdate, _ ...rest.RequestOpt) (*discord.Message, error) {
+	f.replies <- m
+	if f.fail {
+		return nil, errors.New("private response failure")
+	}
+	return nil, nil
+}
+
+func TestDiscordAdminDecisionRefreshesExistingResponse(t *testing.T) {
+	for _, decision := range []string{"admin_approve", "admin_reject"} {
+		for _, fail := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/fail=%t", decision, fail), func(t *testing.T) {
+				s, rt, v, _ := discordMinecraftFixture(t)
+				fake := &discordDecisionREST{discordFakeREST: newDiscordFakeREST(), fail: fail}
+				rt.api = fake
+				// Exercise the actual deferred interaction reply before the WebUI decision.
+				s.discordInteraction(rt, discordTestInteraction(t, v.GuildID, "777", "", discordComponentID(v, "request", "")))
+				select {
+				case initial := <-fake.replies:
+					if initial.Content == nil || !strings.Contains(*initial.Content, "Admin access requested") {
+						t.Fatal("missing initial request result")
+					}
+				case <-time.After(3 * time.Second):
+					t.Fatal("missing initial reply")
+				}
+				rr := discordAdminRequest(s, administratorSession(time.Now()), map[string]any{"action": decision, "user_id": "777"})
+				if rr.Code != 200 {
+					t.Fatal("decision failed", rr.Code)
+				}
+				var persisted string
+				if err := s.store.db.QueryRow(`SELECT record_json FROM discord_state WHERE id=1`).Scan(&persisted); err != nil || strings.Contains(persisted, "private-interaction-token") || strings.Contains(rr.Body.String(), "private-interaction-token") {
+					t.Fatal("interaction token escaped runtime")
+				}
+				select {
+				case reply := <-fake.replies:
+					if reply.Content == nil {
+						t.Fatal("missing decision response")
+					}
+					raw, _ := json.Marshal(reply.Components)
+					if decision == "admin_approve" {
+						for _, label := range []string{"Minecraft server", "Minecraft access requests", "Minecraft Network", "System"} {
+							if !strings.Contains(string(raw), label) {
+								t.Error("fresh root missing", label)
+							}
+						}
+						if strings.Contains(string(raw), "Request admin access") {
+							t.Error("stale request controls")
+						}
+					} else if !strings.Contains(*reply.Content, "Administrator access was not approved") || len(*reply.Components) != 0 {
+						t.Error("rejection retained stale controls")
+					}
+				case <-time.After(3 * time.Second):
+					t.Fatal("missing best-effort update")
+				}
+				s.discordMu.Lock()
+				current, err := s.store.discordRead()
+				remaining := len(rt.adminResponses)
+				s.discordMu.Unlock()
+				if err != nil || current.administrator("777") != (decision == "admin_approve") || len(current.Pending) != 0 || remaining != 0 {
+					t.Fatal("response failure changed saved decision or target was retained")
+				}
+				select {
+				case <-fake.replies:
+					t.Fatal("decision was retried")
+				default:
+				}
+			})
+		}
+	}
+}
+
+func TestDiscordAdminResponseMemoryBoundExpiryAndSerialization(t *testing.T) {
+	s, rt, v := discordBoundFixture(t)
+	now := time.Now()
+	for index := 0; index < 33; index++ {
+		user := fmt.Sprint(1000 + index)
+		i := discordTestInteraction(t, v.GuildID, user, "", discordComponentID(v, "request", ""))
+		discordRememberAdminResponse(rt, v, i, v.GuildID, user, now)
+	}
+	if len(rt.adminResponses) != 32 {
+		t.Fatal("response targets unbounded")
+	}
+	i := discordTestInteraction(t, v.GuildID, "1000", "", discordComponentID(v, "request", ""))
+	discordRememberAdminResponse(rt, v, i, v.GuildID, "1000", now.Add(time.Minute))
+	if !rt.adminResponses["1000"].expiresAt.Equal(now.Add(11 * time.Minute)) {
+		t.Fatal("latest response did not replace previous target")
+	}
+	for _, value := range []any{v, rt, s.discordSnapshot(v)} {
+		raw, err := json.Marshal(value)
+		if err != nil || strings.Contains(string(raw), "private-interaction-token") {
+			t.Fatal("runtime target escaped serialization")
+		}
+	}
+	var raw string
+	if err := s.store.db.QueryRow(`SELECT record_json FROM discord_state WHERE id=1`).Scan(&raw); err != nil || strings.Contains(raw, "private-interaction-token") {
+		t.Fatal("interaction token persisted")
+	}
+	discordPruneAdminResponses(rt, now.Add(10*time.Minute))
+	if len(rt.adminResponses) != 1 {
+		t.Fatal("expiry was not checked at boundary")
+	}
+	rt.generation++
+	discordPruneAdminResponses(rt, now.Add(10*time.Minute))
+	if len(rt.adminResponses) != 0 {
+		t.Fatal("generation did not invalidate targets")
+	}
+}
+
+func TestDiscordAdminResponseExpiredOrReplacedRuntimeIsIgnored(t *testing.T) {
+	for _, change := range []string{"expired", "generation", "runtime"} {
+		t.Run(change, func(t *testing.T) {
+			s, rt, v := discordBoundFixture(t)
+			discordHandleTest(t, s, rt, v, "777", "request", "")
+			fake := rt.api.(*discordFakeREST)
+			switch change {
+			case "expired":
+				target := rt.adminResponses["777"]
+				target.expiresAt = time.Now()
+				rt.adminResponses["777"] = target
+			case "generation":
+				current, err := s.store.discordRead()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(current.Pending) != 1 || current.Pending[0].UserID != "777" {
+					t.Fatal("missing pending administrator request")
+				}
+				current.Generation++
+				discordSaveTestState(t, s, current)
+			case "runtime":
+				s.discordRuntime = &discordRuntime{generation: v.Generation}
+			}
+			if rr := discordAdminRequest(s, administratorSession(time.Now()), map[string]any{"action": "admin_approve", "user_id": "777"}); rr.Code != 200 {
+				t.Fatal(rr.Code)
+			}
+			current, _ := s.store.discordRead()
+			if !current.administrator("777") {
+				t.Fatal("approval depended on response target")
+			}
+			select {
+			case <-fake.replies:
+				t.Fatal("stale target used")
+			default:
+			}
+		})
+	}
+}
+
+func TestDiscordAdminResponseTrustChangesClearMemory(t *testing.T) {
+	for _, action := range []string{"credential", "disconnect", "guild", "enabled"} {
+		t.Run(action, func(t *testing.T) {
+			s, rt, v := discordBoundFixture(t)
+			discordHandleTest(t, s, rt, v, "777", "request", "")
+			payload := map[string]any{"action": action}
+			switch action {
+			case "credential":
+				payload["token"] = "replacement"
+			case "guild":
+				rt.guilds["222"] = discordGuild{ID: "222", Name: "Other", Available: true}
+				payload["guild_id"] = "222"
+			case "enabled":
+				payload["enabled"] = false
+			}
+			if rr := discordAdminRequest(s, administratorSession(time.Now()), payload); rr.Code != 200 {
+				t.Fatal(rr.Code)
+			}
+			if len(rt.adminResponses) != 0 {
+				t.Fatal("trust change retained response tokens")
+			}
+		})
+	}
 }

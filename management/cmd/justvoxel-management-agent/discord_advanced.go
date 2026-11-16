@@ -224,7 +224,11 @@ func discordAdvancedPreview(a discordPendingAction) string {
 	case "reboot":
 		return "Ordinary reboot? The appliance will restart."
 	case "update_reboot":
-		return fmt.Sprintf("Update reboot · %ds warning · backup first: %t?", a.WarningSeconds, a.BackupMinecraft)
+		backup := "no backup"
+		if a.BackupMinecraft {
+			backup = "backup first"
+		}
+		return fmt.Sprintf("Update reboot · %ds warning · %s?", a.WarningSeconds, backup)
 	}
 	return "Confirm operation?"
 }
@@ -239,15 +243,140 @@ type discordNetworkStatus struct {
 	RuntimeReady     bool `json:"runtime_ready"`
 }
 
+// Omit absent values instead of showing blank diagnostic labels.
+func discordSummaryField(text, label, value string) string {
+	if strings.TrimSpace(value) == "" {
+		return text
+	}
+	return text + "\n" + label + ": " + discordAdvancedText(value)
+}
+func discordHumanState(value string) string {
+	value = strings.ReplaceAll(strings.TrimSpace(value), "_", " ")
+	if value == "" {
+		return "Unavailable"
+	}
+	return strings.ToUpper(value[:1]) + value[1:]
+}
+func discordUpdateAvailability(available bool) string {
+	if available {
+		return "Available"
+	}
+	return "Up to date"
+}
+func discordConnections(java, bedrock bool) string {
+	if java && bedrock {
+		return "Java + Bedrock"
+	}
+	if java {
+		return "Java"
+	}
+	if bedrock {
+		return "Bedrock"
+	}
+	return "Unavailable"
+}
+func discordSoftware(value string) string {
+	switch value {
+	case "paper":
+		return "Paper"
+	case "purpur":
+		return "Purpur"
+	case "fabric":
+		return "Fabric"
+	case "forge":
+		return "Forge"
+	case "neoforge":
+		return "NeoForge"
+	case "vanilla":
+		return "Vanilla"
+	case "bedrock":
+		return "Bedrock"
+	case "folia":
+		return "Folia"
+	case "quilt":
+		return "Quilt"
+	case "spigot":
+		return "Spigot"
+	}
+	return discordHumanState(value)
+}
 func discordOSSummary(status adminSystemUpdateStatus) string {
-	text := "JustVoxel OS updates\nRunning: " + discordAdvancedText(status.Running.Version)
+	text := discordSummaryField("JustVoxel OS", "Running", status.Running.Version)
 	if status.Staged != nil {
-		text += "\nStaged: " + discordAdvancedText(status.Staged.Version)
+		text = discordSummaryField(text, "Staged", status.Staged.Version)
 	}
 	if status.Available != nil {
-		text += "\nAvailable: " + discordAdvancedText(status.Available.Version)
+		text = discordSummaryField(text, "Update available", status.Available.Version)
 	}
-	return text + fmt.Sprintf("\nCheck state: %s\nReboot required: %t\nActivation pending: %t\nActivation failed: %t", discordAdvancedText(status.CheckState), status.RebootRequired, status.ActivationPending, status.ActivationFailed)
+	switch status.CheckState {
+	case "current":
+		if !status.RebootRequired && !status.ActivationPending && !status.ActivationFailed {
+			text += "\nStatus: No update action required"
+		}
+	case "staged_current":
+		text += "\nStatus: Update downloaded and staged"
+	case "update_available":
+		text += "\nStatus: Update available"
+	case "unknown":
+		text += "\nStatus: Check for updates to see availability"
+	}
+	if status.RebootRequired {
+		text += "\n⚠ Reboot required"
+	}
+	if status.ActivationPending {
+		text += "\n⚠ Update activation pending"
+	}
+	if status.ActivationFailed {
+		text += "\n⚠ Update activation failed\nReview System Update in JustVoxel."
+	}
+	return text
+}
+func discordNetworkSummary(status discordNetworkStatus, instances []discordInstance) string {
+	text := fmt.Sprintf("Minecraft Network / Velocity · %s\n\nJava: %d · Bedrock: %d", discordEnabled(status.Config.Enabled), status.Config.JavaPort, status.Config.BedrockPort)
+	selected := map[string]bool{}
+	for _, id := range status.Config.Members {
+		selected[id] = true
+	}
+	names := map[string]int{}
+	for _, server := range instances {
+		if selected[server.ID] {
+			names[server.Name]++
+		}
+	}
+	members := []string{}
+	count := 0
+	for _, server := range instances {
+		if !selected[server.ID] {
+			continue
+		}
+		count++
+		if len(members) >= 10 {
+			continue
+		}
+		name := discordAdvancedText(server.Name)
+		if name == "" {
+			name = "Unnamed server"
+		}
+		if names[server.Name] > 1 {
+			name += " (" + server.ID + ")"
+		}
+		members = append(members, name)
+	}
+	if len(members) > 0 {
+		text += "\nServers: " + strings.Join(members, ", ")
+	}
+	if count > 10 {
+		text += "\nMore selected servers are available in JustVoxel WebUI."
+	}
+	if status.RuntimeReady {
+		text += "\nStatus: Ready"
+	} else {
+		text += "\nStatus: Not ready"
+	}
+	if status.RecoveryRequired {
+		text += "\n⚠ Recovery required"
+	}
+	return text
 }
 
 // Every entry is already a native Discord component with generation fencing.
@@ -417,19 +546,7 @@ func (s *server) discordAdvancedLocked(ctx context.Context, rt *discordRuntime, 
 			action.NetworkMembers = members
 			return discordAdvancedConfirm(rt, action, label+discordAdvancedText(name)+"?\nDisable Minecraft Network and stop affected servers before changing membership.")
 		}
-		panel := discordPanel{text: fmt.Sprintf("Minecraft Network / Velocity\n%s\nJava port: %d\nBedrock port: %d\nSelected members: %d\nRecovery required: %t\nRuntime ready: %t", discordEnabled(status.Config.Enabled), status.Config.JavaPort, status.Config.BedrockPort, len(status.Config.Members), status.RecoveryRequired, status.RuntimeReady)}
-		count := 0
-		for _, server := range instances {
-			if selected[server.ID] {
-				if count < 10 {
-					panel.text += "\n• " + discordAdvancedText(server.Name) + " (" + server.ID + ")"
-				}
-				count++
-			}
-		}
-		if count > 10 {
-			panel.text += "\nMore selected members are available in JustVoxel WebUI."
-		}
+		panel := discordPanel{text: discordNetworkSummary(status, instances)}
 		if op == "adv_members" {
 			options, total := discordNetworkMemberOptions(instances, eligible)
 			if len(options) > 0 {
@@ -440,7 +557,11 @@ func (s *server) discordAdvancedLocked(ctx context.Context, rt *discordRuntime, 
 			}
 			panel.components = append(panel.components, discordAdvancedButtons(v, "", [2]string{"Back", "network"})...)
 		} else {
-			panel.components = discordAdvancedButtons(v, "", [2]string{"Enable Network", "network_enable"}, [2]string{"Disable Network", "network_disable"}, [2]string{"Change members", "members"}, [2]string{"Back", "back"})
+			toggle := [2]string{"Enable Network", "network_enable"}
+			if status.Config.Enabled {
+				toggle = [2]string{"Disable Network", "network_disable"}
+			}
+			panel.components = discordAdvancedButtons(v, "", toggle, [2]string{"Change members", "members"}, [2]string{"Back", "back"})
 		}
 		return panel
 	}
@@ -508,7 +629,7 @@ func (s *server) discordAdvancedLocked(ctx context.Context, rt *discordRuntime, 
 				name = server.Name
 			}
 		}
-		panel.text = fmt.Sprintf("%s\nSoftware: %s\nMinecraft version: %s\nStart on Boot: %s\nJava available: %t\nBedrock available: %t", discordAdvancedText(name), discordAdvancedText(details.Runtime.Software), discordAdvancedText(details.Runtime.Version), discordEnabled(details.Runtime.StartOnBoot), details.Runtime.JavaPort > 0, details.Runtime.BedrockEnabled || details.Runtime.Software == "bedrock")
+		panel.text = fmt.Sprintf("%s\n\nSoftware: %s\nMinecraft: %s\nStart on Boot: %s\nConnections: %s", discordAdvancedText(name), discordAdvancedText(discordSoftware(details.Runtime.Software)), discordAdvancedText(details.Runtime.Version), discordEnabled(details.Runtime.StartOnBoot), discordConnections(details.Runtime.JavaPort > 0, details.Runtime.BedrockEnabled || details.Runtime.Software == "bedrock"))
 	case "backups":
 		var inventory struct {
 			Backups []instanceBackupMetadata `json:"backups"`
@@ -532,13 +653,13 @@ func (s *server) discordAdvancedLocked(ctx context.Context, rt *discordRuntime, 
 		if json.Unmarshal(raw, &status) != nil {
 			return discordAdvancedFailure()
 		}
-		panel.text = fmt.Sprintf("Backup status: %s\nLast attempt: %s\nLast success: %s\nRestart required: %t", discordAdvancedText(status.State), discordAdvancedText(status.LastAttempt), discordAdvancedText(status.LastSuccess), status.RestartRequired)
+		panel.text = discordBackupSummary(status)
 	case "version_status":
 		var status adminVersionStatus
 		if json.Unmarshal(raw, &status) != nil {
 			return discordAdvancedFailure()
 		}
-		panel.text = fmt.Sprintf("Minecraft updates\nInstalled: %s\nAvailable: %s\nRecommended: %s\nSelected candidate: %s\nPolicy: %s\nConfigured version: %s\nStack state: %s\nUpdate available: %t\nServer supported: %t\nCross-play compatible: %t", discordAdvancedText(status.Installed), discordAdvancedText(status.Available), discordAdvancedText(status.Recommended), discordAdvancedText(status.SelectedCandidate), discordAdvancedText(status.Policy), discordAdvancedText(status.ConfiguredVersion), discordAdvancedText(status.StackState), status.UpdateAvailable, status.ServerSupported, status.CrossplayCompatible)
+		panel.text = discordVersionSummary(status)
 		safe := status.UpdateAvailable && status.ServerSupported && status.StackState == "updates_available" && (!status.CrossplayEnabled || status.CrossplayCompatible) && operationFingerprintPattern.MatchString(status.PlanFingerprint)
 		if op == "adv_version_review" {
 			if !safe {
@@ -560,7 +681,7 @@ func (s *server) discordAdvancedLocked(ctx context.Context, rt *discordRuntime, 
 			return discordAdvancedFailure()
 		}
 		safe := status.InstanceID == id && status.Running && (status.State == "update_available" || status.State == "image_missing" || status.State == "restart_needed") && operationFingerprintPattern.MatchString(status.PlanFingerprint)
-		panel.text = fmt.Sprintf("Container updates\nState: %s\nRunning: %t\nPrevious images retained: %d\nUpdate/restart available: %t", discordAdvancedText(status.State), status.Running, status.KeepPreviousImages, safe)
+		panel.text = discordContainerSummary(status)
 		if op == "adv_container_review" {
 			if !safe {
 				return panel
@@ -588,7 +709,7 @@ func (s *server) discordAdvancedLocked(ctx context.Context, rt *discordRuntime, 
 		}
 		panel.text = "No current update operation."
 		if status.Operation != nil {
-			panel.text = fmt.Sprintf("Update progress\nState: %s\nStage: %s\nAccepted: true\nCompleted: %t\nStatus: %s", discordAdvancedText(status.Operation.State), discordAdvancedText(status.Operation.Stage), status.Operation.FinishedAt != "", discordAdvancedText(status.Operation.Status))
+			panel.text = discordProgressSummary(status.Operation.State, status.Operation.Stage, status.Operation.Status, status.Operation.FinishedAt != "")
 		}
 	}
 	if _, ok = s.discordAdvancedAuthorized(rt, generation, guild, user); !ok {
@@ -751,4 +872,56 @@ func discordNetworkMemberOptions(instances []discordInstance, eligible map[strin
 		options = append(options, discord.NewStringSelectMenuOption(label, server.ID))
 	}
 	return options, total
+}
+
+func discordBackupSummary(status instanceBackupStatus) string {
+	text := "Backup status: " + discordAdvancedText(discordHumanState(status.State))
+	text = discordSummaryField(text, "Last attempt", status.LastAttempt)
+	text = discordSummaryField(text, "Last success", status.LastSuccess)
+	if status.RestartRequired {
+		text += "\n⚠ Restart required"
+	}
+	return text
+}
+func discordVersionSummary(status adminVersionStatus) string {
+	text := "Minecraft updates\nUpdate: " + discordUpdateAvailability(status.UpdateAvailable)
+	for _, field := range [][2]string{{"Installed", status.Installed}, {"Available", status.Available}, {"Recommended", status.Recommended}, {"Selected candidate", status.SelectedCandidate}, {"Policy", status.Policy}, {"Configured version", status.ConfiguredVersion}} {
+		text = discordSummaryField(text, field[0], field[1])
+	}
+	if status.StackState != "" {
+		text = discordSummaryField(text, "Status", discordHumanState(status.StackState))
+	}
+	if !status.ServerSupported {
+		text += "\n⚠ Server software is unsupported"
+	}
+	if status.CrossplayEnabled && !status.CrossplayCompatible {
+		text += "\n⚠ Cross-play is incompatible with this update"
+	}
+	return text
+}
+func discordContainerSummary(status minecraftContainerStatus) string {
+	state := "Stopped"
+	if status.Running {
+		state = "Running"
+	}
+	available := status.State == "update_available" || status.State == "image_missing" || status.State == "restart_needed"
+	text := "Container updates\nStatus: " + state + "\nUpdate: " + discordUpdateAvailability(available)
+	if status.KeepPreviousImages > 0 {
+		text += fmt.Sprintf("\nPrevious images retained: %d", status.KeepPreviousImages)
+	}
+	return text
+}
+func discordProgressSummary(state, stage, result string, completed bool) string {
+	status := "In progress"
+	if completed {
+		status = "Completed"
+	}
+	text := "Update progress\nStatus: " + status
+	if state != "" {
+		text = discordSummaryField(text, "State", discordHumanState(state))
+	}
+	if stage != "" {
+		text = discordSummaryField(text, "Stage", discordHumanState(stage))
+	}
+	return discordSummaryField(text, "Result", result)
 }

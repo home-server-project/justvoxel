@@ -23,6 +23,9 @@
   let generation = 0;
   let surfaceGeneration = 0;
   let refreshQueued = false;
+  let refreshTimer;
+  let verificationFailed = false;
+  let ready = false;
   // Only allowlisted, non-secret presentation fields leave this controller.
   let presentation = {configured: false, verified: false, enabled: false, status: '', bot_username: ''};
   const clearToken = () => { token.value = ''; };
@@ -44,7 +47,7 @@
   const displayStatus = snapshot => {
     if (snapshot?.configured !== true) return snapshot?.status === 'disconnected' ? 'disconnected' : '';
     if (snapshot.verified !== true) return 'unverified';
-    if (snapshot.enabled !== true) return 'disabled';
+    if (snapshot.enabled !== true) return 'verified';
     if (typeof snapshot.runtime_status === 'string') return Object.hasOwn(labels, snapshot.runtime_status) ? snapshot.runtime_status : '';
     return ['disconnected', 'unverified', 'verified'].includes(snapshot.status) ? snapshot.status : '';
   };
@@ -55,6 +58,8 @@
       bot_username: snapshot?.verified === true && typeof snapshot.bot_username === 'string' ? snapshot.bot_username : '',
     };
     configured = presentation.configured;
+    if (presentation.verified) verificationFailed = false;
+    ready = presentation.status === 'connected' && !!snapshot?.guild_id && snapshot?.bound_guild_available === true;
     renderHeader();
     dialog.dispatchEvent(new CustomEvent('discord-state', {detail: {...presentation}}));
     if (!active()) return;
@@ -119,12 +124,24 @@
     const currentSurface = surfaceGeneration;
     const current = () => currentGeneration === generation && workspaceOpen() && (globalChange || currentSurface === surfaceGeneration);
     busy = true; renderHeader();
-    report(payload ? 'Saving…' : '');
+    if (payload) report('Saving…');
     try {
-      const snapshot = await send(payload);
+      let snapshot = await send(payload);
       if (current()) {
         if (['credential', 'disconnect'].includes(payload?.action)) replacing = false;
-        render(snapshot); report(payload ? 'Saved.' : '');
+        if (payload?.action === 'credential') {
+          verificationFailed = false;
+          render(snapshot);
+          // The credential is already saved; verification failure must retain it.
+          try { snapshot = await send({action: 'verify'}); }
+          catch (_) { verificationFailed = true; }
+          if (!current()) return;
+        } else if (['verify', 'disconnect'].includes(payload?.action)) verificationFailed = false;
+        render(snapshot);
+        if (verificationFailed) report('Token saved, but verification failed. Check the token or connection, then choose Retry.');
+        else if (ready) report('Ready. In Discord, use /jv or /help.');
+        else if (payload) report('Saved.');
+        else if (feedback.textContent === 'Ready. In Discord, use /jv or /help.') report('');
       }
     } catch (_) {
       if (current()) {
@@ -139,6 +156,7 @@
     }
   };
   const leaveSurface = () => {
+    clearInterval(refreshTimer); refreshTimer = undefined;
     surfaceGeneration++; clearToken(); replacing = false; renderBot();
     guild.disabled = true; bind.disabled = true;
     install.hidden = true; install.href = '';
@@ -149,7 +167,11 @@
     configured = false; renderBot(); renderHeader();
     dialog.dispatchEvent(new CustomEvent('discord-state', {detail: {...presentation}}));
   };
-  dialog.addEventListener('gateway-surface-change', () => { leaveSurface(); if (workspaceOpen()) request(); });
+  const startPolling = () => {
+    clearInterval(refreshTimer); refreshTimer = undefined;
+    if (active() && primary()) refreshTimer = setInterval(() => { if (active()) request(); }, 5000);
+  };
+  dialog.addEventListener('gateway-surface-change', () => { leaveSurface(); if (workspaceOpen()) request(); startPolling(); });
   dialog.addEventListener('close', stop);
   dialog.addEventListener('cancel', stop);
   dialog.addEventListener('discord-refresh', () => request());
@@ -167,5 +189,5 @@
   bind.addEventListener('click', () => { if (!guild.disabled && availableGuilds.has(guild.value)) request({action: 'guild', guild_id: guild.value}); });
   find('[data-discord-disconnect]').addEventListener('click', () => request({action: 'disconnect'}));
   renderHeader();
-  if (workspaceOpen()) request();
+  if (workspaceOpen()) { request(); startPolling(); }
 })();

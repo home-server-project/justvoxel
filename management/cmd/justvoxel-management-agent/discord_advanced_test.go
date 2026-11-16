@@ -161,7 +161,7 @@ func TestDiscordAdvancedDetailsAndStartOnBoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := advancedHandle(t, s, rt, v, "777", "adv_instance_details", id)
-	if !strings.Contains(p.text, before.Runtime.Software) || strings.Contains(p.text, "RCON") || strings.Contains(p.text, "/var/") {
+	if !strings.Contains(p.text, discordSoftware(before.Runtime.Software)) || !strings.Contains(p.text, "Connections:") || strings.Contains(p.text, "RCON") || strings.Contains(p.text, "/var/") {
 		t.Fatal("unsafe or missing details", p.text)
 	}
 	review := advancedHandle(t, s, rt, v, "777", "adv_boot_review", id)
@@ -311,7 +311,7 @@ func TestDiscordAdvancedBackupReadsAreBounded(t *testing.T) {
 		t.Fatal("inventory bounds", p.text)
 	}
 	p = advancedHandle(t, s, rt, v, "777", "adv_backup_status", id)
-	if !strings.Contains(p.text, "Last success:") {
+	if !strings.Contains(p.text, "Backup status:") || strings.Contains(p.text, "Restart required: false") {
 		t.Fatal("backup status adapter", p.text)
 	}
 }
@@ -619,5 +619,124 @@ func TestDiscordAdvancedNetworkSharedTransactionAndBootProtection(t *testing.T) 
 	current, err = networkRead(f.backend)
 	if err != nil || !reflect.DeepEqual(current.Config.Members, members) || capture.Code != 200 {
 		t.Fatal("Telegram shared member mutation", capture.Code, capture.Body.String(), err)
+	}
+}
+
+func TestDiscordAdvancedHumanSummaries(t *testing.T) {
+	emptyOS := discordOSSummary(adminSystemUpdateStatus{})
+	if emptyOS != "JustVoxel OS" {
+		t.Fatal("empty OS noise", emptyOS)
+	}
+	current := discordOSSummary(adminSystemUpdateStatus{Running: adminSystemUpdateDeployment{Version: "44.x"}, CheckState: "current"})
+	if !strings.Contains(current, "Running: 44.x") || !strings.Contains(current, "Status: No update action required") {
+		t.Fatal(current)
+	}
+	failure := discordOSSummary(adminSystemUpdateStatus{ActivationFailed: true, CheckState: "current"})
+	if !strings.Contains(failure, "⚠ Update activation failed\nReview System Update in JustVoxel.") || strings.Contains(failure, "No update action required") {
+		t.Fatal(failure)
+	}
+	pending := discordOSSummary(adminSystemUpdateStatus{RebootRequired: true, ActivationPending: true, CheckState: "staged_current"})
+	for _, want := range []string{"⚠ Reboot required", "⚠ Update activation pending", "Update downloaded and staged"} {
+		if !strings.Contains(pending, want) {
+			t.Error("missing", want, pending)
+		}
+	}
+	for _, tc := range []struct {
+		java, bedrock bool
+		want          string
+	}{{true, true, "Java + Bedrock"}, {true, false, "Java"}, {false, true, "Bedrock"}, {false, false, "Unavailable"}} {
+		if got := discordConnections(tc.java, tc.bedrock); got != tc.want {
+			t.Error(got, tc.want)
+		}
+	}
+	if discordSoftware("paper") != "Paper" || discordSoftware("fabric") != "Fabric" {
+		t.Fatal("raw software names")
+	}
+	texts := []string{emptyOS, current, failure, pending,
+		discordBackupSummary(instanceBackupStatus{}), discordBackupSummary(instanceBackupStatus{RestartRequired: true}),
+		discordVersionSummary(adminVersionStatus{}), discordVersionSummary(adminVersionStatus{ServerSupported: true, UpdateAvailable: true, CrossplayEnabled: true}),
+		discordContainerSummary(minecraftContainerStatus{}), discordContainerSummary(minecraftContainerStatus{Running: true, State: "update_available", KeepPreviousImages: 2}),
+		discordProgressSummary("running", "preparing_update", "", false), discordProgressSummary("succeeded", "complete", "Updated", true),
+		discordAdvancedPreview(discordPendingAction{Operation: "update_reboot", WarningSeconds: 60, BackupMinecraft: true}),
+		discordAdvancedPreview(discordPendingAction{Operation: "update_reboot", WarningSeconds: 10, BackupMinecraft: false}),
+	}
+	for _, text := range texts {
+		for _, noise := range []string{"true", "false", "\nLast attempt: \n", "\nLast success: \n", "Accepted:", "Completed:"} {
+			if strings.Contains(text, noise) {
+				t.Error("raw or empty diagnostic", text)
+			}
+		}
+	}
+	if strings.Contains(texts[4], "Last attempt:") || strings.Contains(texts[4], "Last success:") || strings.Contains(texts[4], "Restart required") {
+		t.Fatal("empty backup noise")
+	}
+}
+
+func TestDiscordNetworkHumanPresentationAndStateButtons(t *testing.T) {
+	instances := []discordInstance{{ID: "jv-aaaaaa", Name: "Fabric"}, {ID: "jv-bbbbbb", Name: "Paper"}}
+	status := discordNetworkStatus{Config: minecraftNetworkConfig{JavaPort: 25565, BedrockPort: 19132, Members: []string{"jv-aaaaaa", "jv-bbbbbb"}}, RuntimeReady: true}
+	for _, enabled := range []bool{false, true} {
+		status.Config.Enabled = enabled
+		text := discordNetworkSummary(status, instances)
+		if strings.Split(text, "\n")[0] != "Minecraft Network / Velocity · "+discordEnabled(enabled) {
+			t.Fatal(text)
+		}
+		if !strings.Contains(text, "Servers: Fabric, Paper") || !strings.Contains(text, "Status: Ready") || strings.Contains(text, "jv-") || strings.Contains(text, "true") || strings.Contains(text, "false") || strings.Contains(text, "Recovery") {
+			t.Fatal(text)
+		}
+	}
+	instances[1].Name = "Fabric"
+	text := discordNetworkSummary(status, instances)
+	if !strings.Contains(text, "Fabric (jv-aaaaaa)") || !strings.Contains(text, "Fabric (jv-bbbbbb)") {
+		t.Fatal("duplicate names ambiguous", text)
+	}
+	status.RecoveryRequired = true
+	status.RuntimeReady = false
+	text = discordNetworkSummary(status, instances)
+	if !strings.Contains(text, "⚠ Recovery required") || !strings.Contains(text, "Status: Not ready") {
+		t.Fatal(text)
+	}
+	// Exercise the real panel/handler as well as its text summary.
+	f, config := networkTransactionFixture(t)
+	s, _ := networkLockFixture(t, f)
+	bound, rt, v := discordBoundFixture(t)
+	s.store = bound.store
+	s.discordRuntime = rt
+	discordRegistryFixture(t, f.backend.identities())
+	discordApproveFixture(t, s, &v, "777")
+	for _, enabled := range []bool{false, true} {
+		config.Enabled = enabled
+		if err := networkApply(context.Background(), f.backend, config); err != nil {
+			t.Fatal(err)
+		}
+		panel := advancedHandle(t, s, rt, v, "777", "adv_network", "")
+		if strings.Split(panel.text, "\n")[0] != "Minecraft Network / Velocity · "+discordEnabled(enabled) {
+			t.Fatal(panel.text)
+		}
+		if strings.Contains(panel.text, "true") || strings.Contains(panel.text, "false") {
+			t.Fatal("raw boolean presentation", panel.text)
+		}
+		raw := string(mustAdvancedJSON(panel.components))
+		want, absent := "Enable Network", "Disable Network"
+		if enabled {
+			want, absent = absent, want
+		}
+		if !strings.Contains(raw, want) || strings.Contains(raw, absent) {
+			t.Fatal(raw)
+		}
+	}
+}
+
+func TestDiscordNetworkSummaryBoundsMembers(t *testing.T) {
+	status := discordNetworkStatus{}
+	instances := []discordInstance{}
+	for index := 0; index < 12; index++ {
+		id := fmt.Sprintf("jv-%06x", index)
+		status.Config.Members = append(status.Config.Members, id)
+		instances = append(instances, discordInstance{ID: id, Name: fmt.Sprintf("Server %02d", index)})
+	}
+	text := discordNetworkSummary(status, instances)
+	if strings.Count(text, "Server ") != 10 || !strings.Contains(text, "More selected servers") || strings.Contains(text, "jv-") {
+		t.Fatal("member names unbounded or IDs exposed", text)
 	}
 }
