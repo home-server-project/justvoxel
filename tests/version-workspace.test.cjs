@@ -641,6 +641,10 @@ test('Container reuses Version framing and typography with responsive informatio
  assert.match(cssRule('.version-container-action-lane'),/justify-content:flex-end/);
  assert.match(cssRule('.version-container-action-lane'),/border-top:1px solid var\(--jv-border\)/);
  assert.match(cssRule('.version-container-footer .backup-command-actions'),/justify-content:flex-end/);
+ assert.match(cssRule('.version-container-panel .version-container-footer'),/display:grid;grid-template-columns:minmax\(0,1fr\) auto;align-items:center/);
+ assert.match(cssRule('.version-container-footer .backup-command-actions'),/padding:0;border:0/);
+ assert.match(cssRule('.version-container-footer .backup-command-actions button'),/min-height:32px;width:auto;padding:\.38rem \.65rem;font-size:\.8rem/);
+
  assert.match(cssRule('.version-container-configuration>.muted.compact'),/color:var\(--jv-muted\);font-size:\.75rem;line-height:1\.35;margin:var\(--jv-space-sm\) 0 0/);
  assert.match(cssRule('.version-container-panel'),/container-type:inline-size/);
  for(const kind of ['media','container']) for(const [width,columns] of [[700,'repeat(2,minmax(0,1fr))'],[420,'minmax(0,1fr)']]) {
@@ -648,7 +652,10 @@ test('Container reuses Version framing and typography with responsive informatio
   assert.ok(start>=0);
   const rules=css.slice(start,css.indexOf('\n',start));
   assert.ok(rules.includes('.version-container-panel .version-container-controls,.version-container-footer .backup-library-summary{grid-template-columns:'+columns+'}'));
-  if(width===700) assert.ok(rules.includes('.version-container-history .backup-file-grid{grid-template-columns:1fr}'));
+  if(width===700) {
+   assert.ok(rules.includes('.version-container-history .backup-file-grid{grid-template-columns:1fr}'));
+   assert.ok(rules.includes('.version-container-panel .version-container-footer{grid-template-columns:minmax(0,1fr)}'));
+  }
  }
  const empty=cssRule('.version-container-history .backup-library-empty');
  assert.match(empty,/grid-column:1 \/ -1/);assert.match(empty,/min-height:62px/);

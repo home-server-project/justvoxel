@@ -220,6 +220,21 @@ func TestSystemWorkspaceMigrationContract(t *testing.T) {
 			t.Fatalf("System workspace behavior missing %q", want)
 		}
 	}
+	upsCSS, err := assets.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`.system-ups-source-final-row{grid-column:1/-1;display:flex;align-items:end;gap:.65rem;min-width:0}`,
+		`.system-ups-source-final-row>label{flex:1;min-width:0}`,
+		`.system-ups-source-actions{display:flex;align-items:center;gap:.65rem;flex:none}`,
+		`.system-ups-source-actions button{min-height:32px;width:auto;padding:.38rem .65rem;font-size:.8rem}`,
+		`save.textContent = "Save and verify"`,
+	} {
+		if !strings.Contains(string(upsCSS), want) && !strings.Contains(behavior, want) {
+			t.Fatalf("compact UPS final row missing %q", want)
+		}
+	}
 	for _, old := range []string{"192.168.0.51", "blackbox.lan"} {
 		if strings.Contains(behavior, old) {
 			t.Fatalf("UPS UI contains private example %q", old)

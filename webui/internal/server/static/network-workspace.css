@@ -41,6 +41,7 @@
 .network-overview-status{display:flex;justify-content:flex-end;align-items:center;gap:.4rem;flex-wrap:wrap}
 .network-workspace-content .network-overview-version{margin:.2rem 0 0;font-size:.78rem}
 .network-badge{text-transform:capitalize;white-space:nowrap}
+.network-internet-status{text-transform:none}
 .network-badge.good{border-color:var(--jv-success);background:#20382b;color:#c8f2d7}
 .network-badge.danger{border-color:var(--jv-error);background:#3a2423;color:#ffc5bd}
 .network-badge.muted{color:var(--jv-muted)}
@@ -51,6 +52,7 @@
 @container(min-width:1140px){.network-provider-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
 .network-device-heading,.network-section-heading{display:flex;align-items:center;justify-content:space-between;gap:.5rem}
 .network-device-heading>div,.network-section-heading>div{display:grid;gap:.15rem;min-width:0}
+.network-device-heading>.network-inline-actions{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap}
 .network-device-heading strong{font-size:1rem;overflow-wrap:anywhere}
 .network-device-kind{font-size:.7rem}
 .network-section-heading span{color:var(--jv-muted);font-size:.76rem}
@@ -88,6 +90,10 @@
 .network-wifi-row strong,.network-saved-row strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.86rem}
 .network-wifi-row span:not(.network-badge),.network-saved-row span:not(.network-badge){display:block;color:var(--jv-muted);font-size:.76rem}
 .network-wifi-row-actions{flex-shrink:0}
+.network-wifi-row-actions .danger{background:var(--jv-error);color:#fff}
+.network-wifi-section .network-section-heading{flex-wrap:wrap}
+.network-wifi-section .network-section-heading>.network-inline-actions{display:flex;flex-direction:row;flex-wrap:nowrap;gap:.4rem}
+.network-wifi-section .network-section-heading button{flex:none;width:auto;white-space:nowrap}
 .network-wifi-unavailable{color:var(--jv-muted);font-size:.76rem}
 .network-empty{margin:.4rem 0 0;color:var(--jv-muted);font-size:.8rem}
 .network-list-pages{display:flex;align-items:center;justify-content:space-between;gap:.4rem;margin-top:.4rem;font-size:.76rem;color:var(--jv-muted)}
@@ -104,6 +110,12 @@
 .network-workspace-content :is(.network-connect-panel,.network-ethernet-form) label{display:grid;gap:.2rem;min-width:0;margin:0;font-size:.8rem;font-weight:700}
 .network-workspace-content :is(.network-connect-panel,.network-ethernet-form) :is(input:not([type="checkbox"]),select){width:100%;min-width:0;min-height:34px;margin:0;padding:.38rem .55rem}
 .network-workspace-content .network-ethernet-form .toggle-line{display:flex;align-items:center;justify-content:flex-end;gap:.5rem;grid-column:1/-1}
+.network-form-information{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:.75rem}
+.network-form-information>.state-text{flex:1}
+.network-form-information>.toggle-line{flex:none;white-space:nowrap}
+.network-reconnect-information{flex-wrap:nowrap;justify-content:space-between}
+.network-reconnect-information>.state-text{flex:1;margin:0;font-size:.8rem;line-height:1.4;color:var(--jv-muted)}
+.network-reconnect-information>button{flex:none}
 .network-ethernet-form input[type="checkbox"]{width:auto;margin:0}
 .network-ethernet-form .state-text,.network-connect-hint{grid-column:1/-1;margin:0;font-size:.78rem;line-height:1.4;color:var(--jv-muted)}
 .network-connect-password{grid-column:1/-1}
@@ -115,6 +127,7 @@
 }
 @container(max-width:560px){
   .network-devices,.network-wifi-layout{grid-template-columns:1fr}
+  .network-form-information,.network-reconnect-information{align-items:flex-start;flex-direction:column}
   .network-workspace-content .section-heading{flex-wrap:wrap}
   .network-overview-status{justify-content:flex-start}
   .network-workspace-view>.network-tabs{flex-wrap:wrap}
@@ -142,10 +155,26 @@
 .network-workspace-view>.network-workspace-state:empty{display:none}
 .network-troubleshoot-devices{display:grid;grid-template-columns:minmax(0,1fr);gap:.55rem;margin-top:.55rem}
 .network-troubleshoot>.network-health-heading{display:flex;align-items:center;gap:.65rem;flex-wrap:wrap}
-.network-health-heading>h2{margin:0;font-size:1rem}
+.network-health-heading>.eyebrow{margin:0}
 .network-health-heading>button{margin-left:auto}
 .network-troubleshoot .network-device-card>.state-text{margin:.5rem 0 0;font-size:.8rem;line-height:1.4;color:var(--jv-muted)}
 @media(max-width:700px){.network-workspace-dialog{top:var(--jv-workspace-top-inset)!important}}
 
 .network-provider-card [data-action="deactivate"]{grid-column:1;justify-self:start}
 .network-provider-card [data-action="activate"]{grid-column:2;justify-self:end}
+
+/* Nearby rows consume the remaining workspace height; the list scrolls as needed. */
+.network-workspace-content:has([data-network-view="Wi-Fi"]){height:100%}
+.network-workspace-view:has([data-network-view="Wi-Fi"]){height:100%;min-height:0}
+#network-tab-panel[data-network-view="Wi-Fi"]>.network-overview{flex:none}
+#network-tab-panel[data-network-view="Wi-Fi"]{display:flex;flex-direction:column;flex:1;min-height:0}
+.network-wifi-layout{flex:1;min-height:0}
+.network-wifi-settings{overflow:auto}
+.network-wifi-nearby{grid-auto-rows:minmax(0,1fr);min-height:0}
+.network-wifi-section{display:flex;flex-direction:column;min-height:0}
+.network-wifi-list{flex:1;min-height:0;overflow-y:auto;align-content:start}
+@container(max-width:560px){
+  #network-tab-panel[data-network-view="Wi-Fi"]{flex:none}
+  .network-wifi-layout{flex:none}
+  .network-wifi-nearby{height:var(--jv-workspace-height);min-height:220px}
+}

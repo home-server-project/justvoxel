@@ -265,9 +265,10 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     return "Unknown";
   };
 
-  const firstAddress = (config) => {
+  const firstAddress = (config, includePrefix = true) => {
     const address = config?.addresses?.[0];
     if (!address?.address) return "Not assigned";
+    if (!includePrefix) return address.address.split("/")[0];
     return address.prefix !== undefined ? address.address + "/" + address.prefix : address.address;
   };
 
@@ -348,6 +349,15 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     item.className = "badge network-badge" + (tone ? " " + tone : "");
     item.textContent = text;
     return item;
+  };
+
+  const internetStatus = (snapshot) => {
+    const status = badge(
+      connectivitySummary(snapshot.connectivity),
+      snapshot.connectivity === "full" ? "good" : ["none", "limited", "portal"].includes(snapshot.connectivity) ? "danger" : "muted"
+    );
+    status.className += " network-internet-status";
+    return status;
   };
 
   const actionButton = (text, datasetName, datasetValue, kind = "secondary") => {
@@ -473,21 +483,10 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     const heading = document.createElement("div");
     heading.className = "section-heading";
 
-    const primary = document.createElement("div");
-    primary.className = "network-overview-primary";
-    const eyebrow = document.createElement("p");
-    eyebrow.className = "eyebrow";
-    eyebrow.textContent = "Connectivity";
-
-    const connectivity = snapshot.connectivity || "unknown";
-    const title = document.createElement("h2");
-    title.textContent = connectivitySummary(connectivity);
-    primary.append(eyebrow, title);
-
     const status = document.createElement("div");
     status.className = "network-overview-status";
     status.append(
-      badge(label(snapshot.state), snapshot.state?.startsWith("connected") ? "good" : ""),
+      internetStatus(snapshot),
       badge(snapshot.networking_enabled ? "Networking on" : "Networking off", snapshot.networking_enabled ? "good" : "danger")
     );
 
@@ -496,18 +495,11 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       status.appendChild(
         badge(snapshot.wireless_enabled ? "Wi-Fi on" : "Wi-Fi off", snapshot.wireless_enabled ? "" : "muted")
       );
-      /* Radio controls belong in the Wi-Fi tab. */
-      const toggle = actionButton(
-        snapshot.wireless_enabled ? "Turn Wi-Fi off" : "Turn Wi-Fi on",
-        "networkWifiRadio",
-        snapshot.wireless_enabled ? "off" : "on"
-      );
-      if (selectedTab === "Wi-Fi" && isAdministrator()) status.appendChild(toggle);
     } else {
       status.appendChild(badge("Wi-Fi not available", "muted"));
     }
 
-    heading.append(primary, status);
+    heading.appendChild(status);
 
     const subtitle = document.createElement("p");
     subtitle.className = "state-text network-overview-version";
@@ -520,15 +512,14 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
   const renderOverview = (snapshot) => {
     const section = document.createElement("section");
     section.className = "panel details network-overview";
-    const connectivity = snapshot.connectivity || "unknown";
-    const heading = sectionHeading("Connectivity", connectivitySummary(connectivity));
+    const heading = internetStatus(snapshot);
     const devices = (snapshot.devices || []).filter((device) => ["ethernet", "wifi"].includes(device.kind));
     const primary = devices.find((device) => device.state === "activated" && device.ipv4?.gateway && device.ipv4?.addresses?.length)
       || devices.find((device) => device.state === "activated" && device.ipv4?.addresses?.length);
     const ethernet = devices.find((device) => device.kind === "ethernet" && device.state === "activated")
       || devices.find((device) => device.kind === "ethernet");
     section.append(heading,
-      row("IPv4", primary?.ipv4?.addresses?.[0]?.address || "Unavailable"),
+      row("IPv4", primary ? firstAddress(primary.ipv4, false) : "Unavailable"),
       row("Ethernet", ethernet ? ethernet.interface + " · " + (ethernet.state === "activated" && ethernet.carrier !== false ? "Connected" : "Disconnected") : "Unavailable"));
     for (const [id, name] of [["tailscale", "Tailscale"], ["netbird", "NetBird"], ["playit", "Playit"]]) {
       const provider = remoteProviders.find((item) => item.id === id);
@@ -592,7 +583,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     checkpointTimer = window.setInterval(updateCheckpointCountdown, 1000);
   };
 
-  const renderDevice = (device) => {
+  const renderDevice = (device, snapshot = null) => {
     const card = document.createElement("article");
     card.className = "panel network-device-card";
 
@@ -607,7 +598,14 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     titleWrap.append(kind, title);
 
     const stateBadge = badge(label(device.state), device.state === "activated" ? "good" : device.state === "failed" ? "danger" : "");
-    heading.append(titleWrap, stateBadge);
+    if (device.kind === "ethernet" && snapshot) {
+      const status = document.createElement("div");
+      status.className = "network-inline-actions";
+      status.append(stateBadge, internetStatus(snapshot));
+      heading.append(titleWrap, status);
+    } else {
+      heading.append(titleWrap, stateBadge);
+    }
     card.appendChild(heading);
 
     const summary = document.createElement("div");
@@ -617,18 +615,12 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       summary.append(
         row("Network", ssid),
         row("Signal", device.wireless?.ssid ? signalBars(device.wireless?.signal) + " · " + (device.wireless?.signal || 0) + "%" : "—"),
-        row("IPv4", firstAddress(device.ipv4))
+        row("IPv4", firstAddress(device.ipv4, false))
       );
-      if (device.active_connection) {
-        const actions = document.createElement("div");
-        actions.className = "network-inline-actions nav-admin-only";
-        actions.appendChild(actionButton("Disconnect", "networkWifiDisconnect", device.interface, "secondary"));
-        summary.appendChild(actions);
-      }
     } else {
       summary.append(
         row("Link", device.carrier === false ? "Cable disconnected" : device.speed_mbps ? device.speed_mbps + " Mbps" : "Connected"),
-        row("IPv4", firstAddress(device.ipv4)),
+        row("IPv4", firstAddress(device.ipv4, false)),
         row("Profile", device.active_connection?.id || "No active profile"),
         row("Gateway", device.ipv4?.gateway || "—"),
         row("DNS", device.ipv4?.dns?.join(", ") || "—"),
@@ -676,13 +668,17 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
 
     const headingActions = document.createElement("div");
     headingActions.className = "network-inline-actions";
-    const other = actionButton("Other network…", "networkWifiOther", device.interface, "secondary");
+    const toggle = actionButton(
+      currentSnapshot.wireless_enabled ? "Turn Wi-Fi off" : "Turn Wi-Fi on",
+      "networkWifiRadio", currentSnapshot.wireless_enabled ? "off" : "on"
+    );
+    const other = actionButton("Hidden network", "networkWifiOther", device.interface, "secondary");
     const scan = document.createElement("button");
     scan.type = "button";
-    scan.className = "secondary network-scan-button";
+    scan.className = "primary network-scan-button";
     scan.dataset.networkScan = device.interface;
     scan.textContent = "Scan";
-    headingActions.append(other, scan);
+    headingActions.append(toggle, other, scan);
     heading.append(headingText, headingActions);
     section.appendChild(heading);
 
@@ -711,7 +707,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         const actions = document.createElement("div");
         actions.className = "network-wifi-row-actions";
         if (network.active) {
-          actions.appendChild(badge("Connected", "good"));
+          actions.append(badge("Connected", "good"), actionButton("Disconnect", "networkWifiDisconnect", device.interface, "danger"));
         } else if (network.profile_uuid) {
           const connect = actionButton("Connect", "networkWifiSavedConnect", device.interface);
           connect.dataset.profileUuid = network.profile_uuid;
@@ -734,8 +730,6 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       });
     }
     section.appendChild(list);
-    const pages = paginateList(list, 4);
-    if (pages) section.appendChild(pages);
     return section;
   };
 
@@ -943,7 +937,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     field("dns", "DNS servers (comma separated)", (device.ipv4?.dns || []).join(", "));
     const mtu = field("mtu", "MTU (0 for automatic)", device.mtu || 0, "number");
     mtu.min = "0"; mtu.max = "9000";
-    field("autoconnect", "Connect automatically", device.active_connection.autoconnect, "checkbox");
+    const autoconnect = field("autoconnect", "Connect automatically", device.active_connection.autoconnect, "checkbox");
     const updateMode = () => {
       [address, prefix, gateway].forEach((input) => { input.disabled = method.value === "auto"; });
       address.required = method.value === "manual";
@@ -961,7 +955,10 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     const actions = document.createElement("div");
     actions.className = "network-form-actions";
     actions.appendChild(apply);
-    form.append(hint, actions);
+    const information = document.createElement("div");
+    information.className = "network-form-information";
+    information.append(hint, autoconnect.parentElement);
+    form.append(information, actions);
     return form;
   };
 
@@ -970,13 +967,10 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     section.className = "panel network-section network-troubleshoot";
     const heading = document.createElement("div");
     heading.className = "network-health-heading";
-    const title = document.createElement("h2");
+    const title = document.createElement("p");
+    title.className = "eyebrow";
     title.textContent = "Network health";
-    const status = document.createElement("span");
-    status.className = "state-text";
-    status.textContent = snapshot.connectivity === "full" ? "Internet connected"
-      : ["none", "limited", "portal"].includes(snapshot.connectivity) ? "Internet not connected"
-      : "Internet status unavailable";
+    const status = internetStatus(snapshot);
     heading.append(title, status);
     if (["none", "limited", "portal"].includes(snapshot.connectivity)) {
       heading.appendChild(actionButton("Check internet now", "networkConnectivityCheck", "true"));
@@ -995,7 +989,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       summary.append(
         row("Interface", device.interface), row("State", label(device.state)),
         row("Link", device.carrier === false ? "No carrier" : device.carrier === true ? "Carrier present" : "Not reported"),
-        row("IPv4", firstAddress(device.ipv4)),
+        row("IPv4", firstAddress(device.ipv4, false)),
         row("Default gateway", device.ipv4?.gateway || "Missing"),
         row("DNS servers", device.ipv4?.dns?.join(", ") || "Missing"),
         row("Active profile", device.active_connection?.id || "Missing")
@@ -1010,8 +1004,9 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         const explanation = document.createElement("p");
         explanation.className = "state-text";
         explanation.textContent = "Reconnect this interface using its current settings. The connection may briefly pause; previous settings are restored unless you confirm.";
-        actions.appendChild(repair);
-        card.append(explanation, actions);
+        actions.classList.add("network-reconnect-information");
+        actions.append(explanation, repair);
+        card.appendChild(actions);
       }
       grid.appendChild(card);
     });
@@ -1392,7 +1387,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       panel.appendChild(renderOverview(currentSnapshot));
     } else if (selectedTab === "Ethernet") {
       devices.filter((device) => device.kind === "ethernet").forEach((device) => {
-        const card = renderDevice(device);
+        const card = renderDevice(device, currentSnapshot);
         if (currentCheckpoint?.interfaces?.includes(device.interface)) card.appendChild(row("Review", "Check the live address and connectivity, then Keep settings to save or Revert now."));
         else if (device.active_connection && device.state === "activated") card.appendChild(renderEthernetForm(device));
         else card.appendChild(row("Configuration", "An active Ethernet profile is required. Use nm-hsp or nmtui locally to activate one."));
@@ -1412,7 +1407,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         nearby.appendChild(renderWiFiNetworks(device, currentNetworks.get(device.interface)));
       });
       const saved = renderSavedWiFi(currentSnapshot);
-      if (saved) nearby.appendChild(saved);
+      if (saved) settings.appendChild(saved);
       const connectPanel = renderConnectPanel();
       if (connectPanel) settings.appendChild(connectPanel);
       layout.append(settings, nearby);

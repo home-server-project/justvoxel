@@ -492,23 +492,25 @@ class Element {
 }
 const document = { createElement: (tag) => new Element(tag) };
 const row = (name, value) => { const e = new Element("row"); e.textContent = name + ": " + value; return e; };
-const sectionHeading = (name, value) => { const e = new Element("heading"); e.textContent = name + ": " + value; return e; };
+
 const remoteProviders = [
   { id: "tailscale", summary: "Awaiting approval" },
   { id: "netbird", summary: "Not configured" },
   { id: "playit", summary: "Setup pending", claim_url: "https://playit.gg/claim/0123abcdef" },
 ];
-` + script[strings.Index(script, "  const connectivitySummary ="):strings.Index(script, "  const validPlayitClaim =")] + script[start:end] + `
+` + script[strings.Index(script, "  const connectivitySummary ="):strings.Index(script, "  const validPlayitClaim =")] + script[strings.Index(script, "  const firstAddress ="):strings.Index(script, "  const clearRecoveryTimer =")] + script[strings.Index(script, "  const badge ="):strings.Index(script, "  const actionButton =")] + script[start:end] + `
 const snapshot = { connectivity: "full", devices: [
-  { kind: "ethernet", interface: "enp1s0", state: "activated", carrier: true, ipv4: { gateway: "192.168.0.1", addresses: [{ address: "192.168.0.28" }] } },
+  { kind: "ethernet", interface: "enp1s0", state: "activated", carrier: true, ipv4: { gateway: "192.168.0.1", addresses: [{ address: "192.168.0.28/24", prefix: 24 }] } },
 ] };
 const panel = renderOverview(snapshot);
 assert.equal(panel.tag, "section"); assert.equal(panel.children.length, 6);
 assert.deepEqual(panel.children.map((node) => node.textContent), [
-  "Connectivity: Internet connected", "IPv4: 192.168.0.28", "Ethernet: enp1s0 · Connected",
+  "Internet connected", "IPv4: 192.168.0.28", "Ethernet: enp1s0 · Connected",
   "Tailscale: Awaiting approval", "NetBird: Not configured", "Playit: Setup pending",
 ]);
 assert(!JSON.stringify(panel).includes("claim"));
+assert(!JSON.stringify(panel).includes("Connectivity"));
+assert.equal(panel.children[0].className, "badge network-badge good network-internet-status");
 const missing = renderOverview({ devices: [] });
 assert.equal(missing.children[1].textContent, "IPv4: Unavailable");
 assert.equal(missing.children[2].textContent, "Ethernet: Unavailable");
@@ -686,7 +688,7 @@ func TestNetworkTroubleshootInternetStates(t *testing.T) {
 	program := `
 const assert = require("node:assert/strict");
 class Element {
-  constructor(tag) { this.tag = tag; this.children = []; this.dataset = {}; this.textContent = ""; }
+  constructor(tag) { this.tag = tag; this.children = []; this.dataset = {}; this.textContent = ""; this.classList = { add: (name) => { this.className += " " + name; } }; }
   append(...nodes) { this.children.push(...nodes); }
   appendChild(node) { this.append(node); return node; }
 }
@@ -696,7 +698,7 @@ const label = (value) => value;
 const firstAddress = (ip) => ip?.addresses?.[0] || "Missing";
 const actionButton = (text, key, value) => { const e = new Element("button"); e.textContent = text; e.dataset[key] = value; return e; };
 let currentCheckpoint = null;
-` + script[start:end] + `
+` + script[strings.Index(script, "  const connectivitySummary ="):strings.Index(script, "  const validPlayitClaim =")] + script[strings.Index(script, "  const badge ="):strings.Index(script, "  const actionButton =")] + script[start:end] + `
 const flatten = (node) => [node, ...node.children.flatMap(flatten)];
 const device = { kind: "ethernet", interface: "enp1s0", state: "activated", carrier: true, managed: true,
   ipv4: { addresses: ["192.168.0.28"], gateway: "192.168.0.1", dns: ["192.168.0.1"] },
@@ -706,7 +708,10 @@ for (const connectivity of ["full", "none", "limited", "portal", "unknown", "una
   const heading = section.children[0];
   const knownDisconnected = ["none", "limited", "portal"].includes(connectivity);
   assert.equal(heading.children[0].textContent, "Network health");
-  assert.equal(heading.children[1].textContent, connectivity === "full" ? "Internet connected" : knownDisconnected ? "Internet not connected" : "Internet status unavailable");
+  assert.equal(heading.children[1].textContent, connectivitySummary(connectivity));
+  assert.equal(heading.children[0].tag, "p");
+  assert.equal(heading.children[0].className, "eyebrow");
+  assert.equal(heading.children[1].className, "badge network-badge " + (connectivity === "full" ? "good" : knownDisconnected ? "danger" : "muted") + " network-internet-status");
   assert.equal(heading.children.length, knownDisconnected ? 3 : 2);
   if (knownDisconnected) {
     assert.equal(heading.children[2].textContent, "Check internet now");
@@ -1293,5 +1298,172 @@ const flatten = node => [node, ...node.children.flatMap(flatten)];
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("Playit account: %v\n%s", err, output)
+	}
+}
+
+func TestNetworkPresentationLayoutContract(t *testing.T) {
+	source, err := assets.ReadFile("static/network-workspace.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(source)
+	slice := func(start, end string) string {
+		t.Helper()
+		a, b := strings.Index(script, start), strings.Index(script, end)
+		if a < 0 || b <= a {
+			t.Fatalf("missing renderer boundary %q / %q", start, end)
+		}
+		return script[a:b]
+	}
+	program := `
+const assert = require("node:assert/strict");
+class Element {
+  constructor(tag) {
+    this.tag = tag; this.children = []; this.dataset = {}; this.textContent = ""; this.className = "";
+    this.classList = { add: (name) => { this.className += " " + name; } };
+  }
+  append(...nodes) {
+    for (const node of nodes) {
+      if (node.parentElement) node.parentElement.children = node.parentElement.children.filter((child) => child !== node);
+      node.parentElement = this; this.children.push(node);
+    }
+  }
+  appendChild(node) { this.append(node); return node; }
+  replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
+  setAttribute(name, value) { this[name] = value; }
+  addEventListener() {}
+}
+const document = { createElement: (tag) => new Element(tag) };
+const flatten = (node) => [node, ...node.children.flatMap(flatten)];
+const find = (root, predicate) => flatten(root).find(predicate);
+const hasClass = (name) => (node) => node.className.split(" ").includes(name);
+const isAdministrator = () => true;
+const remoteProviders = [];
+const content = new Element("div"), state = new Element("p");
+let selectedTab = "Overview", currentCheckpoint = null, connectionDraft = null;
+const wifi = { kind: "wifi", interface: "wlp1s0", state: "activated", managed: true,
+  wireless: { ssid: "Robinson Crusoe", signal: 79 },
+  ipv4: { addresses: [{ address: "192.168.0.27", prefix: 24 }] },
+  ipv6: { addresses: [{ address: "2001:db8::1", prefix: 64 }] },
+  active_connection: { uuid: "wifi-profile", id: "Robinson Crusoe", autoconnect: true } };
+const ethernet = { ...wifi, kind: "ethernet", interface: "enp1s0", carrier: true };
+const currentSnapshot = { connectivity: "full", state: "connected-global", networking_enabled: true, wireless_enabled: true,
+  workspace_tabs: ["Overview", "Ethernet", "Wi-Fi", "Troubleshoot"], devices: [ethernet, wifi],
+  profiles: [{ type: "802-11-wireless", uuid: "wifi-profile", ssid: "Robinson Crusoe" }] };
+const currentNetworks = new Map([["wlp1s0", { networks: [
+  { ssid: "Robinson Crusoe", active: true, strength: 79, known: true, security: "wpa-personal" },
+  { ssid: "Other saved", profile_uuid: "other-profile", security: "wpa-personal" },
+  ...Array.from({ length: 18 }, (_, i) => ({ ssid: "Nearby " + i, security: "open" }))
+] }]]);
+` + slice("  const effectiveTabs =", "  const validPlayitClaim =") +
+		slice("  const label =", "  const clearRecoveryTimer =") +
+		slice("  const row =", "  const readStoredCheckpointID =") +
+		slice("  const sectionHeading =", "  const renderCheckpoint =") +
+		slice("  const renderDevice =", "  // Account actions reuse setup state") +
+		slice("  const renderNetwork =", "  const resumeCheckpoint =") + `
+for (const tab of currentSnapshot.workspace_tabs) {
+  selectedTab = tab; renderNetwork();
+  const internet = find(content, (node) => node.textContent === "Internet connected");
+  assert(internet, tab + " Internet status");
+  assert.equal(internet.tag, "span");
+  assert.equal(internet.className, "badge network-badge good network-internet-status");
+  if (tab === "Ethernet") {
+    assert.equal(internet.parentElement.className, "network-inline-actions");
+    assert.equal(internet.parentElement.parentElement.className, "network-device-heading");
+  }
+  assert(!flatten(content).some((node) => /Connectivity|Connected global|connected global/.test(node.textContent)));
+}
+selectedTab = "Wi-Fi"; renderNetwork();
+const common = renderConnectivity(currentSnapshot);
+assert(!find(common, (node) => node.dataset.networkWifiRadio));
+assert(!find(common, (node) => node.textContent === "connected global"));
+const settings = find(content, hasClass("network-wifi-settings"));
+const nearby = find(content, hasClass("network-wifi-nearby"));
+assert(find(settings, hasClass("network-saved")));
+assert(!find(nearby, hasClass("network-saved")));
+const left = find(settings, hasClass("network-device-card"));
+assert(!find(left, (node) => node.textContent === "Disconnect"));
+assert(!find(left, (node) => node.dataset.networkWifiDisconnect));
+assert.equal(flatten(settings).filter(hasClass("network-device-card")).length, 1);
+assert.deepEqual(settings.children.map((node) => node.tag), ["article", "details"]);
+assert.equal(nearby.children.length, 1); // No duplicate connected-network card.
+const list = find(nearby, hasClass("network-wifi-list"));
+assert.equal(list.children.length, 20);
+assert(list.children.every((node) => !node.hidden));
+assert(!find(nearby, hasClass("network-list-pages")));
+const active = find(list, hasClass("active"));
+const actions = find(active, hasClass("network-wifi-row-actions"));
+assert.deepEqual(actions.children.map((node) => node.textContent), ["Connected", "Disconnect"]);
+const disconnect = actions.children[1];
+assert(disconnect.className.split(" ").includes("danger"));
+assert.equal(disconnect.dataset.networkWifiDisconnect, "wlp1s0");
+for (const text of ["Connect", "Join"]) {
+  const action = find(list, (node) => node.textContent === text);
+  assert.equal(action.parentElement.className, actions.className);
+}
+const heading = find(nearby, hasClass("network-section-heading"));
+const headingActions = heading.children[1];
+assert.deepEqual(headingActions.children.map((node) => node.textContent), ["Turn Wi-Fi off", "Hidden network", "Scan"]);
+assert(headingActions.children[0].className.startsWith("secondary "));
+assert(headingActions.children[1].className.startsWith("secondary "));
+assert(headingActions.children[2].className.startsWith("primary "));
+assert.equal(flatten(content).filter((node) => node.dataset.networkWifiRadio).length, 1);
+currentSnapshot.wireless_enabled = false;
+assert.equal(renderWiFiNetworks(wifi, {}).children[0].children[1].children[0].textContent, "Turn Wi-Fi on");
+assert.equal(firstAddress(wifi.ipv4, false), "192.168.0.27");
+assert.equal(firstAddress({ addresses: [{ address: "192.168.0.27/24" }] }, false), "192.168.0.27");
+assert.equal(firstAddress(wifi.ipv6), "2001:db8::1/64");
+for (const view of [renderDevice(wifi), renderDevice(ethernet), renderTroubleshoot(currentSnapshot), renderOverview(currentSnapshot)]) {
+  const ipv4 = find(view, (node) => node.children[0]?.textContent === "IPv4");
+  assert.equal(ipv4.children[1].textContent, "192.168.0.27");
+}
+const form = renderEthernetForm(ethernet);
+const prefix = find(form, (node) => node.name === "prefix");
+assert.equal(prefix.value, 24); assert.equal(prefix.min, "0"); assert.equal(prefix.max, "32");
+assert.equal(prefix.disabled, true);
+const info = find(form, hasClass("network-form-information"));
+assert(info.children[0].textContent.startsWith("Settings roll back after 90 seconds"));
+assert.equal(info.children[1].textContent, "Connect automatically");
+assert.equal(info.children[1].children[0].name, "autoconnect");
+assert.equal(find(form, (node) => node.textContent === "Apply").parentElement.className, "network-form-actions");
+const health = renderTroubleshoot(currentSnapshot);
+const healthTitle = find(health, (node) => node.textContent === "Network health");
+assert.equal(healthTitle.tag, "p"); assert.equal(healthTitle.className, "eyebrow");
+const repair = find(health, (node) => node.textContent === "Reconnect active profile");
+assert(hasClass("network-reconnect-information")(repair.parentElement));
+assert(repair.parentElement.children[0].textContent.startsWith("Reconnect this interface using its current settings."));
+`
+	cmd := exec.Command("node")
+	cmd.Stdin = strings.NewReader(program)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("network presentation contract: %v\n%s", err, output)
+	}
+
+	if strings.Contains(script, "paginateList(list, 4)") || strings.Contains(script, `"Other network…"`) {
+		t.Fatal("Nearby Wi-Fi must use available height and Hidden network wording")
+	}
+	css, err := assets.ReadFile("static/network-workspace.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`.network-workspace-content:has([data-network-view="Wi-Fi"]){height:100%}`,
+		`.network-workspace-view:has([data-network-view="Wi-Fi"]){height:100%;min-height:0}`,
+		`#network-tab-panel[data-network-view="Wi-Fi"]{display:flex;flex-direction:column;flex:1;min-height:0}`,
+		`.network-wifi-layout{flex:1;min-height:0}`,
+		`.network-wifi-nearby{grid-auto-rows:minmax(0,1fr);min-height:0}`,
+		`.network-wifi-section{display:flex;flex-direction:column;min-height:0}`,
+		`.network-wifi-list{flex:1;min-height:0;overflow-y:auto;align-content:start}`,
+		`.network-device-heading>.network-inline-actions{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap}`,
+		`.network-wifi-row-actions .danger{background:var(--jv-error);color:#fff}`,
+		`.network-wifi-section .network-section-heading>.network-inline-actions{display:flex;flex-direction:row;flex-wrap:nowrap;gap:.4rem}`,
+		`.network-wifi-section .network-section-heading button{flex:none;width:auto;white-space:nowrap}`,
+		`.network-form-information{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:.75rem}`,
+		`.network-reconnect-information{flex-wrap:nowrap;justify-content:space-between}`,
+		`.network-form-information,.network-reconnect-information{align-items:flex-start;flex-direction:column}`,
+	} {
+		if !strings.Contains(string(css), want) {
+			t.Fatalf("network layout missing %q", want)
+		}
 	}
 }
