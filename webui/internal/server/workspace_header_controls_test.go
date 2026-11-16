@@ -192,7 +192,7 @@ func TestGatewaySettingsCompactComposition(t *testing.T) {
 		t.Error("All servers must be the first switch in the individual server lane")
 	}
 	previous := -1
-	for _, marker := range []string{"gateway-name-access-row", "data-gateway-providers", "gateway-server-lane", "data-gateway-status hidden", "gateway-actions-lane", "data-gateway-live-note", "data-gateway-delete", "data-gateway-save", "data-gateway-advanced hidden"} {
+	for _, marker := range []string{"data-gateway-native-integrations", "data-gateway-connection-frame", "gateway-name-access-row", "data-gateway-providers", "gateway-server-lane", "data-gateway-status hidden", "gateway-actions-lane", "data-gateway-live-note", "data-gateway-delete", "data-gateway-save", "data-gateway-advanced hidden"} {
 		index := strings.Index(form, marker)
 		if index <= previous {
 			t.Errorf("missing or out-of-order settings element: %s", marker)
@@ -214,8 +214,11 @@ func TestGatewaySettingsCompactComposition(t *testing.T) {
 	if strings.Contains(form[strings.Index(form, `<details data-gateway-advanced`):], `name="expires_at"`) {
 		t.Error("expiration must not be in Advanced")
 	}
-	if !regexp.MustCompile(`(?s)<details data-gateway-advanced hidden>.*</details>\s*</form>\s*$`).MatchString(form) {
-		t.Error("Advanced details must be collapsed and last")
+	if !regexp.MustCompile(`(?s)<section[^>]+data-gateway-native-integrations>.*?</section>\s*<section class="gateway-connection-frame" data-gateway-connection-frame>`).MatchString(form) {
+		t.Error("Native integrations must be outside and immediately before the AI & API connection frame")
+	}
+	if !regexp.MustCompile(`(?s)<section class="gateway-connection-frame" data-gateway-connection-frame>.*<details data-gateway-advanced hidden>.*</details>\s*</section>\s*</form>\s*$`).MatchString(form) {
+		t.Error("Advanced details must be collapsed and last inside the AI & API connection frame, which closes before the form")
 	}
 }
 
@@ -231,21 +234,25 @@ func TestGatewayHelpReferenceSectionsStayCompact(t *testing.T) {
 		t.Fatal("connection Help missing")
 	}
 	help := markup[start:end]
-	reference := strings.Index(help, `<details class="panel" data-gateway-provider-reference>`)
+	reference := strings.Index(help, `<section class="panel" data-gateway-provider-reference>`)
 	if reference < 0 {
-		t.Fatal("collapsed provider reference missing")
+		t.Fatal("always-visible provider reference missing")
 	}
-	normal := help[:reference]
+	generalStart := strings.Index(help, `<details class="panel"><summary>Access levels AI &amp; API</summary>`)
+	if generalStart <= reference {
+		t.Fatal("collapsed Access levels AI & API must follow Provider reference")
+	}
+	normal := help[generalStart:]
 	for _, phrase := range []string{"Codex, Claude Code, GitHub Copilot CLI, VS Code, OpenClaw and other local MCP clients", "when they can reach the server", "ChatGPT, Claude remote connectors, Grok and Gemini connect from outside your LAN", "See Provider reference for the exact connection options for each provider."} {
 		if !strings.Contains(normal, phrase) {
 			t.Errorf("Network access guidance missing: %s", phrase)
 		}
 	}
-	if !strings.Contains(normal, `<section class="panel"><h3>Access levels</h3>`) {
-		t.Error("Access levels must remain an open section panel")
+	if !strings.Contains(normal, `<details class="panel"><summary>Access levels AI &amp; API</summary>`) {
+		t.Error("Access levels AI & API must be collapsed by default")
 	}
 	panels := regexp.MustCompile(`<(section|details) class="panel"[^>]*><(?:h3|summary)>([^<]+)</(?:h3|summary)>`).FindAllStringSubmatch(help, -1)
-	titles := []string{"Access levels", "Minecraft scope", "Authentication", "Network access", "Provider reference", "Developer integration"}
+	titles := []string{"Provider reference", "Access levels AI &amp; API", "Minecraft scope", "Authentication", "Network access", "Developer integration"}
 	if len(panels) != len(titles) {
 		t.Fatalf("Help must retain exactly its six panels, got %d", len(panels))
 	}
@@ -286,7 +293,7 @@ func TestGatewayHelpReferenceSectionsStayCompact(t *testing.T) {
 		}
 	}
 	if !strings.Contains(help[reference:], `data-gateway-help-guide`) || !strings.Contains(help, `<details class="panel"><summary>Developer integration</summary>`) || regexp.MustCompile(`<details[^>]*\bopen\b`).MatchString(help) {
-		t.Error("provider manuals and developer integration must remain available in collapsed details")
+		t.Error("provider reference must remain available and general Help panels must remain collapsed")
 	}
 }
 

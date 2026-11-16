@@ -648,6 +648,10 @@
       text('p', 'The fixed minimum install permission value is 3072: View Channel + Send Messages. No Administrator permission.'),
       text('p', 'Discord is independent of AI/API Gateway levels. All management passes through authoritative JustVoxel operations.'));
   };
+  const resetHelpGuide = () => {
+    for (const button of find('[data-gateway-help-providers]').querySelectorAll('button')) button.setAttribute('aria-pressed', 'false');
+    find('[data-gateway-help-guide]').replaceChildren();
+  };
   const setupHelpGuide = () => {
     const selector = find('[data-gateway-help-providers]');
     const guide = find('[data-gateway-help-guide]');
@@ -658,12 +662,13 @@
       else if (purpose === 'Discord') renderDiscordHelpGuide(guide);
       else renderProviderGuide(guide, purpose, location.origin + (purpose === 'Automation / REST API' ? '/api/v1' : '/mcp'), {help: true});
     };
-    for (const purpose of [...providers.keys(), 'Telegram', 'Discord']) {
-      const button = text('button', ''); button.type = 'button'; button.className = 'secondary';
+    for (const purpose of ['Telegram', 'Discord', ...providers.keys()]) {
+      const button = text('button', ''); button.type = 'button'; button.className = 'gateway-provider-card';
+      button.setAttribute('aria-pressed', 'false');
       button.append(purpose === 'Telegram' ? telegramHelpIcon() : purpose === 'Discord' ? discordHelpIcon() : providerIcon(purpose), text('span', purpose));
       button.addEventListener('click', () => select(purpose)); selector.append(button); buttons.push([purpose, button]);
     }
-    select('OpenAI');
+    resetHelpGuide();
   };
   const renderSettings = connection => {
     const c = structuredClone(connection);
@@ -687,6 +692,10 @@
       showSurface('discord');
       find(discordState.configured ? '[data-discord-replace]' : '[data-discord-token]').focus();
     });
+    if (c.id) {
+      form.querySelector('[data-gateway-native-integrations]').remove();
+      form.querySelector('[data-gateway-connection-title]').remove();
+    }
     const field = name => form.elements.namedItem(name);
     form.className = c.id ? 'gateway-edit-settings' : 'gateway-add-settings';
     for (const name of ['name', 'level']) field(name).value = c[name] ?? '';
@@ -825,7 +834,7 @@
     discordState = event.detail;
     renderCards();
   });
-  const workspace = setupWorkspaceWindow(dialog, {onOpen: () => { load(); showSurface(surface); }});
+  const workspace = setupWorkspaceWindow(dialog, {onOpen: () => { resetHelpGuide(); load(); showSurface(surface); }, onClose: resetHelpGuide});
   launcher.addEventListener('click', () => {
     if (!primary()) return;
     const center = document.querySelector('[data-control-center]'); if (center) center.open = false;

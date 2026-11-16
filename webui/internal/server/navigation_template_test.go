@@ -1314,13 +1314,26 @@ func TestApprovedControlCenterLayout(t *testing.T) {
 	if strings.Count(gateway, "data-telegram-enabled") != 1 || strings.Contains(telegram, "data-telegram-enabled") || strings.Contains(telegram, "Enable Telegram") || strings.Contains(lane, ">Gateway</span>") {
 		t.Fatal("Telegram must have exactly one enable control in navigation with the approved labels")
 	}
-	grid := regexp.MustCompile(`(?s)<div class="gateway-provider-grid"[^>]*>.*?</div>`).FindString(markup)
+	grid := regexp.MustCompile(`(?s)<div class="gateway-provider-grid" data-gateway-providers>.*?</div>`).FindString(markup)
 	providerCards := regexp.MustCompile(`(?s)<label class="gateway-provider-card".*?</label>`).FindAllString(grid, -1)
-	if len(providerCards) != 10 || !strings.Contains(providerCards[7], "Automation / REST API") || !strings.Contains(providerCards[8], `data-telegram-select`) || !strings.Contains(providerCards[8], `/static/ai-providers/telegram.svg`) || strings.Contains(providerCards[8], `name="purpose"`) {
-		t.Fatal("Telegram must follow Automation / REST API using the shared provider card and a local icon, without a gateway purpose")
+	purposes := []string{"OpenAI", "Claude", "Grok", "Gemini", "GitHub Copilot", "OpenClaw", "Other AI / MCP app", "Automation / REST API"}
+	if len(providerCards) != len(purposes) || strings.Contains(grid, "Telegram") || strings.Contains(grid, "Discord") {
+		t.Fatal("ordinary provider grid must contain exactly eight AI/API cards without native integrations")
 	}
-	if !strings.Contains(providerCards[9], `name="integration" value="discord" data-discord-select`) || !strings.Contains(providerCards[9], `/static/ai-providers/discord.svg`) || strings.Contains(providerCards[9], `name="purpose"`) {
-		t.Fatal("Discord must immediately follow Telegram as a special integration with a local icon")
+	for i, purpose := range purposes {
+		if !strings.Contains(providerCards[i], `name="purpose" value="`+purpose+`"`) {
+			t.Errorf("ordinary provider %d must be %s", i+1, purpose)
+		}
+	}
+	native := regexp.MustCompile(`(?s)<section class="panel gateway-native-frame"[^>]*>.*?</section>`).FindString(markup)
+	nativeCards := regexp.MustCompile(`(?s)<label class="gateway-provider-card".*?</label>`).FindAllString(native, -1)
+	if len(nativeCards) != 2 || strings.Index(markup, native) >= strings.Index(markup, `data-gateway-connection-frame`) {
+		t.Fatal("Native integrations must contain two cards above the AI/API frame")
+	}
+	for i, integration := range []string{"telegram", "discord"} {
+		if !strings.Contains(nativeCards[i], `name="integration" value="`+integration+`" data-`+integration+`-select`) || !strings.Contains(nativeCards[i], `/static/ai-providers/`+integration+`.svg`) || strings.Contains(nativeCards[i], `name="purpose"`) {
+			t.Errorf("native card %d must be %s with its local icon and independent selection", i+1, integration)
+		}
 	}
 	discord := regexp.MustCompile(`(?s)<section data-gateway-discord.*?<section data-gateway-help`).FindString(gateway)
 	for _, required := range []string{`class="integration-lane integration-header"`, `class="integration-title"`, `/static/ai-providers/discord.svg`, `id="discord-title">Discord`, `<strong>Bot Token</strong>`, `<strong>Discord server</strong>`, `data-discord-status`, `aria-label="Bot Token" autocomplete="off" data-password-ui="off" spellcheck="false" autocapitalize="off" data-discord-token`, "data-discord-token-cancel", "data-discord-replace", "data-discord-verify", "data-discord-disconnect"} {
@@ -1344,7 +1357,7 @@ func TestApprovedControlCenterLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, required := range []string{"renderDiscordHelpGuide", "else if (purpose === 'Discord') renderDiscordHelpGuide(guide)", "[...providers.keys(), 'Telegram', 'Discord']"} {
+	for _, required := range []string{"renderDiscordHelpGuide", "else if (purpose === 'Discord') renderDiscordHelpGuide(guide)", "['Telegram', 'Discord', ...providers.keys()]"} {
 		if !strings.Contains(string(gatewayScript), required) {
 			t.Fatalf("dedicated Discord Help missing: %s", required)
 		}

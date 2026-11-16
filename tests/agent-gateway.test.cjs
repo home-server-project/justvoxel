@@ -19,7 +19,7 @@ class Node {
     }
   }
   prepend(...children) { this.children.unshift(...children); children.forEach(child => { child.parentNode = this; }); }
-  querySelectorAll(selector) { return this.children.flatMap(child => [...((selector === 'input' || selector === 'input[name="instance_ids"]' && child.name === 'instance_ids') && child.tagName === 'input' ? [child] : []), ...child.querySelectorAll(selector)]); }
+  querySelectorAll(selector) { return this.children.flatMap(child => [...(selector === 'button' && child.tagName === 'button' || (selector === 'input' || selector === 'input[name="instance_ids"]' && child.name === 'instance_ids') && child.tagName === 'input' ? [child] : []), ...child.querySelectorAll(selector)]); }
   closest() { return this.parentNode; }
   focus() { this.focused = true; }
   select() { this.selected = true; this.selectionStart = 0; this.selectionEnd = this.value.length; }
@@ -38,18 +38,20 @@ test('workspace reuses movable workspace infrastructure and primary-only Control
   assert.ok(setup, 'uses the existing workspace');
   const dialog = {};
   const calls = [];
-  let onOpen;
+  let onOpen, onClose;
   const context = vm.createContext({
     dialog, surface: 'telegram', load: () => calls.push('load'),
-    showSurface: surface => calls.push(surface),
-    setupWorkspaceWindow(target, options) { assert.equal(target, dialog); onOpen = options.onOpen; },
+    showSurface: surface => calls.push(surface), resetHelpGuide: () => calls.push('reset'),
+    setupWorkspaceWindow(target, options) { assert.equal(target, dialog); onOpen = options.onOpen; onClose = options.onClose; },
   });
   vm.runInContext(setup[0], context);
   onOpen();
-  assert.deepEqual(calls, ['load', 'telegram']);
+  assert.deepEqual(calls, ['reset', 'load', 'telegram']);
   context.surface = 'settings';
   onOpen();
-  assert.deepEqual(calls, ['load', 'telegram', 'load', 'settings']);
+  assert.deepEqual(calls, ['reset', 'load', 'telegram', 'reset', 'load', 'settings']);
+  onClose();
+  assert.equal(calls.at(-1), 'reset');
   assert.match(js, /if \(!primary\(\)\) return;/);
   assert.match(transport, /a\.fileBrowserIdentity\(w,\s*r\)/);
   assert.match(backend, /s\.requirePrimaryAdministrator\(w,\s*r\)/);
@@ -190,7 +192,7 @@ test('cards contain human summaries while technical fields and endpoints stay of
 });
 
 test('help uses compact sections and a comparison table with collapsed developer details', () => {
-  assert.ok(help.includes('<section class="panel"><h3>Access levels</h3>'));
+  assert.ok(help.includes('<details class="panel"><summary>Access levels AI &amp; API</summary>'));
   for (const section of ['Minecraft scope', 'Authentication', 'Network access']) assert.ok(help.includes(`<details class="panel"><summary>${section}</summary>`), section);
   assert.match(help, /data-gateway-help-providers/);
   assert.equal((help.match(/data-gateway-help-guide/g) || []).length, 1);
@@ -206,12 +208,17 @@ test('provider cards replace the purpose dropdown with one OpenAI choice for Cha
   assert.deepEqual(purposes, ['OpenAI', 'Claude', 'Grok', 'Gemini', 'GitHub Copilot', 'OpenClaw', 'Other AI / MCP app', 'Automation / REST API']);
   const providerGrid = form.match(/<div class="gateway-provider-grid"[^>]*>([\s\S]*?)<\/div>/)[1];
   const cards = [...providerGrid.matchAll(/<label class="gateway-provider-card"[^>]*>([\s\S]*?)<\/label>/g)].map(match => match[1]);
-  assert.deepEqual(cards.map(card => card.match(/<strong>([^<]+)<\/strong>/)[1]), [...purposes, 'Telegram', 'Discord']);
-  assert.match(cards[8], /name="integration" value="telegram" data-telegram-select/);
-  assert.doesNotMatch(cards[8], /name="purpose"|name="auth_mode"/);
-  assert.match(cards[9], /name="integration" value="discord" data-discord-select/);
-  assert.match(cards[9], /src="\/static\/ai-providers\/discord.svg"/);
-  assert.doesNotMatch(cards[9], /name="purpose"|name="auth_mode"/);
+  assert.deepEqual(cards.map(card => card.match(/<strong>([^<]+)<\/strong>/)[1]), purposes);
+  assert.doesNotMatch(providerGrid, /Telegram|Discord|name="integration"/);
+  const native = form.match(/<section class="panel gateway-native-frame"[^>]*>([\s\S]*?)<\/section>/)[1];
+  assert.ok(form.indexOf('data-gateway-native-integrations') < form.indexOf('data-gateway-connection-frame'));
+  assert.match(form, /data-gateway-connection-title>AI &amp; API connection<\/h3>/);
+  assert.deepEqual([...native.matchAll(/<strong>([^<]+)<\/strong>/g)].map(match => match[1]), ['Telegram', 'Discord']);
+  for (const integration of ['telegram', 'discord']) {
+    assert.ok(native.includes(`name="integration" value="${integration}" data-${integration}-select`));
+    assert.ok(native.includes(`/static/ai-providers/${integration}.svg`));
+  }
+  assert.doesNotMatch(native, /name="(?:purpose|name|level|enabled|server_scope)"/);
   assert.equal((form.match(/<strong>OpenAI<\/strong>/g) || []).length, 1);
   assert.equal(purposes.filter(purpose => purpose === 'OpenClaw').length, 1);
   assert.match(form, /<strong>OpenClaw<\/strong><small>Control UI &amp; CLI<\/small>/);
@@ -715,7 +722,7 @@ function guideHarness(origin = 'http://192.168.1.20:8099') {
     document: {createElement: tag => new Node(tag), createTextNode: value => new Node('#text', value)}, text: (tag, value) => new Node(tag, value)});
   const providers = js.slice(js.indexOf('  const providers ='), js.indexOf('  const activityLabel'));
   const guide = js.slice(js.indexOf('  // Presentation only:'), js.indexOf('  const renderSettings ='));
-  vm.runInContext(providers + guide + '\nglobalThis.render = renderProviderGuide; globalThis.setup = setupHelpGuide; globalThis.local = localAddress; globalThis.secure = secureAddress;', context);
+  vm.runInContext(providers + guide + '\nglobalThis.render = renderProviderGuide; globalThis.setup = setupHelpGuide; globalThis.resetHelp = resetHelpGuide; globalThis.local = localAddress; globalThis.secure = secureAddress;', context);
   return {host, copied, find, context, render(purpose, options) { context.render(host, purpose, origin + (purpose === 'Automation / REST API' ? '/api/v1' : '/mcp/jvc_current'), options); return guideText(host); }};
 }
 
@@ -805,7 +812,14 @@ test('Help selects one guide without any connection mutation or saved state', ()
   const buttons = h.find('[data-gateway-help-providers]').children;
   const guide = h.find('[data-gateway-help-guide]');
   assert.equal(buttons.length, 10);
-  assert.deepEqual(buttons.map(button => button.children[1].textContent), ['OpenAI', 'Claude', 'Grok', 'Gemini', 'GitHub Copilot', 'OpenClaw', 'Other AI / MCP app', 'Automation / REST API', 'Telegram', 'Discord']);
+  assert.equal(guide.children.length, 0);
+  for (const button of buttons) {
+    assert.equal(button.type, 'button');
+    assert.equal(button.className, 'gateway-provider-card');
+    assert.equal(button['aria-pressed'], 'false');
+    assert.ok(button.children[0].src.startsWith('/static/'));
+  }
+  assert.deepEqual(buttons.map(button => button.children[1].textContent), ['Telegram', 'Discord', 'OpenAI', 'Claude', 'Grok', 'Gemini', 'GitHub Copilot', 'OpenClaw', 'Other AI / MCP app', 'Automation / REST API']);
   for (const button of buttons) {
     button.listeners.click();
     assert.equal(buttons.filter(item => item['aria-pressed'] === 'true').length, 1);
@@ -813,7 +827,41 @@ test('Help selects one guide without any connection mutation or saved state', ()
     assert.equal(guide.children[0].children[1].children[0].textContent, button.children[1].textContent);
   }
   const setup = js.slice(js.indexOf('  const setupHelpGuide ='), js.indexOf('  const renderSettings ='));
-  assert.doesNotMatch(setup, /mutate|send\(|snapshot|selectedID|fetch\(/);
+  assert.doesNotMatch(setup, /mutate|send\(|snapshot|selectedID|fetch\(|select\(['"]OpenAI['"]\)|localStorage|sessionStorage/);
+});
+
+test('workspace close and reopen clear the actual Help guide and pressed state', () => {
+  const h = guideHarness(); h.context.setup();
+  const buttons = h.find('[data-gateway-help-providers]').children;
+  const guide = h.find('[data-gateway-help-guide]');
+  let hooks;
+  h.context.dialog = {};
+  h.context.surface = 'help';
+  h.context.load = () => {};
+  h.context.showSurface = surface => assert.equal(surface, 'help');
+  h.context.setupWorkspaceWindow = (dialog, options) => { hooks = options; };
+  vm.runInContext(js.match(/^  const workspace = setupWorkspaceWindow\(dialog, .*$/m)[0], h.context);
+  const assertEmpty = () => {
+    assert.equal(guide.children.length, 0);
+    assert.ok(buttons.every(button => button['aria-pressed'] === 'false'));
+  };
+  for (const button of buttons) {
+    button.listeners.click();
+    assert.ok(guide.children.length > 0);
+    hooks.onClose();
+    assertEmpty();
+    hooks.onOpen();
+    assertEmpty();
+    // Revisiting Help uses the existing surface without reinitializing the selector.
+    h.context.showSurface('help');
+    assertEmpty();
+  }
+  buttons[2].listeners.click();
+  hooks.onOpen();
+  assertEmpty();
+  assert.equal(buttons.length, 10);
+  const helpState = js.slice(js.indexOf('  const resetHelpGuide ='), js.indexOf('  const renderSettings ='));
+  assert.doesNotMatch(helpState, /localStorage|sessionStorage|writeWorkspaceWindowState|mutate\(|fetch\(/);
 });
 
 test('Telegram is Help-only and never an ordinary connection purpose or client mode', () => {
@@ -832,12 +880,12 @@ test('Telegram is Help-only and never an ordinary connection purpose or client m
 test('Telegram Help uses its local icon and a dedicated guide without gateway connection setup', () => {
   const h = guideHarness(); h.context.setup();
   const buttons = h.find('[data-gateway-help-providers]').children;
-  assert.equal(buttons[7].children[1].textContent, 'Automation / REST API');
-  assert.equal(buttons[8].children[1].textContent, 'Telegram');
-  assert.equal(buttons[8].children[0].src, '/static/ai-providers/telegram.svg');
+  assert.equal(buttons[9].children[1].textContent, 'Automation / REST API');
+  assert.equal(buttons[0].children[1].textContent, 'Telegram');
+  assert.equal(buttons[0].children[0].src, '/static/ai-providers/telegram.svg');
   // Selecting Telegram must not generate a gateway endpoint.
   Object.defineProperty(h.context.location, 'origin', {get() { throw new Error('endpoint generated'); }});
-  buttons[8].listeners.click();
+  buttons[0].listeners.click();
   const guide = h.find('[data-gateway-help-guide]');
   const content = guideText(guide);
   assert.equal(guide.children[0].children[0].src, '/static/ai-providers/telegram.svg');
@@ -1053,7 +1101,7 @@ test('Add has no provider onboarding, addresses, commands or network callouts be
 
 test('Add has one neutral summary immediately below provider cards, with no setup controls', () => {
   assert.equal((form.match(/data-gateway-compatibility-summary/g) || []).length, 1);
-  assert.match(form, /value="Automation \/ REST API"[^\n]+\n\s*<label class="gateway-provider-card" data-telegram-card>[^\n]+\n\s*<label class="gateway-provider-card" data-discord-card>[^\n]+\n\s*<\/div>\n\s*<p class="muted gateway-compatibility-summary" data-gateway-compatibility-summary aria-live="polite" hidden><\/p>/);
+  assert.match(form, /value="Automation \/ REST API"[^\n]+\n\s*<\/div>\n\s*<p class="muted gateway-compatibility-summary" data-gateway-compatibility-summary aria-live="polite" hidden><\/p>/);
   const summary = form.match(/<p[^>]*data-gateway-compatibility-summary[^>]*><\/p>/)[0];
   assert.doesNotMatch(summary, /warning|notice|icon|<svg|<img/);
   assert.doesNotMatch(form, /data-gateway-copy|MCP address|https?:\/\/|codex mcp|claude mcp|openclaw mcp|copilot mcp/);
@@ -1266,8 +1314,23 @@ test('compact desktop lanes wrap by available width with Advanced as the final c
   assert.ok(actions.indexOf('data-gateway-live-note') < actions.indexOf('data-gateway-delete'));
   assert.match(actions, /class="action-row gateway-save"><button[^>]+data-gateway-delete[^>]*>Delete<\/button><button[^>]+data-gateway-save>Create<\/button>/);
   assert.ok(actions.indexOf('data-gateway-live-note') < actions.indexOf('data-gateway-save'));
-  assert.match(form, /<details data-gateway-advanced hidden>[\s\S]*<\/details>\s*<\/form>/);
-  assert.doesNotMatch(form.match(/<details data-gateway-advanced[^>]*>/)[0], /\bopen\b/);
+  assert.match(form, /<section[^>]+data-gateway-native-integrations>[\s\S]*?<\/section>\s*<section class="gateway-connection-frame" data-gateway-connection-frame>/);
+  const nativeIntegrationsStart = form.indexOf('data-gateway-native-integrations');
+  const connectionFrameStart = form.indexOf('data-gateway-connection-frame');
+  assert.ok(nativeIntegrationsStart >= 0 && nativeIntegrationsStart < connectionFrameStart);
+  const actionsStart = form.indexOf('gateway-actions-lane', connectionFrameStart);
+  const advancedStart = form.indexOf('<details data-gateway-advanced hidden>');
+  assert.ok(actionsStart > connectionFrameStart && advancedStart > actionsStart);
+  const advancedOpeningEnd = form.indexOf('>', advancedStart);
+  assert.doesNotMatch(form.slice(advancedStart, advancedOpeningEnd + 1), /\bopen\b/);
+  const advancedEnd = form.indexOf('</details>', advancedOpeningEnd + 1);
+  assert.ok(advancedEnd > advancedOpeningEnd);
+  const formEnd = form.indexOf('</form>', connectionFrameStart);
+  assert.ok(formEnd > advancedEnd);
+  const connectionFrameEnd = form.lastIndexOf('</section>', formEnd);
+  assert.ok(connectionFrameEnd > advancedEnd);
+  assert.equal(form.slice(advancedEnd + '</details>'.length, connectionFrameEnd).trim(), '');
+  assert.equal(form.slice(connectionFrameEnd + '</section>'.length, formEnd).trim(), '');
 });
 
 test('All servers adapter submits all scope and preserves exactly the chosen individual IDs', () => {
@@ -1488,12 +1551,20 @@ test('create and edit use one configuration template, provider list and scope he
   }
 });
 
-test('default Help is a reference with provider manuals and developer integration collapsed', () => {
-  const referenceStart = help.indexOf('<details class="panel" data-gateway-provider-reference>');
+test('default Help has an always visible provider reference before collapsed general panels', () => {
+  const referenceStart = help.indexOf('<section class="panel" data-gateway-provider-reference>');
   assert.ok(referenceStart > 0);
-  const normal = help.slice(0, referenceStart);
+  const panels = [...help.matchAll(/<(section|details) class="panel"[^>]*><(?:h3|summary)>([^<]+)<\/(?:h3|summary)>/g)];
+  assert.deepEqual(panels.map(panel => [panel[1], panel[2]]), [
+    ['section', 'Provider reference'], ['details', 'Access levels AI &amp; API'],
+    ['details', 'Minecraft scope'], ['details', 'Authentication'],
+    ['details', 'Network access'], ['details', 'Developer integration'],
+  ]);
+  assert.match(help, /data-gateway-help-guide aria-live="polite"><\/section>/);
+
+  const normal = help.slice(help.indexOf('<details class="panel"><summary>Access levels AI &amp; API</summary>'));
   assert.doesNotMatch(normal, /Getting connected|Choose your app|data-gateway-help-providers|data-gateway-help-guide|How to connect/);
-  assert.ok(normal.includes('<section class="panel"><h3>Access levels</h3>'));
+  assert.ok(normal.includes('<details class="panel"><summary>Access levels AI &amp; API</summary>'));
   for (const section of ['Minecraft scope', 'Authentication', 'Network access']) assert.ok(normal.includes(`<details class="panel"><summary>${section}</summary>`));
   for (const phrase of ['Selected servers', 'OAuth connections', 'Token connections', 'shown once', 'Local clients', 'Cloud clients']) assert.ok(normal.includes(phrase));
   const local = normal.match(/<strong>Local clients<\/strong>\s*<p>(.*?)<\/p>/)[1];
@@ -1502,8 +1573,9 @@ test('default Help is a reference with provider manuals and developer integratio
   const cloud = normal.match(/<strong>Cloud clients<\/strong>\s*<p>(.*?)<\/p>/)[1];
   for (const name of ['ChatGPT', 'Claude remote connectors', 'Grok', 'Gemini']) assert.ok(cloud.includes(name), name);
   assert.match(cloud, /connect from outside your LAN/);
-  const reference = help.slice(referenceStart, help.indexOf('<details class="panel"><summary>Developer integration'));
-  assert.match(reference, /<summary>Provider reference<\/summary>/);
+  const reference = help.slice(referenceStart, help.indexOf('<details class="panel"><summary>Access levels AI &amp; API</summary>'));
+  assert.match(reference, /<h3>Provider reference<\/h3>/);
+  assert.doesNotMatch(reference, /<details|<summary/);
   assert.match(reference, /data-gateway-help-providers/);
   assert.match(reference, /data-gateway-help-guide/);
   assert.doesNotMatch(help, /<details[^>]*\bopen\b/);
@@ -1801,6 +1873,8 @@ test('existing normal connection settings remove both special integration cards'
   const h = settingsHarness({id: 'existing', name: 'App', purpose: 'OpenAI', enabled: true, all_instances: true});
   assert.equal(h.node('[data-telegram-card]').removed, true);
   assert.equal(h.node('[data-discord-card]').removed, true);
+  assert.equal(h.node('[data-gateway-native-integrations]').removed, true);
+  assert.equal(h.node('[data-gateway-connection-title]').removed, true);
   assert.equal(h.node('[data-discord-select]').listeners.change, undefined);
 });
 
@@ -1962,13 +2036,13 @@ test('Discord cards use exact status badges and coexist with Telegram without st
   assert.equal(h.requests.length, 0);
 });
 
-test('Discord Help has its own final provider button, guide and accurate security model', () => {
+test('Discord Help has its own second provider card, guide and accurate security model', () => {
   const h = guideHarness(); h.context.setup();
   const buttons = h.find('[data-gateway-help-providers]').children;
-  assert.deepEqual(buttons.slice(-2).map(button => button.children[1].textContent), ['Telegram', 'Discord']);
-  assert.equal(buttons.at(-1).children[0].src, '/static/ai-providers/discord.svg');
+  assert.deepEqual(buttons.slice(0, 2).map(button => button.children[1].textContent), ['Telegram', 'Discord']);
+  assert.equal(buttons[1].children[0].src, '/static/ai-providers/discord.svg');
   Object.defineProperty(h.context.location, 'origin', {get() { throw new Error('generic MCP endpoint generated'); }});
-  buttons.at(-1).listeners.click();
+  buttons[1].listeners.click();
   const guide = h.find('[data-gateway-help-guide]');
   const links = descendants(guide).filter(node => node.tagName === 'a' && node.textContent === 'Discord Developer Portal');
   assert.equal(links.length, 1);

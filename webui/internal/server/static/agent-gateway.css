@@ -96,10 +96,7 @@
 [data-agent-gateway-dialog] .gateway-guide .gateway-address { padding: .6rem; border-radius: var(--jv-radius); background: var(--jv-surface-sunken); }
 [data-agent-gateway-dialog] .gateway-guide .gateway-address code { flex: 1; min-width: 0; }
 [data-agent-gateway-dialog] .gateway-guide [role=status]:empty { display: none; }
-[data-agent-gateway-dialog] .gateway-help-selector,
 [data-agent-gateway-dialog] .gateway-guide-modes { display: flex; flex-wrap: wrap; gap: .4rem; }
-[data-agent-gateway-dialog] .gateway-help-selector button { display: flex; align-items: center; gap: .4rem; }
-[data-agent-gateway-dialog] .gateway-help-selector .gateway-provider-icon { width: 24px; height: 24px; }
 [data-agent-gateway-dialog] :is(.gateway-help-selector, .gateway-guide-modes) button[aria-pressed=true] { border-color: var(--jv-success); background: color-mix(in srgb, var(--jv-success) 18%, var(--jv-surface-sunken)); }
 [data-agent-gateway-dialog] .gateway-requirements { display: flex; flex-wrap: wrap; gap: .35rem 1rem; list-style: none; padding: 0; margin: .5rem 0 0; }
 
@@ -210,3 +207,16 @@
 [data-agent-gateway-dialog] [data-discord-integration] { cursor: pointer; }
 [data-agent-gateway-dialog] [data-discord-integration]:focus-visible { outline: 2px solid var(--jv-accent); outline-offset: 2px; }
 [data-gateway-discord] .integration-lane [data-discord-guild] { width: 14rem; flex: 1 1 14rem; min-width: 0; max-width: 100%; box-sizing: border-box; }
+
+/* Add keeps native integrations separate from ordinary connection settings. */
+[data-agent-gateway-dialog] .gateway-native-frame,
+[data-agent-gateway-dialog] .gateway-add-settings > .gateway-connection-frame { box-sizing: border-box; min-width: 0; margin: 0; padding: .8rem; border: 1px solid var(--jv-border-strong); border-radius: var(--jv-radius); }
+[data-agent-gateway-dialog] .gateway-native-frame > h3,
+[data-agent-gateway-dialog] [data-gateway-connection-title] { margin: 0 0 .6rem; font-size: 1rem; }
+[data-agent-gateway-dialog] .gateway-native-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 210px)); gap: .4rem; }
+[data-agent-gateway-dialog] .gateway-add-settings > .gateway-connection-frame { display: grid; gap: .6rem; }
+[data-agent-gateway-dialog] .gateway-edit-settings > .gateway-connection-frame { display: contents; }
+[data-agent-gateway-dialog] .gateway-help-selector .gateway-provider-card { text-align: left; color: var(--jv-text); }
+[data-agent-gateway-dialog] .gateway-help-selector .gateway-provider-card:focus-visible { outline: 2px solid var(--jv-accent); outline-offset: 2px; }
+[data-agent-gateway-dialog] [data-gateway-help-guide]:empty { display: none; }
+[data-agent-gateway-dialog] [data-gateway-help-guide]:not(:empty) { margin-top: .8rem; }
