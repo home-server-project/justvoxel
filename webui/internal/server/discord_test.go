@@ -119,28 +119,62 @@ func TestDiscordApprovalActionsUseExistingPrimarySurface(t *testing.T) {
 	}
 }
 
-func TestDiscordAdministratorPanelUsesExistingModalStyles(t *testing.T) {
+func TestDiscordAdministratorAccessUsesCompactExistingSurface(t *testing.T) {
 	header, err := os.ReadFile("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
 	markup := string(header)
-	start := strings.Index(markup, "data-gateway-discord")
+	workspaceStart := strings.Index(markup, `<dialog class="workspace-window system-workspace-dialog" data-workspace-window="agent-gateway"`)
+	if workspaceStart < 0 {
+		t.Fatal("existing connections workspace missing")
+	}
+	workspaceEnd := strings.Index(markup[workspaceStart:], "</dialog>")
+	if workspaceEnd < 0 {
+		t.Fatal("connections workspace closing tag missing")
+	}
+	workspace := markup[workspaceStart : workspaceStart+workspaceEnd]
+	if !strings.Contains(workspace, `<h2 id="agent-gateway-title">AI &amp; API Connections</h2>`) {
+		t.Fatal("existing connections workspace title missing")
+	}
+	start := strings.Index(workspace, "<section data-gateway-discord")
 	if start < 0 {
 		t.Fatal("existing provider missing")
 	}
-	end := strings.Index(markup[start:], "data-gateway-help")
+	end := strings.Index(workspace[start:], "</section>")
 	if end < 0 {
-		t.Fatal("existing modal help missing")
+		t.Fatal("Discord surface closing tag missing")
 	}
-	surface := markup[start : start+end]
-	if strings.Count(surface, `<h3>Discord administrators</h3>`) != 1 || !strings.Contains(surface, `<section class="panel">`) || strings.Index(surface, "Discord administrators") < strings.Index(surface, "Discord connection") {
-		t.Fatal("administrator panel moved outside provider")
-	}
-	for _, marker := range []string{"data-discord-pending", "data-discord-administrators", "data-discord-enabled", "data-discord-bind"} {
+	surface := workspace[start : start+end]
+	for _, marker := range []string{`class="discord-lane discord-header"`, "data-discord-pending", "data-discord-administrators", "data-discord-bind"} {
 		if !strings.Contains(surface, marker) {
 			t.Fatal("existing provider control missing", marker)
 		}
+	}
+	for _, marker := range []string{`<h3>Discord administrators</h3>`, `<section class="panel">`, "Discord connection", "data-discord-enabled"} {
+		if strings.Contains(surface, marker) {
+			t.Fatal("obsolete Discord surface structure present", marker)
+		}
+	}
+	if strings.Count(markup, "data-discord-enabled") != 1 {
+		t.Fatal("Discord must have exactly one enable control")
+	}
+	navigationStart := strings.Index(workspace, `<nav class="minecraft-workspace-tabs gateway-navigation"`)
+	if navigationStart < 0 {
+		t.Fatal("gateway navigation missing")
+	}
+	navigationEnd := strings.Index(workspace[navigationStart:], "</nav>")
+	if navigationEnd < 0 {
+		t.Fatal("gateway navigation closing tag missing")
+	}
+	navigation := workspace[navigationStart : navigationStart+navigationEnd]
+	if !strings.Contains(navigation, "data-discord-enabled") {
+		t.Fatal("Discord enable control missing from gateway navigation")
+	}
+	telegramGlobal := strings.Index(navigation, "data-telegram-global")
+	discordGlobal := strings.Index(navigation, "data-discord-global")
+	if telegramGlobal < 0 || discordGlobal < 0 || discordGlobal <= telegramGlobal {
+		t.Fatal("Discord global control must follow Telegram global control")
 	}
 	script, err := os.ReadFile("static/discord.js")
 	if err != nil {

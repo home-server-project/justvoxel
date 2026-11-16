@@ -16,6 +16,8 @@
   let instances = [];
   let selectedID = '';
   let surface = 'overview';
+  let discordOrigin = 'add';
+  let discordState = {configured: false};
   let telegramOrigin = 'add';
   let telegramState = {configured: false};
   const showSurface = name => {
@@ -26,9 +28,9 @@
     find('[data-gateway-telegram]').hidden = name !== 'telegram';
     find('[data-gateway-discord]').hidden = name !== 'discord';
     feedback.hidden = name === 'telegram' || name === 'discord';
-    find('[data-gateway-connections]').setAttribute('aria-selected', String(name === 'overview' || (name === 'telegram' && telegramOrigin === 'connections') || (name === 'settings' && Boolean(selectedID))));
+    find('[data-gateway-connections]').setAttribute('aria-selected', String(name === 'overview' || (name === 'telegram' && telegramOrigin === 'connections') || (name === 'discord' && discordOrigin === 'connections') || (name === 'settings' && Boolean(selectedID))));
     find('[data-gateway-help-open]').setAttribute('aria-selected', String(name === 'help'));
-    find('[data-gateway-add]').setAttribute('aria-selected', String((name === 'settings' && !selectedID) || (name === 'telegram' && telegramOrigin === 'add') || name === 'discord'));
+    find('[data-gateway-add]').setAttribute('aria-selected', String((name === 'settings' && !selectedID) || (name === 'telegram' && telegramOrigin === 'add') || (name === 'discord' && discordOrigin === 'add')));
     content.scrollTop = 0;
     dialog.dispatchEvent(new CustomEvent('gateway-surface-change', {detail: name}));
   };
@@ -172,7 +174,7 @@
   });
   const renderCards = (gatewayEnabled = snapshot.enabled) => {
     cards.replaceChildren();
-    if (!snapshot.connections.length && !telegramState.configured) cards.append(text('p', 'No connections yet. Select Add to get started.'));
+    if (!snapshot.connections.length && !telegramState.configured && !discordState.configured) cards.append(text('p', 'No connections yet. Select Add to get started.'));
     for (const connection of snapshot.connections) {
       const active = gatewayEnabled && connection.enabled;
       const card = text('article', ''); card.className = `panel minecraft-server-card minecraft-server-health-${active ? 'success' : 'neutral'}`; card.dataset.gatewayConnection = connection.id;
@@ -220,6 +222,30 @@
       heading.append(identity, badge); card.append(heading);
       if (telegramState.bot_name) card.append(text('p', `@${telegramState.bot_name}`));
       const open = () => { if (busy) return; telegramOrigin = 'connections'; showSurface('telegram'); find('[data-telegram-replace]').focus(); };
+      card.addEventListener('click', open);
+      card.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); } });
+      cards.append(card);
+    }
+    if (discordState.configured) {
+      const statuses = {
+        connected: ['Connected', 'good'], verified: ['Bot verified', 'good'],
+        disabled: ['Disabled', 'muted'], unverified: ['Needs verification', 'muted'],
+        connecting: ['Connecting', 'muted'],
+        connection_retry: ['Retrying', 'danger'], connection_paused: ['Needs attention', 'danger'],
+        disconnected: ['Disconnected', 'muted'],
+      };
+      const [label, tone] = Object.hasOwn(statuses, discordState.status) ? statuses[discordState.status] : ['Status unavailable', 'muted'];
+      const card = text('article', ''); card.className = 'panel minecraft-server-card';
+      card.setAttribute('data-discord-integration', '');
+      card.setAttribute('role', 'button'); card.setAttribute('tabindex', '0');
+      card.setAttribute('aria-label', `Discord: ${label}. Open settings`);
+      const heading = text('div', ''); heading.className = 'minecraft-server-heading';
+      const identity = text('div', ''); identity.className = 'gateway-connection-identity';
+      identity.append(discordHelpIcon(), text('h2', 'Discord'));
+      const badge = text('span', label); badge.className = `badge telegram-integration-badge ${tone}`;
+      heading.append(identity, badge); card.append(heading);
+      if (discordState.bot_username) card.append(text('p', `@${discordState.bot_username}`));
+      const open = () => { if (busy) return; discordOrigin = 'connections'; showSurface('discord'); find('[data-discord-replace]').focus(); };
       card.addEventListener('click', open);
       card.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); } });
       cards.append(card);
@@ -587,6 +613,35 @@
       text('p', 'Telegram operates independently of the AI/API Gateway switch and does not use AI/API Levels 1–4.'),
       text('p', 'Unknown or unapproved Telegram users are silently ignored. Only the exact active pairing challenge receives the pending-approval acknowledgement.'));
   };
+  const discordHelpIcon = () => {
+    const icon = document.createElement('img');
+    icon.className = 'gateway-provider-icon'; icon.alt = '';
+    icon.src = '/static/ai-providers/discord.svg';
+    return icon;
+  };
+  const renderDiscordHelpGuide = host => {
+    host.replaceChildren();
+    const identity = text('div', ''); identity.className = 'gateway-connection-identity';
+    const titles = text('div', ''); titles.append(text('h3', 'Discord'));
+    identity.append(discordHelpIcon(), titles); host.append(identity);
+    host.append(text('h4', 'How to connect'));
+    const steps = text('ol', '');
+    for (const step of [
+      'Open AI & API Connections → Add → Discord.',
+      'Create a dedicated Discord application and bot in the Discord Developer Portal.',
+      'Copy the bot token into JustVoxel and choose Save. Use Retry to verify as needed.',
+      'Use Add bot to Discord server to install the bot using JustVoxel’s fixed least-privilege install link.',
+      'Enable Discord from the top navigation switch.',
+      'Choose the intended Discord server and select Use this server.',
+      'In Discord use /jv or /help.',
+      'Ordinary members of the bound server get the allowed read-only and community experience. Management requires explicit JustVoxel administrator approval.',
+    ]) steps.append(text('li', step));
+    host.append(steps,
+      text('p', 'JustVoxel uses one explicitly bound Discord server, with no automatic binding. Discord roles are not JustVoxel authority.'),
+      text('p', 'Guilds intent only. No Message Content, Guild Members, Presence, or Guild Messages intent. No DM reading; ordinary messages and channel history are not read.'),
+      text('p', 'The fixed minimum install permission value is 3072: View Channel + Send Messages. No Administrator permission.'),
+      text('p', 'Discord is independent of AI/API Gateway levels. All management passes through authoritative JustVoxel operations.'));
+  };
   const setupHelpGuide = () => {
     const selector = find('[data-gateway-help-providers]');
     const guide = find('[data-gateway-help-guide]');
@@ -594,11 +649,12 @@
     const select = purpose => {
       buttons.forEach(([name, button]) => button.setAttribute('aria-pressed', String(name === purpose)));
       if (purpose === 'Telegram') renderTelegramHelpGuide(guide);
+      else if (purpose === 'Discord') renderDiscordHelpGuide(guide);
       else renderProviderGuide(guide, purpose, location.origin + (purpose === 'Automation / REST API' ? '/api/v1' : '/mcp'), {help: true});
     };
-    for (const purpose of [...providers.keys(), 'Telegram']) {
+    for (const purpose of [...providers.keys(), 'Telegram', 'Discord']) {
       const button = text('button', ''); button.type = 'button'; button.className = 'secondary';
-      button.append(purpose === 'Telegram' ? telegramHelpIcon() : providerIcon(purpose), text('span', purpose));
+      button.append(purpose === 'Telegram' ? telegramHelpIcon() : purpose === 'Discord' ? discordHelpIcon() : providerIcon(purpose), text('span', purpose));
       button.addEventListener('click', () => select(purpose)); selector.append(button); buttons.push([purpose, button]);
     }
     select('OpenAI');
@@ -621,8 +677,9 @@
     else form.querySelector('[data-discord-select]').addEventListener('change', () => {
       if (busy) return;
       details.replaceChildren();
+      discordOrigin = 'add';
       showSurface('discord');
-      find('[data-discord-back]').focus();
+      find(discordState.configured ? '[data-discord-replace]' : '[data-discord-token]').focus();
     });
     const field = name => form.elements.namedItem(name);
     form.className = c.id ? 'gateway-edit-settings' : 'gateway-add-settings';
@@ -736,10 +793,6 @@
     renderSettings({name: '', purpose: 'OpenAI', auth_mode: 'oauth_local', level: 1, enabled: true, all_instances: true, instance_ids: []});
   };
   find('[data-gateway-add]').addEventListener('click', showAdd);
-  find('[data-discord-back]').addEventListener('click', () => {
-    showAdd();
-    details.querySelector('[data-discord-select]')?.focus();
-  });
   find('[data-gateway-connections]').addEventListener('click', showOverview);
   find('[data-gateway-help-open]').addEventListener('click', () => { if (!busy) showSurface('help'); });
   for (const button of dialog.querySelectorAll('[data-gateway-copy-address]')) {
@@ -762,6 +815,10 @@
     telegramState = event.detail;
     renderCards();
   });
+  dialog.addEventListener('discord-state', event => {
+    discordState = event.detail;
+    renderCards();
+  });
   const workspace = setupWorkspaceWindow(dialog, {onOpen: () => { load(); showSurface(surface); }});
   launcher.addEventListener('click', () => {
     if (!primary()) return;
@@ -770,9 +827,15 @@
   });
   find('[data-gateway-close]').addEventListener('click', () => workspace.close());
   find('[data-gateway-refresh]').addEventListener('click', () => {
-    dialog.dispatchEvent(new Event('telegram-refresh'));
-    if (surface === 'discord') dialog.dispatchEvent(new Event('discord-refresh'));
-    else if (surface !== 'telegram' && !busy) load();
+    if (surface === 'telegram') dialog.dispatchEvent(new Event('telegram-refresh'));
+    else if (surface === 'discord') dialog.dispatchEvent(new Event('discord-refresh'));
+    else {
+      if (surface === 'overview') {
+        dialog.dispatchEvent(new Event('telegram-refresh'));
+        dialog.dispatchEvent(new Event('discord-refresh'));
+      }
+      if (!busy) load();
+    }
   });
   const restore = () => {
     if (document.body.classList.contains('role-pending')) return false;

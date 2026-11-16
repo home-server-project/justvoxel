@@ -275,7 +275,16 @@ test('header zones and scoped reveal suppression leave other passwords alone', a
   const css = readFileSync(`${base}static/agent-gateway.css`, 'utf8');
   assert.match(markup, /telegram-header/); assert.match(markup, /telegram-title/);
   assert.match(css, /\[data-gateway-telegram\] \.telegram-header.*grid-template-columns: 1fr auto/);
-  for (const line of css.split('\n').filter(line => /::-ms-reveal|::-ms-clear|::-webkit-credentials-auto-fill-button/.test(line))) assert.match(line, /\[data-gateway-telegram\] \[data-telegram-token\]/);
+  for (const integration of ['telegram', 'discord']) {
+    for (const pseudo of ['::-ms-reveal', '::-ms-clear', '::-webkit-credentials-auto-fill-button']) {
+      assert.ok(css.includes(`[data-gateway-${integration}] [data-${integration}-token]${pseudo}`));
+    }
+  }
+  for (const line of css.split('\n').filter(line => /::-ms-reveal|::-ms-clear|::-webkit-credentials-auto-fill-button/.test(line))) {
+    for (const selector of line.split('{')[0].split(',').map(selector => selector.trim()).filter(Boolean)) {
+      assert.match(selector, /^\[data-gateway-(telegram|discord)\] \[data-\1-token\]::-(?:ms-reveal|ms-clear|webkit-credentials-auto-fill-button)$/);
+    }
+  }
   assert.match(markup, /<strong>Bot Token<\/strong>/); assert.doesNotMatch(markup, /<strong>Bot<\/strong>/);
   for (const status of ['verified', 'connected']) {
     const h = await harness({status}); assert.match(h.node('status').className, /success/);

@@ -217,6 +217,7 @@
         <div class="gateway-navigation-controls">
           <label class="gateway-switch gateway-global-switch"><span>AI &amp; API Gateway</span><input class="date-time-switch" type="checkbox" role="switch" aria-label="Enable gateway" data-gateway-enabled><span class="gateway-visually-hidden" data-gateway-state>Gateway Disabled</span></label>
           <label class="gateway-switch gateway-global-switch" data-telegram-global hidden><img class="gateway-provider-icon" src="/static/ai-providers/telegram.svg" alt=""><span>Telegram</span><input class="date-time-switch" type="checkbox" role="switch" aria-label="Telegram" data-telegram-enabled disabled></label>
+          <label class="gateway-switch gateway-global-switch" data-discord-global hidden><img class="gateway-provider-icon" src="/static/ai-providers/discord.svg" alt=""><span>Discord</span><input class="date-time-switch" type="checkbox" role="switch" aria-label="Discord" data-discord-enabled disabled></label>
         </div>
       </nav>
       <div class="system-workspace-body">
@@ -260,47 +261,37 @@
             </div>
           </section>
           <section data-gateway-discord hidden aria-labelledby="discord-title">
-            <div class="form-actions">
-              <button class="button" type="button" data-discord-back>Back to Add</button>
-              <h3 id="discord-title">Discord</h3>
-            </div>
-            <p class="muted">Discord works independently of the Gateway switch. Community and server-management features will be added after the bot connection is configured.</p>
-            <p role="status" data-discord-feedback></p>
             <div data-discord-content data-discord-csrf="{{.CSRF}}">
-              <section class="panel">
-                <h3>Bot connection</h3>
-                <p class="muted">Use a dedicated Discord application and bot. JustVoxel connects outward to Discord.</p>
-                <p>Status: <span data-discord-status>Connection unavailable</span></p>
-                <div data-discord-identity hidden></div>
-                <p><a class="button" data-discord-install hidden target="_blank" rel="noopener noreferrer">Add bot to Discord server</a></p>
-                <form data-discord-token-form autocomplete="off">
-                  <label>Bot token <input type="password" name="token" autocomplete="off" data-password-ui="off" data-discord-token required></label>
-                  <button class="button" type="submit">Save or replace token</button>
+              <div class="discord-lane discord-header">
+                <div class="discord-title"><img class="gateway-provider-icon" src="/static/ai-providers/discord.svg" alt="">
+                <h3 id="discord-title">Discord</h3></div>
+                <span class="gateway-connection-state" data-discord-status>Disconnected</span>
+              </div>
+              <div class="discord-lane">
+                <strong>Bot Token</strong>
+                <form class="discord-controls" data-discord-token-form autocomplete="off">
+                  <input type="password" name="token" aria-label="Bot Token" autocomplete="off" data-password-ui="off" spellcheck="false" autocapitalize="off" data-discord-token required>
+                  <button class="button" type="submit">Save</button>
+                  <button class="button" type="button" data-discord-token-cancel hidden>Cancel</button>
                 </form>
-                <div class="form-actions">
-                  <button class="button" type="button" data-discord-verify disabled>Verify bot</button>
-                  <button class="button" type="button" data-discord-disconnect>Disconnect completely</button>
+                <div class="discord-controls" data-discord-bot-actions hidden>
+                  <button class="button" type="button" data-discord-verify hidden>Retry</button>
+                  <button class="button" type="button" data-discord-replace>Replace token</button>
+                  <button class="button" type="button" data-discord-disconnect>Disconnect</button>
                 </div>
-                <p class="muted">Replacing the token removes the previously verified bot/application identity.</p>
-              </section>
-              <section class="panel">
-                <h3>Discord connection</h3>
-                <label><input class="date-time-switch" type="checkbox" role="switch" data-discord-enabled disabled> Enable Discord</label>
-                <p>Connection: <span data-discord-runtime>Disabled</span></p>
-                <label>Discord server <select data-discord-guild disabled><option value="">Choose a Discord server</option></select></label>
+              </div>
+              <div class="discord-lane">
+                <strong>Discord server</strong>
+                <a class="button" data-discord-install hidden target="_blank" rel="noopener noreferrer">Add bot to Discord server</a>
+                <select aria-label="Discord server" data-discord-guild disabled><option value="">Choose a Discord server</option></select>
                 <button class="button" type="button" data-discord-bind disabled>Use this server</button>
-                <p data-discord-empty hidden>No Discord servers found. Add the bot to a Discord server, then Refresh.</p>
-                <p>Bound server: <span data-discord-bound>None</span></p>
-                <p data-discord-bound-unavailable hidden>The bot no longer has access to this Discord server.</p>
-              </section>
-              <section class="panel">
-                <h3>Discord administrators</h3>
-                <p class="muted">Members of the bound Discord server can view server status and players. Only approved Discord administrators can Start, Stop, Restart, or create a manual backup.</p>
-                <h4>Pending requests</h4>
-                <div data-discord-pending></div>
-                <h4>Approved administrators</h4>
-                <div data-discord-administrators></div>
-              </section>
+                <p>Bound: <span data-discord-bound>None</span></p>
+                <p data-discord-empty hidden>No Discord servers found. Add the bot to a server, then Refresh.</p>
+                <p data-discord-bound-unavailable hidden>The bot no longer has access to the bound Discord server.</p>
+              </div>
+              <div data-discord-pending></div>
+              <div data-discord-administrators></div>
+              <p role="status" data-discord-feedback></p>
             </div>
           </section>
           <section data-gateway-help hidden>

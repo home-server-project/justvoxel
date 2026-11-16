@@ -1,11 +1,29 @@
 # Discord connection
 
-The primary WebUI administrator configures a dedicated Discord bot in the existing
-**AI & API Connections** modal. Save its token, verify it, use **Add bot to Discord
-server**, then enable Discord. Refresh to discover servers, choose one, and press
-**Use this server**. JustVoxel supports one bound Discord server and never switches
-it automatically. If access is lost, restore the bot's access or explicitly bind
-another available server.
+The primary WebUI administrator opens **AI & API Connections → Add → Discord**
+to configure a dedicated bot. The compact settings surface has **Bot Token**,
+**Discord server**, and **Access** lanes. Save the token and choose **Retry** to
+verify it as needed. **Replace token** opens an empty password field; **Cancel**
+discards it. Tokens are never redisplayed, and drafts clear when leaving settings
+or closing the workspace.
+
+Use **Add bot to Discord server**, then enable **Discord** using its independent
+switch in the workspace's top navigation. The switch appears once configured and
+is usable after verification from Connections, Add, Help, or Discord settings.
+Refresh to discover servers, choose the intended server, and select **Use this
+server**. JustVoxel supports one explicitly bound Discord server and never binds
+or switches it automatically. If access is lost, restore the bot's access or
+explicitly bind another available server.
+
+Configured Discord appears as a compact card in **Connections**, showing its bot
+username and current status. Open it to manage settings while Connections stays
+selected. **Add → Discord** opens the same settings while Add stays selected.
+Use the normal top tabs to navigate; there is no Discord back button.
+**Help → Provider reference → Discord** provides setup steps and the security
+model. The fixed install link uses permission value **3072**: **View Channel** +
+**Send Messages**, without Administrator permission. Discord does not use AI/API
+Gateway access levels. All management passes through authoritative JustVoxel
+operations.
 
 In the bound Discord server, use **/jv** for an ephemeral interactive control panel
 or **/help** for usage and access information. These are guild-scoped commands;
@@ -44,7 +62,8 @@ The private identity database stores the credential, bounded configuration,
 administrator approvals, and community access requests; interaction tokens and messages are never persisted.
 
 Discord runs inside the existing Management Agent with **Guilds intent only**.
-No Message Content, Guild Members, Presence, or message intents are required.
+No Message Content, Guild Members, Presence, or Guild Messages intent is used.
+JustVoxel does not read DMs.
 JustVoxel does not read ordinary messages or channel history. No Discord roles,
 message content, or interaction tokens are returned to the WebUI. Failures shown
 in Discord use safe fixed messages rather than internal errors or command output.

@@ -1323,16 +1323,20 @@ func TestApprovedControlCenterLayout(t *testing.T) {
 		t.Fatal("Discord must immediately follow Telegram as a special integration with a local icon")
 	}
 	discord := regexp.MustCompile(`(?s)<section data-gateway-discord.*?<section data-gateway-help`).FindString(gateway)
-	for _, required := range []string{`data-discord-back>Back to Add`, `id="discord-title">Discord`, "independently of the Gateway switch", "Bot connection", `type="password" name="token" autocomplete="off" data-password-ui="off" data-discord-token`, "data-discord-identity", "data-discord-verify", "data-discord-disconnect"} {
+	for _, required := range []string{`class="discord-lane discord-header"`, `class="discord-title"`, `/static/ai-providers/discord.svg`, `id="discord-title">Discord`, `<strong>Bot Token</strong>`, `<strong>Discord server</strong>`, `data-discord-status`, `aria-label="Bot Token" autocomplete="off" data-password-ui="off" spellcheck="false" autocapitalize="off" data-discord-token`, "data-discord-token-cancel", "data-discord-replace", "data-discord-verify", "data-discord-disconnect"} {
 		if !strings.Contains(discord, required) {
 			t.Fatalf("Discord setup surface missing: %s", required)
 		}
 	}
-	for _, forbidden := range []string{`style=`, `name="purpose"`, `name="level"`, `data-gateway-oauth`, `data-discord-users`, `data-discord-pair`} {
+	for _, forbidden := range []string{`style=`, `name="purpose"`, `name="level"`, `data-gateway-oauth`, `data-discord-users`, `data-discord-pair`, `class="panel"`, `data-discord-back`, "Back to Add", "Bot connection", "Discord administrators", "independently of the Gateway switch", `name="name"`, `name="server_scope"`, `data-discord-enabled`} {
 		if strings.Contains(discord, forbidden) {
 			t.Fatalf("unexpected Discord setup control: %s", forbidden)
 		}
 	}
+	if strings.Count(gateway, "data-discord-enabled") != 1 || !strings.Contains(lane, `data-discord-global hidden`) || !strings.Contains(lane, `aria-label="Discord" data-discord-enabled disabled`) || strings.Index(lane, "data-discord-global") < strings.Index(lane, "data-telegram-global") {
+		t.Fatal("Discord must have exactly one enable control immediately after Telegram in navigation")
+	}
+
 	if !strings.Contains(markup, `<script src="/static/discord.js" defer></script>`) || strings.Contains(markup, `data-workspace-window="discord"`) || strings.Contains(markup, `data-discord-open`) {
 		t.Fatal("Discord must load inside the existing AI & API Connections workspace")
 	}
@@ -1340,6 +1344,12 @@ func TestApprovedControlCenterLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, required := range []string{"renderDiscordHelpGuide", "else if (purpose === 'Discord') renderDiscordHelpGuide(guide)", "[...providers.keys(), 'Telegram', 'Discord']"} {
+		if !strings.Contains(string(gatewayScript), required) {
+			t.Fatalf("dedicated Discord Help missing: %s", required)
+		}
+	}
+
 	telegramScript, err := assets.ReadFile("static/telegram.js")
 	if err != nil {
 		t.Fatal(err)
