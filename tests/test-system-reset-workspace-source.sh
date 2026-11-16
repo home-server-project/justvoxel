@@ -1,6 +1,8 @@
 #!/usr/bin/bash
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/helpers/webui-i18n.sh"
+
 header=webui/internal/server/templates/header.html
 script=webui/internal/server/static/app.js
 styles=webui/internal/server/static/app.css
@@ -30,27 +32,28 @@ grep -Fq '/api/system/workspace/reset/minecraft/apply' "${script}"
 grep -Fq '/api/system/workspace/reset/factory/apply' "${script}"
 grep -Fq '/api/system/workspace/reset/factory/resolve' "${script}"
 grep -Fq 'workspaceRestoreAllowed() ? saved : { ...saved, open: false }' "${script}"
-grep -Fq 'Keep current server' "${script}"
-grep -Fq 'Review and retry Factory Reset' "${script}"
+catalog_text_used "${script}" 'Keep current server'
+catalog_text_used "${script}" 'Review and retry Factory Reset'
 grep -Fq 'retry.addEventListener("click", () => planReset("factory"));' "${script}"
 grep -Fq 'if (operation.operation_type !== "factory_reset") built.panel.appendChild(liveConsole);' "${script}"
 # Keep the Factory Reset console after the yellow warning and before recovery actions.
-factory_console_placement='    if (operation.operation_type === "factory_reset") {
+factory_console_prefix='    if (operation.operation_type === "factory_reset") {
       const note = document.createElement("div");
       note.className = "notice warning";
-      note.textContent = "When Full Factory Reset completes, this WebUI session will be signed out. Sign in with voxel / voxel, then choose a new administrator password before normal administration is available.";
+      note.textContent = jvT("'
+factory_console_suffix='");
       built.panel.appendChild(note);
       const consoleActions = document.createElement("div");
       consoleActions.className = "action-row";
       consoleActions.appendChild(liveConsole);
       built.panel.appendChild(consoleActions);
       if (operation.state === "needs_attention") {'
-[[ "$(cat "${script}")" == *"${factory_console_placement}"* ]] || {
+catalog_text_used "${script}" 'When Full Factory Reset completes, this WebUI session will be signed out. Sign in with voxel / voxel, then choose a new administrator password before normal administration is available.' "${factory_console_prefix}" "${factory_console_suffix}" || {
     echo 'ERROR: Factory Reset Live Console must follow the yellow sign-out warning in an action row before recovery content.' >&2
     exit 1
 }
 grep -Fq '.action-row,.form-actions{justify-content:flex-end}' "${styles}"
-grep -Fq 'Retry Reset Minecraft' "${script}"
+catalog_text_used "${script}" 'Retry Reset Minecraft'
 grep -Fq 'retry.addEventListener("click", () => planReset("minecraft", true));' "${script}"
 grep -Fq '/api/system/workspace/reset/factory/current' "${script}"
 grep -Fq '/api/system/workspace/reset/minecraft/current' "${script}"
@@ -58,8 +61,8 @@ grep -Fq '/api/system/workspace/reset/operations/' "${script}"
 grep -Fq 'slider.type = "range"' "${script}"
 grep -Fq 'slider.max = "100"' "${script}"
 grep -Fq 'finalConfirm.disabled = true' "${script}"
-grep -Fq 'Current voxel system password' "${script}"
-grep -Fq 'External, USB, NFS, and SMB storage are never erased' "${script}"
+catalog_text_used "${script}" 'Current voxel system password'
+catalog_text_used "${script}" 'Choose how much JustVoxel should reset. External, USB, NFS, and SMB storage are never erased by Full Factory Reset.'
 grep -Fq 'backup_action === "preserve"' "${script}"
 grep -Fq 'plan_fingerprint: plan.plan_fingerprint' "${script}"
 

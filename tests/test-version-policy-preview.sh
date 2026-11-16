@@ -2,6 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "${repo_root}/tests/helpers/webui-i18n.sh"
 fixture_dir="$(mktemp -d)"
 trap 'rm -rf "${fixture_dir}"' EXIT
 
@@ -104,8 +105,8 @@ grep -Eq '"GET /version-preview":[[:space:]]+a.setupWizardVersionPreview' "${rep
 grep -Fq 'bedrock, draft.Minecraft.ServerType)' "${repo_root}/webui/internal/server/setup_wizard.go"
 grep -Fq 'status.selected_candidate' "${repo_root}/webui/internal/server/static/settings.js"
 grep -Fq 'next.disabled = !status.selected_candidate || (status.crossplay_enabled && !status.crossplay_compatible)' "${repo_root}/webui/internal/server/static/settings.js"
-grep -Fq '<dt>Minecraft version</dt><dd>{{.Plan.Normalized.Minecraft.Version}}</dd>' "${repo_root}/webui/internal/server/templates/setup_review.html"
-grep -Fq '<dt>Version policy</dt><dd>{{.VersionPolicyLabel}}</dd>' "${repo_root}/webui/internal/server/templates/setup_review.html"
+catalog_text_used "${repo_root}/webui/internal/server/templates/setup_review.html" 'Minecraft version' '<dt>{{t "' '"}}</dt><dd>{{.Plan.Normalized.Minecraft.Version}}</dd>'
+catalog_text_used "${repo_root}/webui/internal/server/templates/setup_review.html" 'Version policy' '<dt>{{t "' '"}}</dt><dd>{{ts .VersionPolicyLabel}}</dd>'
 if grep -Fq 'Version: LATEST' "${repo_root}/webui/internal/server/templates/setup_review.html"; then exit 1; fi
 
 # Exercise the planner separately from the browser preview. The selected policy
