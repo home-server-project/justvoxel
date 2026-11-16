@@ -147,6 +147,55 @@ func TestConnectionGuideUnconfigured(t *testing.T) {
 		t.Fatal("unnecessary remote discovery")
 	}
 }
+
+func TestConnectionGuideEmptyInventorySelection(t *testing.T) {
+	app, client := newServerInventoryApp(t)
+	client.instances = nil
+	client.runtimes = nil
+	status := guideFixture()
+	status.Minecraft.Configured = false
+	client.statusResult = status
+	var emptyPage string
+	for _, tc := range []struct {
+		name  string
+		query string
+		code  int
+	}{
+		{"no selection", "", http.StatusOK},
+		{"one empty selection", "?server=", http.StatusOK},
+		{"multiple empty selections", "?server=&server=", http.StatusBadRequest},
+		{"malformed selection", "?server=invalid", http.StatusBadRequest},
+		{"stale selection", "?server=jv-missing1", http.StatusNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			response := httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "/minecraft/how-to-connect"+tc.query, ""))
+			body := response.Body.String()
+			if response.Code != tc.code {
+				t.Fatalf("status %d: %s", response.Code, body)
+			}
+			if len(client.reads) != 0 || len(client.actions) != 0 {
+				t.Fatalf("empty inventory accessed server data: reads %v actions %v", client.reads, client.actions)
+			}
+			if tc.code != http.StatusOK {
+				return
+			}
+			if !strings.Contains(response.Header().Get("Content-Type"), "text/html") || !strings.Contains(body, "Minecraft is not configured yet") {
+				t.Fatalf("expected normal empty page: %s", body)
+			}
+			for _, absent := range []string{`data-server-id=`, `data-selected-server=`, "data-connect-method", "data-connect-guide", "data-java-port", "Save to PDF"} {
+				if strings.Contains(body, absent) {
+					t.Errorf("empty page contains %q", absent)
+				}
+			}
+			if tc.query == "" {
+				emptyPage = body
+			} else if body != emptyPage {
+				t.Fatal("empty selection changed the normal empty page")
+			}
+		})
+	}
+}
+
 func TestConnectionGuideAvailability(t *testing.T) {
 	for _, id := range []string{"local", "tailscale", "netbird", "nordvpn"} {
 		for _, value := range []string{"192.168.1.5", "100.80.0.8", "", "0.0.0.0", "127.0.0.1", "169.254.1.2", "224.0.0.1", "https://auth.example"} {
@@ -491,6 +540,7 @@ func TestConnectionGuideSelectedFriendlyNameAndInvitation(t *testing.T) {
 		{"?invite=1", http.StatusOK},
 		{"?server=Family+Survival&invite=1", http.StatusBadRequest},
 		{"?server=", http.StatusBadRequest},
+		{"?server=&server=", http.StatusBadRequest},
 		{"?server=jv-missing&invite=1", http.StatusNotFound},
 		{"?server=jv-family1&server=jv-kids001&invite=1", http.StatusBadRequest},
 	} {
@@ -537,6 +587,11 @@ func TestConnectionGuideOwnServerSelection(t *testing.T) {
 	response = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "/minecraft/how-to-connect", ""))
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Kids Creative — Purpur 1.21.8") || strings.Join(client.reads, ",") != "configuration:jv-kids001" {
 		t.Fatalf("single automatic selection: %d %v", response.Code, client.reads)
+	}
+	client.reads = nil
+	response = httptestResponse(app, authenticatedAdminRequest(http.MethodGet, "/minecraft/how-to-connect?server=", ""))
+	if response.Code != http.StatusBadRequest || len(client.reads) != 0 {
+		t.Fatalf("single server accepted empty selection: %d %v", response.Code, client.reads)
 	}
 }
 

@@ -87,7 +87,11 @@ func (a *App) howToConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	selected := selectedServerContext{}
-	if _, explicit := r.URL.Query()["server"]; explicit || len(instances) == 1 {
+	values, explicit := r.URL.Query()["server"]
+	if len(instances) == 0 && len(values) == 1 && values[0] == "" {
+		explicit = false
+	}
+	if explicit || len(instances) == 1 {
 		var valid bool
 		selected, valid = a.selectedMinecraft(w, r, session)
 		if !valid {
