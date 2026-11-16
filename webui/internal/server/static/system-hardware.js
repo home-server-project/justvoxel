@@ -16,7 +16,6 @@
   let snapshot = null;
   let busy = false;
   let opening = false;
-  let refreshRequest = 0;
   let displayDirty = false;
   // Session-only desired command. This is deliberately not physical readback.
   let displaySelection = true;
@@ -54,27 +53,20 @@
     indicators.hidden = indicators.childElementCount === 0;
   };
   const refresh = async () => {
-    const request = ++refreshRequest;
-    power.dataset.hardwareSettled = "false";
-    open.hidden = true;
-    indicators.hidden = true;
     let hardware;
     try {
       hardware = await get("/api/system-hardware");
-      if (request !== refreshRequest) return;
       snapshot = hardware;
       open.hidden = !(hardware.hws === true && hardware.display_available);
     } catch (_) {
-      if (request === refreshRequest) snapshot = null;
+      snapshot = null;
       return;
-    } finally {
-      if (request === refreshRequest) power.dataset.hardwareSettled = "true";
     }
     let ups = null;
     if (hardware.hws === true) {
       try { ups = await get("/api/ups"); } catch (_) { /* Onboard status remains useful independently. */ }
     }
-    if (request === refreshRequest) renderIndicators(hardware, ups);
+    renderIndicators(hardware, ups);
   };
   const setInputs = () => {
     const available = snapshot?.hws === true && snapshot.display_available;
@@ -125,7 +117,7 @@
       setInputs();
     }
   };
-  menu.addEventListener("toggle", () => { if (menu.open) refresh(); });
+  refresh();
   open.addEventListener("click", async () => {
     if (opening || busy || open.hidden) return;
     opening = true;

@@ -37,6 +37,25 @@ func TestSystemPowerHeaderAndDialogUX(t *testing.T) {
 		}
 	}
 
+	for _, action := range []string{"reboot", "poweroff"} {
+		_, button, found := strings.Cut(markup, `data-system-action="`+action+`"`)
+		if !found {
+			t.Fatalf("missing %s button", action)
+		}
+		button, _, _ = strings.Cut(button, ">")
+		if strings.Contains(button, "disabled") || strings.Contains(button, "hidden") {
+			t.Fatalf("%s must be available before capability discovery", action)
+		}
+	}
+	if !strings.Contains(markup, `data-tooltip="Reboot to UEFI/BIOS" hidden`) {
+		t.Fatal("firmware action must start hidden until capability discovery")
+	}
+	for _, obsolete := range []string{"data-actions-settled", "data-hardware-settled"} {
+		if strings.Contains(markup, obsolete) {
+			t.Fatalf("obsolete power group discovery gate: %s", obsolete)
+		}
+	}
+
 	if !strings.Contains(markup, `<rect x="8" y="9" width="8" height="8" rx="1"></rect>`) {
 		t.Fatal("custom UEFI firmware icon lost its microchip body")
 	}

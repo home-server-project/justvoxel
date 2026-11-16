@@ -34,7 +34,12 @@ function page(hardware, ups, {systemActions = false, intercept} = {}) {
     const button = node(`[data-system-action="${action}"]`); button.dataset.systemAction = action; return button;
   });
   node('[data-system-power]').querySelectorAll = () => buttons;
-  node('[data-system-power]').dataset = {actionsSettled: systemActions ? 'false' : 'true', hardwareSettled: 'false'};
+  node('[data-system-power]').hidden = false;
+  for (const button of buttons) {
+    const tag = header.match(new RegExp(`<button[^>]*data-system-action="${button.dataset.systemAction}"[^>]*>`))[0];
+    button.hidden = /\bhidden\b/.test(tag);
+    button.disabled = /\bdisabled\b/.test(tag);
+  }
   node('[data-system-actions-csrf]').value = 'csrf-token';
   const requests = [];
   const context = vm.createContext({
@@ -60,8 +65,8 @@ function page(hardware, ups, {systemActions = false, intercept} = {}) {
     setHardware(value) { currentHardware = value; },
     posts() { return requests.filter(r => r.options.method === 'POST').map(r => new URLSearchParams(r.options.body)); },
     actions() { return this.posts().map(body => body.get('action')); },
-    visible() { const data = node('[data-system-power]').dataset; return data.actionsSettled === 'true' && data.hardwareSettled === 'true'; },
     async open() { node('[data-control-center]').open = true; await node('[data-control-center]').emit('toggle'); await settle(); },
+    async close() { node('[data-control-center]').open = false; await node('[data-control-center]').emit('toggle'); await settle(); },
     async popup() { await node('[data-display-open]').emit('click'); await settle(); },
     async change(selector, checked) {
       assert.notEqual(node(selector).checked, checked, `${selector} must actually change`);
@@ -280,30 +285,125 @@ test('Apply blocks edits, duplicate submissions and cancellation while commands 
   assert.equal(prevented, true); assert.equal(p.node('[data-display-dialog]').open, true); assert.deepEqual(p.actions(), ['display-off']);
   pending.resolve({ok: true, json: async () => hws}); await applying;
 });
-test('capabilities reveal as one group after both requests settle in either order, including failures', async () => {
-  assert.match(css, /\.control-power-actions\[data-actions-settled="false"\],\.control-power-actions\[data-hardware-settled="false"\]\{visibility:hidden;pointer-events:none\}/);
+const assertPowerAvailable = p => {
+  assert.equal(p.node('[data-system-power]').hidden, false);
+  for (const action of ['reboot', 'poweroff']) {
+    const button = p.node(`[data-system-action="${action}"]`);
+    assert.equal(button.hidden, false, action);
+    assert.equal(button.disabled, false, action);
+  }
+};
+const capabilityRequests = p => p.requests.filter(r => ['/api/system-actions', '/api/system-hardware', '/api/ups'].includes(r.url)).map(r => r.url);
+const repeatMenu = async p => {
+  for (let i = 0; i < 3; i++) { await p.open(); await p.close(); }
+  await p.open();
+};
+
+test('template starts with available power actions and hidden dynamic controls without a settled gate', () => {
+  for (const action of ['reboot', 'poweroff']) {
+    const tag = header.match(new RegExp(`<button[^>]*data-system-action="${action}"[^>]*>`))[0];
+    assert.doesNotMatch(tag, /\b(disabled|hidden)\b/);
+  }
+  assert.match(header, /<button[^>]*data-system-action="firmware-reboot"[^>]*\bhidden\b/);
+  assert.match(header, /<button[^>]*data-display-open[^>]*\bhidden\b/);
+  assert.match(header, /data-power-indicators hidden/);
+  for (const text of [header, css, source, powerSource]) {
+    assert.doesNotMatch(text, /data-actions-settled|data-hardware-settled|actionsSettled|hardwareSettled/);
+  }
+  assert.doesNotMatch(css, /\.control-power-actions[^{}]*\{[^}]*visibility\s*:\s*hidden/);
+});
+
+test('initial discovery keeps power available in either completion order, including failures, without menu retries', async () => {
   for (const first of ['/api/system-actions', '/api/system-hardware']) {
     for (const failed of [null, '/api/system-actions', '/api/system-hardware']) {
       const pending = {'/api/system-actions': deferred(), '/api/system-hardware': deferred()};
       const p = page(hws, null, {systemActions: true, intercept: url => pending[url]?.promise});
-      await p.open(); assert.equal(p.visible(), false);
+      assert.deepEqual(capabilityRequests(p), ['/api/system-actions', '/api/system-hardware']);
+      assertPowerAvailable(p);
+      assert.equal(p.node('[data-system-action="firmware-reboot"]').hidden, true);
+      assert.equal(p.node('[data-display-open]').hidden, true);
+      await repeatMenu(p);
+      assert.deepEqual(capabilityRequests(p), ['/api/system-actions', '/api/system-hardware']);
+      assertPowerAvailable(p);
       const complete = path => {
         if (failed === path) pending[path].reject(new Error('unavailable'));
         else pending[path].resolve({ok: true, json: async () => path === '/api/system-hardware' ? hws : {variant:'hws', firmware:{available:true}}});
       };
-      complete(first); await settle(); assert.equal(p.visible(), false);
+      complete(first); await settle(); assertPowerAvailable(p);
       complete(first === '/api/system-actions' ? '/api/system-hardware' : '/api/system-actions'); await settle();
-      assert.equal(p.visible(), true);
-      assert.equal(p.node('[data-display-open]').hidden, failed === '/api/system-hardware');
-      assert.equal(p.node('[data-system-action="firmware-reboot"]').hidden, failed === '/api/system-actions');
+      assertPowerAvailable(p);
+      const display = p.node('[data-display-open]');
+      const firmware = p.node('[data-system-action="firmware-reboot"]');
+      assert.equal(display.hidden, failed === '/api/system-hardware');
+      assert.equal(firmware.hidden, failed === '/api/system-actions');
+      assert.equal(firmware.disabled, failed === '/api/system-actions');
+      if (failed === '/api/system-hardware') assert.equal(p.node('[data-power-indicators]').hidden, true);
+      const requests = capabilityRequests(p);
+      assert.deepEqual(requests, failed === '/api/system-hardware'
+        ? ['/api/system-actions', '/api/system-hardware']
+        : ['/api/system-actions', '/api/system-hardware', '/api/ups']);
+      // Detect even a temporary hide/reveal or disable/enable on menu toggle.
+      for (const [element, property] of [[firmware, 'hidden'], [firmware, 'disabled'], [display, 'hidden']]) {
+        const value = element[property];
+        Object.defineProperty(element, property, {get: () => value, set: () => assert.fail(`menu changed ${property}`)});
+      }
+      await repeatMenu(p);
+      assert.deepEqual(capabilityRequests(p), requests);
+      assertPowerAvailable(p);
     }
   }
 });
-test('VM action group reveals without fake firmware or Display buttons', async () => {
-  const p = page({hws:false, display_available:false, lid_available:false}, null, {systemActions:true}); await p.open();
-  assert.equal(p.visible(), true);
-  assert.equal(p.node('[data-display-open]').hidden, true);
-  assert.equal(p.node('[data-system-action="firmware-reboot"]').hidden, true);
-  assert.equal(p.node('[data-system-action="reboot"]').disabled, false);
-  assert.equal(p.node('[data-system-action="poweroff"]').disabled, false);
+
+test('VM and unsupported capabilities remain hidden after initial discovery and repeated menu opens', async () => {
+  for (const hardware of [{hws:false, display_available:false}, {...hws, display_available:false}]) {
+    const p = page(hardware, null, {systemActions:true, intercept: url => url === '/api/system-actions'
+      ? Promise.resolve({ok:true, json:async () => ({variant:hardware.hws ? 'hws' : 'vm', firmware:{available:!hardware.hws}})}) : undefined});
+    assertPowerAvailable(p);
+    await settle();
+    const requests = capabilityRequests(p);
+    assert.deepEqual(requests, hardware.hws ? ['/api/system-actions', '/api/system-hardware', '/api/ups'] : ['/api/system-actions', '/api/system-hardware']);
+    await repeatMenu(p);
+    assert.deepEqual(capabilityRequests(p), requests);
+    assert.equal(p.node('[data-display-open]').hidden, true);
+    assert.equal(p.node('[data-system-action="firmware-reboot"]').hidden, true);
+    assertPowerAvailable(p);
+  }
+});
+
+test('initial battery and UPS indicators survive menu toggles without clearing or rebuilding', async () => {
+  for (const failUPS of [false, true]) {
+    const p = page({...hws, batteries:[{capacity:42, status:'Discharging'}]}, upsStatus(86), {
+      systemActions:true,
+      intercept: url => failUPS && url === '/api/ups' ? Promise.reject(new Error('NUT unavailable')) : undefined,
+    });
+    await settle();
+    const indicators = p.node('[data-power-indicators]');
+    assert.equal(indicators.hidden, false);
+    assert.deepEqual(indicators.children.map(item => item.children.map(child => child.textContent)),
+      failUPS ? [['Onboard', '42%']] : [['Onboard', '42%'], ['UPS', '86%']]);
+    const children = [...indicators.children];
+    Object.defineProperty(indicators, 'hidden', {get: () => false, set: () => assert.fail('menu changed indicators visibility')});
+    indicators.replaceChildren = () => assert.fail('menu cleared indicators');
+    indicators.append = () => assert.fail('menu rebuilt indicators');
+    await repeatMenu(p);
+    children.forEach((child, i) => assert.equal(indicators.children[i], child));
+    assert.deepEqual(capabilityRequests(p), ['/api/system-actions', '/api/system-hardware', '/api/ups']);
+    assertPowerAvailable(p);
+  }
+});
+
+test('Display popup performs a fresh authoritative hardware read each time', async () => {
+  const p = page(hws, null, {systemActions:true});
+  await settle();
+  await repeatMenu(p);
+  assert.deepEqual(capabilityRequests(p), ['/api/system-actions', '/api/system-hardware', '/api/ups']);
+  p.setHardware({...hws, lid_ignored:true});
+  await p.popup();
+  assert.equal(p.node('[data-lid-ignore]').checked, true);
+  await p.node('[data-display-cancel]').emit('click');
+  p.setHardware({...hws, lid_ignored:false});
+  await p.popup();
+  assert.equal(p.node('[data-lid-ignore]').checked, false);
+  assert.deepEqual(capabilityRequests(p), ['/api/system-actions', '/api/system-hardware', '/api/ups', '/api/system-hardware', '/api/system-hardware']);
+  assert.deepEqual(p.actions(), []);
 });

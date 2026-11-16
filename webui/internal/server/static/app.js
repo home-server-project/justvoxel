@@ -1027,17 +1027,7 @@ if (systemPower && systemDialog) {
     },
   };
 
-  const setMenuAvailable = (available) => {
-    actionButtons.forEach((button) => {
-      button.disabled = !available;
-    });
-  };
-
-  let systemActionsRequest = 0;
   const loadSystemActionsStatus = async () => {
-    const request = ++systemActionsRequest;
-    systemPower.dataset.actionsSettled = "false";
-    setMenuAvailable(false);
     if (menuError) menuError.hidden = true;
     if (firmwareButton) firmwareButton.hidden = true;
     try {
@@ -1057,22 +1047,19 @@ if (systemPower && systemDialog) {
       }
       if (!response.ok) throw new Error("status unavailable");
       const status = await response.json();
-      if (request !== systemActionsRequest) return false;
       latestStatus = status;
       const firmwareAvailable =
         latestStatus.variant === "hws" &&
         latestStatus.firmware &&
         latestStatus.firmware.available === true;
-      if (firmwareButton) firmwareButton.hidden = !firmwareAvailable;
-      actionButtons.forEach((button) => {
-        button.disabled = button === firmwareButton && !firmwareAvailable;
-      });
+      if (firmwareButton) {
+        firmwareButton.hidden = !firmwareAvailable;
+        firmwareButton.disabled = !firmwareAvailable;
+      }
       return true;
     } catch (_) {
-      if (request === systemActionsRequest && menuError) menuError.hidden = false;
+      if (menuError) menuError.hidden = false;
       return false;
-    } finally {
-      if (request === systemActionsRequest) systemPower.dataset.actionsSettled = "true";
     }
   };
 
@@ -1203,13 +1190,7 @@ if (systemPower && systemDialog) {
     }
   };
 
-  if (controlCenter) {
-    controlCenter.addEventListener("toggle", () => {
-      if (controlCenter.open) loadSystemActionsStatus();
-    });
-  } else {
-    loadSystemActionsStatus();
-  }
+  loadSystemActionsStatus();
 
   actionButtons.forEach((button) => {
     button.addEventListener("click", () => openConfirmation(button.dataset.systemAction));

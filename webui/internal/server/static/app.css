@@ -233,7 +233,6 @@ body.role-administrator .control-power-actions.nav-admin-only{display:flex!impor
 .control-battery-indicators[hidden]{display:none}
 .control-battery-indicator{display:inline-flex;align-items:center;gap:.3rem;white-space:nowrap}
 .control-battery-indicator .system-ups-status{background:transparent;padding:0;border:0;border-radius:0;font:inherit;letter-spacing:inherit}
-.control-power-actions[data-actions-settled="false"],.control-power-actions[data-hardware-settled="false"]{visibility:hidden;pointer-events:none}
 
 /* Display controls use the connection-card frame and existing switches. */
 [data-display-dialog] .display-setting-row{display:flex;align-items:center;justify-content:space-between;gap:.5rem;height:64px;margin-top:10px;padding:.65rem;border:1px solid var(--jv-border);background:var(--jv-surface-sunken);border-radius:var(--jv-radius)}

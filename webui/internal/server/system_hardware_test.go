@@ -86,7 +86,7 @@ func TestHardwareDialogTemplateContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`data-display-open aria-label="Display" data-tooltip="Display" hidden`, `data-display-dialog`, `Display power`, `min="1" max="999" step="1" value="10" data-display-delay disabled`, `data-display-timer`, `data-display-command`, `data-display-cancel>Cancel`, `data-display-apply>Apply`, `Ignore laptop lid close`, `role="switch" data-lid-ignore`, `data-lid-option hidden`, `data-power-indicators hidden`, `data-actions-settled="false" data-hardware-settled="false"`, `/static/system-hardware.js`} {
+	for _, want := range []string{`data-display-open aria-label="Display" data-tooltip="Display" hidden`, `data-display-dialog`, `Display power`, `min="1" max="999" step="1" value="10" data-display-delay disabled`, `data-display-timer`, `data-display-command`, `data-display-cancel>Cancel`, `data-display-apply>Apply`, `Ignore laptop lid close`, `role="switch" data-lid-ignore`, `data-lid-option hidden`, `data-power-indicators hidden`, `/static/system-hardware.js`} {
 		if !strings.Contains(string(header), want) {
 			t.Fatalf("template missing %q", want)
 		}
