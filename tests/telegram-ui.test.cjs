@@ -40,7 +40,9 @@ async function harness(initial = {}) {
     if (!nodes.has(selector)) nodes.set(selector, new Node());
     return nodes.get(selector);
   };
+  const events = [];
   const dialog = new Node('dialog'); dialog.open = true; dialog.querySelector = node;
+  dialog.dispatchEvent = event => { events.push(event); return true; };
   node('content').dataset.telegramCsrf = 'test-csrf';
   let snapshot = {configured: true, verified: true, enabled: true, status: 'connected', bot_name: 'test_bot', users: [], ...initial};
   let poll;
@@ -54,6 +56,7 @@ async function harness(initial = {}) {
   document.body.classList = {contains: () => true};
   const requests = [];
   const context = vm.createContext({
+    CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
     document, navigator: {get clipboard() { return clipboardMode === 'unavailable' ? undefined : {async writeText(text) { if (clipboardMode !== 'modern') throw new Error('LAN HTTP'); copied.push(text); }}; }},
     window: Object.assign(new Node(), {getSelection: () => ({removeAllRanges() {}, addRange() {}})}), URLSearchParams, setTimeout(callback, delay) { timers.set(++timerID, {callback, delay}); return timerID; }, clearTimeout(id) { timers.delete(id); }, setInterval(callback, delay) { assert.equal(delay, 5000); poll = callback; return 1; }, clearInterval() { poll = null; },
     async fetch(url, options) {
@@ -63,6 +66,7 @@ async function harness(initial = {}) {
         const payload = JSON.parse(options.body.get('request')); requests.push(payload);
         if (payload.action === 'verify' && verifyFail) return {ok: false, async json() { return {error: 'Verification failed'}; }};
         if (!fail) {
+          if (payload.action === 'enabled') snapshot = {...snapshot, enabled: payload.enabled, status: payload.enabled ? 'connected' : 'disabled'};
           if (payload.action === 'verify') snapshot = {...snapshot, verified: true, status: 'verified'};
           if (payload.action === 'approve') { snapshot.users.push({id: payload.user_id, permission: payload.permission, notifications: payload.notifications}); snapshot.pairing = null; }
           if (payload.action === 'user') snapshot.users = snapshot.users.map(item => item.id === payload.user_id ? {...item, permission: payload.permission, notifications: payload.notifications} : item);
@@ -76,7 +80,7 @@ async function harness(initial = {}) {
   vm.runInContext(source, context);
   dialog.listeners['gateway-surface-change'](); await settle();
   return {
-    node, dialog, requests, document, copied, timers, clipboard(mode) { clipboardMode = mode; }, verifyFail(value) { verifyFail = value; }, snapshot: () => snapshot, fail(value) { fail = value; },
+    node, dialog, events, requests, document, copied, timers, clipboard(mode) { clipboardMode = mode; }, verifyFail(value) { verifyFail = value; }, snapshot: () => snapshot, fail(value) { fail = value; },
     pending: () => node('pending'), row: id => node('users').children.find(row => row.children[1].textContent === `User ${id}`),
     async refresh() { await dialog.listeners['telegram-refresh'](); },
     async poll() { assert.ok(poll); poll(); await settle(); },
@@ -270,7 +274,7 @@ test('LAN clipboard fallback copies exactly, or selects the command for manual c
 test('header zones and scoped reveal suppression leave other passwords alone', async () => {
   const css = readFileSync(`${base}static/agent-gateway.css`, 'utf8');
   assert.match(markup, /telegram-header/); assert.match(markup, /telegram-title/);
-  assert.match(css, /\[data-gateway-telegram\] \.telegram-header.*grid-template-columns: 1fr auto 1fr/);
+  assert.match(css, /\[data-gateway-telegram\] \.telegram-header.*grid-template-columns: 1fr auto/);
   for (const line of css.split('\n').filter(line => /::-ms-reveal|::-ms-clear|::-webkit-credentials-auto-fill-button/.test(line))) assert.match(line, /\[data-gateway-telegram\] \[data-telegram-token\]/);
   assert.match(markup, /<strong>Bot Token<\/strong>/); assert.doesNotMatch(markup, /<strong>Bot<\/strong>/);
   for (const status of ['verified', 'connected']) {
@@ -291,4 +295,58 @@ test('challenge is cleared by expiry, changed pairing, replacement, disconnect, 
     assert.equal(h.node('challenge').textContent, '');
     assert.equal(h.node('copy').hidden, true);
   }
+});
+
+test('Telegram has exactly one enable control in the workspace navigation', () => {
+  const lane = header.match(/<nav class="minecraft-workspace-tabs gateway-navigation"[^>]*>([\s\S]*?)<\/nav>/)[1];
+  assert.match(lane, /<span>AI &amp; API Gateway<\/span>/);
+  assert.doesNotMatch(lane, /<span>Gateway<\/span>/);
+  assert.match(lane, /data-telegram-global hidden><img[^>]*src="\/static\/ai-providers\/telegram.svg"[^>]*><span>Telegram<\/span>/);
+  assert.equal((header.match(/data-telegram-enabled/g) || []).length, 1);
+  assert.doesNotMatch(markup, /data-telegram-enabled|Enable Telegram/);
+});
+
+test('workspace Telegram header follows authoritative configuration, verification and enabled state', async () => {
+  for (const configured of [false, true]) for (const verified of [false, true]) for (const enabled of [false, true]) {
+    const h = await harness({configured, verified, enabled});
+    assert.equal(h.node('global').hidden, !configured);
+    assert.equal(h.node('enabled').disabled, !verified);
+    assert.equal(h.node('enabled').checked, enabled);
+  }
+});
+
+test('Telegram header mutates on Connections, Add and Help without changing Gateway', async () => {
+  for (const surface of ['overview', 'settings', 'help']) {
+    const h = await harness();
+    h.node('[data-gateway-telegram]').hidden = true;
+    h.dialog.listeners['gateway-surface-change']({detail: surface}); await settle();
+    const gateway = h.node('[data-gateway-enabled]'); gateway.checked = false;
+    h.node('enabled').checked = false;
+    await h.node('enabled').listeners.change();
+    assert.deepEqual(h.requests.at(-1), {action: 'enabled', enabled: false});
+    assert.equal(h.node('enabled').checked, false);
+    assert.equal(h.events.at(-1).detail.enabled, false);
+    assert.equal(h.events.at(-1).detail.status, 'disabled');
+    assert.equal(gateway.checked, false);
+    h.node('enabled').checked = true;
+    await h.node('enabled').listeners.change();
+    assert.equal(h.node('enabled').checked, true);
+    assert.equal(gateway.checked, false);
+    h.fail(true); h.node('enabled').checked = false;
+    await h.node('enabled').listeners.change();
+    assert.equal(h.node('enabled').checked, true);
+    assert.equal(h.node('[data-gateway-feedback]').textContent, 'Could not save');
+    assert.equal(gateway.checked, false);
+  }
+});
+
+test('workspace refresh publishes only safe Telegram presentation state while settings are hidden', async () => {
+  const h = await harness({token: 'private', pairing: pairing(101), pairing_command: '/start private', users: [user(101)], callback_data: 'private'});
+  h.node('[data-gateway-telegram]').hidden = true;
+  await h.refresh();
+  const event = h.events.at(-1);
+  assert.equal(event.type, 'telegram-state');
+  assert.deepEqual(JSON.parse(JSON.stringify(event.detail)), {configured: true, verified: true, enabled: true, status: 'connected', bot_name: 'test_bot'});
+  assert.deepEqual(Object.keys(event.detail).sort(), ['bot_name', 'configured', 'enabled', 'status', 'verified']);
+  assert.doesNotMatch(JSON.stringify(event.detail), /private|pairing|users|callback|token/);
 });

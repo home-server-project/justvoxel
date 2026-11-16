@@ -67,7 +67,7 @@ test('multiple independent cards select their own immutable connection settings'
     {id: 'third', name: '<script>untrusted label</script>', level: 2, enabled: true, auth_mode: 'token'},
   ];
   const selected = [];
-  const context = vm.createContext({snapshot: {enabled: true, connections}, cards, busy: false, selectedID: '', renderSettings: c => selected.push(c.id), providerIcon: () => new Node('img'), purposeLabel: value => value || 'Other', levelLabel: value => `Level ${value}`, scopeLabel: () => 'All Minecraft servers', activityLabel: value => value || 'No activity yet', text: (tag, value) => new Node(tag, value)});
+  const context = vm.createContext({telegramState: {configured: false}, snapshot: {enabled: true, connections}, cards, busy: false, selectedID: '', renderSettings: c => selected.push(c.id), providerIcon: () => new Node('img'), purposeLabel: value => value || 'Other', levelLabel: value => `Level ${value}`, scopeLabel: () => 'All Minecraft servers', activityLabel: value => value || 'No activity yet', text: (tag, value) => new Node(tag, value)});
   vm.runInContext(js.slice(start, end) + '\nrenderCards();', context);
   assert.equal(cards.children.length, 3);
   for (const [index, card] of cards.children.entries()) {
@@ -163,9 +163,9 @@ test('top lane has Connections, Add, Help and a persistent right-aligned Gateway
   assert.ok(workspace.indexOf('</nav>') < workspace.indexOf('data-gateway-overview'));
   assert.match(overview, /minecraft-server-inventory/);
   assert.match(overview, /minecraft-server-entries" data-gateway-cards/);
-  assert.ok(js.includes("if (!snapshot.connections.length) cards.append(text('p', 'No connections yet. Select Add to get started.'))"));
+  assert.ok(js.includes("if (!snapshot.connections.length && !telegramState.configured) cards.append(text('p', 'No connections yet. Select Add to get started.'))"));
   const css = readFileSync(`${base}webui/internal/server/static/agent-gateway.css`, 'utf8');
-  assert.match(css, /gateway-navigation \.gateway-global-switch \{[^}]*margin-left: auto/);
+  assert.match(css, /gateway-navigation-controls \{[^}]*margin-left: auto/);
   assert.doesNotMatch(overview, /<form|data-gateway-overview hidden/);
   assert.match(workspace, /data-gateway-details hidden/);
   assert.match(workspace, /data-gateway-help hidden/);
@@ -347,7 +347,10 @@ function settingsHarness(connection, inventory = [], gatewayEnabled = true) {
   node('[data-gateway-help]').hidden = true;
   vm.runInContext(surfaces + helpers + renderer + navigation + '\nglobalThis.render = renderSettings;', context);
   if (connection) context.render(connection);
-  return {node, field, details, settings, created, requests, confirmations, events, scope(value) { const toggle = node('[data-gateway-all-servers]'); toggle.checked = value === 'all'; toggle.listeners.change(); }, preview(purpose) { field('purpose').value = purpose; providerRadio.listeners.change?.(); }, submit() { settings.listeners.submit({preventDefault() {}}); }};
+  const cardsRenderer = js.slice(js.indexOf('  const renderCards ='), js.indexOf('  // Presentation only:'));
+  context.cards = node('[data-gateway-cards]');
+  vm.runInContext(cardsRenderer, context);
+  return {node, field, details, settings, created, requests, confirmations, events, telegramOverview(state) { context.integrationState = state; vm.runInContext("telegramState = integrationState; snapshot.connections = []; showSurface('overview'); renderCards();", context); }, scope(value) { const toggle = node('[data-gateway-all-servers]'); toggle.checked = value === 'all'; toggle.listeners.change(); }, preview(purpose) { field('purpose').value = purpose; providerRadio.listeners.change?.(); }, submit() { settings.listeners.submit({preventDefault() {}}); }};
 }
 
 test('Telegram selection uses the internal surface and restores feedback on return', () => {
@@ -357,7 +360,7 @@ test('Telegram selection uses the internal surface and restores feedback on retu
   assert.equal(h.node('[data-gateway-telegram]').hidden, false);
   assert.equal(h.node('[data-gateway-feedback]').hidden, true);
   assert.equal(h.node('[data-gateway-add]')['aria-selected'], 'true');
-  assert.equal(h.node('[data-telegram-enabled]').focused, true);
+  assert.equal(h.node('[data-telegram-token]').focused, true);
   assert.equal(h.events.at(-1).type, 'gateway-surface-change');
   assert.equal(h.events.at(-1).detail, 'telegram');
   h.node('[data-gateway-add]').listeners.click();
@@ -553,7 +556,7 @@ test('OAuth login rechecks existing strict cookies without changing normal login
 test('effective cards follow Gateway state without changing connection enabled flags', () => {
   const connection = {id: 'one', name: 'Assistant', enabled: true};
   const cards = new Node('div');
-  const context = vm.createContext({snapshot: {enabled: false, connections: [connection]}, cards,
+  const context = vm.createContext({telegramState: {configured: false}, snapshot: {enabled: false, connections: [connection]}, cards,
     providerIcon: () => new Node('img'), purposeLabel: () => 'OpenAI', levelLabel: () => 'Read Only',
     scopeLabel: () => 'All Minecraft servers', activityLabel: () => 'No activity yet',
     text: (tag, value) => new Node(tag, value)});
@@ -593,7 +596,7 @@ test('connection cards reuse server hierarchy and compact human-readable data fo
   const cards = new Node('div');
   const connection = {id: 'immutable-id', name: '<Assistant>', purpose: 'OpenAI', level: 2, enabled: true, all_instances: true};
   const context = vm.createContext({
-    snapshot: {enabled: true, connections: [connection]}, cards, instances: [],
+    telegramState: {configured: false}, snapshot: {enabled: true, connections: [connection]}, cards, instances: [],
     document: {createElement: tag => new Node(tag)},
     text: (tag, value) => new Node(tag, value),
   });
@@ -1814,5 +1817,93 @@ test('workspace Refresh routes independently to gateway, Telegram and Discord', 
   context.surface = 'telegram'; refresh();
   context.surface = 'discord'; refresh();
   context.surface = 'settings'; refresh();
-  assert.deepEqual(events, ['gateway', 'telegram-refresh', 'discord-refresh', 'gateway']);
+  assert.deepEqual(events, ['telegram-refresh', 'gateway', 'telegram-refresh', 'telegram-refresh', 'discord-refresh', 'telegram-refresh', 'gateway']);
+});
+
+test('Telegram overview is a separate presentation card with exact independent status badges', () => {
+  const cards = new Node('div');
+  const context = vm.createContext({
+    snapshot: {enabled: false, connections: []}, telegramState: {configured: false}, cards,
+    busy: false, telegramOrigin: 'add', showSurface() {}, find: () => new Node('input'),
+    text: (tag, value) => new Node(tag, value), document: {createElement: tag => new Node(tag)},
+  });
+  const icon = js.slice(js.indexOf('  const telegramHelpIcon ='), js.indexOf('  const renderTelegramHelpGuide ='));
+  const renderer = js.slice(js.indexOf('  const renderCards ='), js.indexOf('  // Presentation only:'));
+  vm.runInContext(icon + renderer + '\nglobalThis.render = renderCards;', context);
+  context.render();
+  assert.equal(cards.children[0].textContent, 'No connections yet. Select Add to get started.');
+  const mapping = {
+    connected: ['Connected', 'good'], verified: ['Bot verified', 'good'], disabled: ['Disabled', 'muted'],
+    unverified: ['Needs verification', 'muted'], verification_failed: ['Verification failed', 'danger'],
+    connecting: ['Connecting', 'muted'], connection_retry: ['Retrying', 'danger'],
+    connection_paused: ['Needs attention', 'danger'], disconnected: ['Disconnected', 'muted'], unknown: ['Status unavailable', 'muted'],
+  };
+  for (const [status, [label, tone]] of Object.entries(mapping)) {
+    context.telegramState = {configured: true, status, bot_name: 'test_bot', enabled: status === 'connected'};
+    context.render();
+    assert.equal(cards.children.length, 1);
+    const card = cards.children[0];
+    assert.equal(card['data-telegram-integration'], '');
+    assert.equal(card.role, 'button'); assert.equal(card.tabindex, '0');
+    assert.equal(card.children[0].children[0].children[0].src, '/static/ai-providers/telegram.svg');
+    assert.equal(card.children[0].children[1].textContent, label);
+    assert.equal(card.children[0].children[1].className, `badge telegram-integration-badge ${tone}`);
+    assert.equal(card.children[1].textContent, '@test_bot');
+    assert.equal(context.snapshot.enabled, false);
+    assert.equal(context.snapshot.connections.length, 0);
+    context.render(); assert.equal(cards.children.length, 1);
+  }
+  context.telegramState.bot_name = ''; context.render();
+  assert.equal(cards.children[0].children.length, 1);
+});
+
+test('Telegram overview supports click, Enter and Space and retains Connections tab origin', () => {
+  for (const key of [null, 'Enter', ' ']) {
+    const h = settingsHarness();
+    h.telegramOverview({configured: true, enabled: true, status: 'connected'});
+    const card = h.node('[data-gateway-cards]').children[0];
+    if (key) {
+      let prevented = false;
+      card.listeners.keydown({key, preventDefault() { prevented = true; }});
+      assert.equal(prevented, true);
+    } else card.listeners.click();
+    assert.equal(h.node('[data-gateway-telegram]').hidden, false);
+    assert.equal(h.node('[data-gateway-connections]')['aria-selected'], 'true');
+    assert.equal(h.node('[data-gateway-add]')['aria-selected'], 'false');
+    h.node('[data-gateway-add]').listeners.click();
+    h.node('[data-telegram-select]').listeners.change();
+    assert.equal(h.node('[data-gateway-telegram]').hidden, false);
+    assert.equal(h.node('[data-gateway-add]')['aria-selected'], 'true');
+    assert.equal(h.node('[data-gateway-connections]')['aria-selected'], 'false');
+  }
+});
+
+test('Telegram stays outside provider, client mode and Gateway state ownership', () => {
+  const providers = js.slice(js.indexOf('  const providers ='), js.indexOf('  const activityLabel'));
+  assert.doesNotMatch(providers, /Telegram|telegram/);
+  assert.doesNotMatch(js, /fetch\(['"]\/api\/telegram|snapshot\.connections\.(?:push|unshift)\(/);
+  const toggle = js.slice(js.indexOf('  const showGatewayState ='), js.indexOf('  const renderCards ='));
+  assert.doesNotMatch(toggle, /telegram|Telegram/);
+  const listener = js.slice(js.indexOf("  dialog.addEventListener('telegram-state'"), js.indexOf('  const workspace ='));
+  const state = {configured: true, verified: true, enabled: true, status: 'connected', bot_name: 'test_bot'};
+  let callback; let rendered = 0;
+  const context = vm.createContext({telegramState: {}, surface: 'overview', dialog: {addEventListener(type, fn) { assert.equal(type, 'telegram-state'); callback = fn; }}, renderCards() { rendered++; }});
+  vm.runInContext(listener, context);
+  callback({detail: state}); assert.equal(context.telegramState, state); assert.equal(rendered, 1);
+  context.surface = 'help'; callback({detail: state}); assert.equal(rendered, 2);
+});
+
+test('Gateway mutation preserves authoritative Telegram presentation state', () => {
+  const telegramState = {configured: true, verified: true, enabled: true, status: 'connected', bot_name: 'test_bot'};
+  const before = structuredClone(telegramState);
+  const gatewaySwitch = new Node('input'); gatewaySwitch.checked = false;
+  const requests = [];
+  const context = vm.createContext({
+    telegramState, gatewaySwitch, snapshot: {enabled: true}, busy: false,
+    find: () => new Node('span'), renderCards() {}, mutate: payload => requests.push(payload),
+  });
+  vm.runInContext(js.slice(js.indexOf('  const showGatewayState ='), js.indexOf('  const renderCards =')), context);
+  gatewaySwitch.listeners.change();
+  assert.deepEqual(JSON.parse(JSON.stringify(requests)), [{action: 'enable', enabled: false}]);
+  assert.deepEqual(telegramState, before);
 });

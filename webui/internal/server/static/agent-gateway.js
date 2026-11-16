@@ -16,6 +16,8 @@
   let instances = [];
   let selectedID = '';
   let surface = 'overview';
+  let telegramOrigin = 'add';
+  let telegramState = {configured: false};
   const showSurface = name => {
     surface = name;
     find('[data-gateway-overview]').hidden = name !== 'overview';
@@ -24,9 +26,9 @@
     find('[data-gateway-telegram]').hidden = name !== 'telegram';
     find('[data-gateway-discord]').hidden = name !== 'discord';
     feedback.hidden = name === 'telegram' || name === 'discord';
-    find('[data-gateway-connections]').setAttribute('aria-selected', String(name === 'overview' || (name === 'settings' && Boolean(selectedID))));
+    find('[data-gateway-connections]').setAttribute('aria-selected', String(name === 'overview' || (name === 'telegram' && telegramOrigin === 'connections') || (name === 'settings' && Boolean(selectedID))));
     find('[data-gateway-help-open]').setAttribute('aria-selected', String(name === 'help'));
-    find('[data-gateway-add]').setAttribute('aria-selected', String((name === 'settings' && !selectedID) || name === 'telegram' || name === 'discord'));
+    find('[data-gateway-add]').setAttribute('aria-selected', String((name === 'settings' && !selectedID) || (name === 'telegram' && telegramOrigin === 'add') || name === 'discord'));
     content.scrollTop = 0;
     dialog.dispatchEvent(new CustomEvent('gateway-surface-change', {detail: name}));
   };
@@ -170,7 +172,7 @@
   });
   const renderCards = (gatewayEnabled = snapshot.enabled) => {
     cards.replaceChildren();
-    if (!snapshot.connections.length) cards.append(text('p', 'No connections yet. Select Add to get started.'));
+    if (!snapshot.connections.length && !telegramState.configured) cards.append(text('p', 'No connections yet. Select Add to get started.'));
     for (const connection of snapshot.connections) {
       const active = gatewayEnabled && connection.enabled;
       const card = text('article', ''); card.className = `panel minecraft-server-card minecraft-server-health-${active ? 'success' : 'neutral'}`; card.dataset.gatewayConnection = connection.id;
@@ -196,6 +198,30 @@
       card.append(metrics);
       const activity = text('div', ''); activity.className = 'gateway-card-activity';
       activity.append(text('span', 'Last activity'), text('p', activityLabel(connection.last_activity))); card.append(activity);
+      cards.append(card);
+    }
+    if (telegramState.configured) {
+      const statuses = {
+        connected: ['Connected', 'good'], verified: ['Bot verified', 'good'],
+        disabled: ['Disabled', 'muted'], unverified: ['Needs verification', 'muted'],
+        verification_failed: ['Verification failed', 'danger'], connecting: ['Connecting', 'muted'],
+        connection_retry: ['Retrying', 'danger'], connection_paused: ['Needs attention', 'danger'],
+        disconnected: ['Disconnected', 'muted'],
+      };
+      const [label, tone] = Object.hasOwn(statuses, telegramState.status) ? statuses[telegramState.status] : ['Status unavailable', 'muted'];
+      const card = text('article', ''); card.className = 'panel minecraft-server-card';
+      card.setAttribute('data-telegram-integration', '');
+      card.setAttribute('role', 'button'); card.setAttribute('tabindex', '0');
+      card.setAttribute('aria-label', `Telegram: ${label}. Open settings`);
+      const heading = text('div', ''); heading.className = 'minecraft-server-heading';
+      const identity = text('div', ''); identity.className = 'gateway-connection-identity';
+      identity.append(telegramHelpIcon(), text('h2', 'Telegram'));
+      const badge = text('span', label); badge.className = `badge telegram-integration-badge ${tone}`;
+      heading.append(identity, badge); card.append(heading);
+      if (telegramState.bot_name) card.append(text('p', `@${telegramState.bot_name}`));
+      const open = () => { if (busy) return; telegramOrigin = 'connections'; showSurface('telegram'); find('[data-telegram-replace]').focus(); };
+      card.addEventListener('click', open);
+      card.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); } });
       cards.append(card);
     }
   };
@@ -586,8 +612,9 @@
     else form.querySelector('[data-telegram-select]').addEventListener('change', () => {
       if (busy) return;
       details.replaceChildren();
+      telegramOrigin = 'add';
       showSurface('telegram');
-      find('[data-telegram-enabled]').focus();
+      find(telegramState.configured ? '[data-telegram-replace]' : '[data-telegram-token]').focus();
     });
     const discordCard = form.querySelector('[data-discord-card]');
     if (c.id) discordCard.remove();
@@ -731,6 +758,10 @@
     if (element.tagName === 'A') element.href = path;
   }
   setupHelpGuide();
+  dialog.addEventListener('telegram-state', event => {
+    telegramState = event.detail;
+    renderCards();
+  });
   const workspace = setupWorkspaceWindow(dialog, {onOpen: () => { load(); showSurface(surface); }});
   launcher.addEventListener('click', () => {
     if (!primary()) return;
@@ -739,9 +770,9 @@
   });
   find('[data-gateway-close]').addEventListener('click', () => workspace.close());
   find('[data-gateway-refresh]').addEventListener('click', () => {
-    if (surface === 'telegram') dialog.dispatchEvent(new Event('telegram-refresh'));
-    else if (surface === 'discord') dialog.dispatchEvent(new Event('discord-refresh'));
-    else if (!busy) load();
+    dialog.dispatchEvent(new Event('telegram-refresh'));
+    if (surface === 'discord') dialog.dispatchEvent(new Event('discord-refresh'));
+    else if (surface !== 'telegram' && !busy) load();
   });
   const restore = () => {
     if (document.body.classList.contains('role-pending')) return false;

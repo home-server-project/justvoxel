@@ -1300,10 +1300,19 @@ func TestApprovedControlCenterLayout(t *testing.T) {
 	if strings.Contains(telegram, `<strong>Bot</strong>`) || strings.Contains(telegram, `>Verify</button>`) {
 		t.Fatal("obsolete Telegram token setup")
 	}
-	for _, control := range []string{"status", "token", "token-cancel", "replace", "verify", "enabled", "disconnect", "pair", "pending", "users", "operation"} {
+	for _, control := range []string{"status", "token", "token-cancel", "replace", "verify", "disconnect", "pair", "pending", "users", "operation"} {
 		if !strings.Contains(telegram, "data-telegram-"+control) {
 			t.Fatalf("Telegram management control missing: %s", control)
 		}
+	}
+	lane := regexp.MustCompile(`(?s)<nav class="minecraft-workspace-tabs gateway-navigation"[^>]*>.*?</nav>`).FindString(gateway)
+	for _, required := range []string{`<span>AI &amp; API Gateway</span>`, `gateway-navigation-controls`, `data-telegram-global hidden`, `/static/ai-providers/telegram.svg`, `<span>Telegram</span>`, `aria-label="Telegram" data-telegram-enabled disabled`} {
+		if !strings.Contains(lane, required) {
+			t.Fatalf("Telegram navigation contract missing: %s", required)
+		}
+	}
+	if strings.Count(gateway, "data-telegram-enabled") != 1 || strings.Contains(telegram, "data-telegram-enabled") || strings.Contains(telegram, "Enable Telegram") || strings.Contains(lane, ">Gateway</span>") {
+		t.Fatal("Telegram must have exactly one enable control in navigation with the approved labels")
 	}
 	grid := regexp.MustCompile(`(?s)<div class="gateway-provider-grid"[^>]*>.*?</div>`).FindString(markup)
 	providerCards := regexp.MustCompile(`(?s)<label class="gateway-provider-card".*?</label>`).FindAllString(grid, -1)

@@ -3,7 +3,8 @@
   const dialog = document.querySelector('[data-agent-gateway-dialog]');
   const surface = dialog?.querySelector('[data-gateway-telegram]');
   if (!surface) return;
-  const active = () => dialog.open && !surface.hidden;
+  const workspaceOpen = () => dialog.open;
+  const active = () => workspaceOpen() && !surface.hidden;
   const find = selector => dialog.querySelector(selector);
   const primary = () => document.body.classList.contains('primary-administrator');
   const token = find('[data-telegram-token]');
@@ -25,6 +26,17 @@
   let verificationFailed = false;
   // Ignore responses from a surface session that has already been left.
   let generation = 0;
+  let surfaceGeneration = 0;
+  let presentation = {configured: false, verified: false, enabled: false, status: '', bot_name: ''};
+  const renderHeader = () => {
+    find('[data-telegram-global]').hidden = !presentation.configured;
+    enabled.checked = presentation.enabled;
+    enabled.disabled = busy || !presentation.verified;
+  };
+  const report = message => {
+    feedback.textContent = message;
+    if (!active()) find('[data-gateway-feedback]').textContent = message;
+  };
   const clearPairingCommand = () => { pairingCommand = ''; pairingExpires = ''; clearTimeout(challengeTimer); challenge.textContent = ''; find('[data-telegram-copy]').hidden = true; find('[data-telegram-expiry]').textContent = ''; };
   const renderBot = () => {
     find('[data-telegram-token-form]').hidden = configured && !replacing;
@@ -65,12 +77,21 @@
     return response.json();
   };
   const render = snapshot => {
+    // Only allowlisted presentation fields leave this controller.
+    presentation = {
+      configured: Boolean(snapshot.configured), verified: Boolean(snapshot.verified),
+      enabled: Boolean(snapshot.enabled), status: typeof snapshot.status === 'string' ? snapshot.status : '',
+      bot_name: typeof snapshot.bot_name === 'string' ? snapshot.bot_name : '',
+    };
+    configured = presentation.configured;
+    renderHeader();
+    dialog.dispatchEvent(new CustomEvent('telegram-state', {detail: {...presentation}}));
+    if (!active()) return;
     const labels = {disconnected: 'Disconnected', unverified: 'Token saved — verification needed', verification_failed: 'Verification failed', verified: 'Bot verified', connecting: 'Connecting', connected: 'Connected', disabled: 'Disabled', connection_retry: 'Connection interrupted — retrying', connection_paused: 'Connection paused — verify the bot and enable again'};
     const status = find('[data-telegram-status]');
     status.textContent = `${snapshot.bot_name ? `@${snapshot.bot_name}  ` : ''}● ${labels[snapshot.status] || 'Connection unavailable'}`;
     status.className = `gateway-connection-state${['verified', 'connected'].includes(snapshot.status) ? ' success' : ['verification_failed', 'connection_retry', 'connection_paused'].includes(snapshot.status) ? ' error' : snapshot.status === 'unverified' ? ' warning' : ''}`;
     configured = Boolean(snapshot.configured); renderBot();
-    enabled.checked = snapshot.enabled; enabled.disabled = !snapshot.verified;
     find('[data-telegram-verify]').hidden = snapshot.verified;
     find('[data-telegram-verify]').disabled = !snapshot.configured;
     find('[data-telegram-pair]').disabled = !snapshot.enabled;
@@ -105,12 +126,15 @@
     find('[data-telegram-expiry]').textContent = pairing && !pendingID ? `Expires ${new Date(pairing.expires).toLocaleTimeString()}` : '';
   };
   const change = async payload => {
-    if (busy || !active()) return;
+    const globalChange = payload.action === 'enabled';
+    if (busy || !workspaceOpen() || (!globalChange && !active())) { renderHeader(); return; }
     const requestGeneration = generation;
-    busy = true; feedback.textContent = 'Saving…';
+    const requestSurface = surfaceGeneration;
+    const current = () => requestGeneration === generation && workspaceOpen() && (globalChange || (requestSurface === surfaceGeneration && active()));
+    busy = true; renderHeader(); report('Saving…');
     try {
       let snapshot = await send(payload);
-      if (requestGeneration !== generation || !active()) return;
+      if (!current()) return;
       if (['approve', 'credential', 'disconnect'].includes(payload.action)) pendingDraft = null;
       const savedDraft = userDrafts.get(payload.user_id);
       if (payload.action === 'revoke' || (payload.action === 'user' && savedDraft?.permission === payload.permission && savedDraft?.notifications === payload.notifications)) userDrafts.delete(payload.user_id);
@@ -129,31 +153,32 @@
         render(snapshot);
         try { snapshot = await send({action: 'verify'}); }
         catch (_) { verificationFailed = true; }
-        if (requestGeneration !== generation || !active()) return;
+        if (!current()) return;
       } else if (payload.action === 'verify') verificationFailed = false;
       render(snapshot);
-      feedback.textContent = verificationFailed ? 'Token saved, but verification failed. Check the token or connection.' : 'Saved.';
-    } catch (error) { if (requestGeneration === generation && active()) feedback.textContent = error.message; }
-    finally { if (payload && Object.hasOwn(payload, 'token')) payload.token = ''; busy = false; if (!active()) clearSecrets(); }
+      report(verificationFailed ? 'Token saved, but verification failed. Check the token or connection.' : 'Saved.');
+    } catch (error) { if (current()) report(error.message); }
+    finally { if (payload && Object.hasOwn(payload, 'token')) payload.token = ''; busy = false; renderHeader(); if (!active()) clearSecrets(); }
   };
   const load = async () => {
-    if (busy || !primary() || !active()) return;
+    if (busy || !primary() || !workspaceOpen()) return;
     const requestGeneration = generation;
     busy = true;
     try {
       const snapshot = await send();
-      if (requestGeneration === generation && active()) { render(snapshot); if (!verificationFailed) feedback.textContent = ''; }
+      if (requestGeneration === generation && workspaceOpen()) { render(snapshot); if (!verificationFailed) feedback.textContent = ''; }
     }
     catch (error) { if (requestGeneration === generation && active()) feedback.textContent = error.message; }
-    finally { busy = false; if (!active()) clearSecrets(); }
+    finally { busy = false; renderHeader(); if (!active()) clearSecrets(); }
   };
   const clearSecrets = () => { token.value = ''; clearPairingCommand(); };
-  const stop = () => { generation++; verificationFailed = false; clearSecrets(); pendingDraft = null; userDrafts.clear(); replacing = false; renderBot(); clearInterval(refreshTimer); };
+  const leaveSurface = () => { surfaceGeneration++; verificationFailed = false; clearSecrets(); pendingDraft = null; userDrafts.clear(); replacing = false; renderBot(); clearInterval(refreshTimer); };
+  const stop = () => { generation++; leaveSurface(); };
   dialog.addEventListener('gateway-surface-change', () => {
-    stop();
-    if (!active()) return;
+    leaveSurface();
+    if (!workspaceOpen()) return;
     load();
-    refreshTimer = setInterval(() => {
+    if (active()) refreshTimer = setInterval(() => {
       if (active()) load();
     }, 5000);
   });

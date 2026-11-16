@@ -214,7 +214,10 @@
         <button type="button" data-gateway-connections aria-selected="true">Connections</button>
         <button type="button" data-gateway-add aria-selected="false">Add</button>
         <button type="button" data-gateway-help-open aria-selected="false">Help</button>
-        <label class="gateway-switch gateway-global-switch"><span>Gateway</span><input class="date-time-switch" type="checkbox" role="switch" aria-label="Enable gateway" data-gateway-enabled><span class="gateway-visually-hidden" data-gateway-state>Gateway Disabled</span></label>
+        <div class="gateway-navigation-controls">
+          <label class="gateway-switch gateway-global-switch"><span>AI &amp; API Gateway</span><input class="date-time-switch" type="checkbox" role="switch" aria-label="Enable gateway" data-gateway-enabled><span class="gateway-visually-hidden" data-gateway-state>Gateway Disabled</span></label>
+          <label class="gateway-switch gateway-global-switch" data-telegram-global hidden><img class="gateway-provider-icon" src="/static/ai-providers/telegram.svg" alt=""><span>Telegram</span><input class="date-time-switch" type="checkbox" role="switch" aria-label="Telegram" data-telegram-enabled disabled></label>
+        </div>
       </nav>
       <div class="system-workspace-body">
         <p data-gateway-feedback role="status"></p>
@@ -228,7 +231,6 @@
               <div class="telegram-lane telegram-header">
                 <div class="telegram-title"><img class="gateway-provider-icon" src="/static/ai-providers/telegram.svg" alt="">
                 <h3 id="telegram-title">Telegram</h3></div>
-                <label class="gateway-switch"><input type="checkbox" role="switch" data-telegram-enabled> Enable Telegram</label>
                 <span class="gateway-connection-state" data-telegram-status>Disconnected</span>
               </div>
               <div class="telegram-lane">

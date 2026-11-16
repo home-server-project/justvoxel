@@ -7,6 +7,10 @@ polling in the existing Management Agent. It needs no AI model, inbound port,
 webhook, additional container, or separate daemon. The WebUI continues to use the
 existing local Unix-socket Management API.
 
+**Connections** shows the configured Telegram integration and its current status.
+Telegram remains independent of **AI & API Gateway**; either switch can be changed
+without changing the other.
+
 A short setup guide is available in **AI & API Connections → Help → Provider reference → Telegram**.
 
 Discord and Telegram are independent interaction surfaces over the same
@@ -26,7 +30,9 @@ and open **Control Center → AI & API Connections → Add → Telegram**.
 2. Choose **Save**. JustVoxel automatically verifies the bot identity and checks
    that it has no configured webhook. If verification fails, the token stays
    saved; choose **Retry** or **Replace token**.
-3. Enable Telegram. **Bot verified** and **Connected** are distinct states.
+3. After configuration, use the **Telegram** enable/disable switch in the
+   **AI & API Connections** top navigation. **Bot verified** and **Connected** are
+   distinct states.
 4. Choose **Pair user**.
 5. Choose **Copy** to copy the exact `/start <challenge>` command, then send it in
    a **private chat** with the bot within ten minutes. On LAN HTTP, Copy uses a
