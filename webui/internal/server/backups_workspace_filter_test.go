@@ -2,7 +2,6 @@ package server
 
 import (
 	"net/http"
-	"os/exec"
 	"strconv"
 	"strings"
 	"testing"
@@ -46,7 +45,7 @@ func TestBackupsWorkspaceSelectedServerPreservesArchiveReferences(t *testing.T) 
 }
 
 func TestBackupsWorkspaceServerFilterBehavior(t *testing.T) {
-	source, err := assets.ReadFile("static/new-backups.js")
+	source, err := englishPresentationAsset("static/new-backups.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +138,7 @@ assert.deepEqual(cards.map(c => c.hidden), [false, false, false]);
 assert.equal(summaryCount.textContent, "3");
 assert.equal(summarySize.textContent, "6.0 KiB");
 `
-	command := exec.Command("node", "-e", program)
+	command := nodeTestCommand("-e", program)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("backup filter interaction test: %v\n%s", err, output)
 	}

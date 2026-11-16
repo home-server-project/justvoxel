@@ -49,7 +49,7 @@ func TestLoginTemplateUsesLocalLogo(t *testing.T) {
 			t.Errorf("login template contains unwanted branding %q", unwanted)
 		}
 	}
-	if _, err := assets.ReadFile("static/justvoxel-login-logo.png"); err != nil {
+	if _, err := englishPresentationAsset("static/justvoxel-login-logo.png"); err != nil {
 		t.Fatalf("local login logo is unavailable: %v", err)
 	}
 }

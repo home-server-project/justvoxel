@@ -3,9 +3,9 @@ package server
 import (
 	"crypto/sha256"
 	"fmt"
+	"html"
 	"net/http"
 	"net/http/httptest"
-	"os/exec"
 	"strings"
 	"testing"
 
@@ -72,7 +72,7 @@ func TestMinecraftNetworkWorkspaceRequiresSession(t *testing.T) {
 func TestMinecraftNetworkWorkspaceArchitecture(t *testing.T) {
 	read := func(path string) string {
 		t.Helper()
-		data, err := assets.ReadFile(path)
+		data, err := englishPresentationAsset(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -131,7 +131,7 @@ func TestMinecraftNetworkWorkspaceArchitecture(t *testing.T) {
 
 // Exercise the existing mode-switching code with zero, one, and multiple server cards.
 func TestMinecraftNetworkActionBarArrangeVisibility(t *testing.T) {
-	data, err := assets.ReadFile("static/minecraft-servers.js")
+	data, err := englishPresentationAsset("static/minecraft-servers.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ for (const count of [0, 1, 2, 3]) {
   }
 }
 `
-	cmd := exec.Command("node")
+	cmd := nodeTestCommand()
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("server arrange behavior: %v\n%s", err, output)
@@ -200,7 +200,7 @@ func TestMinecraftNetworkCorrectionPreservesCSS(t *testing.T) {
 		"static/storage-browser.css":   "fbdfb24d4ce62fac8ef6ca6d1bf053258c2f2668b0b23217ef489c3388a003c6",
 	}
 	for path, want := range baseline {
-		data, err := assets.ReadFile(path)
+		data, err := englishPresentationAsset(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -219,7 +219,7 @@ func TestMinecraftNetworkCorrectionPreservesCSS(t *testing.T) {
 }
 
 func TestMinecraftNetworkLaunchersAndFragmentTransport(t *testing.T) {
-	data, err := assets.ReadFile("static/app.js")
+	data, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -479,7 +479,7 @@ const launch = () => {
   assert.equal(opened, wasOpened);
 })().catch(error => {console.error(error); process.exitCode = 1;});
 `
-	cmd := exec.Command("node")
+	cmd := nodeTestCommand()
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("Minecraft Network workspace behavior: %v\n%s", err, output)
@@ -507,10 +507,10 @@ func TestMinecraftNetworkWhitelistConfigureAndFragment(t *testing.T) {
 				`Network Whitelist controls access to the lobby and every server included in Minecraft Network.`,
 				`When disabled, players can access selected Network servers without whitelist restriction.`,
 				`Standalone whitelist settings and players are preserved and become active again when a server leaves Minecraft Network.`,
-				`Lobby: Java + Bedrock server selector`, `data-minecraft-network-cancel disabled>Cancel</button>`,
+				uiText("ui.d619ef679d7c"), `data-minecraft-network-cancel disabled>Cancel</button>`,
 				`name="action" value="configure" disabled>Apply</button>`,
 			} {
-				if !strings.Contains(rr.Body.String(), want) {
+				if !strings.Contains(html.UnescapeString(rr.Body.String()), want) {
 					t.Errorf("missing %q", want)
 				}
 			}

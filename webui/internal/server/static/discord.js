@@ -14,8 +14,8 @@
   const guild = find('[data-discord-guild]');
   const bind = find('[data-discord-bind]');
   const install = find('[data-discord-install]');
-  const labels = {disconnected: 'Disconnected', unverified: 'Needs verification', verified: 'Bot verified', disabled: 'Disabled', connecting: 'Connecting', connected: 'Connected', connection_retry: 'Retrying', connection_paused: 'Needs attention'};
-  const failure = 'Discord settings could not be loaded or saved. Check the bot token, session, and connection.';
+  const labels = {disconnected: jvT("ui.04dfac3671b4"), unverified: jvT("ui.3dddf7d417a7"), verified: jvT("ui.f724fb6f802d"), disabled: jvT("ui.75081b593d15"), connecting: jvT("ui.d403c686f6a1"), connected: jvT("ui.22965568d22a"), connection_retry: jvT("ui.f8fe6f863109"), connection_paused: jvT("ui.c1ebc7817870")};
+  const failure = jvT("ui.b2043f4ecaab");
   let availableGuilds = new Set();
   let busy = false;
   let configured = false;
@@ -73,9 +73,9 @@
       for (const entry of (Array.isArray(entries) ? entries.slice(0, 32) : [])) {
         if (typeof entry?.user_id !== 'string' || !/^[1-9][0-9]{0,19}$/.test(entry.user_id)) continue;
         const row = node('div', ''); row.className = 'integration-lane';
-        row.append(node('strong', 'Access'), node('span', (typeof entry.name === 'string' && entry.name) || (typeof entry.username === 'string' && entry.username) || 'Discord user'));
-        const secondary = node('span', `User ${entry.user_id}`); secondary.className = 'muted'; row.append(secondary);
-        for (const [label, action] of (pending ? [['Approve', 'admin_approve'], ['Reject', 'admin_reject']] : [['Remove', 'admin_remove']])) {
+        row.append(node('strong', jvT("ui.ec5ba0abb717")), node('span', (typeof entry.name === 'string' && entry.name) || (typeof entry.username === 'string' && entry.username) || jvT("ui.6c1b691b1073")));
+        const secondary = node('span', jvT("ui.19de1acb0e29", {v0: (entry.user_id)})); secondary.className = 'muted'; row.append(secondary);
+        for (const [label, action] of (pending ? [[jvT("ui.6007acbe30b2"), 'admin_approve'], [jvT("ui.ab604a360777"), 'admin_reject']] : [[jvT("ui.c3812fc4acb8"), 'admin_remove']])) {
           const button = node('button', label); button.type = 'button'; button.className = 'button';
           button.addEventListener('click', () => request({action, user_id: entry.user_id})); row.append(button);
         }
@@ -86,7 +86,7 @@
     renderAdministrators('[data-discord-administrators]', snapshot?.administrators, false);
     const previous = guild.value;
     availableGuilds = new Set(); guild.replaceChildren();
-    const placeholder = node('option', 'Choose a Discord server'); placeholder.value = ''; guild.append(placeholder);
+    const placeholder = node('option', jvT("ui.55ec560f5aa3")); placeholder.value = ''; guild.append(placeholder);
     for (const entry of (Array.isArray(snapshot?.guilds) ? snapshot.guilds.slice(0, 200) : [])) {
       if (typeof entry?.id !== 'string' || !/^[1-9][0-9]{0,19}$/.test(entry.id) || typeof entry.name !== 'string') continue;
       const option = node('option', entry.name); option.value = entry.id; guild.append(option); availableGuilds.add(entry.id);
@@ -95,7 +95,7 @@
     guild.disabled = !presentation.verified || !presentation.enabled || snapshot?.guilds_ready !== true || availableGuilds.size === 0;
     bind.disabled = guild.disabled || !availableGuilds.has(guild.value);
     find('[data-discord-empty]').hidden = snapshot?.guilds_ready !== true || availableGuilds.size !== 0;
-    find('[data-discord-bound]').textContent = typeof snapshot?.guild_name === 'string' && snapshot.guild_name ? snapshot.guild_name : 'None';
+    find('[data-discord-bound]').textContent = typeof snapshot?.guild_name === 'string' && snapshot.guild_name ? snapshot.guild_name : jvT("ui.dc937b598926");
     find('[data-discord-bound-unavailable]').hidden = !snapshot?.guild_id || !presentation.enabled || snapshot?.guilds_ready !== true || snapshot?.bound_guild_available === true;
     install.hidden = true; install.href = '';
     if (presentation.verified && typeof snapshot.application_id === 'string' && /^[1-9][0-9]{0,19}$/.test(snapshot.application_id)) {
@@ -106,7 +106,7 @@
   const send = async payload => {
     const options = {credentials: 'same-origin', cache: 'no-store', headers: {Accept: 'application/json'}};
     if (payload) {
-      options.method = 'POST';
+      options.method = "POST";
       options.body = new URLSearchParams({csrf: find('[data-discord-content]').dataset.discordCsrf, request: JSON.stringify(payload)});
     }
     const response = await fetch('/api/discord', options);
@@ -124,7 +124,7 @@
     const currentSurface = surfaceGeneration;
     const current = () => currentGeneration === generation && workspaceOpen() && (globalChange || currentSurface === surfaceGeneration);
     busy = true; renderHeader();
-    if (payload) report('Saving…');
+    if (payload) report(jvT("ui.23e39291d613"));
     try {
       let snapshot = await send(payload);
       if (current()) {
@@ -138,10 +138,10 @@
           if (!current()) return;
         } else if (['verify', 'disconnect'].includes(payload?.action)) verificationFailed = false;
         render(snapshot);
-        if (verificationFailed) report('Token saved, but verification failed. Check the token or connection, then choose Retry.');
-        else if (ready) report('Ready. In Discord, use /jv or /help.');
-        else if (payload) report('Saved.');
-        else if (feedback.textContent === 'Ready. In Discord, use /jv or /help.') report('');
+        if (verificationFailed) report(jvT("ui.688d4c5ad38c"));
+        else if (ready) report(jvT("ui.ab3aec14361f"));
+        else if (payload) report(jvT("ui.fca046ccd586"));
+        else if (feedback.textContent === jvT("ui.ab3aec14361f")) report('');
       }
     } catch (_) {
       if (current()) {

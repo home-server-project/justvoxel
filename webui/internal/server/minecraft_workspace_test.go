@@ -196,7 +196,7 @@ func TestMinecraftWorkspaceOperatorWhitelistAndLogsAreNativeJSON(t *testing.T) {
 }
 
 func TestMinecraftWorkspaceClientDoesNotRenderLegacyPages(t *testing.T) {
-	sourceBytes, err := assets.ReadFile("static/app.js")
+	sourceBytes, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +226,7 @@ func TestMinecraftWorkspaceClientDoesNotRenderLegacyPages(t *testing.T) {
 		}
 	}
 
-	headerBytes, err := assets.ReadFile("templates/header.html")
+	headerBytes, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestMinecraftWorkspaceClientDoesNotRenderLegacyPages(t *testing.T) {
 }
 
 func TestMinecraftWorkspaceGameplayTabRendersGameModeAndDeferredReview(t *testing.T) {
-	headerBytes, err := assets.ReadFile("templates/header.html")
+	headerBytes, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +251,7 @@ func TestMinecraftWorkspaceGameplayTabRendersGameModeAndDeferredReview(t *testin
 	if strings.Contains(string(headerBytes), `data-minecraft-tab="whitelist"`) {
 		t.Fatal("Minecraft Settings still has a standalone Whitelist tab")
 	}
-	sourceBytes, err := assets.ReadFile("static/app.js")
+	sourceBytes, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +295,7 @@ func TestMinecraftWorkspaceGameplayTabRendersGameModeAndDeferredReview(t *testin
 }
 
 func TestMinecraftWorkspaceCrossplayUsesExistingCheckboxSwitch(t *testing.T) {
-	sourceBytes, err := assets.ReadFile("static/app.js")
+	sourceBytes, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,7 +310,7 @@ func TestMinecraftWorkspaceCrossplayUsesExistingCheckboxSwitch(t *testing.T) {
 			t.Fatalf("Cross-play form missing %q", want)
 		}
 	}
-	cssBytes, err := assets.ReadFile("static/app.css")
+	cssBytes, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +347,7 @@ func TestMinecraftWorkspaceCrossplayUsesExistingCheckboxSwitch(t *testing.T) {
 }
 
 func TestMinecraftWorkspaceReviewHumanizesOnlyBedrockValues(t *testing.T) {
-	sourceBytes, err := assets.ReadFile("static/app.js")
+	sourceBytes, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,7 +409,7 @@ func TestMinecraftWorkspaceReviewHumanizesOnlyBedrockValues(t *testing.T) {
 		t.Error("Minecraft settings plan request source changed")
 	}
 
-	cssBytes, err := assets.ReadFile("static/app.css")
+	cssBytes, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -514,7 +514,7 @@ func TestMinecraftWorkspaceWhitelistPermissionsAndStructuredResponse(t *testing.
 }
 
 func TestMinecraftWorkspacePlayersClientUsesBoundedWhitelistActions(t *testing.T) {
-	sourceBytes, err := assets.ReadFile("static/app.js")
+	sourceBytes, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}

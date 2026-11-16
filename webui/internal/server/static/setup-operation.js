@@ -65,9 +65,9 @@ document.addEventListener("DOMContentLoaded", () => {
       eulaDialog?.close();
       if (configure) {
         configure.disabled = true;
-        configure.textContent = addingServer ? "Creating server…" : "Starting setup…";
+        configure.textContent = addingServer ? jvT("ui.583ba8d35f24") : jvT("ui.696abab0be63");
       }
-      let submissionMessage = "Setup status could not be confirmed. Reload Review to check the current operation.";
+      let submissionMessage = jvT("ui.ee4e2378bd55");
       try {
         const submit = () => fetch(applyForm.action, {
           method: "POST", credentials: "same-origin", cache: "no-store",
@@ -88,14 +88,14 @@ document.addEventListener("DOMContentLoaded", () => {
         submitting = false;
         if (configure) {
           configure.disabled = false;
-          configure.textContent = addingServer ? "Create Server" : "Configure JustVoxel";
+          configure.textContent = addingServer ? jvT("ui.7ac52b00d920") : jvT("ui.fef1e933ec92");
         }
         const feedback = document.createElement("p");
         feedback.setAttribute("role", "alert");
         feedback.textContent = submissionMessage;
         const review = document.createElement("a");
         review.href = addingServer ? "/minecraft/servers/add/review" : "/setup/review";
-        review.textContent = "Reload Review";
+        review.textContent = jvT("ui.72ff222f7f89");
         applyForm.append(feedback, review);
       } finally {
         body.delete("smb_password");
@@ -139,36 +139,36 @@ document.addEventListener("DOMContentLoaded", () => {
   let finalElapsed = null;
 
   const stateLabel = (state) => {
-    if (state === "queued") return "Queued";
-    if (state === "validating") return "Validating";
-    if (state === "running") return "Configuring";
-    if (state === "verifying") return "Verifying";
-    if (state === "failed") return "Recovering";
-    if (state === "rolling_back") return "Rolling back";
-    if (state === "rolled_back") return "Rolled back";
-    if (state === "needs_attention") return "Needs attention";
-    if (state === "succeeded") return "Complete";
-    return state || "Working";
+    if (state === "queued") return jvT("ui.661ff40a07e0");
+    if (state === "validating") return jvT("ui.5a1a167e3d90");
+    if (state === "running") return jvT("ui.f852556e2329");
+    if (state === "verifying") return jvT("ui.a7d4a9f301ed");
+    if (state === "failed") return jvT("ui.d90064dbdb11");
+    if (state === "rolling_back") return jvT("ui.8b9e964b606b");
+    if (state === "rolled_back") return jvT("ui.71592236d852");
+    if (state === "needs_attention") return jvT("ui.c1ebc7817870");
+    if (state === "succeeded") return jvT("ui.143b270a3260");
+    return state || jvT("ui.a92f0449a9f7");
   };
 
   const stageLabel = (stage) => {
-    if (stage === "queued") return "Waiting to start";
-    if (stage === "storage_preflight") return "Checking storage";
-    if (stage === "storage_snapshot") return "Preparing storage changes";
-    if (stage === "storage_verified") return "Storage ready";
-    if (stage === "runtime_preflight") return "Checking Minecraft configuration";
-    if (stage === "runtime_config") return "Writing Minecraft configuration";
-    if (stage === "minecraft_verify") return "Starting Minecraft";
-    if (stage === "final_validation") return "Final validation";
-    if (stage === "completed") return "Complete";
-    if (stage === "setup_failed") return "Preparing recovery";
-    if (stage === "runtime_rollback") return "Restoring Minecraft configuration";
-    if (stage === "storage_rollback") return "Restoring storage changes";
-    if (stage === "runtime_recovery") return "Retrying Minecraft recovery";
-    if (stage === "storage_recovery") return "Retrying storage recovery";
-    if (stage === "setup_rolled_back") return "Rolled back";
-    if (stage === "interrupted") return "Interrupted";
-    return "Working";
+    if (stage === "queued") return jvT("ui.f5e5f81fd256");
+    if (stage === "storage_preflight") return jvT("ui.b5deea41f994");
+    if (stage === "storage_snapshot") return jvT("ui.a4177ad95738");
+    if (stage === "storage_verified") return jvT("ui.53e417e293d7");
+    if (stage === "runtime_preflight") return jvT("ui.87e72934b376");
+    if (stage === "runtime_config") return jvT("ui.d01ed84b6ec2");
+    if (stage === "minecraft_verify") return jvT("ui.eb7466fbf37e");
+    if (stage === "final_validation") return jvT("ui.3fa519aa4bf7");
+    if (stage === "completed") return jvT("ui.143b270a3260");
+    if (stage === "setup_failed") return jvT("ui.b62ffd61bf8c");
+    if (stage === "runtime_rollback") return jvT("ui.d353e569c4b7");
+    if (stage === "storage_rollback") return jvT("ui.ae7cbca04533");
+    if (stage === "runtime_recovery") return jvT("ui.20da9d1e8eb0");
+    if (stage === "storage_recovery") return jvT("ui.c79560178cdb");
+    if (stage === "setup_rolled_back") return jvT("ui.71592236d852");
+    if (stage === "interrupted") return jvT("ui.132d124d6bb3");
+    return jvT("ui.a92f0449a9f7");
   };
 
   const terminalState = (state) => ["succeeded", "rolled_back", "needs_attention"].includes(state);
@@ -208,8 +208,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const seconds = finalElapsed ?? Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
     const minutes = Math.floor(seconds / 60);
     const remainder = seconds % 60;
-    const formatted = minutes === 0 ? `${seconds} sec` : remainder === 0 ? `${minutes} min` : `${minutes} min ${String(remainder).padStart(2, "0")} sec`;
-    elapsed.textContent = `Time elapsed since setup started: ${formatted}`;
+    const formatted = minutes === 0 ? `${seconds} sec` : remainder === 0 ? `${minutes} min` : jvT("ui.b58375451be0", {v0: (minutes), v1: (String(remainder).padStart(2, "0"))});
+    elapsed.textContent = jvT("ui.663e41d8f18f", {v0: (formatted)});
     elapsed.hidden = false;
   };
 
@@ -220,9 +220,9 @@ document.addEventListener("DOMContentLoaded", () => {
     window.JustVoxelLiveConsole.updateState(panel.dataset.operationId, operation.state, operation.stage);
     failures = 0;
     if (reconnectNote) reconnectNote.hidden = true;
-    if (statusText) statusText.textContent = operation.status || "Setup is running.";
+    if (statusText) statusText.textContent = operation.status || jvT("ui.654b6d52bf7a");
     if (stateBadge) stateBadge.textContent = stateLabel(operation.state);
-    if (stageText) stageText.textContent = operation.state === "rolled_back" ? "Rolled back" : stageLabel(operation.stage);
+    if (stageText) stageText.textContent = operation.state === "rolled_back" ? jvT("ui.71592236d852") : stageLabel(operation.stage);
     renderStages(operation);
     const parsedStart = Date.parse(operation.started_at || "");
     if (Number.isFinite(parsedStart)) startedAt = parsedStart;
@@ -280,7 +280,7 @@ document.addEventListener("DOMContentLoaded", () => {
         window.location.assign("/password");
         return;
       }
-      if (!response.ok) throw new Error("status unavailable");
+      if (!response.ok) throw new Error(jvT("ui.180119be630b"));
       const payload = await response.json();
       render(payload.operation);
     } catch (_) {

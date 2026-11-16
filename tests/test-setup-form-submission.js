@@ -3,7 +3,7 @@
 // Native required-field validation runs before submit listeners. Hidden ancestors
 // and closed dialogs do NOT exempt ordinary required inputs from validation.
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
+const fs = require('./helpers/webui-i18n.cjs');
 const vm = require('node:vm');
 const path = require('node:path');
 const pages = JSON.parse(fs.readFileSync(0, 'utf8'));

@@ -5,7 +5,7 @@
       button.classList.toggle('is-selected', isSelected);
       button.setAttribute('aria-pressed', String(isSelected));
       const badge = button.querySelector('.storage-partition-state');
-      if (badge) badge.textContent = isSelected ? 'Selected' : button.dataset.role;
+      if (badge) badge.textContent = isSelected ? jvT("ui.57fd7a0cf33f") : button.dataset.role;
     });
   }
 

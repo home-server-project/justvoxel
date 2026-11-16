@@ -12,7 +12,7 @@
       if (options.inlineDetails) panel.hidden = true;
       else panel.close();
     }
-    function refreshStorageWorkspace(message = "Storage updated.") {
+    function refreshStorageWorkspace(message = jvT("ui.019bd0148d26")) {
       const workspace = root.closest("[data-storage-workspace-dialog]");
       if (options.onChanged) options.onChanged(message);
       else workspace?.querySelector("[data-storage-refresh]")?.click();
@@ -32,7 +32,7 @@
   if (options.onSelect && actionMenu) {
     setupChoice = document.createElement("button");
     setupChoice.type = "button";
-    setupChoice.textContent = "Use this partition";
+    setupChoice.textContent = jvT("ui.56ad50b0dae1");
     setupChoice.dataset.setupPartitionSelect = "";
     setupChoice.hidden = true;
     setupChoice.addEventListener("click", () => {
@@ -59,12 +59,12 @@
   }
   function setupMountError(message) {
     if (/conflict|inconsistent|different filesystem|another filesystem|other filesystem/i.test(message)) {
-      return "Saved mount location conflicts with another filesystem. Choose another partition or ask your administrator for help.";
+      return jvT("ui.74c01fdd91bd");
     }
     if (/protected|unavailable|UUID|verify|unsupported/i.test(message)) {
-      return "Partition cannot be selected safely. Choose another partition or retry after refreshing the drives.";
+      return jvT("ui.a555068b260d");
     }
-    return "Mount operation failed. " + message + " Retry or choose another partition.";
+    return jvT("ui.d994f9e17843") + message + jvT("ui.ef9f8a990400");
   }
 
   if (options.onSelect || options.inlineDetails) root.addEventListener("submit", event => {
@@ -295,8 +295,8 @@
     if (value === "ntfs" || value === "ntfs-3g") return "NTFS";
     if (value === "vfat" || value === "fat" || value === "fat32") return "FAT / FAT32";
     if (value === "exfat") return "exFAT";
-    if (!value) return "Not formatted";
-    return filesystem || "Unknown";
+    if (!value) return jvT("ui.af9d8f12b31f");
+    return filesystem || jvT("ui.b764cdc0eab7");
   }
 
   function showStorageAction(action, visible) {
@@ -346,7 +346,7 @@
     }
 
     if (persistence === "justvoxel") {
-      setOptional(detail.mountTypeRow, detail.mountType, "Permanent");
+      setOptional(detail.mountTypeRow, detail.mountType, jvT("ui.455a95491f40"));
       if (mounted) showStorageAction("unmount-for-now", true);
       else if (status.mount_point) showStorageAction("mount-now", true);
       showStorageAction("remove-permanent", true);
@@ -354,13 +354,13 @@
     }
 
     if (persistence === "external") {
-      setOptional(detail.mountTypeRow, detail.mountType, "Permanent");
+      setOptional(detail.mountTypeRow, detail.mountType, jvT("ui.455a95491f40"));
       if (mounted) showStorageAction("unmount-for-now", true);
       return;
     }
 
     if (persistence === "none") {
-      setOptional(detail.mountTypeRow, detail.mountType, mounted ? "For now" : "Not mounted");
+      setOptional(detail.mountTypeRow, detail.mountType, mounted ? jvT("ui.c388aed077e6") : jvT("ui.669cf449a506"));
       if (mounted) {
         showStorageAction("unmount-for-now", true);
         showStorageAction("make-permanent", true);
@@ -371,7 +371,7 @@
       return;
     }
 
-    setOptional(detail.mountTypeRow, detail.mountType, "Needs attention");
+    setOptional(detail.mountTypeRow, detail.mountType, jvT("ui.c1ebc7817870"));
     if (mounted) showStorageAction("unmount-for-now", true);
   }
 
@@ -380,8 +380,8 @@
     const mountable = ["xfs", "ext4", "btrfs", "ntfs", "vfat", "exfat"].includes(filesystem.toLowerCase());
     if (!mountable || data.system === "Yes" || data.readonly === "Yes") {
       selectionFeedback(!filesystem && data.system !== "Yes" && data.readonly !== "Yes"
-        ? "Prepare this partition using the partition actions before selecting it."
-        : "Partition cannot be selected safely. Choose another partition.", Boolean(filesystem));
+        ? jvT("ui.28ec02adbf4f")
+        : jvT("ui.3d6b7be1bb5a"), Boolean(filesystem));
       return;
     }
 
@@ -395,16 +395,16 @@
       });
       let payload = null;
       try { payload = await response.json(); } catch (_) { payload = null; }
-      if (!response.ok || !payload?.ok) throw new Error(payload?.error || "Mount status is unavailable.");
+      if (!response.ok || !payload?.ok) throw new Error(payload?.error || jvT("ui.63a88a5aaa90"));
       if (selectedPartition !== data) return;
       selectedMountStatus = payload.proposed || null;
       if (options.onSelect) {
         const eligible = options.canSelect?.(selectedPath, selectedMountStatus);
         selectionFeedback(eligible
-          ? (selectedMountStatus.mounted ? "Drive already mounted. Use this partition to keep its current location." : "")
+          ? (selectedMountStatus.mounted ? jvT("ui.66c8393ebd93") : "")
           : (selectedMountStatus?.persistence === "conflict" || selectedMountStatus?.persistence === "other_mount"
-            ? "Saved mount location conflicts with another filesystem. Choose another partition or ask your administrator for help."
-            : "Partition cannot be selected safely. Refresh the drives or choose another partition."), !eligible);
+            ? jvT("ui.74c01fdd91bd")
+            : jvT("ui.9e51e9a75d40")), !eligible);
       }
       configurePartitionActions(selectedPartition, selectedMountStatus);
     } catch (error) {
@@ -422,24 +422,24 @@
       closeActionMenu();
       selectedPartition = { ...data };
       selectedMountStatus = null;
-      selectionFeedback("Checking whether this partition can be used safely…");
-      if (detail.title) detail.title.textContent = data.path || "Partition";
-      if (detail.role) detail.role.textContent = data.role || "Partition";
+      selectionFeedback(jvT("ui.188589be4ae0"));
+      if (detail.title) detail.title.textContent = data.path || jvT("ui.4dbdd221e957");
+      if (detail.role) detail.role.textContent = data.role || jvT("ui.4dbdd221e957");
       if (detail.path) detail.path.textContent = data.path || "";
-      if (detail.size) detail.size.textContent = data.size || "Unknown";
+      if (detail.size) detail.size.textContent = data.size || jvT("ui.b764cdc0eab7");
       const usageKnown = data.filesystemUsageKnown === "Yes";
       if (detail.usedRow) detail.usedRow.hidden = !usageKnown;
       if (detail.freeRow) detail.freeRow.hidden = !usageKnown;
       if (detail.usageUnavailableRow) detail.usageUnavailableRow.hidden = usageKnown || !data.filesystem;
-      if (detail.used) detail.used.textContent = usageKnown ? (data.filesystemUsed || "Unknown") : "";
-      if (detail.free) detail.free.textContent = usageKnown ? (data.filesystemFree || "Unknown") : "";
+      if (detail.used) detail.used.textContent = usageKnown ? (data.filesystemUsed || jvT("ui.b764cdc0eab7")) : "";
+      if (detail.free) detail.free.textContent = usageKnown ? (data.filesystemFree || jvT("ui.b764cdc0eab7")) : "";
       if (detail.filesystem) detail.filesystem.textContent = data.filesystemDisplay || filesystemDisplay(data.filesystem);
-      if (detail.mounted) detail.mounted.textContent = data.mounted || "No";
-      if (detail.system) detail.system.textContent = data.system || "No";
-      if (detail.readonly) detail.readonly.textContent = data.readonly || "No";
+      if (detail.mounted) detail.mounted.textContent = data.mounted || jvT("ui.1ea442a134b2");
+      if (detail.system) detail.system.textContent = data.system || jvT("ui.1ea442a134b2");
+      if (detail.readonly) detail.readonly.textContent = data.readonly || jvT("ui.1ea442a134b2");
       setOptional(detail.labelRow, detail.label, data.label);
       setOptional(detail.uuidRow, detail.uuid, data.uuid);
-      if (detail.mountLabel) detail.mountLabel.textContent = "Mounted at";
+      if (detail.mountLabel) detail.mountLabel.textContent = jvT("ui.63a2b13c2fdc");
       setOptional(detail.mountRow, detail.mount, data.system === "Yes" ? "" : data.mountpoints);
       configurePartitionActions(selectedPartition, null);
       if (options.onSelect) hideDetails(freeDetailDialog);
@@ -476,7 +476,7 @@
     const armed = progress >= 100;
     shell?.classList.toggle("is-armed", armed);
     if (text) text.textContent = armed ? armedText : idleText;
-    slider?.setAttribute("aria-valuetext", armed ? "Ready for final confirmation" : progress + " percent");
+    slider?.setAttribute("aria-valuetext", armed ? jvT("ui.f457978a1756") : progress + " percent");
     return armed;
   }
 
@@ -517,11 +517,11 @@
     };
     reviewedWholeDisk = null;
     const minecraft = selectedWholeDisk.purpose === "minecraft";
-    if (wholeDiskTitle) wholeDiskTitle.textContent = minecraft ? "Use this disk for Minecraft data" : "Use this disk for backups";
+    if (wholeDiskTitle) wholeDiskTitle.textContent = minecraft ? jvT("ui.5905d384d2ba") : jvT("ui.27e4cc7148be");
     if (wholeDiskDescription) {
       wholeDiskDescription.textContent = minecraft
-        ? "JustVoxel will review this whole disk, then safely migrate Minecraft data onto a new XFS filesystem."
-        : "The ENTIRE disk, including its current filesystem (such as FAT32) and all data, will be erased after Review and destructive confirmation. JustVoxel will create GPT and XFS, mount it permanently, and activate it for backups.";
+        ? jvT("ui.1d8aec4443eb")
+        : jvT("ui.d769c6e21f13");
     }
     if (wholeDiskDevice) wholeDiskDevice.textContent = selectedWholeDisk.device;
     if (wholeDiskSize) wholeDiskSize.textContent = selectedWholeDisk.size;
@@ -539,11 +539,11 @@
       wholeDiskConfirmSliderText,
       wholeDiskConfirmToggleRow,
       wholeDiskConfirmToggle,
-      "Slide to confirm erasing",
+      jvT("ui.507319d1e586"),
     );
     if (wholeDiskError) { wholeDiskError.hidden = true; wholeDiskError.textContent = ""; }
-    if (wholeDiskReview) { wholeDiskReview.hidden = false; wholeDiskReview.disabled = false; wholeDiskReview.textContent = "Review action"; }
-    if (wholeDiskApply) { wholeDiskApply.hidden = true; wholeDiskApply.disabled = false; wholeDiskApply.textContent = "Apply destructive action"; }
+    if (wholeDiskReview) { wholeDiskReview.hidden = false; wholeDiskReview.disabled = false; wholeDiskReview.textContent = jvT("ui.8f102c2baf65"); }
+    if (wholeDiskApply) { wholeDiskApply.hidden = true; wholeDiskApply.disabled = false; wholeDiskApply.textContent = jvT("ui.a6e53d6b90d2"); }
   }
 
   async function postWholeDisk(phase) {
@@ -569,7 +569,7 @@
     });
     let payload = null;
     try { payload = await response.json(); } catch (_) { payload = null; }
-    if (!response.ok || !payload?.ok) throw new Error(payload?.error || "Disk preparation could not be completed.");
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || jvT("ui.4b97e34e84c1"));
     return payload;
   }
 
@@ -595,11 +595,11 @@
     if (!selectedWholeDisk) return;
     if (wholeDiskError) { wholeDiskError.hidden = true; wholeDiskError.textContent = ""; }
     wholeDiskReview.disabled = true;
-    wholeDiskReview.textContent = "Reviewing…";
+    wholeDiskReview.textContent = jvT("ui.fcc53388888f");
     try {
       const payload = await postWholeDisk("plan");
       reviewedWholeDisk = payload;
-      if (wholeDiskAfter) wholeDiskAfter.textContent = payload.purpose === "minecraft" ? "Minecraft data on a new XFS filesystem" : "Backups on a new XFS filesystem";
+      if (wholeDiskAfter) wholeDiskAfter.textContent = payload.purpose === "minecraft" ? jvT("ui.ab87a9a10a2d") : jvT("ui.b6bd22b5ce0d");
       if (wholeDiskPlanRow) wholeDiskPlanRow.hidden = false;
       if (wholeDiskMount) wholeDiskMount.textContent = payload.mount_point || "";
       if (wholeDiskMountRow) wholeDiskMountRow.hidden = !payload.mount_point;
@@ -608,7 +608,7 @@
       if (wholeDiskPlayersField) wholeDiskPlayersField.hidden = !needsPlayers;
       if (wholeDiskPlayersNote) {
         const names = (payload.players || []).join(", ");
-        wholeDiskPlayersNote.textContent = needsPlayers ? (names ? " Online: " + names : " Players are online.") : "";
+        wholeDiskPlayersNote.textContent = needsPlayers ? (names ? " Online: " + names : jvT("ui.f47eb9db6080")) : "";
       }
       const confirmation = payload.confirmation || "";
       const destructiveSummary = (payload.device || selectedWholeDisk.device) + " will be erased";
@@ -620,7 +620,7 @@
         wholeDiskConfirmSliderText,
         wholeDiskConfirmToggleRow,
         wholeDiskConfirmToggle,
-        "Slide to confirm erasing",
+        jvT("ui.507319d1e586"),
       );
       if (wholeDiskConfirmationSummary) wholeDiskConfirmationSummary.textContent = destructiveSummary;
       if (wholeDiskConfirmationField) wholeDiskConfirmationField.hidden = !confirmation;
@@ -636,7 +636,7 @@
       if (wholeDiskError) { wholeDiskError.textContent = error.message; wholeDiskError.hidden = false; }
     } finally {
       wholeDiskReview.disabled = false;
-      wholeDiskReview.textContent = "Review action";
+      wholeDiskReview.textContent = jvT("ui.8f102c2baf65");
     }
   });
 
@@ -647,8 +647,8 @@
       wholeDiskConfirmSlider,
       wholeDiskConfirmSliderShell,
       wholeDiskConfirmSliderText,
-      (reviewedWholeDisk.device || selectedWholeDisk?.device || "Selected disk") + " will be erased",
-      "Slide to confirm erasing",
+      (reviewedWholeDisk.device || selectedWholeDisk?.device || jvT("ui.2d708b296620")) + " will be erased",
+      jvT("ui.507319d1e586"),
     );
     if (wholeDiskConfirmToggleRow) wholeDiskConfirmToggleRow.hidden = !needsConfirmation || !sliderArmed;
     if (!sliderArmed && wholeDiskConfirmToggle) wholeDiskConfirmToggle.checked = false;
@@ -668,12 +668,12 @@
       reviewedWholeDisk.confirmation &&
       (Number(wholeDiskConfirmSlider?.value || 0) < 100 || !wholeDiskConfirmToggle?.checked)
     ) {
-      if (wholeDiskError) { wholeDiskError.textContent = "Slide fully to the right, then switch Confirm on before applying."; wholeDiskError.hidden = false; }
+      if (wholeDiskError) { wholeDiskError.textContent = jvT("ui.8ad19c5363e9"); wholeDiskError.hidden = false; }
       wholeDiskConfirmSlider?.focus();
       return;
     }
     if (reviewedWholeDisk.players_confirmation_required && !wholeDiskPlayers?.checked) {
-      if (wholeDiskError) { wholeDiskError.textContent = "Confirm that online players may be interrupted before applying."; wholeDiskError.hidden = false; }
+      if (wholeDiskError) { wholeDiskError.textContent = jvT("ui.47a32e58e149"); wholeDiskError.hidden = false; }
       wholeDiskPlayers?.focus();
       return;
     }
@@ -681,7 +681,7 @@
     wholeDiskApply.disabled = true;
     if (wholeDiskClose) wholeDiskClose.disabled = true;
     if (wholeDiskCancel) wholeDiskCancel.disabled = true;
-    wholeDiskApply.textContent = "Applying…";
+    wholeDiskApply.textContent = jvT("ui.3329a9bb48b9");
     try {
       const payload = await postWholeDisk("apply");
       if (payload.operation_id) {
@@ -695,7 +695,7 @@
           operation_id: payload.operation_id,
           state: "queued",
           stage: "queued",
-          status: "Minecraft data migration operation queued.",
+          status: jvT("ui.ad36ade1e9ed"),
         });
       } else {
         wholeDiskDialog?.close();
@@ -707,7 +707,7 @@
       if (wholeDiskClose) wholeDiskClose.disabled = false;
       if (wholeDiskCancel) wholeDiskCancel.disabled = false;
       wholeDiskApply.disabled = false;
-      wholeDiskApply.textContent = "Apply destructive action";
+      wholeDiskApply.textContent = jvT("ui.a6e53d6b90d2");
     }
   });
 
@@ -720,7 +720,7 @@
       selectedFreeSpace = { ...button.dataset };
       reviewedCreatePartition = null;
       if (freeDetailDevice) freeDetailDevice.textContent = selectedFreeSpace.device || "";
-      if (freeDetailSize) freeDetailSize.textContent = selectedFreeSpace.size || "Unknown";
+      if (freeDetailSize) freeDetailSize.textContent = selectedFreeSpace.size || jvT("ui.b764cdc0eab7");
       if (options.onSelect) hideDetails(detailDialog);
       if (options.inlineDetails) {
         freeSpaceButtons.forEach(candidate => candidate.classList.toggle("is-selected", candidate === button));
@@ -757,24 +757,24 @@
       createConfirmSliderText,
       createConfirmToggleRow,
       createConfirmToggle,
-      "Slide to confirm partition creation",
+      jvT("ui.973f04f1623c"),
     );
     if (createReview) {
       createReview.hidden = false;
       createReview.disabled = false;
-      createReview.textContent = "Review action";
+      createReview.textContent = jvT("ui.8f102c2baf65");
     }
     if (createApply) {
       createApply.hidden = true;
       createApply.disabled = false;
-      createApply.textContent = "Apply destructive action";
+      createApply.textContent = jvT("ui.a6e53d6b90d2");
     }
   }
 
   function resetCreateDialog() {
     if (!selectedFreeSpace) return;
     if (createDevice) createDevice.textContent = selectedFreeSpace.device || "";
-    if (createAvailable) createAvailable.textContent = selectedFreeSpace.size || "Unknown";
+    if (createAvailable) createAvailable.textContent = selectedFreeSpace.size || jvT("ui.b764cdc0eab7");
     if (createUseAll) createUseAll.checked = false;
     if (createSize) {
       createSize.value = "";
@@ -827,7 +827,7 @@
 
   async function postCreatePartition(phase) {
     const sizeGiB = createSizeGiB();
-    if (!sizeGiB) throw new Error("Enter a whole-number partition size in GiB.");
+    if (!sizeGiB) throw new Error(jvT("ui.14ae26043f2b"));
     const body = new URLSearchParams();
     body.set("csrf", csrf);
     body.set("operation", "create_partition");
@@ -852,7 +852,7 @@
     });
     let payload = null;
     try { payload = await response.json(); } catch (_) { payload = null; }
-    if (!response.ok || !payload?.ok) throw new Error(payload?.error || "Partition creation could not be completed.");
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || jvT("ui.fddf09b3e6fe"));
     return payload;
   }
 
@@ -863,15 +863,15 @@
       createError.textContent = "";
     }
     createReview.disabled = true;
-    createReview.textContent = "Reviewing…";
+    createReview.textContent = jvT("ui.fcc53388888f");
     try {
       const payload = await postCreatePartition("plan");
       reviewedCreatePartition = payload.proposed || null;
-      if (!reviewedCreatePartition) throw new Error("Partition creation returned an incomplete plan.");
+      if (!reviewedCreatePartition) throw new Error(jvT("ui.3ac02776822a"));
       if (createReviewPanel) createReviewPanel.hidden = false;
       const requested = createSizeGiB();
       const plannedSize = requested === "all" ? (selectedFreeSpace.size || "available space") : requested + " GiB";
-      if (createAfter) createAfter.textContent = "New " + plannedSize + " XFS partition";
+      if (createAfter) createAfter.textContent = jvT("ui.277e39a23325") + plannedSize + " XFS partition";
       renderCreateWarnings(payload.warnings);
       const confirmation = reviewedCreatePartition.confirmation || "";
       resetConfirmationControl(
@@ -882,12 +882,12 @@
         createConfirmSliderText,
         createConfirmToggleRow,
         createConfirmToggle,
-        "Slide to confirm partition creation",
+        jvT("ui.973f04f1623c"),
       );
       if (createConfirmationSummary) {
         createConfirmationSummary.textContent =
-          (reviewedCreatePartition.device || selectedFreeSpace.device || "Selected disk") +
-          " will get a new " + plannedSize + " XFS partition";
+          (reviewedCreatePartition.device || selectedFreeSpace.device || jvT("ui.2d708b296620")) +
+          jvT("ui.44cf45caaa3f") + plannedSize + " XFS partition";
       }
       if (createConfirmationField) createConfirmationField.hidden = !confirmation;
       createReview.hidden = true;
@@ -904,7 +904,7 @@
       }
     } finally {
       createReview.disabled = false;
-      createReview.textContent = "Review action";
+      createReview.textContent = jvT("ui.8f102c2baf65");
     }
   });
 
@@ -917,9 +917,9 @@
       createConfirmSlider,
       createConfirmSliderShell,
       createConfirmSliderText,
-      (reviewedCreatePartition.device || selectedFreeSpace?.device || "Selected disk") +
-        " will get a new " + plannedSize + " XFS partition",
-      "Slide to confirm partition creation",
+      (reviewedCreatePartition.device || selectedFreeSpace?.device || jvT("ui.2d708b296620")) +
+        jvT("ui.44cf45caaa3f") + plannedSize + " XFS partition",
+      jvT("ui.973f04f1623c"),
     );
     if (createConfirmToggleRow) createConfirmToggleRow.hidden = !needsConfirmation || !sliderArmed;
     if (!sliderArmed && createConfirmToggle) createConfirmToggle.checked = false;
@@ -940,7 +940,7 @@
       (Number(createConfirmSlider?.value || 0) < 100 || !createConfirmToggle?.checked)
     ) {
       if (createError) {
-        createError.textContent = "Slide fully to the right, then switch Confirm on before applying.";
+        createError.textContent = jvT("ui.8ad19c5363e9");
         createError.hidden = false;
       }
       createConfirmSlider?.focus();
@@ -951,7 +951,7 @@
     createApply.disabled = true;
     if (createClose) createClose.disabled = true;
     if (createCancel) createCancel.disabled = true;
-    createApply.textContent = "Applying…";
+    createApply.textContent = jvT("ui.3329a9bb48b9");
     try {
       await postCreatePartition("apply");
       createDialog?.close();
@@ -965,7 +965,7 @@
       if (createClose) createClose.disabled = false;
       if (createCancel) createCancel.disabled = false;
       createApply.disabled = false;
-      createApply.textContent = "Apply destructive action";
+      createApply.textContent = jvT("ui.a6e53d6b90d2");
     }
   });
 
@@ -975,44 +975,44 @@
 
   function migrationBytes(value) {
     const bytes = Number(value || 0);
-    if (!Number.isFinite(bytes) || bytes <= 0) return "Unknown";
+    if (!Number.isFinite(bytes) || bytes <= 0) return jvT("ui.b764cdc0eab7");
     const gib = bytes / (1024 * 1024 * 1024);
     if (gib >= 1) return gib.toFixed(gib >= 10 ? 1 : 2) + " GiB";
     return (bytes / (1024 * 1024)).toFixed(0) + " MiB";
   }
 
   function migrationStateLabel(state) {
-    if (state === "queued") return "Queued";
-    if (state === "validating") return "Validating";
-    if (state === "running") return "Migrating";
-    if (state === "verifying") return "Runtime validation";
-    if (state === "failed") return "Recovering";
-    if (state === "rolling_back") return "Rolling back";
-    if (state === "rolled_back") return "Rolled back";
-    if (state === "needs_attention") return "Needs attention";
-    if (state === "succeeded") return "Complete";
-    return "Working";
+    if (state === "queued") return jvT("ui.661ff40a07e0");
+    if (state === "validating") return jvT("ui.5a1a167e3d90");
+    if (state === "running") return jvT("ui.c0902db780a5");
+    if (state === "verifying") return jvT("ui.724382940a57");
+    if (state === "failed") return jvT("ui.d90064dbdb11");
+    if (state === "rolling_back") return jvT("ui.8b9e964b606b");
+    if (state === "rolled_back") return jvT("ui.71592236d852");
+    if (state === "needs_attention") return jvT("ui.c1ebc7817870");
+    if (state === "succeeded") return jvT("ui.143b270a3260");
+    return jvT("ui.a92f0449a9f7");
   }
 
   function migrationStageLabel(stage) {
-    if (stage === "queued") return "Waiting to start";
-    if (stage === "migration_preflight" || stage === "target_recheck") return "Checking reviewed migration";
-    if (stage === "target_prepare") return "Preparing target storage";
-    if (stage === "staging_space") return "Checking free space";
-    if (stage === "player_recheck") return "Rechecking players";
-    if (stage === "minecraft_stop") return "Stopping Minecraft safely";
-    if (stage === "cold_backup") return "Creating verified backup";
-    if (stage === "copying") return "Copying Minecraft data";
-    if (stage === "copy_verification") return "Verifying copied data";
-    if (stage === "switching") return "Switching Minecraft data storage";
-    if (stage === "minecraft_runtime") return "Validating migrated Minecraft";
-    if (stage === "migrated_storage") return "Validating migrated storage";
-    if (stage === "migration_failed") return "Preparing recovery";
-    if (stage === "rollback") return "Restoring previous configuration";
-    if (stage === "migration_rolled_back") return "Rolled back";
-    if (["migration_needs_attention","migration_backend_interrupted","migration_backend_incomplete","invalid_execution_plan","interrupted"].includes(stage)) return "Administrator attention required";
-    if (stage === "completed") return "Complete";
-    return "Working";
+    if (stage === "queued") return jvT("ui.f5e5f81fd256");
+    if (stage === "migration_preflight" || stage === "target_recheck") return jvT("ui.56ca8cb20172");
+    if (stage === "target_prepare") return jvT("ui.9dd09873773c");
+    if (stage === "staging_space") return jvT("ui.f2e3a490cf35");
+    if (stage === "player_recheck") return jvT("ui.b8d83247878b");
+    if (stage === "minecraft_stop") return jvT("ui.995beb2af122");
+    if (stage === "cold_backup") return jvT("ui.cfe5e3272ffb");
+    if (stage === "copying") return jvT("ui.9d116f928b71");
+    if (stage === "copy_verification") return jvT("ui.e9edf19a183e");
+    if (stage === "switching") return jvT("ui.b88ca5f9a498");
+    if (stage === "minecraft_runtime") return jvT("ui.a0b9cdd2c9e4");
+    if (stage === "migrated_storage") return jvT("ui.9bd0d96bce36");
+    if (stage === "migration_failed") return jvT("ui.b62ffd61bf8c");
+    if (stage === "rollback") return jvT("ui.995d58cec59c");
+    if (stage === "migration_rolled_back") return jvT("ui.71592236d852");
+    if (["migration_needs_attention","migration_backend_interrupted","migration_backend_incomplete","invalid_execution_plan","interrupted"].includes(stage)) return jvT("ui.1e1b96ec8fd9");
+    if (stage === "completed") return jvT("ui.143b270a3260");
+    return jvT("ui.a92f0449a9f7");
   }
 
   function migrationTerminal(state) {
@@ -1040,12 +1040,12 @@
       window.location.assign("/login");
       return null;
     }
-    if (response.status === 403 && String(payload.error || "").toLowerCase().includes("password change")) {
+    if (response.status === 403 && String(jvC(payload.error || "")).toLowerCase().includes("password change")) {
       window.location.assign("/password");
       return null;
     }
     if (!response.ok || !payload?.ok) {
-      const error = new Error(payload?.error || "Minecraft data migration could not be completed.");
+      const error = new Error(payload?.error || jvT("ui.28002ab611ca"));
       error.payload = payload;
       error.status = response.status;
       throw error;
@@ -1069,7 +1069,7 @@
     reviewedMigrationPlan = null;
     migrationApplying = false;
     migrationPollFailures = 0;
-    if (migrationTitle) migrationTitle.textContent = "Use this filesystem";
+    if (migrationTitle) migrationTitle.textContent = jvT("ui.76885b1c6c88");
     if (migrationSetup) migrationSetup.hidden = false;
     if (migrationReviewPanel) migrationReviewPanel.hidden = true;
     if (migrationProgress) migrationProgress.hidden = true;
@@ -1115,10 +1115,10 @@
     if (migrationSetup) migrationSetup.hidden = true;
     if (migrationReviewPanel) migrationReviewPanel.hidden = false;
     if (migrationProgress) migrationProgress.hidden = true;
-    if (migrationTitle) migrationTitle.textContent = "Review Minecraft data migration";
-    if (migrationCurrentPath) migrationCurrentPath.textContent = normalized.current_data_path || "Unknown";
+    if (migrationTitle) migrationTitle.textContent = jvT("ui.b98d5022bb6d");
+    if (migrationCurrentPath) migrationCurrentPath.textContent = normalized.current_data_path || jvT("ui.b764cdc0eab7");
     if (migrationReviewDevice) migrationReviewDevice.textContent = normalized.device || "";
-    if (migrationReviewFilesystem) migrationReviewFilesystem.textContent = normalized.filesystem || "Unknown";
+    if (migrationReviewFilesystem) migrationReviewFilesystem.textContent = normalized.filesystem || jvT("ui.b764cdc0eab7");
     if (migrationReviewMount) migrationReviewMount.textContent = normalized.mount_point || "";
     if (migrationReviewPath) migrationReviewPath.textContent = normalized.path || "";
     if (migrationReviewCapacity) migrationReviewCapacity.textContent = migrationBytes(normalized.target_capacity_bytes);
@@ -1146,10 +1146,10 @@
     if (migrationSetup) migrationSetup.hidden = true;
     if (migrationReviewPanel) migrationReviewPanel.hidden = true;
     if (migrationProgress) migrationProgress.hidden = false;
-    if (migrationTitle) migrationTitle.textContent = "Minecraft data migration";
+    if (migrationTitle) migrationTitle.textContent = jvT("ui.ef50e1e3c523");
     if (migrationProgressState) migrationProgressState.textContent = migrationStateLabel(operation.state);
     if (migrationProgressStage) migrationProgressStage.textContent = migrationStageLabel(operation.stage);
-    if (migrationProgressStatus) migrationProgressStatus.textContent = operation.status || "Minecraft data migration is running.";
+    if (migrationProgressStatus) migrationProgressStatus.textContent = operation.status || jvT("ui.dde3c697d2f2");
     if (migrationProgressID) migrationProgressID.textContent = operation.operation_id || "";
     if (migrationReconnect) migrationReconnect.hidden = true;
     if (migrationSuccess) migrationSuccess.hidden = operation.state !== "succeeded";
@@ -1216,8 +1216,8 @@
     }
     if (migrationMountNote) {
       migrationMountNote.textContent = existingMount
-        ? "This filesystem is already mounted. Review will verify this exact mount point."
-        : "This filesystem is not mounted. The migration backend can create a permanent mount at this location.";
+        ? jvT("ui.a9b612c0b766")
+        : jvT("ui.cc764c13a4bf");
     }
     if (migrationPath) migrationPath.value = minecraftDataPath(mountPoint);
     migrationDialog.showModal();
@@ -1228,7 +1228,7 @@
   migrationReview?.addEventListener("click", async () => {
     if (migrationError) { migrationError.hidden = true; migrationError.textContent = ""; }
     migrationReview.disabled = true;
-    migrationReview.textContent = "Reviewing…";
+    migrationReview.textContent = jvT("ui.fcc53388888f");
     try {
       const body = migrationRequestBody();
       const payload = await migrationJSON("/api/new-storage/minecraft-data/plan", {
@@ -1246,7 +1246,7 @@
       }
     } finally {
       migrationReview.disabled = false;
-      migrationReview.textContent = "Review migration";
+      migrationReview.textContent = jvT("ui.03e285059a0f");
     }
   });
 
@@ -1258,7 +1258,7 @@
     migrationApply.disabled = true;
     if (migrationClose) migrationClose.disabled = true;
     if (migrationBack) migrationBack.disabled = true;
-    migrationApply.textContent = "Starting…";
+    migrationApply.textContent = jvT("ui.bbe5fc3b9ef3");
     try {
       const body = migrationRequestBody();
       body.set("plan_fingerprint", reviewedMigrationPlan.plan_fingerprint || "");
@@ -1281,7 +1281,7 @@
       migrationApplying = false;
       if (migrationClose) migrationClose.disabled = false;
       if (migrationBack) migrationBack.disabled = false;
-      migrationApply.textContent = "Start migration";
+      migrationApply.textContent = jvT("ui.91d77a655ec1");
       updateMigrationApplyState();
     }
   });
@@ -1296,7 +1296,7 @@
     reviewedMigrationPlan = null;
     if (migrationSetup) migrationSetup.hidden = false;
     if (migrationReviewPanel) migrationReviewPanel.hidden = true;
-    if (migrationTitle) migrationTitle.textContent = "Use this filesystem";
+    if (migrationTitle) migrationTitle.textContent = jvT("ui.76885b1c6c88");
     migrationPath?.focus();
   });
   migrationClose?.addEventListener("click", closeMigrationDialog);
@@ -1309,37 +1309,37 @@
   void showCurrentMigrationIfAny();
 
   function actionLabel(action) {
-    if (action === "use-for-backups") return "Use for backups";
-    if (action === "delete_partition") return "Delete partition";
-    if (action === "initialize_disk") return "Reinitialize entire disk as GPT";
-    if (action === "mount-for-now") return "Mount for now";
-    if (action === "mount-permanently") return "Mount permanently";
-    if (action === "make-permanent") return "Make permanent";
-    if (action === "mount-now") return "Mount now";
-    if (action === "unmount-for-now") return "Unmount for now";
-    if (action === "remove-permanent") return "Remove permanent mount";
-    return "Format partition";
+    if (action === "use-for-backups") return jvT("ui.3e445d7176e5");
+    if (action === "delete_partition") return jvT("ui.c122a05a345e");
+    if (action === "initialize_disk") return jvT("ui.25a4b0df9763");
+    if (action === "mount-for-now") return jvT("ui.b38026295cf7");
+    if (action === "mount-permanently") return jvT("ui.c25aca017ad2");
+    if (action === "make-permanent") return jvT("ui.47c6c7c07b5a");
+    if (action === "mount-now") return jvT("ui.ee66044030fe");
+    if (action === "unmount-for-now") return jvT("ui.3bfad184955d");
+    if (action === "remove-permanent") return jvT("ui.5b8d0b0a935c");
+    return jvT("ui.9c138f81e8f1");
   }
 
   function actionCopy(action) {
-    if (action === "use-for-backups") return "Review this permanently mounted partition as the backup destination. Existing files will be kept.";
-    if (action === "delete_partition") return "Permanently delete only this partition and all its data. Its space becomes unallocated; neighboring partitions stay unchanged.";
-    if (action === "initialize_disk") return "Erase the entire disk and create a modern GPT partition table. Then choose sizes for new XFS partitions in its unallocated space.";
-    if (action === "mount-for-now") return "This storage will stay mounted at the selected location until you unmount it or reboot JustVoxel.";
-    if (action === "mount-permanently") return "This storage will be mounted at the selected location and JustVoxel will mount it automatically after every reboot.";
-    if (action === "make-permanent") return "JustVoxel will remember the current mount location and mount this storage automatically after every reboot.";
-    if (action === "mount-now") return "This storage already has a permanent mount location. It will be mounted there now.";
+    if (action === "use-for-backups") return jvT("ui.9b336d24fadf");
+    if (action === "delete_partition") return jvT("ui.63f8d5517bed");
+    if (action === "initialize_disk") return jvT("ui.18bd18ebd2bb");
+    if (action === "mount-for-now") return jvT("ui.936e8a08a57e");
+    if (action === "mount-permanently") return jvT("ui.55459c21e4fb");
+    if (action === "make-permanent") return jvT("ui.19f306d1294c");
+    if (action === "mount-now") return jvT("ui.91a63a9b84d9");
     if (action === "unmount-for-now") {
       if (selectedMountStatus?.persistence === "justvoxel") {
-        return "This storage will be unmounted now. JustVoxel will mount it automatically again after the next reboot.";
+        return jvT("ui.939f86ea1091");
       }
       if (selectedMountStatus?.persistence === "external") {
-        return "This storage will be unmounted now. Its existing saved mount setting will not be changed.";
+        return jvT("ui.e9db1950e7bc");
       }
-      return "This storage will be unmounted now. It will stay unmounted until you mount it again.";
+      return jvT("ui.2b8b3f575593");
     }
-    if (action === "remove-permanent") return "This storage will be unmounted and JustVoxel will stop mounting it automatically after reboot. Your files will not be deleted.";
-    return "Review exactly what will be destroyed before formatting this partition as XFS.";
+    if (action === "remove-permanent") return jvT("ui.629b167e6d94");
+    return jvT("ui.d9725ded7258");
   }
 
   function defaultMountPoint(data) {
@@ -1394,11 +1394,11 @@
       confirmSliderText,
       confirmToggleRow,
       confirmToggle,
-      "Slide to confirm destructive action",
+      jvT("ui.7f9334299170"),
     );
     if (actionError) { actionError.hidden = true; actionError.textContent = ""; }
-    if (reviewButton) { reviewButton.hidden = false; reviewButton.disabled = false; reviewButton.textContent = "Review action"; }
-    if (applyButton) { applyButton.hidden = true; applyButton.disabled = false; applyButton.textContent = "Apply action"; }
+    if (reviewButton) { reviewButton.hidden = false; reviewButton.disabled = false; reviewButton.textContent = jvT("ui.8f102c2baf65"); }
+    if (applyButton) { applyButton.hidden = true; applyButton.disabled = false; applyButton.textContent = jvT("ui.79ca6b45e0ef"); }
   }
 
   root.querySelectorAll("[data-storage-initialize]").forEach((button) => {
@@ -1435,7 +1435,7 @@
 
   async function postAction(phase, extra) {
     const request = actionRequest();
-    if (!request) throw new Error("Storage action could not be prepared.");
+    if (!request) throw new Error(jvT("ui.966432911d4d"));
     const body = new URLSearchParams();
     body.set("csrf", csrf);
     body.set("operation", request.operation);
@@ -1455,7 +1455,7 @@
     let payload = null;
     try { payload = await response.json(); } catch (_) { payload = null; }
     if (!response.ok || !payload?.ok) {
-      throw new Error(payload?.error || "Storage action could not be completed.");
+      throw new Error(payload?.error || jvT("ui.4e3c976cd0a3"));
     }
     return payload;
   }
@@ -1466,38 +1466,38 @@
 
   function targetDescription(plan) {
     if (selectedAction === "use-for-backups") return "Mount: " + plan.mount_point + " · Backup directory: " + plan.path;
-    if (selectedAction === "delete_partition") return "Partition deleted; space becomes unallocated";
-    if (selectedAction === "initialize_disk") return "Entire disk erased; GPT table with unallocated space";
-    if (selectedAction === "mount-for-now") return "Mounted for now at " + (plan.mount_point || "selected location");
-    if (selectedAction === "mount-permanently" || selectedAction === "make-permanent") return "Permanent mount at " + (plan.mount_point || "selected location");
-    if (selectedAction === "mount-now") return "Mounted now at " + (plan.mount_point || "saved location");
+    if (selectedAction === "delete_partition") return jvT("ui.2feb49e37e60");
+    if (selectedAction === "initialize_disk") return jvT("ui.1940637b5b73");
+    if (selectedAction === "mount-for-now") return jvT("ui.0a9aeb1ab18f") + (plan.mount_point || "selected location");
+    if (selectedAction === "mount-permanently" || selectedAction === "make-permanent") return jvT("ui.9a7be41be876") + (plan.mount_point || "selected location");
+    if (selectedAction === "mount-now") return jvT("ui.eeff23f0dc71") + (plan.mount_point || "saved location");
     if (selectedAction === "unmount-for-now") {
-      if (selectedMountStatus?.persistence === "justvoxel") return "Unmounted for now; returns after reboot";
-      if (selectedMountStatus?.persistence === "external") return "Unmounted for now; saved setting kept";
-      return "Unmounted";
+      if (selectedMountStatus?.persistence === "justvoxel") return jvT("ui.6b827e9c3609");
+      if (selectedMountStatus?.persistence === "external") return jvT("ui.e25262547997");
+      return jvT("ui.870c28714a20");
     }
-    if (selectedAction === "remove-permanent") return "Permanent mount removed";
-    return "New XFS filesystem";
+    if (selectedAction === "remove-permanent") return jvT("ui.7987f37b3c2c");
+    return jvT("ui.5cf3142fae57");
   }
 
   reviewButton?.addEventListener("click", async () => {
     if (!selectedPartition || !selectedAction) return;
     if (actionError) { actionError.hidden = true; actionError.textContent = ""; }
     reviewButton.disabled = true;
-    reviewButton.textContent = "Reviewing…";
+    reviewButton.textContent = jvT("ui.fcc53388888f");
     try {
       const payload = await postAction("plan");
       reviewedPlan = payload.proposed;
       if (selectedAction === "use-for-backups") reviewedPlan.fingerprint = payload.fingerprint;
       if (reviewPanel) reviewPanel.hidden = false;
       if (reviewDevice) reviewDevice.textContent = reviewedPlan.device || selectedPartition.path;
-      if (reviewRole) reviewRole.textContent = reviewedPlan.role || selectedPartition.role || "Available";
+      if (reviewRole) reviewRole.textContent = reviewedPlan.role || selectedPartition.role || jvT("ui.e674447337e8");
       if (reviewFilesystem) reviewFilesystem.textContent = filesystemDisplay(reviewedPlan.filesystem);
       if (reviewTarget) reviewTarget.textContent = targetDescription(reviewedPlan);
       if (reviewTargetRow) reviewTargetRow.hidden = false;
       renderWarnings(payload.warnings);
       const needsConfirmation = Boolean(reviewedPlan.confirmation);
-      const destructiveSummary = (reviewedPlan.device || selectedPartition.path) + (selectedAction === "delete_partition" ? " will be deleted" : selectedAction === "initialize_disk" ? " will be entirely erased" : " will be formatted");
+      const destructiveSummary = (reviewedPlan.device || selectedPartition.path) + (selectedAction === "delete_partition" ? " will be deleted" : selectedAction === "initialize_disk" ? jvT("ui.b81e47b89397") : " will be formatted");
       resetConfirmationControl(
         confirmationField,
         confirmationSummary,
@@ -1506,7 +1506,7 @@
         confirmSliderText,
         confirmToggleRow,
         confirmToggle,
-        "Slide to confirm destructive action",
+        jvT("ui.7f9334299170"),
       );
       if (confirmationSummary) confirmationSummary.textContent = destructiveSummary;
       if (confirmationField) confirmationField.hidden = !needsConfirmation;
@@ -1514,7 +1514,7 @@
       if (applyButton) {
         applyButton.hidden = false;
         applyButton.disabled = needsConfirmation;
-        applyButton.textContent = reviewedPlan.destructive ? "Apply destructive action" : "Apply action";
+        applyButton.textContent = reviewedPlan.destructive ? jvT("ui.a6e53d6b90d2") : jvT("ui.79ca6b45e0ef");
       }
       if (needsConfirmation) confirmSlider?.focus();
       else applyButton?.focus();
@@ -1522,7 +1522,7 @@
       if (actionError) { actionError.textContent = options.onSelect && selectedAction.startsWith("mount") ? setupMountError(error.message) : error.message; actionError.hidden = false; }
     } finally {
       reviewButton.disabled = false;
-      reviewButton.textContent = "Review action";
+      reviewButton.textContent = jvT("ui.8f102c2baf65");
     }
   });
 
@@ -1533,8 +1533,8 @@
       confirmSlider,
       confirmSliderShell,
       confirmSliderText,
-      (reviewedPlan.device || selectedPartition?.path || "Selected partition") + (selectedAction === "delete_partition" ? " will be deleted" : selectedAction === "initialize_disk" ? " will be entirely erased" : " will be formatted"),
-      "Slide to confirm destructive action",
+      (reviewedPlan.device || selectedPartition?.path || jvT("ui.aea1c108998d")) + (selectedAction === "delete_partition" ? " will be deleted" : selectedAction === "initialize_disk" ? jvT("ui.b81e47b89397") : " will be formatted"),
+      jvT("ui.7f9334299170"),
     );
     if (confirmToggleRow) confirmToggleRow.hidden = !needsConfirmation || !sliderArmed;
     if (!sliderArmed && confirmToggle) confirmToggle.checked = false;
@@ -1550,7 +1550,7 @@
     const expected = reviewedPlan.confirmation || "";
     const confirmationReady = Number(confirmSlider?.value || 0) >= 100 && Boolean(confirmToggle?.checked);
     if (expected && !confirmationReady) {
-      if (actionError) { actionError.textContent = "Slide fully to the right, then switch Confirm on before applying."; actionError.hidden = false; }
+      if (actionError) { actionError.textContent = jvT("ui.8ad19c5363e9"); actionError.hidden = false; }
       confirmSlider?.focus();
       return;
     }
@@ -1559,21 +1559,21 @@
     applyButton.disabled = true;
     if (actionClose) actionClose.disabled = true;
     if (actionCancel) actionCancel.disabled = true;
-    applyButton.textContent = "Applying…";
+    applyButton.textContent = jvT("ui.3329a9bb48b9");
     try {
       await postAction("apply", {
         fingerprint: reviewedPlan.fingerprint,
         confirmation: entered,
       });
       actionDialog?.close();
-      refreshStorageWorkspace(selectedAction.startsWith("mount") ? "Drive mounted successfully." : "Storage updated.");
+      refreshStorageWorkspace(selectedAction.startsWith("mount") ? jvT("ui.f88542d3a421") : jvT("ui.019bd0148d26"));
     } catch (error) {
       actionApplying = false;
       if (actionError) { actionError.textContent = options.onSelect && selectedAction.startsWith("mount") ? setupMountError(error.message) : error.message; actionError.hidden = false; }
       if (actionClose) actionClose.disabled = false;
       if (actionCancel) actionCancel.disabled = false;
       applyButton.disabled = false;
-      applyButton.textContent = reviewedPlan.destructive ? "Apply destructive action" : "Apply action";
+      applyButton.textContent = reviewedPlan.destructive ? jvT("ui.a6e53d6b90d2") : jvT("ui.79ca6b45e0ef");
     }
   });
   }

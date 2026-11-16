@@ -77,7 +77,7 @@ func (a *App) registerAddServerWizardRoutes(mux *http.ServeMux) {
 				draft, exists := setupDrafts.get(a, session)
 				backupEdit := draft.CoreCreated && (suffix == "/review/back" || suffix == "/backups")
 				if exists && draft.AddServer && draft.CreationAttempted && r.Method == http.MethodPost && !backupEdit && suffix != "/review/apply" && suffix != "/cancel" && suffix != "/review/cancel" {
-					http.Error(w, "Creation has already been submitted. Return to Review to check the result.", http.StatusConflict)
+					http.Error(w, uiText("ui.90da7ede56fa"), http.StatusConflict)
 					return
 				}
 			}
@@ -132,12 +132,12 @@ func (a *App) minecraftServersWorkspace(w http.ResponseWriter, r *http.Request) 
 	}
 	message := ""
 	if r.URL.Query().Get("deleted") == "yes" {
-		message = "Server deleted. Backup archives were preserved as historical archives. Current Restore remains tied to that server identity."
+		message = ui(w, "ui.a2e4780da483")
 	}
 	if r.URL.Query().Get("created") == "yes" {
-		message = "Minecraft server created."
+		message = ui(w, "ui.df6478b86f23")
 	}
-	data := minecraftServersPageData{Title: "Minecraft Servers", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI, CSRF: csrfFromRequest(r), Identity: identity, Message: message, Configured: configuration.Configured}
+	data := minecraftServersPageData{Title: ui(w, "ui.d9d8bd931a78"), Version: a.config.Version, ManagementAPI: a.config.ManagementAPI, CSRF: csrfFromRequest(r), Identity: identity, Message: message, Configured: configuration.Configured}
 	data.Servers, data.Error = a.minecraftServerInventory(r.Context(), session)
 	a.renderAdminDiscovery(w, "minecraft_servers.html", data)
 }
@@ -146,38 +146,38 @@ func (a *App) minecraftServersWorkspace(w http.ResponseWriter, r *http.Request) 
 // The registry remains authoritative for uniqueness at creation time.
 func (a *App) validateAddServerName(ctx context.Context, session, name string, excludeID ...string) error {
 	if !utf8.ValidString(name) {
-		return errors.New("Enter a valid server name.")
+		return errors.New(uiText("ui.8e08c518a2e3"))
 	}
 	for _, r := range name {
 		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
-			return errors.New("Use letters, numbers, spaces, or . _ - ' ( ) in the server name.")
+			return errors.New(uiText("ui.25e1e9702fc8"))
 		}
 	}
 	name = strings.TrimSpace(name)
 	if name == "" || name == "." || name == ".." || utf8.RuneCountInString(name) > 64 {
-		return errors.New("Enter a server name of 1–64 characters.")
+		return errors.New(uiText("ui.5c5a0d3278e0"))
 	}
 	for _, r := range name {
 		if !(unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsMark(r) || r == ' ' || strings.ContainsRune("._-'()", r)) {
-			return errors.New("Use letters, numbers, spaces, or . _ - ' ( ) in the server name.")
+			return errors.New(uiText("ui.25e1e9702fc8"))
 		}
 	}
 	client, ok := a.api.(interface {
 		MinecraftInstances(context.Context, string) ([]api.RegisteredMinecraftInstance, error)
 	})
 	if !ok {
-		return errors.New("Independent server creation is unavailable.")
+		return errors.New(uiText("ui.fca3d11e7828"))
 	}
 	instances, err := client.MinecraftInstances(ctx, session)
 	if err != nil {
-		return errors.New("Server names could not be checked. Try again.")
+		return errors.New(uiText("ui.ca2ab788585b"))
 	}
 	for _, instance := range instances {
 		if len(excludeID) > 0 && instance.ID == excludeID[0] {
 			continue
 		}
 		if strings.EqualFold(instance.DisplayName, name) {
-			return errors.New("Another server already uses this name.")
+			return errors.New(uiText("ui.2ec5db4d828a"))
 		}
 	}
 	return nil
@@ -189,7 +189,7 @@ func availableInstancePort(start int, used map[int]bool) (int, error) {
 			return port, nil
 		}
 	}
-	return 0, errors.New("No unused Minecraft port could be selected.")
+	return 0, errors.New(uiText("ui.3e2318920e2c"))
 }
 func separatedBackupTimes(a, b string) bool {
 	minute := func(s string) int { h, _ := strconv.Atoi(s[:2]); m, _ := strconv.Atoi(s[3:]); return h*60 + m }
@@ -211,7 +211,7 @@ func (a *App) newAddServerDraft(ctx context.Context, session string, client admi
 	}
 	instances, ok := a.api.(addServerAPI)
 	if !ok {
-		return setupDraft{}, errors.New("Independent server creation is unavailable.")
+		return setupDraft{}, errors.New(uiText("ui.fca3d11e7828"))
 	}
 	ids, err := instances.MinecraftInstanceRuntimes(ctx, session)
 	if err != nil {
@@ -250,12 +250,12 @@ func (a *App) newAddServerDraft(ctx context.Context, session string, client admi
 	seen := map[string]bool{}
 	for _, id := range ids {
 		if seen[id] {
-			return setupDraft{}, errors.New("Existing server inventory is ambiguous.")
+			return setupDraft{}, errors.New(uiText("ui.43b98d28d53c"))
 		}
 		seen[id] = true
 		runtime, err := instances.MinecraftInstanceConfiguration(ctx, session, id)
 		if err != nil {
-			return setupDraft{}, errors.New("Existing server settings could not be checked. Resolve the existing server's configuration before adding another.")
+			return setupDraft{}, errors.New(uiText("ui.8193ab557d46"))
 		}
 		if runtime.Software == "bedrock" {
 			javaUsed[runtime.BedrockTCPPort], bedrockUsed[runtime.BedrockTCPPort] = true, true
@@ -269,7 +269,7 @@ func (a *App) newAddServerDraft(ctx context.Context, session string, client admi
 		}
 		memory, valid := setupMemoryMiB(runtime.ContainerMemory)
 		if !valid {
-			return setupDraft{}, errors.New("Existing server memory could not be checked.")
+			return setupDraft{}, errors.New(uiText("ui.83cddf6b5d84"))
 		}
 		draft.OtherMemoryMiB += memory
 		if runtime.StartOnBoot {
@@ -300,7 +300,7 @@ func (a *App) newAddServerDraft(ctx context.Context, session string, client admi
 		}
 		if backup.Enabled {
 			if !addServerBackupTimePattern.MatchString(backup.Time) {
-				return setupDraft{}, errors.New("An existing backup schedule could not be checked.")
+				return setupDraft{}, errors.New(uiText("ui.76df17cc94a9"))
 			}
 			schedules = append(schedules, backup.Time)
 		}

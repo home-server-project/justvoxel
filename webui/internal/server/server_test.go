@@ -519,7 +519,7 @@ func TestWallpaperContentSecurityPolicy(t *testing.T) {
 }
 
 func TestPlayitInitialStylesMatchCSP(t *testing.T) {
-	data, err := assets.ReadFile("static/network-workspace.js")
+	data, err := englishPresentationAsset("static/network-workspace.js")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -88,25 +88,25 @@ func (a *App) storageBrowserWholeDiskChange(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		writeStorageBrowserWholeDiskJSON(w, http.StatusBadRequest, storageBrowserWholeDiskResponse{OK: false, Error: "could not read disk preparation request"})
+		writeStorageBrowserWholeDiskJSON(w, http.StatusBadRequest, storageBrowserWholeDiskResponse{OK: false, Error: ui(w, "ui.c3701980b10d")})
 		return
 	}
 	purpose := strings.TrimSpace(r.FormValue("purpose"))
 	device := strings.TrimSpace(r.FormValue("device"))
 	if device == "" || (purpose != "minecraft" && purpose != "backups") {
-		writeStorageBrowserWholeDiskJSON(w, http.StatusBadRequest, storageBrowserWholeDiskResponse{OK: false, Error: "choose a disk and storage purpose"})
+		writeStorageBrowserWholeDiskJSON(w, http.StatusBadRequest, storageBrowserWholeDiskResponse{OK: false, Error: ui(w, "ui.202907bbca95")})
 		return
 	}
 
 	if purpose == "minecraft" {
 		storage, err := discovery.AdminStorage(r.Context(), session)
 		if err != nil {
-			writeStorageBrowserWholeDiskJSON(w, storageBrowserErrorStatus(err), storageBrowserWholeDiskResponse{OK: false, Error: apiMessage(err, "storage discovery is unavailable")})
+			writeStorageBrowserWholeDiskJSON(w, storageBrowserErrorStatus(err), storageBrowserWholeDiskResponse{OK: false, Error: apiMessage(err, ui(w, "ui.246f08b71730"))})
 			return
 		}
 		for _, candidate := range storage.Devices {
 			if candidate.Path == device && strings.EqualFold(strings.TrimSpace(candidate.Transport), "usb") {
-				writeStorageBrowserWholeDiskJSON(w, http.StatusBadRequest, storageBrowserWholeDiskResponse{OK: false, Error: "USB disks cannot be used for Minecraft data"})
+				writeStorageBrowserWholeDiskJSON(w, http.StatusBadRequest, storageBrowserWholeDiskResponse{OK: false, Error: ui(w, "ui.667dd1dda399")})
 				return
 			}
 		}
@@ -115,7 +115,7 @@ func (a *App) storageBrowserWholeDiskChange(w http.ResponseWriter, r *http.Reque
 	if purpose == "backups" {
 		client, ok := a.api.(adminStorageWholeDiskProvisionAPI)
 		if !ok {
-			writeStorageBrowserWholeDiskJSON(w, http.StatusServiceUnavailable, storageBrowserWholeDiskResponse{OK: false, Error: "backup disk preparation is unavailable"})
+			writeStorageBrowserWholeDiskJSON(w, http.StatusServiceUnavailable, storageBrowserWholeDiskResponse{OK: false, Error: ui(w, "ui.bae0196de135")})
 			return
 		}
 		request := api.AdminStorageProvisionRequest{
@@ -137,11 +137,11 @@ func (a *App) storageBrowserWholeDiskChange(w http.ResponseWriter, r *http.Reque
 			result, err = client.AdminStorageProvisionPlan(r.Context(), session, request)
 		}
 		if err != nil {
-			writeStorageBrowserWholeDiskJSON(w, storageBrowserErrorStatus(err), storageBrowserWholeDiskResponse{OK: false, Error: apiMessage(err, "backup disk preparation failed")})
+			writeStorageBrowserWholeDiskJSON(w, storageBrowserErrorStatus(err), storageBrowserWholeDiskResponse{OK: false, Error: apiMessage(err, ui(w, "ui.ce779051582d"))})
 			return
 		}
 		if apply && !result.Applied {
-			writeStorageBrowserWholeDiskJSON(w, http.StatusConflict, storageBrowserWholeDiskResponse{OK: false, Error: "backup disk preparation did not complete"})
+			writeStorageBrowserWholeDiskJSON(w, http.StatusConflict, storageBrowserWholeDiskResponse{OK: false, Error: ui(w, "ui.e4e1e8b434d0")})
 			return
 		}
 		writeStorageBrowserWholeDiskJSON(w, http.StatusOK, storageBrowserWholeDiskResponse{
@@ -156,7 +156,7 @@ func (a *App) storageBrowserWholeDiskChange(w http.ResponseWriter, r *http.Reque
 
 	client, ok := a.api.(adminStorageWholeDiskMigrationAPI)
 	if !ok {
-		writeStorageBrowserWholeDiskJSON(w, http.StatusServiceUnavailable, storageBrowserWholeDiskResponse{OK: false, Error: "Minecraft disk preparation is unavailable"})
+		writeStorageBrowserWholeDiskJSON(w, http.StatusServiceUnavailable, storageBrowserWholeDiskResponse{OK: false, Error: ui(w, "ui.58ee50dc5f62")})
 		return
 	}
 	request := api.AdminDataMigrationPlanRequest{
@@ -182,7 +182,7 @@ func (a *App) storageBrowserWholeDiskChange(w http.ResponseWriter, r *http.Reque
 	}
 	if err != nil {
 		writeStorageBrowserWholeDiskJSON(w, dataMigrationErrorStatus(err), storageBrowserWholeDiskResponse{
-			OK: false, Error: dataMigrationErrorMessage(err, "Minecraft disk preparation failed"),
+			OK: false, Error: dataMigrationErrorMessage(err, ui(w, "ui.fd32d3d2fecb")),
 		})
 		return
 	}
@@ -251,11 +251,11 @@ func (a *App) storageBrowserAction(w http.ResponseWriter, r *http.Request, apply
 	}
 	client, ok := a.api.(adminStorageActionAPI)
 	if !ok {
-		writeStorageBrowserActionJSON(w, http.StatusServiceUnavailable, api.AdminStorageActionResponse{OK: false, Error: "storage actions are unavailable"})
+		writeStorageBrowserActionJSON(w, http.StatusServiceUnavailable, api.AdminStorageActionResponse{OK: false, Error: ui(w, "ui.36ba49211d45")})
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		writeStorageBrowserActionJSON(w, http.StatusBadRequest, api.AdminStorageActionResponse{OK: false, Error: "could not read storage action"})
+		writeStorageBrowserActionJSON(w, http.StatusBadRequest, api.AdminStorageActionResponse{OK: false, Error: ui(w, "ui.2cbc7c67f318")})
 		return
 	}
 	request := api.AdminStorageActionRequest{
@@ -268,7 +268,7 @@ func (a *App) storageBrowserAction(w http.ResponseWriter, r *http.Request, apply
 		Fingerprint:  strings.TrimSpace(r.FormValue("fingerprint")),
 	}
 	if request.Operation == "" || request.Device == "" {
-		writeStorageBrowserActionJSON(w, http.StatusBadRequest, api.AdminStorageActionResponse{OK: false, Error: "choose a storage action and partition"})
+		writeStorageBrowserActionJSON(w, http.StatusBadRequest, api.AdminStorageActionResponse{OK: false, Error: ui(w, "ui.d1a862daecff")})
 		return
 	}
 
@@ -305,12 +305,12 @@ func (a *App) storageBrowserMountStatus(w http.ResponseWriter, r *http.Request) 
 	}
 	client, ok := a.api.(adminStorageMountAPI)
 	if !ok {
-		writeStorageBrowserMountJSON(w, http.StatusServiceUnavailable, api.AdminStorageMountResponse{OK: false, Error: "permanent mount actions are unavailable"})
+		writeStorageBrowserMountJSON(w, http.StatusServiceUnavailable, api.AdminStorageMountResponse{OK: false, Error: ui(w, "ui.83daf29184b3")})
 		return
 	}
 	device := strings.TrimSpace(r.URL.Query().Get("device"))
 	if device == "" {
-		writeStorageBrowserMountJSON(w, http.StatusBadRequest, api.AdminStorageMountResponse{OK: false, Error: "choose a storage partition"})
+		writeStorageBrowserMountJSON(w, http.StatusBadRequest, api.AdminStorageMountResponse{OK: false, Error: ui(w, "ui.9323924f73df")})
 		return
 	}
 	result, err := client.AdminStorageMountStatus(r.Context(), session, device)
@@ -320,7 +320,7 @@ func (a *App) storageBrowserMountStatus(w http.ResponseWriter, r *http.Request) 
 		if errors.As(err, &responseErr) && responseErr.StatusCode >= 400 && responseErr.StatusCode < 500 {
 			status = responseErr.StatusCode
 		}
-		writeStorageBrowserMountJSON(w, status, api.AdminStorageMountResponse{OK: false, Error: apiMessage(err, "permanent mount status is unavailable")})
+		writeStorageBrowserMountJSON(w, status, api.AdminStorageMountResponse{OK: false, Error: apiMessage(err, ui(w, "ui.e70aedb5d61d"))})
 		return
 	}
 	writeStorageBrowserMountJSON(w, http.StatusOK, result)
@@ -345,11 +345,11 @@ func (a *App) storageBrowserMountChange(w http.ResponseWriter, r *http.Request, 
 	}
 	client, ok := a.api.(adminStorageMountAPI)
 	if !ok {
-		writeStorageBrowserMountJSON(w, http.StatusServiceUnavailable, api.AdminStorageMountResponse{OK: false, Error: "permanent mount actions are unavailable"})
+		writeStorageBrowserMountJSON(w, http.StatusServiceUnavailable, api.AdminStorageMountResponse{OK: false, Error: ui(w, "ui.83daf29184b3")})
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		writeStorageBrowserMountJSON(w, http.StatusBadRequest, api.AdminStorageMountResponse{OK: false, Error: "could not read permanent mount action"})
+		writeStorageBrowserMountJSON(w, http.StatusBadRequest, api.AdminStorageMountResponse{OK: false, Error: ui(w, "ui.4047305379d6")})
 		return
 	}
 	request := api.AdminStorageMountRequest{
@@ -359,7 +359,7 @@ func (a *App) storageBrowserMountChange(w http.ResponseWriter, r *http.Request, 
 		Fingerprint: strings.TrimSpace(r.FormValue("fingerprint")),
 	}
 	if request.Device == "" || (request.Operation != "persist" && request.Operation != "remove") {
-		writeStorageBrowserMountJSON(w, http.StatusBadRequest, api.AdminStorageMountResponse{OK: false, Error: "choose a permanent mount action and partition"})
+		writeStorageBrowserMountJSON(w, http.StatusBadRequest, api.AdminStorageMountResponse{OK: false, Error: ui(w, "ui.6fc5a9d13746")})
 		return
 	}
 
@@ -376,7 +376,7 @@ func (a *App) storageBrowserMountChange(w http.ResponseWriter, r *http.Request, 
 		if errors.As(err, &responseErr) && responseErr.StatusCode >= 400 && responseErr.StatusCode < 500 {
 			status = responseErr.StatusCode
 		}
-		writeStorageBrowserMountJSON(w, status, api.AdminStorageMountResponse{OK: false, Error: apiMessage(err, "permanent mount action failed")})
+		writeStorageBrowserMountJSON(w, status, api.AdminStorageMountResponse{OK: false, Error: apiMessage(err, ui(w, "ui.25a1ba832e04"))})
 		return
 	}
 	writeStorageBrowserMountJSON(w, http.StatusOK, result)
@@ -418,17 +418,17 @@ func (a *App) storageBrowserBackupPartitionChange(w http.ResponseWriter, r *http
 	}
 	client, ok := a.api.(adminStorageBackupPartitionAPI)
 	if !ok {
-		fail(http.StatusServiceUnavailable, "backup partition adoption is unavailable")
+		fail(http.StatusServiceUnavailable, ui(w, "ui.6b782ed6a265"))
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		fail(http.StatusBadRequest, "could not read backup partition request")
+		fail(http.StatusBadRequest, ui(w, "ui.bef236c6e073"))
 		return
 	}
 	device := strings.TrimSpace(r.FormValue("device"))
 	storage, err := discovery.AdminStorage(r.Context(), session)
 	if err != nil {
-		fail(storageBrowserErrorStatus(err), apiMessage(err, "storage discovery is unavailable"))
+		fail(storageBrowserErrorStatus(err), apiMessage(err, ui(w, "ui.246f08b71730")))
 		return
 	}
 	eligible := false
@@ -439,18 +439,18 @@ func (a *App) storageBrowserBackupPartitionChange(w http.ResponseWriter, r *http
 		}
 	}
 	if !eligible {
-		fail(http.StatusBadRequest, "choose a writable non-system partition")
+		fail(http.StatusBadRequest, ui(w, "ui.7000cc72f10d"))
 		return
 	}
 	status, err := client.AdminStorageMountStatus(r.Context(), session, device)
 	if err != nil {
-		fail(storageBrowserErrorStatus(err), apiMessage(err, "partition mount status is unavailable"))
+		fail(storageBrowserErrorStatus(err), apiMessage(err, ui(w, "ui.9c607c4e7c78")))
 		return
 	}
 	mount := status.Proposed
 	if !status.OK || mount.Device != device || !mount.Mounted || mount.CurrentMountPoint == "" ||
 		(mount.Persistence != "justvoxel" && mount.Persistence != "external") || mount.CurrentMountPoint != mount.MountPoint {
-		fail(http.StatusBadRequest, "mount this partition permanently before using it for backups")
+		fail(http.StatusBadRequest, ui(w, "ui.7f5cca698896"))
 		return
 	}
 	request := api.AdminBackupStorageRequest{
@@ -459,16 +459,16 @@ func (a *App) storageBrowserBackupPartitionChange(w http.ResponseWriter, r *http
 	}
 	// Apply must use the reviewed mount, rather than adopting a new location silently.
 	if apply && (r.FormValue("mount_point") != request.MountPoint || r.FormValue("path") != request.Path) {
-		fail(http.StatusConflict, "partition mount changed; review the backup destination again")
+		fail(http.StatusConflict, ui(w, "ui.f2d711b90422"))
 		return
 	}
 	plan, err := client.AdminBackupStoragePlan(r.Context(), session, request)
 	if err != nil {
-		fail(storageBrowserErrorStatus(err), apiMessage(err, "backup destination review failed"))
+		fail(storageBrowserErrorStatus(err), apiMessage(err, ui(w, "ui.a8e3fe8ffc80")))
 		return
 	}
 	if !plan.OK {
-		fail(http.StatusBadRequest, "backup destination review failed")
+		fail(http.StatusBadRequest, ui(w, "ui.a8e3fe8ffc80"))
 		return
 	}
 	// Bind review to the backend's validated destination identity and warnings.
@@ -480,22 +480,22 @@ func (a *App) storageBrowserBackupPartitionChange(w http.ResponseWriter, r *http
 		Warnings   []string
 	}{request, plan.Proposed.ExpectedUUID, plan.Proposed.ExpectedSource, plan.Proposed.Filesystem, plan.Warnings})
 	if err != nil {
-		fail(http.StatusInternalServerError, "could not prepare backup destination review")
+		fail(http.StatusInternalServerError, ui(w, "ui.a2882cb4fca1"))
 		return
 	}
 	fingerprint := fmt.Sprintf("sha256:%x", sha256.Sum256(evidence))
 	if apply {
 		if r.FormValue("fingerprint") != fingerprint {
-			fail(http.StatusConflict, "backup destination changed; review it again")
+			fail(http.StatusConflict, ui(w, "ui.c1d04601394c"))
 			return
 		}
 		result, err := client.AdminBackupStorageApply(r.Context(), session, request)
 		if err != nil {
-			fail(storageBrowserErrorStatus(err), apiMessage(err, "backup destination apply failed"))
+			fail(storageBrowserErrorStatus(err), apiMessage(err, ui(w, "ui.4514d5e2d5d0")))
 			return
 		}
 		if !result.OK || !result.Applied {
-			fail(http.StatusConflict, "backup destination change did not complete")
+			fail(http.StatusConflict, ui(w, "ui.411d2e160936"))
 			return
 		}
 	}

@@ -71,7 +71,7 @@ func serverSoftware(value string) string {
 	case "neoforge":
 		return "NeoForge"
 	default:
-		return "Software unavailable"
+		return uiText("ui.a6c59994aca8")
 	}
 }
 
@@ -91,40 +91,40 @@ func (s *minecraftServerSummary) setState(state string) {
 	switch strings.ToLower(state) {
 	case "running":
 		s.CardHealth = "success"
-		s.State = "Running"
+		s.State = uiText("ui.f4ccae29e1bb")
 		s.StateClass = "success"
 		s.Running, s.CanSwitch, s.CanConfigureBoot = true, true, true
 		s.CanStop = true
 		s.CanRestart = true
 	case "stopped":
 		s.CardHealth = "neutral"
-		s.State = "Stopped"
+		s.State = uiText("ui.1a4f630ac1b6")
 		s.StateClass = "error"
 		s.CanSwitch, s.CanConfigureBoot = true, true
 		s.CanStart = true
 	case "starting":
 		s.CardHealth = "warning"
-		s.State = "Starting"
+		s.State = uiText("ui.aeed4d26bb5f")
 	case "stopping":
 		s.CardHealth = "warning"
-		s.State = "Stopping"
+		s.State = uiText("ui.a71ee1d4ac5c")
 	case "failed":
-		s.State = "Failed"
+		s.State = uiText("ui.031a8f0f659d")
 		s.StateClass = "error"
 		s.CanStart = true
 	case "configured":
 		s.CardHealth = "neutral"
-		s.State = "Configured"
+		s.State = uiText("ui.84aebc69a1bf")
 	case "recovery_required":
-		s.State = "Recovery required"
+		s.State = uiText("ui.4f22267327b8")
 	case "invalid_configuration":
-		s.State = "Configuration needs attention"
+		s.State = uiText("ui.6969940e62ca")
 	case "degraded":
-		s.State = "Degraded"
+		s.State = uiText("ui.a8494c12f224")
 	case "not_configured", "not configured":
-		s.State = "Not configured"
+		s.State = uiText("ui.dd1841d29502")
 	default:
-		s.State = "Status unavailable"
+		s.State = uiText("ui.7eb5af92e49c")
 	}
 }
 
@@ -181,9 +181,9 @@ func (a *App) independentServerInventory(ctx context.Context, session string) ([
 }
 
 func (a *App) independentServerSummary(ctx context.Context, session string, instance api.RegisteredMinecraftInstance) minecraftServerSummary {
-	s := minecraftServerSummary{ContextID: instance.ID, Name: instance.DisplayName, URL: serverOverviewURL(instance.ID), Software: "Software unavailable", Version: "Version unavailable", State: "Status unavailable", StateClass: "warning", CardHealth: "error"}
+	s := minecraftServerSummary{ContextID: instance.ID, Name: instance.DisplayName, URL: serverOverviewURL(instance.ID), Software: uiText("ui.a6c59994aca8"), Version: uiText("ui.c0a7f647c17d"), State: uiText("ui.7eb5af92e49c"), StateClass: "warning", CardHealth: "error"}
 	if s.Name == "" {
-		s.Name = "Minecraft server"
+		s.Name = uiText("ui.fc80df490dea")
 	}
 	client, ok := a.api.(minecraftServerInventoryAPI)
 	if !ok {
@@ -202,7 +202,7 @@ func (a *App) independentServerSummary(ctx context.Context, session string, inst
 		s.JavaMemory, s.ContainerMemory = c.JavaMemory, c.ContainerMemory
 		s.BootKnown, s.StartOnBoot = true, c.StartOnBoot
 	} else {
-		s.ConfigurationError = "Server configuration could not be checked."
+		s.ConfigurationError = uiText("ui.5f084d0e0517")
 	}
 	if connectionAPI, ok := a.api.(interface {
 		MinecraftInstanceConnection(context.Context, string, string) (api.MinecraftConnection, error)
@@ -239,7 +239,7 @@ func (a *App) minecraftServerInventory(ctx context.Context, session string) ([]m
 	servers := []minecraftServerSummary{}
 	instances, err := a.independentServerInventory(ctx, session)
 	if err != nil {
-		return servers, "Minecraft instances could not be checked. Try opening Minecraft Servers again."
+		return servers, uiText("ui.5ce56db66e30")
 	}
 	for _, instance := range instances {
 		servers = append(servers, a.independentServerSummary(ctx, session, instance))
@@ -250,12 +250,12 @@ func (a *App) minecraftServerInventory(ctx context.Context, session string) ([]m
 func (a *App) selectedServerSummary(w http.ResponseWriter, r *http.Request, session string) (minecraftServerSummary, bool) {
 	id := r.PathValue("id")
 	if !addServerIDPattern.MatchString(id) {
-		http.Error(w, "Server not found.", http.StatusNotFound)
+		http.Error(w, ui(w, "ui.d074483c59de"), http.StatusNotFound)
 		return minecraftServerSummary{}, false
 	}
 	instances, err := a.independentServerInventory(r.Context(), session)
 	if err != nil {
-		http.Error(w, "Server inventory is unavailable.", http.StatusServiceUnavailable)
+		http.Error(w, ui(w, "ui.adfe41895e81"), http.StatusServiceUnavailable)
 		return minecraftServerSummary{}, false
 	}
 	for _, instance := range instances {
@@ -263,7 +263,7 @@ func (a *App) selectedServerSummary(w http.ResponseWriter, r *http.Request, sess
 			return a.independentServerSummary(r.Context(), session, instance), true
 		}
 	}
-	http.Error(w, "Server not found.", http.StatusNotFound)
+	http.Error(w, ui(w, "ui.d074483c59de"), http.StatusNotFound)
 	return minecraftServerSummary{}, false
 }
 
@@ -289,7 +289,7 @@ func (a *App) minecraftSelectedServerAction(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if !a.validCSRF(r) {
-		http.Error(w, "Invalid CSRF token.", http.StatusForbidden)
+		http.Error(w, ui(w, "ui.74bccc44f472"), http.StatusForbidden)
 		return
 	}
 	session, _, identity, ok := a.adminDiscoveryRequest(w, r)
@@ -309,7 +309,7 @@ func (a *App) minecraftSelectedServerAction(w http.ResponseWriter, r *http.Reque
 	}
 	jsonRequest := r.Header.Get("Accept") == "application/json"
 	if jsonRequest && (action != "restart" || !s.CanRestart) {
-		writeMinecraftWorkspaceError(w, 409, "Server state does not permit Restart.")
+		writeMinecraftWorkspaceError(w, 409, ui(w, "ui.f1e1a16b2975"))
 		return
 	}
 	var err error
@@ -320,7 +320,7 @@ func (a *App) minecraftSelectedServerAction(w http.ResponseWriter, r *http.Reque
 	}
 	if jsonRequest {
 		if err != nil {
-			a.writeMinecraftWorkspaceAPIError(w, err, "Restart could not be completed.")
+			a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.d24fcbabdacf"))
 		} else {
 			writeMinecraftWorkspaceJSON(w, 200, map[string]bool{"ok": true})
 		}
@@ -334,7 +334,7 @@ func (a *App) minecraftSelectedServerAction(w http.ResponseWriter, r *http.Reque
 		a.handleAdminDiscoveryError(w, r, err)
 		return
 	}
-	message := "Server action could not be completed. Check server status before trying again."
+	message := ui(w, "ui.51a972887b0f")
 	var responseErr *api.ResponseError
 	if errors.As(err, &responseErr) && responseErr.Message != "" {
 		message = responseErr.Message
@@ -346,7 +346,7 @@ func (a *App) minecraftSelectedServerAction(w http.ResponseWriter, r *http.Reque
 // Card operations require explicit identity, even for a single-server appliance.
 func (a *App) explicitCardServer(w http.ResponseWriter, r *http.Request, session string) (selectedServerContext, bool) {
 	if _, exists := r.URL.Query()["server"]; !exists {
-		writeMinecraftWorkspaceError(w, 400, "Choose a Minecraft server.")
+		writeMinecraftWorkspaceError(w, 400, ui(w, "ui.01fabcf55f34"))
 		return selectedServerContext{}, false
 	}
 	return a.selectedMinecraft(w, r, session)
@@ -358,12 +358,12 @@ func (a *App) minecraftServersLifecycle(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if !a.validCSRF(r) {
-		writeMinecraftWorkspaceError(w, 403, "Invalid CSRF token.")
+		writeMinecraftWorkspaceError(w, 403, ui(w, "ui.74bccc44f472"))
 		return
 	}
 	action := r.FormValue("action")
 	if action != "start" && action != "stop" {
-		writeMinecraftWorkspaceError(w, 400, "Choose Start or Stop.")
+		writeMinecraftWorkspaceError(w, 400, ui(w, "ui.189452933474"))
 		return
 	}
 	selected, ok := a.explicitCardServer(w, r, session)
@@ -372,16 +372,16 @@ func (a *App) minecraftServersLifecycle(w http.ResponseWriter, r *http.Request) 
 	}
 	summary := a.independentServerSummary(r.Context(), session, api.RegisteredMinecraftInstance{ID: selected.ID, DisplayName: selected.Name})
 	if !summary.CanSwitch || (action == "start" && !summary.CanStart) || (action == "stop" && !summary.CanStop) {
-		writeMinecraftWorkspaceError(w, 409, "Server state does not permit this action. Refresh Minecraft Servers.")
+		writeMinecraftWorkspaceError(w, 409, ui(w, "ui.fc9a2971e8de"))
 		return
 	}
 	client, ok := a.api.(minecraftServerLifecycleAPI)
 	if !ok {
-		writeMinecraftWorkspaceError(w, 503, "Server controls are unavailable.")
+		writeMinecraftWorkspaceError(w, 503, ui(w, "ui.5d561696dd33"))
 		return
 	}
 	if err := client.MinecraftInstanceAction(r.Context(), session, selected.ID, action); err != nil {
-		a.writeMinecraftWorkspaceAPIError(w, err, "Server action could not be completed. Check server status before trying again.")
+		a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.51a972887b0f"))
 		return
 	}
 	writeMinecraftWorkspaceJSON(w, 200, map[string]bool{"ok": true})

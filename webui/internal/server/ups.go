@@ -37,7 +37,7 @@ func (a *App) upsAdminClient(w http.ResponseWriter, r *http.Request) (upsAPI, st
 		return nil, "", false
 	}
 	if identity.Role != "administrator" {
-		writeUPSWebError(w, http.StatusForbidden, "Administrator access required")
+		writeUPSWebError(w, http.StatusForbidden, ui(w, "ui.031cc7a3ec82"))
 		return nil, "", false
 	}
 	client, ok := a.api.(upsAPI)
@@ -54,14 +54,14 @@ func (a *App) upsShutdownSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		writeUPSWebError(w, http.StatusBadRequest, "invalid UPS shutdown settings")
+		writeUPSWebError(w, http.StatusBadRequest, ui(w, "ui.9bbbc0ea9670"))
 		return
 	}
 	request := api.UPSShutdownRequest{Enabled: r.FormValue("enabled") == "true"}
 	if request.Enabled {
 		delay, err := strconv.Atoi(strings.TrimSpace(r.FormValue("delay_seconds")))
 		if err != nil {
-			writeUPSWebError(w, http.StatusBadRequest, "Shutdown delay is invalid")
+			writeUPSWebError(w, http.StatusBadRequest, ui(w, "ui.b8d8670c9d33"))
 			return
 		}
 		request.DelaySeconds = delay
@@ -81,14 +81,14 @@ func (a *App) upsSharingSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		writeUPSWebError(w, http.StatusBadRequest, "invalid UPS sharing settings")
+		writeUPSWebError(w, http.StatusBadRequest, ui(w, "ui.6f69cc126960"))
 		return
 	}
 	request := api.UPSSharingRequest{Enabled: r.FormValue("enabled") == "true"}
 	if request.Enabled {
 		port, err := strconv.Atoi(strings.TrimSpace(r.FormValue("listen_port")))
 		if err != nil {
-			writeUPSWebError(w, http.StatusBadRequest, "Sharing port is invalid")
+			writeUPSWebError(w, http.StatusBadRequest, ui(w, "ui.0d0088e6ebfe"))
 			return
 		}
 		request.ListenAddress = strings.TrimSpace(r.FormValue("listen_address"))
@@ -147,7 +147,7 @@ func (a *App) upsSourceSave(w http.ResponseWriter, r *http.Request) {
 	if raw := strings.TrimSpace(r.FormValue("port")); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil {
-			writeUPSWebError(w, http.StatusBadRequest, "Remote NUT port is invalid")
+			writeUPSWebError(w, http.StatusBadRequest, ui(w, "ui.2815c12ccff3"))
 			return
 		}
 		port = parsed
@@ -188,7 +188,7 @@ func (a *App) upsIdentity(w http.ResponseWriter, r *http.Request) (string, api.S
 	case "administrator", "operator", "viewer":
 		return session, identity, true
 	default:
-		writeUPSWebError(w, http.StatusForbidden, "UPS monitoring access denied")
+		writeUPSWebError(w, http.StatusForbidden, ui(w, "ui.3f205a4cb47b"))
 		return "", api.SessionInfo{}, false
 	}
 }

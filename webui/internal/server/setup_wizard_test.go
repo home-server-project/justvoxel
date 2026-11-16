@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os/exec"
 	"strings"
 	"testing"
 )
@@ -16,7 +15,7 @@ const vanillaBedrockHelp = "This software supports Java only."
 
 func assertSetupApplicationLogo(t *testing.T, body string) {
 	t.Helper()
-	headerTemplate, err := assets.ReadFile("templates/header.html")
+	headerTemplate, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +101,7 @@ func TestAdvancedConnectionsBedrockToggleCapabilities(t *testing.T) {
 }
 
 func TestSetupMemoryPresetsMatchDefaultsAndPreserveCustomValues(t *testing.T) {
-	script, err := assets.ReadFile("static/settings.js")
+	script, err := englishPresentationAsset("static/settings.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +211,7 @@ insufficient.click("recommended");
 assert.deepEqual([insufficient.game.value, insufficient.max.value], ["256M", "512M"]);
 assert.equal(open(7884, "4096M", "6144M").selected(), "recommended");
 `
-	cmd := exec.Command("node")
+	cmd := nodeTestCommand()
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("setup memory preset behavior: %v\n%s", err, output)
@@ -250,7 +249,7 @@ func TestSetupEightGBClassDefaultsReachBothWizardModes(t *testing.T) {
 }
 
 func TestSetupWizardCompactDesktopProgressContract(t *testing.T) {
-	css, err := assets.ReadFile("static/setup.css")
+	css, err := englishPresentationAsset("static/setup.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,11 +273,11 @@ func TestSetupWizardCompactDesktopProgressContract(t *testing.T) {
 			t.Fatal("compact progress styling must not be limited to Review")
 		}
 	}
-	markup, err := assets.ReadFile("templates/setup_review.html")
+	markup, err := englishPresentationAsset("templates/setup_review.html")
 	if err != nil {
 		t.Fatal(err)
 	}
-	wizard, err := assets.ReadFile("templates/setup_wizard.html")
+	wizard, err := englishPresentationAsset("templates/setup_wizard.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -656,7 +655,7 @@ func TestSetupWizardUsesCompactAlignedActions(t *testing.T) {
 		t.Fatal("Minecraft step still uses the long continue label")
 	}
 
-	template, err := assets.ReadFile("templates/setup_wizard.html")
+	template, err := englishPresentationAsset("templates/setup_wizard.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -672,7 +671,7 @@ func TestSetupWizardUsesCompactAlignedActions(t *testing.T) {
 }
 
 func TestSetupWizardStorageNoLongerLeavesFirstRunForAdvancedStorage(t *testing.T) {
-	content, err := assets.ReadFile("templates/setup_wizard.html")
+	content, err := englishPresentationAsset("templates/setup_wizard.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -739,14 +738,14 @@ func TestSetupWizardServerStepValidatesAndPersistsChoices(t *testing.T) {
 }
 
 func TestSetupVersionPreviewPresentationContract(t *testing.T) {
-	markup, err := assets.ReadFile("templates/setup_wizard.html")
+	markup, err := englishPresentationAsset("templates/setup_wizard.html")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(markup), `class="setup-version-preview" id="setup-version-preview"`) {
 		t.Fatal("Cross-play is missing its structured version preview container")
 	}
-	script, err := assets.ReadFile("static/settings.js")
+	script, err := englishPresentationAsset("static/settings.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -776,7 +775,7 @@ func TestSetupVersionPreviewPresentationContract(t *testing.T) {
 	if !strings.Contains(source, `preview.replaceChildren(summary);`) || strings.Contains(source, "follows the newest") || strings.Contains(source, "Server software build channel") {
 		t.Fatal("version and compatibility must be separate panels without future compatibility promises")
 	}
-	styles, err := assets.ReadFile("static/setup.css")
+	styles, err := englishPresentationAsset("static/setup.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -789,7 +788,7 @@ func TestSetupVersionPreviewPresentationContract(t *testing.T) {
 			t.Fatalf("version preview styling contract missing %q", want)
 		}
 	}
-	commonStyles, err := assets.ReadFile("static/app.css")
+	commonStyles, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1051,7 +1050,7 @@ func TestConfiguredApplianceCannotEnterFirstRunWizard(t *testing.T) {
 }
 
 func TestDashboardIncludesNonBlockingFirstRunChoiceForUnconfiguredAdministrator(t *testing.T) {
-	dashboard, err := assets.ReadFile("templates/dashboard.html")
+	dashboard, err := englishPresentationAsset("templates/dashboard.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1062,7 +1061,7 @@ func TestDashboardIncludesNonBlockingFirstRunChoiceForUnconfiguredAdministrator(
 		}
 	}
 
-	script, err := assets.ReadFile("static/first-run.js")
+	script, err := englishPresentationAsset("static/first-run.js")
 	if err != nil {
 		t.Fatal(err)
 	}

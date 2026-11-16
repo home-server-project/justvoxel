@@ -153,7 +153,7 @@ func TestMigrationWorkspaceApplyRedirectRendersCanonicalProgress(t *testing.T) {
 		t.Fatalf("redirected progress fragment = %d: %s", fragment.Code, fragment.Body.String())
 	}
 
-	script, err := assets.ReadFile("static/app.js")
+	script, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +243,7 @@ func TestMigrationWorkspacePagesRedirectBrowserAndServeInternalFragments(t *test
 }
 
 func TestMigrationWorkspaceExplicitURLStateContract(t *testing.T) {
-	script, err := assets.ReadFile("static/app.js")
+	script, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,14 +329,14 @@ func TestMigrationWorkspaceImportAttentionActionsAndResolvedNavigation(t *testin
 }
 
 func TestMigrationWorkspacePolledAttentionHidesLoopingNavigation(t *testing.T) {
-	styles, err := assets.ReadFile("static/app.css")
+	styles, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(styles), `[data-server-migration-operation]:has(#server-migration-operation-attention:not([hidden])) .migration-progress-navigation{display:none}`) {
 		t.Fatal("polled needs-attention progress does not hide looping navigation")
 	}
-	markup, err := assets.ReadFile("templates/migration_workspace_progress.html")
+	markup, err := englishPresentationAsset("templates/migration_workspace_progress.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -344,7 +344,7 @@ func TestMigrationWorkspacePolledAttentionHidesLoopingNavigation(t *testing.T) {
 		t.Fatal("normal Migration navigation is not connected to the polled attention styling")
 	}
 
-	script, err := assets.ReadFile("static/server-migration-operation.js")
+	script, err := englishPresentationAsset("static/server-migration-operation.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -420,7 +420,7 @@ func TestStandaloneServerMigrationUIRetired(t *testing.T) {
 		"server_migration_import.html", "server_migration_import_review.html", "server_migration_progress.html",
 		"server_migration_recovery.html", "server_migration_recovery_review.html",
 	} {
-		if _, err := assets.ReadFile("templates/" + name); !errors.Is(err, fs.ErrNotExist) {
+		if _, err := englishPresentationAsset("templates/" + name); !errors.Is(err, fs.ErrNotExist) {
 			t.Fatalf("retired template %s: expected absence, got %v", name, err)
 		}
 	}
@@ -434,7 +434,7 @@ func TestStandaloneServerMigrationUIRetired(t *testing.T) {
 		{"migration_workspace_recovery.html", "/workspace/migration/recovery/resolve"},
 		{"migration_workspace_progress.html", "/api/workspace/migration/progress/"},
 	} {
-		markup, err := assets.ReadFile("templates/" + tc.template)
+		markup, err := englishPresentationAsset("templates/" + tc.template)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -447,7 +447,7 @@ func TestStandaloneServerMigrationUIRetired(t *testing.T) {
 func TestMigrationScriptsUseWorkspaceInitializationOnly(t *testing.T) {
 	for _, kind := range []string{"export", "import", "operation"} {
 		name := map[string]string{"export": "Export", "import": "Import", "operation": "Operation"}[kind]
-		script, err := assets.ReadFile("static/server-migration-" + kind + ".js")
+		script, err := englishPresentationAsset("static/server-migration-" + kind + ".js")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -468,7 +468,7 @@ func TestMigrationScriptsUseWorkspaceInitializationOnly(t *testing.T) {
 			t.Fatal("resolved must remain a terminal operation state")
 		}
 	}
-	script, err := assets.ReadFile("static/app.js")
+	script, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}

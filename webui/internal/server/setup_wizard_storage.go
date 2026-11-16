@@ -232,31 +232,31 @@ func validateSetupStorage(storage setupStorageDraft, inventory api.AdminStorageD
 	switch storage.Type {
 	case "system":
 		if storage.Path != defaults.DataPath {
-			return errors.New("System storage uses the standard JustVoxel Minecraft data directory.")
+			return errors.New(uiText("ui.00a94b8f5e18"))
 		}
 	case "partition":
 		if storage.Device == "" {
-			return errors.New("Choose a partition before continuing.")
+			return errors.New(uiText("ui.bfb7f5b7307b"))
 		}
 		device, ok := safeSetupMinecraftDevice(inventory, storage.Device)
 		if !ok {
-			return errors.New("Choose one of the safe internal XFS, ext4, or Btrfs filesystems shown by JustVoxel.")
+			return errors.New(uiText("ui.4a45d12f5924"))
 		}
 		mount, err := validateSetupLocalMount(storage.MountPoint, device)
 		if err != nil {
 			return err
 		}
 		if !validSetupPath(storage.Path) || !setupPathWithin(storage.Path, mount) {
-			return errors.New("Minecraft data directory must be a safe absolute path inside the selected filesystem mount point.")
+			return errors.New(uiText("ui.f09d7d0e38ee"))
 		}
 	default:
-		return errors.New("Choose JustVoxel system storage or an existing local filesystem.")
+		return errors.New(uiText("ui.c62c2fb91ce1"))
 	}
 	return nil
 }
 
 func validateSetupBackups(backups setupBackupDraft, data setupStorageDraft, inventory api.AdminStorageDiscovery, defaults api.AdminSetupDefaults) error {
-	if _, err := parsePositiveFormInt(backups.Keep, "Backup retention"); err != nil {
+	if _, err := parsePositiveFormInt(backups.Keep, uiText("ui.2bb27baba5e4")); err != nil {
 		return err
 	}
 	if backups.Automatic {
@@ -268,42 +268,42 @@ func validateSetupBackups(backups setupBackupDraft, data setupStorageDraft, inve
 	switch backups.Type {
 	case "system":
 		if backups.Path != defaults.BackupPath {
-			return errors.New("System backup storage uses the standard JustVoxel backup directory.")
+			return errors.New(uiText("ui.989b094fc5bd"))
 		}
 	case "partition":
 		if backups.Device == "" {
-			return errors.New("Choose a partition before continuing.")
+			return errors.New(uiText("ui.bfb7f5b7307b"))
 		}
 		device, ok := safeSetupDevice(inventory, backups.Device)
 		if !ok {
-			return errors.New("Choose one of the safe existing XFS, ext4, or Btrfs filesystems shown by JustVoxel.")
+			return errors.New(uiText("ui.dcb261c9751c"))
 		}
 		mount, err := validateSetupLocalMount(backups.MountPoint, device)
 		if err != nil {
 			return err
 		}
 		if !validSetupPath(backups.Path) || !setupPathWithin(backups.Path, mount) {
-			return errors.New("Backup directory must be a safe absolute path inside the selected filesystem mount point.")
+			return errors.New(uiText("ui.b6d2ac5bb83e"))
 		}
 	case "nfs":
 		if !validSetupNFS(backups.Source) {
 			return errors.New("NFS source must look like server:/export and cannot contain spaces.")
 		}
 		if !validSetupMountPoint(backups.MountPoint) {
-			return errors.New("Choose a safe local mount point for the NFS share.")
+			return errors.New(uiText("ui.a954e416f92a"))
 		}
 		if !validSetupPath(backups.Path) || !setupPathWithin(backups.Path, backups.MountPoint) {
-			return errors.New("Backup directory must be inside the NFS mount point.")
+			return errors.New(uiText("ui.07197023e868"))
 		}
 	case "smb":
 		if !validSetupSMB(backups.Source) {
 			return errors.New("SMB source must look like //server/share and cannot contain spaces.")
 		}
 		if !validSetupMountPoint(backups.MountPoint) {
-			return errors.New("Choose a safe local mount point for the SMB share.")
+			return errors.New(uiText("ui.73c8be65a474"))
 		}
 		if !validSetupPath(backups.Path) || !setupPathWithin(backups.Path, backups.MountPoint) {
-			return errors.New("Backup directory must be inside the SMB mount point.")
+			return errors.New(uiText("ui.4fd5f59807a3"))
 		}
 		if backups.Username == "" {
 			return errors.New("SMB username is required. The password is requested only when setup is finally applied.")
@@ -312,11 +312,11 @@ func validateSetupBackups(backups setupBackupDraft, data setupStorageDraft, inve
 			return errors.New("SMB username or domain is invalid.")
 		}
 	default:
-		return errors.New("Choose a supported backup destination.")
+		return errors.New(uiText("ui.f7a60541e010"))
 	}
 
 	if data.Path != "" && backups.Path != "" && setupPathsOverlap(data.Path, backups.Path) {
-		return errors.New("Minecraft data and backups cannot use the same directory or contain one another.")
+		return errors.New(uiText("ui.917dacf062bc"))
 	}
 	return nil
 }
@@ -580,12 +580,12 @@ func validateSetupLocalMount(requested string, device api.AdminStorageDevice) (s
 			mounted = "/"
 		}
 		if requested != mounted {
-			return "", fmt.Errorf("%s is already mounted at %s. Use that mount point.", device.Path, mounted)
+			return "", fmt.Errorf(uiText("ui.8caf3b387e93"), device.Path, mounted)
 		}
 		return mounted, nil
 	}
 	if !validSetupMountPoint(requested) {
-		return "", errors.New("Choose a safe mount point for the selected local filesystem.")
+		return "", errors.New(uiText("ui.e18885f7d287"))
 	}
 	return requested, nil
 }
@@ -632,7 +632,7 @@ func validSetupSMB(source string) bool {
 func normalizeSetupBackupTime(value string) (string, error) {
 	match := setupBackupTimePattern.FindStringSubmatch(strings.TrimSpace(value))
 	if len(match) != 3 {
-		return "", errors.New("Automatic backup time must use HH:MM, for example 04:30.")
+		return "", errors.New(uiText("ui.371a0756d651"))
 	}
 	hour, _ := strconv.Atoi(match[1])
 	minute, _ := strconv.Atoi(match[2])
@@ -647,17 +647,17 @@ func setupSameDiskWarning(draft setupDraft) string {
 		return ""
 	}
 	if draft.Storage.Type == "system" && draft.Backups.Type == "system" {
-		return "Minecraft data and backups are on the same physical system disk. This helps with accidental file loss, but it does not protect against failure of that disk."
+		return uiText("ui.e5ed6f33cc43")
 	}
 	if draft.Storage.Type == "system" && draft.Backups.Type == "partition" {
 		if device, ok := safeSetupDevice(draft.Inventory, draft.Backups.Device); ok && device.System {
-			return "The selected backup filesystem is on the same physical system disk as Minecraft data. A separate disk or NAS provides a stronger backup failure boundary."
+			return uiText("ui.d797aa9e8281")
 		}
 		return ""
 	}
 	if draft.Storage.Type == "partition" && draft.Backups.Type == "system" {
 		if device, ok := safeSetupDevice(draft.Inventory, draft.Storage.Device); ok && device.System {
-			return "Minecraft data and system backups share the same physical system disk. A separate disk or NAS provides a stronger backup failure boundary."
+			return uiText("ui.df8621558d69")
 		}
 		return ""
 	}
@@ -665,7 +665,7 @@ func setupSameDiskWarning(draft setupDraft) string {
 		dataDevice, dataOK := safeSetupDevice(draft.Inventory, draft.Storage.Device)
 		backupDevice, backupOK := safeSetupDevice(draft.Inventory, draft.Backups.Device)
 		if dataOK && backupOK && setupPhysicalDiskKey(dataDevice) != "" && setupPhysicalDiskKey(dataDevice) == setupPhysicalDiskKey(backupDevice) {
-			return "Minecraft data and backups are on partitions of the same physical disk. This helps with accidental file loss, but it does not protect against failure of that disk."
+			return uiText("ui.014163f9300e")
 		}
 	}
 	return ""

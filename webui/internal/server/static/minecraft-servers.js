@@ -118,7 +118,7 @@
           }
           const status = card.querySelector('.minecraft-server-state');
           if (status) {
-            status.textContent = row.state;
+            status.textContent = jvS(row.state);
             status.className = `minecraft-server-state ${row.state_class}`;
           }
           const running = card.querySelector('[data-server-running]');
@@ -140,7 +140,7 @@
           continue;
         }
         if (!row || !validBytes(row.usage_bytes)) {
-          value.textContent = 'Unavailable';
+          value.textContent = jvT("ui.ca1844969742");
           history.delete(id);
           continue;
         }
@@ -168,9 +168,9 @@
         const response = await fetch('/api/minecraft/servers/live-memory', {
           credentials: 'same-origin', cache: 'no-store', headers: {Accept: 'application/json'},
         });
-        if (!response.ok || response.redirected) throw new Error('Live RAM unavailable');
+        if (!response.ok || response.redirected) throw new Error(jvT("ui.dbcb2af9750b"));
         const rows = await response.json();
-        if (!Array.isArray(rows)) throw new Error('Invalid live RAM response');
+        if (!Array.isArray(rows)) throw new Error(jvT("ui.a0910cc5d920"));
         if (list.isConnected) update(rows);
       } catch (_) {
         if (list.isConnected) update([]);
@@ -199,15 +199,15 @@
       if (connect || review) {
         const link = document.createElement('a');
         link.href = connect ? connectURL : settingsURL;
-        link.textContent = connect ? ' How to connect' : ' Open Minecraft Settings';
+        link.textContent = connect ? jvT("ui.3d912f7f913c") : jvT("ui.62fe28d6ca7f");
         node.appendChild(link);
       }
     };
     const request = async (path, options = {}) => {
       const response = await fetch(selected(path), {credentials: 'same-origin', cache: 'no-store', ...options, headers: {Accept: 'application/json'}});
       let payload;
-      try { payload = await response.json(); } catch (_) { throw new Error('Minecraft operation could not be completed. Refresh Minecraft Servers.'); }
-      if (!response.ok || response.redirected) throw new Error(payload.error || 'Minecraft operation could not be completed.');
+      try { payload = await response.json(); } catch (_) { throw new Error(jvT("ui.a3a82b87d0eb")); }
+      if (!response.ok || response.redirected) throw new Error(payload.error || jvT("ui.4d5161e70e99"));
       return payload;
     };
     const refresh = async () => {
@@ -240,17 +240,17 @@
       const requested = running.checked;
       running.checked = !requested;
       if (!requested && card.dataset.networkMember === 'true') {
-        feedback('Managed by Minecraft Network. Remove this server from Network or disable Minecraft Network before stopping it.', false, false, true);
+        feedback(jvT("ui.ceadef34e4b9"), false, false, true);
         return;
       }
       operation(() => mutate(async () => {
         const status = card.querySelector('.minecraft-server-state');
         if (status) {
-          status.textContent = requested ? 'Starting' : 'Stopping';
+          status.textContent = requested ? jvT("ui.aeed4d26bb5f") : jvT("ui.a71ee1d4ac5c");
           status.className = 'minecraft-server-state warning';
         }
-        const result = await request('/api/minecraft/servers/lifecycle', {method: 'POST', body: new URLSearchParams({csrf, action: requested ? 'start' : 'stop'})});
-        if (!result.ok) throw new Error('Server action was not completed.');
+        const result = await request('/api/minecraft/servers/lifecycle', {method: "POST", body: new URLSearchParams({csrf, action: requested ? 'start' : 'stop'})});
+        if (!result.ok) throw new Error(jvT("ui.bd44764996e3"));
       }));
     });
     const requiresReview = plan => Object.entries(plan).some(([key, value]) => key.endsWith('_required') && value === true);
@@ -262,29 +262,29 @@
         let review = false;
         await mutate(async () => {
           const body = new URLSearchParams({csrf, tab: 'overview', start_on_boot: String(requested)});
-          const plan = await request('/api/minecraft/workspace/settings/plan', {method: 'POST', body});
+          const plan = await request('/api/minecraft/workspace/settings/plan', {method: "POST", body});
           if (requiresReview(plan)) { review = true; return; }
-          if (!plan.review) throw new Error('The settings review is unavailable. Open Minecraft Settings.');
+          if (!plan.review) throw new Error(jvT("ui.257b560c22e1"));
           body.set('review', plan.review);
-          const result = await request('/api/minecraft/workspace/settings/apply', {method: 'POST', body});
+          const result = await request('/api/minecraft/workspace/settings/apply', {method: "POST", body});
           if (requiresReview(result) && !result.applied) { review = true; return; }
-          if (!result.applied) throw new Error(result.error || 'Minecraft settings were not applied.');
+          if (!result.applied) throw new Error(result.error || jvT("ui.59f7401b3446"));
         });
-        if (review) feedback('Review this change in Minecraft Settings.', false, true);
+        if (review) feedback(jvT("ui.35de87951c7e"), false, true);
       });
     });
     card.querySelector('[data-server-restart]')?.addEventListener('click', () => {
       closeMenu();
       operation(() => mutate(async () => {
-        const result = await request('/minecraft/servers/view/' + encodeURIComponent(id) + '/restart', {method: 'POST', body: new URLSearchParams({csrf})});
-        if (!result.ok) throw new Error('Restart was not completed.');
+        const result = await request('/minecraft/servers/view/' + encodeURIComponent(id) + '/restart', {method: "POST", body: new URLSearchParams({csrf})});
+        if (!result.ok) throw new Error(jvT("ui.a5a019d89baa"));
       }));
     });
     card.querySelector('[data-server-delete]')?.addEventListener('click', () => {
       if (pending || isArranging()) return;
       closeMenu();
       globalThis.justVoxelOpenDeleteServer({name: card.dataset.serverName,
-        description: 'Permanently removes this active server and its world data. Existing backup archives are preserved as historical archives.',
+        description: jvT("ui.e9d6a58ae67a"),
         csrf, request, dismissOnDeleted: true, isCurrent: () => card.isConnected && !isArranging(),
         onError: error => feedback(error.message), onDeleted: () => refresh(),
       });
@@ -294,23 +294,23 @@
       operation(async () => {
         const payload = await request('/api/minecraft/servers/invitation');
         if (!card.isConnected || isArranging()) return;
-        if (!payload.invitation) throw new Error('No default invitation is available.');
+        if (!payload.invitation) throw new Error(jvT("ui.619158e764df"));
         const dialog = document.createElement('dialog');
         dialog.className = 'minecraft-server-invitation';
-        dialog.setAttribute('aria-label', 'Invite friends');
-        const title = document.createElement('h2'); title.textContent = 'Invite friends';
+        dialog.setAttribute('aria-label', jvT("ui.2614b42d8452"));
+        const title = document.createElement('h2'); title.textContent = jvT("ui.2614b42d8452");
         const name = document.createElement('p'); name.textContent = payload.name;
-        const label = document.createElement('label'); label.textContent = 'Invitation';
+        const label = document.createElement('label'); label.textContent = jvT("ui.af4ea02852eb");
         const text = document.createElement('textarea'); text.readOnly = true; text.rows = 10; text.spellcheck = false; text.value = payload.invitation;
         label.appendChild(text);
         const status = document.createElement('p'); status.setAttribute('role', 'status');
         const actions = document.createElement('div'); actions.className = 'action-row';
-        const close = document.createElement('button'); close.type = 'button'; close.className = 'secondary'; close.textContent = 'Close';
-        const copy = document.createElement('button'); copy.type = 'button'; copy.textContent = 'Copy invitation';
+        const close = document.createElement('button'); close.type = 'button'; close.className = 'secondary'; close.textContent = jvT("ui.7d9eb7acb13e");
+        const copy = document.createElement('button'); copy.type = 'button'; copy.textContent = jvT("ui.74554e40cdde");
         close.addEventListener('click', () => dialog.close());
         copy.addEventListener('click', async () => {
-          try { await navigator.clipboard.writeText(text.value); status.textContent = 'Copied.'; }
-          catch (_) { status.textContent = 'Copy unavailable. Select the invitation text and copy it manually.'; }
+          try { await navigator.clipboard.writeText(text.value); status.textContent = jvT("ui.d249818eccab"); }
+          catch (_) { status.textContent = jvT("ui.e30e3a48556a"); }
         });
         actions.append(close, copy); dialog.append(title, name, label, status, actions);
         dialog.addEventListener('click', event => {

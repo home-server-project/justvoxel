@@ -1,19 +1,19 @@
 {{define "add_server_cancelled.html"}}<!doctype html>
-<html lang="en">
-<head>
+<html lang="{{locale}}">
+<head><script src="/i18n.js"></script><script src="/static/i18n.js"></script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>JustVoxel - Setup cancelled</title>
+  <title>{{t "ui.771d7013ba7f"}}</title>
   <link rel="icon" type="image/png" href="/static/justvoxel-favicon.png">
   <link rel="stylesheet" href="/static/add-server-cancelled.css">
   <script src="/static/add-server-cancelled.js" defer></script>
 </head>
 <body class="add-server-cancelled">
   <main>
-    <h1>Setup cancelled.</h1>
-    <p>Minecraft Servers remains open in your original JustVoxel tab.</p>
-    <p>You can close this tab.</p>
-    <button type="button" data-close-add-server>Close tab</button>
+    <h1>{{t "ui.68817f9bc395"}}</h1>
+    <p>{{t "ui.1f24ad373052"}}</p>
+    <p>{{t "ui.b3a62533c186"}}</p>
+    <button type="button" data-close-add-server>{{t "ui.50a3f9523122"}}</button>
   </main>
-</body>
+{{template "language-dialog" .}}</body>
 </html>{{end}}

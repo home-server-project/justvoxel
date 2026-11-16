@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -64,8 +65,8 @@ func TestMinecraftNetworkWorkspaceAndCSRF(t *testing.T) {
 	if rr.Code != 200 {
 		t.Fatal(rr.Code, rr.Body.String())
 	}
-	for _, want := range []string{"Network Whitelist", "family Survival", "Java + Bedrock server selector", "Standalone", `name="members"`, `name="welcome_message"`, `value="configure"`, `value="add"`} {
-		if !strings.Contains(rr.Body.String(), want) {
+	for _, want := range []string{"Network Whitelist", "family Survival", strings.TrimPrefix(uiText("ui.d619ef679d7c"), "Lobby: "), "Standalone", `name="members"`, `name="welcome_message"`, `value="configure"`, `value="add"`} {
+		if !strings.Contains(html.UnescapeString(rr.Body.String()), want) {
 			t.Fatal("missing network UI", want)
 		}
 	}
@@ -170,7 +171,7 @@ func TestMinecraftNetworkCompactPresentation(t *testing.T) {
 			if !strings.HasPrefix(icon, "/static/server-software/") || !strings.Contains(row, `src="`+icon+`" alt="">`) {
 				t.Errorf("server %s must render its own shared icon and text", server.ID)
 			}
-			if _, err := assets.ReadFile(strings.TrimPrefix(icon, "/")); err != nil {
+			if _, err := englishPresentationAsset(strings.TrimPrefix(icon, "/")); err != nil {
 				t.Errorf("shared icon is missing: %s: %v", icon, err)
 			}
 		}
@@ -241,7 +242,7 @@ func TestMinecraftNetworkWhitelistRemovalPresentation(t *testing.T) {
 }
 
 func TestMinecraftNetworkCompactStylesAreScoped(t *testing.T) {
-	source, err := assets.ReadFile("static/app.css")
+	source, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}

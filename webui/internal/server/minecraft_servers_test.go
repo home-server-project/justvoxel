@@ -253,7 +253,7 @@ func TestMinecraftServerCardControlsAndIdentity(t *testing.T) {
 	if strings.Contains(body, `src="/static/minecraft-servers.js"`) {
 		t.Error("inventory fragment must not load the shared Minecraft Servers asset")
 	}
-	header, err := assets.ReadFile("templates/header.html")
+	header, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -477,7 +477,7 @@ func TestMinecraftServersWorkspaceCompatibilityAndHeader(t *testing.T) {
 			t.Fatal(body)
 		}
 	}
-	header, _ := assets.ReadFile("templates/header.html")
+	header, _ := englishPresentationAsset("templates/header.html")
 	markup := string(header)
 	if strings.Contains(markup, `href="/minecraft/servers"`) || !strings.Contains(markup, `type="button" data-minecraft-servers-open`) {
 		t.Fatal("inventory launcher must open a workspace")

@@ -48,7 +48,7 @@ func (a *App) storageDestinationData(r *http.Request, session string, identity a
 func (a *App) renderStorageDestination(w http.ResponseWriter, r *http.Request, session string, identity api.SessionInfo, message, pageError string, request *api.AdminBackupStorageRequest, plan *api.AdminBackupStorageResponse) {
 	client, ok := a.api.(adminDiscoveryAPI)
 	if !ok {
-		http.Error(w, "Storage discovery is unavailable", http.StatusServiceUnavailable)
+		http.Error(w, ui(w, "ui.dbeee6e6599f"), http.StatusServiceUnavailable)
 		return
 	}
 	data, err := a.buildStorageBrowserPageData(r.Context(), session, client, identity, csrfFromRequest(r))

@@ -33,12 +33,12 @@ func (a *App) terminalStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	client, ok := a.api.(terminalAPI)
 	if !ok {
-		writeSystemWorkspaceError(w, http.StatusServiceUnavailable, "Terminal unavailable. Retry.")
+		writeSystemWorkspaceError(w, http.StatusServiceUnavailable, translate(requestLocale(r), "ui.6abd557c5b2f"))
 		return
 	}
 	status, err := client.AdminTerminal(r.Context(), session)
 	if err != nil {
-		a.writeSystemWorkspaceAPIError(w, err, "Terminal unavailable. Retry.")
+		a.writeSystemWorkspaceAPIError(w, err, translate(requestLocale(r), "ui.6abd557c5b2f"))
 		return
 	}
 	writeSystemWorkspaceJSON(w, http.StatusOK, status)
@@ -51,16 +51,16 @@ func (a *App) terminalAction(w http.ResponseWriter, r *http.Request, action stri
 		return
 	}
 	if !a.validCSRF(r) {
-		writeSystemWorkspaceError(w, http.StatusForbidden, "Invalid CSRF token.")
+		writeSystemWorkspaceError(w, http.StatusForbidden, translate(requestLocale(r), "ui.74bccc44f472"))
 		return
 	}
 	client, ok := a.api.(terminalAPI)
 	if !ok {
-		writeSystemWorkspaceError(w, http.StatusServiceUnavailable, "Terminal unavailable. Retry.")
+		writeSystemWorkspaceError(w, http.StatusServiceUnavailable, translate(requestLocale(r), "ui.6abd557c5b2f"))
 		return
 	}
 	if err := client.AdminTerminalAction(r.Context(), session, action); err != nil {
-		a.writeSystemWorkspaceAPIError(w, err, "Terminal operation could not be completed. Retry.")
+		a.writeSystemWorkspaceAPIError(w, err, translate(requestLocale(r), "ui.9b7abe7f1df1"))
 		return
 	}
 	writeSystemWorkspaceJSON(w, http.StatusOK, systemWorkspaceMutationResponse{OK: true})
@@ -84,17 +84,17 @@ func (a *App) terminalProxy(w http.ResponseWriter, r *http.Request) {
 	if origin := r.Header.Get("Origin"); origin != "" {
 		u, err := url.Parse(origin)
 		if err != nil || u.Host != r.Host || u.Scheme != a.config.ExternalScheme {
-			http.Error(w, "invalid origin", http.StatusForbidden)
+			http.Error(w, translate(requestLocale(r), "ui.ca3c09d0c33b"), http.StatusForbidden)
 			return
 		}
 	}
 	if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
-		http.Error(w, "invalid origin", http.StatusForbidden)
+		http.Error(w, translate(requestLocale(r), "ui.ca3c09d0c33b"), http.StatusForbidden)
 		return
 	}
 	client, ok := a.api.(terminalProxyAPI)
 	if !ok {
-		http.Error(w, "Terminal unavailable. Use Refresh to retry.", http.StatusBadGateway)
+		http.Error(w, translate(requestLocale(r), "ui.86ff3b88076d"), http.StatusBadGateway)
 		return
 	}
 	proxy := client.TerminalProxy(session)
@@ -107,7 +107,7 @@ func (a *App) terminalProxy(w http.ResponseWriter, r *http.Request) {
 		return nil
 	}
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		http.Error(w, "Terminal unavailable. Use Refresh to retry.", http.StatusBadGateway)
+		http.Error(w, translate(requestLocale(r), "ui.86ff3b88076d"), http.StatusBadGateway)
 	}
 	terminalFrameHeaders(w.Header())
 	// ReverseProxy preserves HTTP Upgrade and tunnels the WebSocket connection.

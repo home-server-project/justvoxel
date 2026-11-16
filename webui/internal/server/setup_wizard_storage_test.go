@@ -92,7 +92,7 @@ func TestSetupSameDiskWarningUsesKnownPhysicalDisk(t *testing.T) {
 }
 
 func TestSetupSameDiskWarningAppearsOnlyOnBackupsStep(t *testing.T) {
-	markup, err := assets.ReadFile("templates/setup_wizard.html")
+	markup, err := englishPresentationAsset("templates/setup_wizard.html")
 	if err != nil {
 		t.Fatal(err)
 	}

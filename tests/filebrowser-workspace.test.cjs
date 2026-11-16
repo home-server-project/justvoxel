@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const {readFileSync} = require('node:fs');
+const {readFileSync} = require('./helpers/webui-i18n.cjs');
 const {test} = require('node:test');
 const vm = require('node:vm');
 const read = path => readFileSync(`${__dirname}/../${path}`, 'utf8');
@@ -158,7 +158,11 @@ test('supported proxy auth disables second login and internal settings', () => {
   assert.match(global,/mux\.HandleFunc\("GET \/", a\.dashboard\)/);
   assert.match(global,/strings\.HasPrefix\(r\.URL\.Path, "\/files\/"\)/);
   assert.match(global,/a\.fileBrowserProxy\(w, r\)/);
-  assert.match(global,/mux\.ServeHTTP\(w, r\)/);
+  const dispatch = /mux\.ServeHTTP\([A-Za-z_][A-Za-z0-9_]*, r\)/.exec(global);
+  assert.ok(dispatch, 'normal mux dispatch remains present');
+  const proxyRoute = /if strings\.HasPrefix\(r\.URL\.Path, "\/files\/"\) \{\s*a\.fileBrowserProxy\(w, r\)\s*return\s*\}/.exec(global);
+  assert.ok(proxyRoute, 'File Browser proxy handles its route and returns');
+  assert.ok(proxyRoute.index < dispatch.index, 'proxy routing precedes normal mux dispatch');
   assert.match(global,/return securityHeaders\(handler\)/);
   assert.doesNotMatch(proxy,/mux\.Handle(?:Func)?\(\s*"\/files\/"\s*,/);
 });

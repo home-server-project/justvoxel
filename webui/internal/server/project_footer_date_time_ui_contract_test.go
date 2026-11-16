@@ -1,7 +1,6 @@
 package server
 
 import (
-	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -9,7 +8,7 @@ import (
 
 func TestProjectFooterAndDateTimeUIContracts(t *testing.T) {
 	read := func(path string) string {
-		data, err := os.ReadFile(path)
+		data, err := englishPresentationAsset(path)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -125,7 +125,7 @@ func addCreateValues(state setupReviewState) url.Values {
 }
 
 func TestAddServerReviewGridRows(t *testing.T) {
-	css, err := assets.ReadFile("static/setup.css")
+	css, err := englishPresentationAsset("static/setup.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestAddServerReviewGridRows(t *testing.T) {
 			t.Fatalf("Add Server Review contains rejected grid row %q", forbidden)
 		}
 	}
-	reviewCSS, err := assets.ReadFile("static/setup-review.css")
+	reviewCSS, err := englishPresentationAsset("static/setup-review.css")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -48,7 +48,7 @@ func TestProjectLinksInDashboardAndAbout(t *testing.T) {
 	}
 
 	// System → About is assembled in the browser, so check its link rows and attributes at the source.
-	source, err := assets.ReadFile("static/app.js")
+	source, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestProjectLinksInDashboardAndAbout(t *testing.T) {
 }
 
 func TestAboutFlexLayoutAndMobileMetadata(t *testing.T) {
-	cssBytes, err := assets.ReadFile("static/app.css")
+	cssBytes, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}

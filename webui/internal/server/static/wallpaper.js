@@ -26,27 +26,27 @@
 
   const validateURL = (value) => {
     if (typeof value !== "string" || !/^https?:\/\//i.test(value)) {
-      throw new Error("Use a web address starting with http:// or https://.");
+      throw new Error(jvT("ui.d28fb0222087"));
     }
     const url = new URL(value);
     if (url.protocol !== "http:" && url.protocol !== "https:") {
-      throw new Error("Use a web address starting with http:// or https://.");
+      throw new Error(jvT("ui.d28fb0222087"));
     }
     return url.href;
   };
   const validateBlob = (blob) => {
     if (!(blob instanceof Blob) || !allowedTypes.has(blob.type)) {
-      throw new Error("Choose a JPEG, PNG, WebP or AVIF picture.");
+      throw new Error(jvT("ui.08fde956f65e"));
     }
     if (blob.size === 0 || blob.size > maxSize) {
-      throw new Error("Choose a picture up to 10 MiB.");
+      throw new Error(jvT("ui.f9385c84dcd5"));
     }
     return blob;
   };
   const loadImage = (src) => new Promise((resolve, reject) => {
     const image = new Image();
     image.onload = () => resolve();
-    image.onerror = () => reject(new Error("The image could not be loaded. Try another picture or web address."));
+    image.onerror = () => reject(new Error(jvT("ui.95d8320184a9")));
     image.src = src;
   });
 
@@ -55,10 +55,10 @@
     let blocked = false;
     const request = indexedDB.open("justvoxel-wallpaper", 1);
     request.onupgradeneeded = () => request.result.createObjectStore("images");
-    request.onerror = () => reject(new Error("This browser could not save the picture."));
+    request.onerror = () => reject(new Error(jvT("ui.cab28fd0947a")));
     request.onblocked = () => {
       blocked = true;
-      reject(new Error("Close other JustVoxel tabs and try again."));
+      reject(new Error(jvT("ui.5b9db7be7ff4")));
     };
     request.onsuccess = () => {
       const db = request.result;
@@ -72,7 +72,7 @@
         transaction.oncomplete = () => { db.close(); resolve(result.result); };
         transaction.onabort = transaction.onerror = () => {
           db.close();
-          reject(new Error("This browser could not save the picture."));
+          reject(new Error(jvT("ui.cab28fd0947a")));
         };
       } catch (failure) {
         db.close();
@@ -92,7 +92,7 @@
   };
   const timeMinutes = (value) => {
     if (typeof value !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) {
-      throw new Error("Choose valid Day and Night start times.");
+      throw new Error(jvT("ui.dd62fa5d5d9c"));
     }
     const [hours, minutes] = value.split(":").map(Number);
     return hours * 60 + minutes;
@@ -102,10 +102,10 @@
     if (saved.mode === "default") return defaultPreference();
     const next = { ...defaultPreference(), ...saved, mode: "builtin" };
     if (!["v1", "v2"].includes(next.theme) || !["auto", "day", "night"].includes(next.appearance)) {
-      throw new Error("Choose a built-in theme and appearance.");
+      throw new Error(jvT("ui.25a7e4f147e2"));
     }
     if (timeMinutes(next.dayStart) === timeMinutes(next.nightStart)) {
-      throw new Error("Day and Night must start at different times.");
+      throw new Error(jvT("ui.22739a8b8e52"));
     }
     return next;
   };
@@ -155,7 +155,7 @@
     try {
       localStorage.setItem(preferenceKey, JSON.stringify(next));
     } catch {
-      throw new Error("This browser could not save the wallpaper preference.");
+      throw new Error(jvT("ui.dcac694ba7f7"));
     }
     preference = next;
     preferenceResolved = true;
@@ -163,7 +163,7 @@
     clearAutomaticTimer();
   };
   const showError = (failure) => {
-    error.textContent = failure.message || "The wallpaper could not be saved.";
+    error.textContent = failure.message || jvT("ui.89df4d47579a");
     error.hidden = false;
   };
   const setBusy = (value) => {
@@ -229,7 +229,7 @@
         applyImage(restoredObjectURL, restoredObjectURL);
         restoredObjectURL = null;
       } else {
-        throw new Error("Unknown wallpaper preference.");
+        throw new Error(jvT("ui.b5a6e48747b7"));
       }
     } catch {
       if (restoredObjectURL) URL.revokeObjectURL(restoredObjectURL);
@@ -325,7 +325,7 @@
       } else if (mode === "url") {
         let url;
         try { url = validateURL(form.elements.url.value.trim()); }
-        catch { throw new Error("Use a web address starting with http:// or https://."); }
+        catch { throw new Error(jvT("ui.d28fb0222087")); }
         await loadImage(url);
         if (currentOperation !== operation) return;
         committing = true;

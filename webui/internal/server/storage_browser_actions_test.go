@@ -294,7 +294,7 @@ func TestStorageBrowserPermanentMountRejectsOperatorAndBadCSRF(t *testing.T) {
 }
 
 func TestStorageBrowserHiddenStateOverridesComponentDisplayRules(t *testing.T) {
-	css, err := assets.ReadFile("static/storage-browser.css")
+	css, err := englishPresentationAsset("static/storage-browser.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +304,7 @@ func TestStorageBrowserHiddenStateOverridesComponentDisplayRules(t *testing.T) {
 }
 
 func TestStorageBrowserCardsHoverWithoutMovement(t *testing.T) {
-	css, err := assets.ReadFile("static/storage-browser.css")
+	css, err := englishPresentationAsset("static/storage-browser.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +333,7 @@ func TestStorageBrowserCardsHoverWithoutMovement(t *testing.T) {
 }
 
 func TestStorageBrowserMountUXUsesHumanWording(t *testing.T) {
-	js, err := assets.ReadFile("static/storage-browser.js")
+	js, err := englishPresentationAsset("static/storage-browser.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -360,7 +360,7 @@ func TestStorageBrowserMountUXUsesHumanWording(t *testing.T) {
 }
 
 func TestStorageBrowserWholeDiskFlowStaysInsideNewStorage(t *testing.T) {
-	templateContent, err := assets.ReadFile("templates/storage_browser.html")
+	templateContent, err := englishPresentationAsset("templates/storage_browser.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -388,7 +388,7 @@ func TestStorageBrowserWholeDiskFlowStaysInsideNewStorage(t *testing.T) {
 }
 
 func TestStorageBrowserDestructiveConfirmationUsesSliderAndToggle(t *testing.T) {
-	templateContent, err := assets.ReadFile("templates/storage_browser.html")
+	templateContent, err := englishPresentationAsset("templates/storage_browser.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -408,7 +408,7 @@ func TestStorageBrowserDestructiveConfirmationUsesSliderAndToggle(t *testing.T) 
 		t.Fatal("New Storage still asks users to type destructive confirmation phrases")
 	}
 
-	js, err := assets.ReadFile("static/storage-browser.js")
+	js, err := englishPresentationAsset("static/storage-browser.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -425,7 +425,7 @@ func TestStorageBrowserDestructiveConfirmationUsesSliderAndToggle(t *testing.T) 
 		}
 	}
 
-	css, err := assets.ReadFile("static/storage-browser.css")
+	css, err := englishPresentationAsset("static/storage-browser.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -444,7 +444,7 @@ func TestStorageBrowserDestructiveConfirmationUsesSliderAndToggle(t *testing.T) 
 }
 
 func TestStorageBrowserPartitionActionMenuContainsDirectActions(t *testing.T) {
-	markup, err := assets.ReadFile("templates/storage_browser.html")
+	markup, err := englishPresentationAsset("templates/storage_browser.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -489,7 +489,7 @@ func TestStorageBrowserPartitionActionMenuContainsDirectActions(t *testing.T) {
 }
 
 func TestStorageBrowserActionMenuClosesWithDialogAndOutsideClick(t *testing.T) {
-	js, err := assets.ReadFile("static/storage-browser.js")
+	js, err := englishPresentationAsset("static/storage-browser.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -511,7 +511,7 @@ func TestStorageBrowserActionMenuClosesWithDialogAndOutsideClick(t *testing.T) {
 }
 
 func TestStorageBrowserPortableFilesystemPolicy(t *testing.T) {
-	template, err := assets.ReadFile("templates/storage_browser.html")
+	template, err := englishPresentationAsset("templates/storage_browser.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -519,7 +519,7 @@ func TestStorageBrowserPortableFilesystemPolicy(t *testing.T) {
 		t.Fatal("storage browser template does not carry the friendly filesystem display name")
 	}
 
-	js, err := assets.ReadFile("static/storage-browser.js")
+	js, err := englishPresentationAsset("static/storage-browser.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -543,7 +543,7 @@ func TestStorageBrowserPortableFilesystemPolicy(t *testing.T) {
 }
 
 func TestStorageBrowserCreatePartitionUXUsesNativeUnallocatedSpaceFlow(t *testing.T) {
-	templateContent, err := assets.ReadFile("templates/storage_browser.html")
+	templateContent, err := englishPresentationAsset("templates/storage_browser.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -564,7 +564,7 @@ func TestStorageBrowserCreatePartitionUXUsesNativeUnallocatedSpaceFlow(t *testin
 		}
 	}
 
-	js, err := assets.ReadFile("static/storage-browser.js")
+	js, err := englishPresentationAsset("static/storage-browser.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -585,7 +585,7 @@ func TestStorageBrowserCreatePartitionUXUsesNativeUnallocatedSpaceFlow(t *testin
 }
 
 func TestStoragePartitionDialogsUseWholeDialogScrolling(t *testing.T) {
-	css, err := assets.ReadFile("static/storage-browser.css")
+	css, err := englishPresentationAsset("static/storage-browser.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -701,7 +701,7 @@ func TestStorageBrowserWholeDiskMinecraftUsesSharedReviewedMigration(t *testing.
 }
 
 func TestStorageBrowserActionDialogUsesViewportHeight(t *testing.T) {
-	css, err := assets.ReadFile("static/storage-browser.css")
+	css, err := englishPresentationAsset("static/storage-browser.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -723,7 +723,7 @@ func TestStorageBrowserActionDialogUsesViewportHeight(t *testing.T) {
 }
 
 func TestStorageBrowserLocalWarningsShareOnePanel(t *testing.T) {
-	js, err := assets.ReadFile("static/storage-browser.js")
+	js, err := englishPresentationAsset("static/storage-browser.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -769,7 +769,7 @@ func TestStorageBrowserLocalWarningsShareOnePanel(t *testing.T) {
 	if strings.Contains(loop, `document.createElement("div")`) || strings.Contains(loop, "notice warning") {
 		t.Fatal("warning renderer still creates a notice card for each warning")
 	}
-	template, err := assets.ReadFile("templates/storage_browser.html")
+	template, err := englishPresentationAsset("templates/storage_browser.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1115,7 +1115,7 @@ func TestStorageBrowserBackupPartitionRejectsUnsafeRequests(t *testing.T) {
 }
 
 func TestStorageBrowserBackupPartitionUsesStorageReviewModal(t *testing.T) {
-	script, err := assets.ReadFile("static/storage-browser.js")
+	script, err := englishPresentationAsset("static/storage-browser.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1133,7 +1133,7 @@ func TestStorageBrowserBackupPartitionUsesStorageReviewModal(t *testing.T) {
 			t.Errorf("backup partition Review/Apply missing %q", want)
 		}
 	}
-	markup, err := assets.ReadFile("templates/storage_browser.html")
+	markup, err := englishPresentationAsset("templates/storage_browser.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1143,7 +1143,7 @@ func TestStorageBrowserBackupPartitionUsesStorageReviewModal(t *testing.T) {
 }
 
 func TestStorageBrowserActionsRefreshWorkspaceInPlace(t *testing.T) {
-	js, err := assets.ReadFile("static/storage-browser.js")
+	js, err := englishPresentationAsset("static/storage-browser.js")
 	if err != nil {
 		t.Fatal(err)
 	}

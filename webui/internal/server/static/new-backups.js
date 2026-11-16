@@ -50,7 +50,7 @@
       [...serverIDs].sort().forEach((id) => {
         const option = document.createElement("option");
         option.value = id;
-        option.textContent = "Server " + id;
+        option.textContent = jvT("ui.194890a33f97") + id;
         serverFilter.insertBefore(option, legacyOption);
       });
     }
@@ -171,7 +171,7 @@
         payload = null;
       }
       if (!response.ok || !payload?.ok) {
-        throw new Error(payload?.error || "Backup deletion could not be completed.");
+        throw new Error(payload?.error || jvT("ui.656efab9d38a"));
       }
       return payload;
     }
@@ -180,7 +180,7 @@
       reviewedPlan = payload.proposed;
       if (summary) {
         const noun = reviewedPlan.count === 1 ? "backup" : "backups";
-        summary.textContent = "Delete " + reviewedPlan.count + " " + noun + " using " + formatBytes(reviewedPlan.total_size_bytes) + "?";
+        summary.textContent = jvT("ui.85941fb9c992") + reviewedPlan.count + " " + noun + " using " + formatBytes(reviewedPlan.total_size_bytes) + "?";
       }
       if (reviewList) {
         reviewList.replaceChildren();
@@ -220,7 +220,7 @@
       clearError(pageError);
       deleteButton.disabled = true;
       const originalLabel = deleteButton.textContent;
-      deleteButton.textContent = "Reviewing…";
+      deleteButton.textContent = jvT("ui.fcc53388888f");
       try {
         const payload = await postDelete("/api/new-backups/delete/plan", ids);
         if (generation !== filterGeneration) return;
@@ -257,7 +257,7 @@
       if (!reviewedPlan || reviewedIDs.length === 0) return;
       const entered = confirmation?.value || "";
       if (entered !== reviewedPlan.confirmation) {
-        showError(dialogError, "Slide fully and use the Confirm toggle before deleting.");
+        showError(dialogError, jvT("ui.5b034338b8f0"));
         confirmationSlider?.focus();
         return;
       }
@@ -268,7 +268,7 @@
       if (closeButton) closeButton.disabled = true;
       if (cancelButton) cancelButton.disabled = true;
       const originalLabel = applyButton.textContent;
-      applyButton.textContent = "Deleting…";
+      applyButton.textContent = jvT("ui.43b5894c3e4e");
       try {
         const payload = await postDelete("/api/new-backups/delete/apply", reviewedIDs, {
           fingerprint: reviewedPlan.fingerprint,
@@ -279,7 +279,7 @@
         if (window.JustVoxelBackupsWorkspace?.reload) {
           await window.JustVoxelBackupsWorkspace.reload(workspaceURL);
         } else {
-          throw new Error("Backups Workspace reload is unavailable. Refresh the workspace to see the updated library.");
+          throw new Error(jvT("ui.78fafe880a44"));
         }
       } catch (error) {
         deleteApplying = false;
@@ -350,7 +350,7 @@
       close.className = "backup-workflow-review-close";
       close.dataset.backupWorkflowReviewClose = "true";
       close.type = "button";
-      close.setAttribute("aria-label", "Close review");
+      close.setAttribute("aria-label", jvT("ui.337f911f9b4a"));
       close.textContent = "×";
       close.addEventListener("click", () => { if (reviewDialog.dataset.busy !== "true") reviewDialog.close(); });
       card.append(close);

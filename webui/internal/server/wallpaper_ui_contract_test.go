@@ -8,7 +8,7 @@ import (
 
 func TestWallpaperUIContracts(t *testing.T) {
 	read := func(path string) string {
-		data, err := assets.ReadFile(path)
+		data, err := englishPresentationAsset(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -78,7 +78,7 @@ func TestWallpaperUIContracts(t *testing.T) {
 	if strings.Contains(dashboard, "/static/justvoxel-default-wallpaper.jpg") {
 		t.Fatal("Old JPG must not remain the configured-dashboard fallback")
 	}
-	if _, err := assets.ReadFile("static/justvoxel-default-wallpaper.jpg"); err == nil {
+	if _, err := englishPresentationAsset("static/justvoxel-default-wallpaper.jpg"); err == nil {
 		t.Fatal("Old JPG must not remain embedded")
 	}
 

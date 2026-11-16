@@ -27,14 +27,14 @@ func configurationRequestFromDiscovery(configuration api.AdminConfigurationDisco
 func parsePositiveFormInt(value, label string) (int, error) {
 	parsed, err := strconv.Atoi(strings.TrimSpace(value))
 	if err != nil || parsed <= 0 {
-		return 0, fmt.Errorf("%s must be a positive number.", label)
+		return 0, fmt.Errorf(uiText("ui.c6a66b5f29cb"), label)
 	}
 	return parsed, nil
 }
 
 func formatMemoryMiB(value int) string {
 	if value <= 0 {
-		return "Unknown"
+		return uiText("ui.b764cdc0eab7")
 	}
 	return humanBytes(uint64(value) * 1024 * 1024)
 }

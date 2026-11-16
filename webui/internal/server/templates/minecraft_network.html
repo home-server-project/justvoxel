@@ -1,80 +1,80 @@
 <div class="minecraft-network">
 <section class="panel control-panel minecraft-network-panel">
-  {{if .Error}}<p class="notice error" role="status">{{.Error}}</p>{{end}}
-  {{if .Message}}<p class="notice success" role="status">{{.Message}}</p>{{end}}
-  <p class="muted minecraft-network-help">Optionally connect selected servers through one shared entrance and lobby. Servers stay standalone unless you select them here and enable Minecraft Network.</p>
-  {{if .Network.RecoveryRequired}}<div class="notice warning"><p>Minecraft Network needs recovery before servers can start.</p><form method="post" action="/workspace/minecraft-network"><input type="hidden" name="csrf" value="{{.CSRF}}"><button name="action" value="recover" type="submit">Retry recovery</button></form></div>{{end}}
+  {{if .Error}}<p class="notice error" role="status">{{ts .Error}}</p>{{end}}
+  {{if .Message}}<p class="notice success" role="status">{{ts .Message}}</p>{{end}}
+  <p class="muted minecraft-network-help">{{t "ui.2d1ac0b10099"}}</p>
+  {{if .Network.RecoveryRequired}}<div class="notice warning"><p>{{t "ui.cc39eb2d83a3"}}</p><form method="post" action="/workspace/minecraft-network"><input type="hidden" name="csrf" value="{{.CSRF}}"><button name="action" value="recover" type="submit">{{t "ui.f37b055f32a8"}}</button></form></div>{{end}}
   <form id="minecraft-network-configure" data-recovery-required="{{.Network.RecoveryRequired}}" method="post" action="/workspace/minecraft-network">
     <input type="hidden" name="csrf" value="{{.CSRF}}">
     <div class="minecraft-network-lane">
-      <h2 class="minecraft-network-ports-title">Network ports:</h2>
+      <h2 class="minecraft-network-ports-title">{{t "ui.7839b926c204"}}</h2>
       <div class="minecraft-network-ports">
         <label>Java<input name="java_port" type="number" min="1024" max="65535" value="{{.Network.Config.JavaPort}}" required></label>
         <label>Bedrock<input name="bedrock_port" type="number" min="1024" max="65535" value="{{.Network.Config.BedrockPort}}" required></label>
       </div>
       <label class="minecraft-network-toggle">
-        <span class="minecraft-network-status minecraft-network-status-disabled">Disabled</span>
-        <span class="minecraft-network-status minecraft-network-status-enabled">Enabled{{if and .Network.Config.Enabled (not .Network.RuntimeReady)}} · Proxy unavailable{{end}}</span>
+        <span class="minecraft-network-status minecraft-network-status-disabled">{{t "ui.75081b593d15"}}</span>
+        <span class="minecraft-network-status minecraft-network-status-enabled">{{t "ui.92c1cdfdf4cb"}}{{if and .Network.Config.Enabled (not .Network.RuntimeReady)}} {{t "ui.782777e63571"}}{{end}}</span>
         <input class="date-time-switch" role="switch" type="checkbox" name="enabled"{{if .Network.Config.Enabled}} checked{{end}}>
       </label>
     </div>
     <section class="minecraft-network-section">
-      <h2>Servers</h2>
-      <p class="muted minecraft-network-help">Running selected servers are stopped automatically. Empty servers stop immediately; occupied servers receive the normal shutdown countdown. Servers that were running are started again after Apply.</p>
+      <h2>{{t "ui.68d7beb6df59"}}</h2>
+      <p class="muted minecraft-network-help">{{t "ui.a2c10e3f82cb"}}</p>
       <div class="minecraft-network-servers">
         {{range .SupportedServers}}<label class="minecraft-network-server">
           <input type="checkbox" name="members" value="{{.ID}}"{{if .Selected}} checked{{end}}>
           {{if .SoftwareIcon}}<img class="minecraft-network-software-icon" src="{{.SoftwareIcon}}" alt="">{{end}}
-          <span class="minecraft-network-server-details"><span>{{.Name}} · {{.Software}} <span class="badge minecraft-network-state {{.StateClass}}" data-network-server-state="{{.ID}}">{{.StateLabel}}</span></span></span>
+          <span class="minecraft-network-server-details"><span>{{.Name}} · {{.Software}} <span class="badge minecraft-network-state {{.StateClass}}" data-network-server-state="{{.ID}}">{{ts .StateLabel}}</span></span></span>
         </label>{{end}}
       </div>
       {{if .UnsupportedServers}}<details class="minecraft-network-unsupported">
-        <summary>Standalone / unsupported servers ({{len .UnsupportedServers}})</summary>
+        <summary>{{t "ui.bbb301575646"}}{{len .UnsupportedServers}})</summary>
         <div class="minecraft-network-unsupported-grid">
         {{range .UnsupportedServers}}<div class="minecraft-network-server">
           {{if .SoftwareIcon}}<img class="minecraft-network-software-icon" src="{{.SoftwareIcon}}" alt="">{{end}}
-          <span class="minecraft-network-server-details"><span>{{.Name}} · {{.Software}} <span class="badge minecraft-network-state {{.StateClass}}" data-network-server-state="{{.ID}}">{{.StateLabel}}</span></span><span class="muted minecraft-network-unavailable">{{.CompatibilityReason}}</span></span>
+          <span class="minecraft-network-server-details"><span>{{.Name}} · {{.Software}} <span class="badge minecraft-network-state {{.StateClass}}" data-network-server-state="{{.ID}}">{{ts .StateLabel}}</span></span><span class="muted minecraft-network-unavailable">{{ts .CompatibilityReason}}</span></span>
         </div>{{end}}
         </div>
       </details>{{end}}
     </section>
     <section class="minecraft-network-section">
       <div class="minecraft-network-welcome-lane">
-        <span>Lobby: Java + Bedrock server selector</span>
-        <label for="minecraft-network-welcome">Welcome message</label>
+        <span>{{t "ui.d619ef679d7c"}}</span>
+        <label for="minecraft-network-welcome">{{t "ui.797389fc28b4"}}</label>
         <input id="minecraft-network-welcome" name="welcome_message" maxlength="512" value="{{.Network.Config.WelcomeMessage}}">
-        <button type="button" class="secondary" data-minecraft-network-cancel disabled>Cancel</button>
-        <button type="submit" name="action" value="configure" disabled>Apply</button>
+        <button type="button" class="secondary" data-minecraft-network-cancel disabled>{{t "ui.19766ed6ccb2"}}</button>
+        <button type="submit" name="action" value="configure" disabled>{{t "ui.31e392d1c037"}}</button>
       </div>
     </section>
   </form>
 </section>
 <section class="panel control-panel minecraft-network-panel minecraft-whitelist-section">
   <div class="section-heading">
-    <h2 data-network-whitelist-heading>Network Whitelist{{if .Network.Config.WhitelistEnforced}}: Enforced{{end}}</h2>
+    <h2 data-network-whitelist-heading>{{t "ui.388e35b34211"}}{{if .Network.Config.WhitelistEnforced}}{{t "ui.ce813ac3bc6c"}}{{end}}</h2>
     <div class="minecraft-whitelist-state">
-      <span class="badge" data-network-whitelist-badge>{{if .Network.Config.WhitelistEnforced}}Enabled{{else}}Disabled{{end}}</span>
-      <button type="button" class="minecraft-whitelist-switch" role="switch" aria-label="Network Whitelist" aria-checked="{{.Network.Config.WhitelistEnforced}}" data-network-whitelist-switch></button>
+      <span class="badge" data-network-whitelist-badge>{{if .Network.Config.WhitelistEnforced}}{{t "ui.92c1cdfdf4cb"}}{{else}}{{t "ui.75081b593d15"}}{{end}}</span>
+      <button type="button" class="minecraft-whitelist-switch" role="switch" aria-label="{{t "ui.388e35b34211"}}" aria-checked="{{.Network.Config.WhitelistEnforced}}" data-network-whitelist-switch></button>
       <input type="hidden" name="whitelist_enforced" form="minecraft-network-configure" value="{{.Network.Config.WhitelistEnforced}}">
     </div>
   </div>
   <div class="minecraft-player-controls">
-    <p class="muted minecraft-network-help">Network Whitelist controls access to the lobby and every server included in Minecraft Network. When disabled, players can access selected Network servers without whitelist restriction. Standalone whitelist settings and players are preserved and become active again when a server leaves Minecraft Network.</p>
+    <p class="muted minecraft-network-help">{{t "ui.23cbdc1a8050"}}</p>
     <form class="minecraft-player-add" method="post" action="/workspace/minecraft-network">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
-      <label class="minecraft-player-platform">Platform<select name="platform"><option value="java">Java Edition</option><option value="bedrock">Bedrock</option></select></label>
-      <label class="minecraft-player-input">Player<input name="name" maxlength="16" required></label>
-      <button type="submit" name="action" value="add">Add player</button>
+      <label class="minecraft-player-platform">{{t "ui.c78ffe195710"}}<select name="platform"><option value="java">{{t "ui.8716240ed98f"}}</option><option value="bedrock">Bedrock</option></select></label>
+      <label class="minecraft-player-input">{{t "ui.64aee8c6cbd0"}}<input name="name" maxlength="16" required></label>
+      <button type="submit" name="action" value="add">{{t "ui.ef207ba9378a"}}</button>
     </form>
   </div>
   <div class="minecraft-whitelist-list">
     {{if .Network.Whitelist}}<table class="minecraft-whitelist-table">
-      <thead><tr><th>Player</th><th>Platform</th><th></th></tr></thead>
+      <thead><tr><th>{{t "ui.64aee8c6cbd0"}}</th><th>{{t "ui.c78ffe195710"}}</th><th></th></tr></thead>
       <tbody>{{range .Network.Whitelist}}<tr>
-        <td>{{.Name}}</td><td>{{if eq .Platform "java"}}Java Edition{{else}}Bedrock{{end}}</td>
-        <td><form method="post" action="/workspace/minecraft-network"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="platform" value="{{.Platform}}"><button class="secondary" type="submit" name="action" value="remove">Remove</button></form></td>
+        <td>{{.Name}}</td><td>{{if eq .Platform "java"}}{{t "ui.8716240ed98f"}}{{else}}Bedrock{{end}}</td>
+        <td><form method="post" action="/workspace/minecraft-network"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{.Name}}"><input type="hidden" name="platform" value="{{.Platform}}"><button class="secondary" type="submit" name="action" value="remove">{{t "ui.c3812fc4acb8"}}</button></form></td>
       </tr>{{end}}</tbody>
-    </table>{{else}}<p class="muted">No players on the network whitelist.</p>{{end}}
+    </table>{{else}}<p class="muted">{{t "ui.7fb51f5740f9"}}</p>{{end}}
   </div>
 </section>
 </div>

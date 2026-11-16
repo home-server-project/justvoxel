@@ -25,12 +25,12 @@ func (a *App) pluginsAddonInventory(w http.ResponseWriter, r *http.Request) {
 	}
 	client, ok := a.api.(addonsWorkspaceAPI)
 	if !ok {
-		writeMinecraftWorkspaceError(w, 503, "Add-ons unavailable.")
+		writeMinecraftWorkspaceError(w, 503, ui(w, "ui.da01c058879a"))
 		return
 	}
 	out, err := client.AdminAddonInventory(r.Context(), session)
 	if err != nil {
-		a.writeMinecraftWorkspaceAPIError(w, err, "Add-ons inventory unavailable.")
+		a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.c0cdc5506392"))
 		return
 	}
 	writeMinecraftWorkspaceJSON(w, 200, out)
@@ -50,36 +50,36 @@ func (a *App) pluginsAddonUpload(w http.ResponseWriter, r *http.Request, apply b
 	// existing cookie/origin policy without ParseMultipartForm memory/disk staging.
 	r.Form = url.Values{"csrf": {r.Header.Get("X-CSRF-Token")}}
 	if !a.validCSRF(r) {
-		writeMinecraftWorkspaceError(w, 403, "Invalid CSRF token.")
+		writeMinecraftWorkspaceError(w, 403, ui(w, "ui.74bccc44f472"))
 		return
 	}
 	if r.URL.RawQuery != "" {
-		writeMinecraftWorkspaceError(w, 400, "Unexpected upload query.")
+		writeMinecraftWorkspaceError(w, 400, ui(w, "ui.324eadbcceec"))
 		return
 	}
 	client, ok := a.api.(addonsWorkspaceAPI)
 	if !ok {
-		writeMinecraftWorkspaceError(w, 503, "Add-ons unavailable.")
+		writeMinecraftWorkspaceError(w, 503, ui(w, "ui.da01c058879a"))
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, api.AddonUploadLimit)
 	reader, err := r.MultipartReader()
 	if err != nil {
-		writeMinecraftWorkspaceError(w, 400, "Multipart upload required.")
+		writeMinecraftWorkspaceError(w, 400, ui(w, "ui.d26664f51507"))
 		return
 	}
 	// Require type first so the WebUI validates the fixed contract before sending
 	// artifact bytes. Remaining fields are checked while the Agent consumes them.
 	first, err := reader.NextPart()
 	if err != nil || first.FormName() != "type" || first.FileName() != "" {
-		writeMinecraftWorkspaceError(w, 400, "Add-ons type must be the first upload field.")
+		writeMinecraftWorkspaceError(w, 400, ui(w, "ui.4c03b99cfdac"))
 		return
 	}
 	raw, err := io.ReadAll(io.LimitReader(first, 65))
 	first.Close()
 	kind := string(raw)
 	if err != nil || !api.ValidAddonKind(kind) {
-		writeMinecraftWorkspaceError(w, 400, "Unknown Add-ons type.")
+		writeMinecraftWorkspaceError(w, 400, ui(w, "ui.3981e09a4203"))
 		return
 	}
 	pipeReader, pipeWriter := io.Pipe()
@@ -100,7 +100,7 @@ func (a *App) pluginsAddonUpload(w http.ResponseWriter, r *http.Request, apply b
 	// The proxy finishes on body/pipe closure even when the Agent rejects early.
 	proxyErr := <-result
 	if err != nil {
-		a.writeMinecraftWorkspaceAPIError(w, err, "Add-ons upload could not continue.")
+		a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.ee0f3ce8b9fd"))
 		return
 	}
 	if proxyErr != nil {
@@ -128,13 +128,13 @@ func proxyAddonMultipart(reader *multipart.Reader, writer *multipart.Writer, kin
 		}
 		key := part.FormName()
 		if seen[key] || !(key == "file" || apply && (key == "plan_fingerprint" || key == "confirm_players")) {
-			return errors.New("Unexpected or duplicate upload field")
+			return errors.New(uiText("ui.8499fc961d0e"))
 		}
 		seen[key] = true
 		if key == "file" {
 			_, params, err := mime.ParseMediaType(part.Header.Get("Content-Disposition"))
 			if err != nil || params["filename"] == "" {
-				return errors.New("Missing filename")
+				return errors.New(uiText("ui.6e659e8e1967"))
 			}
 			target, err := writer.CreateFormFile("file", params["filename"])
 			if err != nil {
@@ -145,15 +145,15 @@ func proxyAddonMultipart(reader *multipart.Reader, writer *multipart.Writer, kin
 				return err
 			}
 			if n <= 0 || n > 128<<20 {
-				return errors.New("Empty or oversized upload")
+				return errors.New(uiText("ui.60ded17eb49a"))
 			}
 		} else {
 			if part.FileName() != "" {
-				return errors.New("Unexpected file field")
+				return errors.New(uiText("ui.d477b0700e82"))
 			}
 			raw, err := io.ReadAll(io.LimitReader(part, 513))
 			if err != nil || len(raw) > 512 {
-				return errors.New("Oversized upload field")
+				return errors.New(uiText("ui.8a48dea45d5c"))
 			}
 			if err = writer.WriteField(key, string(raw)); err != nil {
 				return err
@@ -162,7 +162,7 @@ func proxyAddonMultipart(reader *multipart.Reader, writer *multipart.Writer, kin
 		part.Close()
 	}
 	if !seen["file"] || apply && (!seen["plan_fingerprint"] || !seen["confirm_players"]) {
-		return errors.New("Incomplete upload")
+		return errors.New(uiText("ui.a8af58478c0a"))
 	}
 	return nil
 }
@@ -173,27 +173,27 @@ func (a *App) pluginsAddonRecover(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 4096)
 	if r.ParseForm() != nil || !a.validCSRF(r) {
-		writeMinecraftWorkspaceError(w, 403, "Invalid recovery request.")
+		writeMinecraftWorkspaceError(w, 403, ui(w, "ui.b8522acc4a3c"))
 		return
 	}
 	for key, values := range r.PostForm {
 		if (key != "csrf" && key != "operation_id") || len(values) != 1 {
-			writeMinecraftWorkspaceError(w, 400, "Invalid recovery fields.")
+			writeMinecraftWorkspaceError(w, 400, ui(w, "ui.5e1c649e1015"))
 			return
 		}
 	}
 	if r.URL.RawQuery != "" || !validWorkspaceLogID("plugins", r.FormValue("operation_id")) {
-		writeMinecraftWorkspaceError(w, 400, "Invalid recovery identity.")
+		writeMinecraftWorkspaceError(w, 400, ui(w, "ui.10ce2f02266a"))
 		return
 	}
 	client, ok := a.api.(addonsWorkspaceAPI)
 	if !ok {
-		writeMinecraftWorkspaceError(w, 503, "Add-ons recovery unavailable.")
+		writeMinecraftWorkspaceError(w, 503, ui(w, "ui.4e618a5a9947"))
 		return
 	}
 	out, err := client.AdminAddonRecover(r.Context(), session, api.PluginInstallAcknowledgeRequest{OperationID: r.FormValue("operation_id")})
 	if err != nil {
-		a.writeMinecraftWorkspaceAPIError(w, err, "Recovery remains unverified; evidence is preserved.")
+		a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.2288864fdd4a"))
 		return
 	}
 	writeMinecraftWorkspaceJSON(w, 200, out)

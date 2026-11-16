@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { readFileSync } = require('node:fs');
+const { readFileSync } = require('./helpers/webui-i18n.cjs');
 const path = require('node:path');
 const { test } = require('node:test');
 const vm = require('node:vm');
@@ -64,10 +64,13 @@ test('setup footers use the desktop width and gutter independently of wizard pan
 });
 
 test('login submit reuses Control Center action dimensions and aligns right without changing fields', () => {
-  const selector = '.login-panel>form[action="/login"]>button[type=submit]';
+  const selector = '.login-panel>form[action="/login"]>.login-actions>button[type=submit]';
   const shared = rule(css, `.control-power-actions button,.control-session .nav-logout button,${selector}`);
   assert.deepEqual(shared, { 'min-height': '34px', padding: '.45rem .65rem', 'font-size': '.8rem' });
-  assert.deepEqual(rule(css, selector), { display: 'block', 'margin-left': 'auto' });
+  assert.deepEqual(rules(css).filter(item => item.selector === selector).map(item => item.properties), [
+    { display: 'block', 'margin-left': 'auto' }, {'margin-left': '0'},
+  ]);
+  assert.deepEqual(rule(css, '.login-actions'), {display: 'flex', 'align-items': 'center', 'justify-content': 'flex-end', gap: '.5rem'});
   const base = rule(css, 'button,.button-link');
   assert.equal(base['border-radius'], '8px', 'both buttons retain the standard radius');
   assert.equal(base.font, 'inherit', 'both buttons retain the inherited font and line height');
@@ -75,7 +78,7 @@ test('login submit reuses Control Center action dimensions and aligns right with
   assert.ok(size.selector.startsWith(':is(button,.button-link)'), 'both buttons use the same final font sizing');
   assert.ok(!size.selector.includes('login-panel'), 'login has no separate font-size override');
   const login = read('templates/login.html');
-  assert.match(login, /<form method="post" action="\/login">{{if \.OAuthRequest}}<input type="hidden" name="oauth_request" value="{{\.OAuthRequest}}">{{end}}<label>Username<input name="username" autocomplete="username" required><\/label><label>Password<input type="password" name="password" autocomplete="current-password" required autofocus><\/label><button type="submit">Sign in<\/button><\/form>/);
+  assert.match(login, /<form method="post" action="\/login">{{if \.OAuthRequest}}<input type="hidden" name="oauth_request" value="{{\.OAuthRequest}}">{{end}}<label>Username<input name="username" autocomplete="username" required><\/label><label>Password<input type="password" name="password" autocomplete="current-password" required autofocus><\/label><div class="login-actions">{{template "language-button" \.}}<button type="submit">Sign in<\/button><\/div><\/form>/);
   assert.doesNotMatch(login, /<input\b[^>]*\bname="username"[^>]*\bvalue="voxel"/);
   assert.match(read('templates/header.html'), /class="control-power-actions[^"\n]*"/);
 });

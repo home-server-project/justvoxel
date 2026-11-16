@@ -9,7 +9,6 @@ import (
 
 	"github.com/home-server-project/justvoxel-webui/internal/api"
 	"os"
-	"os/exec"
 	"regexp"
 	"strings"
 	"testing"
@@ -108,7 +107,7 @@ func TestPaperForkChoicesAndSharedPresentation(t *testing.T) {
 		if serverSoftware(tc.id) != tc.name || setupServerTypeLabel(tc.id) != tc.name || serverSoftwareIcon(tc.id) != "/static/server-software/"+tc.id+".svg" || !validSetupServerType(tc.id) || !recommendedServerSupportsBedrock(tc.id) {
 			t.Fatalf("missing shared presentation/capability: %s", tc.id)
 		}
-		data, err := assets.ReadFile("static/server-software/" + tc.id + ".svg")
+		data, err := englishPresentationAsset("static/server-software/" + tc.id + ".svg")
 		if err != nil || !strings.Contains(string(data), `viewBox="0 0 48 48"`) || strings.Contains(string(data), "href=") {
 			t.Fatal("missing original local vector")
 		}
@@ -119,7 +118,7 @@ func TestPaperForkChoicesAndSharedPresentation(t *testing.T) {
 }
 
 func TestSetupValidCandidateAdvisoryDoesNotBlockContinue(t *testing.T) {
-	script, err := assets.ReadFile("static/settings.js")
+	script, err := englishPresentationAsset("static/settings.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +155,7 @@ assert.equal(next.disabled, true);
 context.render({...status, crossplay_enabled: true, crossplay_compatible: false}, "recommended");
 assert.equal(next.disabled, true);
 `
-	cmd := exec.Command("node")
+	cmd := nodeTestCommand()
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("setup version advisory: %v\n%s", err, output)

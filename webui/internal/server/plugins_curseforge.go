@@ -20,7 +20,7 @@ func (a *App) pluginsCurseForgeAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.RawQuery != "" {
-		writeMinecraftWorkspaceError(w, 400, "Invalid CurseForge API request.")
+		writeMinecraftWorkspaceError(w, 400, ui(w, "ui.961db8d24f9b"))
 		return
 	}
 	key := ""
@@ -38,16 +38,16 @@ func (a *App) pluginsCurseForgeAPI(w http.ResponseWriter, r *http.Request) {
 			parseErr = r.ParseForm()
 		}
 		if parseErr != nil {
-			writeMinecraftWorkspaceError(w, 400, "Invalid CurseForge API request.")
+			writeMinecraftWorkspaceError(w, 400, ui(w, "ui.961db8d24f9b"))
 			return
 		}
 		if !a.validCSRF(r) {
-			writeMinecraftWorkspaceError(w, 403, "Invalid CSRF token.")
+			writeMinecraftWorkspaceError(w, 403, ui(w, "ui.74bccc44f472"))
 			return
 		}
 		for name, values := range r.PostForm {
 			if (name != "csrf" && (r.Method != http.MethodPut || name != "key")) || len(values) != 1 {
-				writeMinecraftWorkspaceError(w, 400, "Invalid CurseForge API request.")
+				writeMinecraftWorkspaceError(w, 400, ui(w, "ui.961db8d24f9b"))
 				return
 			}
 		}
@@ -55,12 +55,12 @@ func (a *App) pluginsCurseForgeAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	client, ok := a.api.(curseForgeAPI)
 	if !ok {
-		writeMinecraftWorkspaceError(w, 503, "CurseForge API configuration is unavailable.")
+		writeMinecraftWorkspaceError(w, 503, ui(w, "ui.3629e8c4b0b7"))
 		return
 	}
 	out, err := client.AdminCurseForgeAPI(r.Context(), session, r.Method, key)
 	if err != nil {
-		a.writeMinecraftWorkspaceAPIError(w, err, "CurseForge API configuration could not be updated.")
+		a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.7849f5fa4da7"))
 		return
 	}
 	writeMinecraftWorkspaceJSON(w, 200, out)

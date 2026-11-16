@@ -54,7 +54,7 @@ func (a *App) howToConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	client, ok := a.api.(sessionIdentityAPI)
 	if !ok {
-		http.Error(w, "role-aware controls are unavailable", http.StatusServiceUnavailable)
+		http.Error(w, ui(w, "ui.db238a1fe47d"), http.StatusServiceUnavailable)
 		return
 	}
 	identity, err := client.Session(r.Context(), session)
@@ -73,7 +73,7 @@ func (a *App) howToConnect(w http.ResponseWriter, r *http.Request) {
 	switch identity.Role {
 	case "administrator", "operator", "viewer":
 	default:
-		http.Error(w, "Access denied", http.StatusForbidden)
+		http.Error(w, ui(w, "ui.cc11d415d932"), http.StatusForbidden)
 		return
 	}
 	status, err := a.api.Status(r.Context(), session)
@@ -102,7 +102,7 @@ func (a *App) howToConnect(w http.ResponseWriter, r *http.Request) {
 	for _, instance := range instances {
 		name := strings.TrimSpace(instance.DisplayName)
 		if name == "" {
-			name = "Current server"
+			name = ui(w, "ui.93383944c4b5")
 		}
 		choices = append(choices, selectedServerContext{ID: instance.ID, Name: name})
 	}
@@ -136,7 +136,7 @@ func (a *App) howToConnect(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	a.render(w, "how_to_connect.html", pageData{Title: "How to connect", SelectedMinecraftID: selected.ID, ConnectionServers: choices, ConnectionGuide: newConnectionGuide(status, remote, selected.Name)})
+	a.render(w, "how_to_connect.html", pageData{Title: ui(w, "ui.2198ec8ff357"), SelectedMinecraftID: selected.ID, ConnectionServers: choices, ConnectionGuide: newConnectionGuide(status, remote, selected.Name)})
 }
 
 func usableConnectionIP(value string, ipv4 bool) bool {
@@ -204,7 +204,7 @@ func newConnectionGuide(status api.Status, remote api.RemoteAccessStatus, server
 	}
 	serverName = strings.TrimSpace(serverName)
 	if serverName == "" {
-		serverName = "Current server"
+		serverName = uiText("ui.93383944c4b5")
 	}
 	guide := &connectionGuide{Configured: mc.Configured, Server: serverName, ServerName: serverName, Bedrock: mc.Bedrock, JavaPort: mc.JavaPort, BedrockPort: mc.BedrockPort}
 	if !mc.Configured {
@@ -214,12 +214,12 @@ func newConnectionGuide(status api.Status, remote api.RemoteAccessStatus, server
 		guide.Server += " — " + label
 	}
 	guide.Methods = []connectionMethod{
-		{ID: "custom", Name: "Custom domain", Note: "Use the hostname supplied by the server owner.", Available: validConnectionPort(mc.JavaPort), Status: "Enter your hostname"},
-		{ID: "local", Name: "Local connection IPv4", Note: "Works only for devices on the same home/local network.", Status: "Unavailable"},
-		{ID: "tailscale", Name: "Tailscale", Note: "Works only for users with access to the same Tailscale network.", Status: "Unavailable"},
-		{ID: "netbird", Name: "NetBird", Note: "Works only for peers with access to the relevant NetBird network.", Status: "Unavailable"},
-		{ID: "playit", Name: "Playit.gg", Note: "Use the public tunnel connection information below. Public ports may differ from local ports.", Status: "Unavailable"},
-		{ID: "nordvpn", Name: "NordVPN Meshnet", Note: "Works only for peers with access to this NordVPN Meshnet.", Status: "Unavailable"},
+		{ID: "custom", Name: uiText("ui.d7d4c1e416bc"), Note: uiText("ui.d3d4c5b7fa99"), Available: validConnectionPort(mc.JavaPort), Status: uiText("ui.5a1393ad3611")},
+		{ID: "local", Name: uiText("ui.017d5675a6d9"), Note: uiText("ui.49ced9597e88"), Status: uiText("ui.ca1844969742")},
+		{ID: "tailscale", Name: "Tailscale", Note: uiText("ui.0616790ce939"), Status: uiText("ui.ca1844969742")},
+		{ID: "netbird", Name: "NetBird", Note: uiText("ui.dd8be4917318"), Status: uiText("ui.ca1844969742")},
+		{ID: "playit", Name: "Playit.gg", Note: uiText("ui.50f2025719ef"), Status: uiText("ui.ca1844969742")},
+		{ID: "nordvpn", Name: uiText("ui.efbb9e0df755"), Note: uiText("ui.a2384f9ffab8"), Status: uiText("ui.ca1844969742")},
 	}
 	local := &guide.Methods[1]
 	if usableConnectionIP(status.System.IPv4, true) {
@@ -227,7 +227,7 @@ func newConnectionGuide(status api.Status, remote api.RemoteAccessStatus, server
 		local.Available = len(local.Endpoints) > 0
 		local.Default = local.Available
 		if local.Available {
-			local.Status = "Available"
+			local.Status = uiText("ui.e674447337e8")
 		}
 	}
 	for i := 2; i < len(guide.Methods); i++ {
@@ -286,9 +286,9 @@ func newConnectionGuide(status api.Status, remote api.RemoteAccessStatus, server
 			}
 			method.Available = len(method.Endpoints) > 0
 			if method.Available {
-				method.Status = "Available"
+				method.Status = uiText("ui.e674447337e8")
 			} else if provider.Connected {
-				method.Status = "Connected — no usable connection address"
+				method.Status = uiText("ui.7cf298fe8158")
 			}
 			break
 		}
@@ -297,13 +297,17 @@ func newConnectionGuide(status api.Status, remote api.RemoteAccessStatus, server
 }
 
 // Only the current guide's default method contributes to a direct invitation.
-func defaultConnectionInvitation(guide *connectionGuide) string {
+func defaultConnectionInvitation(guide *connectionGuide, locales ...string) string {
+	locale := "en"
+	if len(locales) > 0 && supportedLocale(locales[0]) {
+		locale = locales[0]
+	}
 	methods := []string{}
 	for _, method := range guide.Methods {
 		if !method.Default || !method.Available {
 			continue
 		}
-		lines := []string{method.Name}
+		lines := []string{translateSource(locale, method.Name)}
 		for _, endpoint := range method.Endpoints {
 			if endpoint.Edition == "Java" && endpoint.JoinAddress != "" {
 				lines = append(lines, "Java: "+endpoint.JoinAddress)
@@ -319,7 +323,7 @@ func defaultConnectionInvitation(guide *connectionGuide) string {
 	if len(methods) == 0 {
 		return ""
 	}
-	return "Join my Minecraft " + guide.ServerName + " on JustVoxel\n\n" + strings.Join(methods, "\n\n")
+	return translate(locale, "ui.2cd990a0a03f", "name", guide.ServerName) + "\n\n" + strings.Join(methods, "\n\n")
 }
 
 func (a *App) minecraftServersInvitation(w http.ResponseWriter, r *http.Request) {
@@ -342,22 +346,22 @@ func (a *App) minecraftServersInvitation(w http.ResponseWriter, r *http.Request)
 	}
 	client, ok := a.api.(minecraftServerInventoryAPI)
 	if !ok {
-		writeMinecraftWorkspaceError(w, 503, "Connection information is unavailable.")
+		writeMinecraftWorkspaceError(w, 503, ui(w, "ui.54c7a930a635"))
 		return
 	}
 	configuration, err := client.MinecraftInstanceConfiguration(r.Context(), session, selected.ID)
 	if err != nil {
-		failure(err, "Server configuration could not be checked.")
+		failure(err, ui(w, "ui.5f084d0e0517"))
 		return
 	}
 	status, err := a.api.Status(r.Context(), session)
 	if err != nil {
-		failure(err, "Connection information is unavailable.")
+		failure(err, ui(w, "ui.54c7a930a635"))
 		return
 	}
 	configuration, err = a.minecraftConnectionSettings(r.Context(), session, selected.ID, configuration)
 	if err != nil {
-		failure(err, "Connection information is unavailable.")
+		failure(err, ui(w, "ui.54c7a930a635"))
 		return
 	}
 	status.Minecraft = instancePresentation(configuration).Minecraft
@@ -366,15 +370,15 @@ func (a *App) minecraftServersInvitation(w http.ResponseWriter, r *http.Request)
 		if client, ok := a.api.(connectionStatusAPI); ok {
 			remote, err = client.RemoteAccessStatus(r.Context(), session)
 			if err != nil {
-				failure(err, "Connection information is unavailable.")
+				failure(err, ui(w, "ui.54c7a930a635"))
 				return
 			}
 		}
 	}
 	guide := newConnectionGuide(status, remote, selected.Name)
-	invitation := defaultConnectionInvitation(guide)
+	invitation := defaultConnectionInvitation(guide, requestLocale(r))
 	if invitation == "" {
-		writeMinecraftWorkspaceError(w, 409, "No default invitation is available. Open How to connect to choose a connection method.")
+		writeMinecraftWorkspaceError(w, 409, ui(w, "ui.c6372025b3ab"))
 		return
 	}
 	writeMinecraftWorkspaceJSON(w, 200, struct {

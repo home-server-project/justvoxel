@@ -36,28 +36,28 @@ if (memoryPanel) {
     const maximumMiB = parseMemoryMiB(maxMemory.value);
     status.classList.remove("warning", "danger");
     if (!totalMiB) {
-      status.textContent = "System memory could not be detected. JustVoxel will validate the values again before Apply.";
+      status.textContent = jvT("ui.1ff4a1e67aae");
       status.classList.add("warning");
       return;
     }
     if (!maximumMiB) {
-      status.textContent = "Enter memory as a size such as 6G or 6144M.";
+      status.textContent = jvT("ui.e9efdcb72877");
       status.classList.add("warning");
       return;
     }
     const otherMemoryMiB = Number(memoryPanel.dataset.otherMemoryMib || 0);
     const remaining = totalMiB - maximumMiB;
     if (remaining < minimumReserveMiB) {
-      status.textContent = `Not enough memory remains outside Minecraft: about ${formatRemaining(remaining)}. JustVoxel requires at least 1 GiB outside the Minecraft limit; reduce Maximum Minecraft memory before continuing.`;
+      status.textContent = jvT("ui.f48134d2c849", {v0: (formatRemaining(remaining))});
       status.classList.add("danger");
     } else if (otherMemoryMiB > 0 && remaining - otherMemoryMiB < minimumReserveMiB) {
-      status.textContent = `Other configured servers have memory limits totalling ${formatRemaining(otherMemoryMiB)}. These servers can remain installed, but they cannot all run at the same time.`;
+      status.textContent = jvT("ui.93dab088e9c4", {v0: (formatRemaining(otherMemoryMiB))});
       status.classList.add("warning");
     } else if (remaining < recommendedReserveMiB) {
-      status.textContent = `Tight memory configuration: about ${formatRemaining(remaining)} remains outside Minecraft. JustVoxel itself typically uses roughly 0.6–1.0 GiB; recommended 1.5 GiB headroom gives extra room for cache, backups, updates and temporary spikes.`;
+      status.textContent = jvT("ui.40d2cf5cc58b", {v0: (formatRemaining(remaining))});
       status.classList.add("warning");
     } else {
-      status.textContent = `Memory remaining outside Minecraft: about ${formatRemaining(remaining)}. JustVoxel itself typically uses roughly 0.6–1.0 GiB; the rest stays available for Linux cache, backups, updates, management services and temporary workload spikes.`;
+      status.textContent = jvT("ui.07b31ffcb6cd", {v0: (formatRemaining(remaining))});
     }
   };
 
@@ -154,7 +154,7 @@ if (versionPolicy && versionInput && specificVersionField) {
   const next = form?.querySelector('button[name="direction"][value="next"]');
   let sequence = 0;
   let timer;
-  const channelLabel = (channel) => ({ STABLE: "Stable", BETA: "Beta", ALPHA: "Alpha", RELEASE: "Release" })[channel] || channel || "Unavailable";
+  const channelLabel = (channel) => ({ STABLE: jvT("ui.90ee305714d7"), BETA: jvT("ui.703390318bd5"), ALPHA: jvT("ui.b1a96dd646bc"), RELEASE: jvT("ui.e020e3c67bd0") })[channel] || channel || jvT("ui.ca1844969742");
   const show = (status, policy) => {
     const make = (tag, className, value) => {
       const node = document.createElement(tag);
@@ -168,12 +168,12 @@ if (versionPolicy && versionInput && specificVersionField) {
     if (javaOnly && toggle) { toggle.disabled = true; toggle.checked = false; status.crossplay_enabled = false; }
     if (toggle && !javaOnly) toggle.disabled = false;
     const summary = make("div", "notice " + (status.selected_candidate ? "success" : "warning") + " setup-version-panel", "");
-    summary.append(make("span", "setup-version-kicker", policy === "recommended" ? "Recommended" : policy === "latest" ? "Latest" : "Specific"));
+    summary.append(make("span", "setup-version-kicker", policy === "recommended" ? "Recommended" : policy === "latest" ? jvT("ui.8730d3c2022a") : jvT("ui.0b85c4d8a4ba")));
     if (status.selected_candidate) {
       summary.append(make("strong", "setup-version-candidate", status.selected_candidate));
-      summary.append(make("span", "setup-version-note", `Minecraft build classification: ${channelLabel(status.candidate_channel)}`));
+      summary.append(make("span", "setup-version-note", jvT("ui.f8105739960e", {v0: (channelLabel(status.candidate_channel))})));
     } else {
-      summary.append(make("p", "setup-version-explanation", status.reason || "No usable server build was found for this version."));
+      summary.append(make("p", "setup-version-explanation", status.reason || jvT("ui.6cd62188f456")));
     }
     preview.replaceChildren(summary);
     if (status.selected_candidate && status.reason && (!status.crossplay_enabled || status.crossplay_compatible)) {
@@ -184,24 +184,24 @@ if (versionPolicy && versionInput && specificVersionField) {
     const selected = status.selected_candidate;
     let message;
     if (javaOnly) {
-      message = "This software supports Java only.";
+      message = jvT("ui.869dd17f477a");
     } else if (status.crossplay_enabled && status.crossplay_compatible) {
-      message = `Bedrock cross-play is supported for Minecraft ${selected}.`;
+      message = jvT("ui.a4582db875ce", {v0: (selected)});
     } else if (!supported) {
-      message = "Current managed cross-play Minecraft version could not be verified. Java setup is available.";
+      message = jvT("ui.a8522a0e572f");
     } else {
-      message = `Managed cross-play currently supports Minecraft ${supported}.`;
+      message = jvT("ui.463ab0c37dc9", {v0: (supported)});
       if (selected && selected !== supported) {
-        message += ` Selected Minecraft ${selected} is available as Java-only.`;
+        message += jvT("ui.371159f2be05", {v0: (selected)});
       } else if (!status.crossplay_enabled) {
         const runtime = software === "fabric" ? "Fabric" : software === "neoforge" ? "NeoForge" : "";
-        message += runtime ? ` Enable Bedrock cross-play to verify this exact ${runtime} runtime.` : " Enable Bedrock cross-play if wanted.";
+        message += runtime ? jvT("ui.d50bb83fdfbd", {v0: (runtime)}) : jvT("ui.8e590792a1f3");
       } else {
-        message += " " + (status.reason || "Managed cross-play compatibility could not be proven for this exact runtime.");
+        message += " " + (status.reason || jvT("ui.3a1f60bff938"));
       }
     }
     compatibility.append(make("p", "", message));
-    if (status.crossplay_enabled && !status.crossplay_compatible) compatibility.append(make("p", "", "Choose Recommended, select a compatible Specific version, or disable Bedrock cross-play."));
+    if (status.crossplay_enabled && !status.crossplay_compatible) compatibility.append(make("p", "", jvT("ui.c144eefdf05c")));
     preview.append(compatibility);
     next.disabled = !status.selected_candidate || (status.crossplay_enabled && !status.crossplay_compatible);
   };
@@ -210,7 +210,7 @@ if (versionPolicy && versionInput && specificVersionField) {
     panel.className = "notice " + severity + " setup-version-panel";
     const title = document.createElement("span");
     title.className = "setup-version-kicker";
-    title.textContent = versionPolicy.value === "recommended" ? "Recommended" : versionPolicy.value === "latest" ? "Latest" : "Specific";
+    title.textContent = versionPolicy.value === "recommended" ? jvT("ui.d70604e84304") : versionPolicy.value === "latest" ? jvT("ui.8730d3c2022a") : jvT("ui.0b85c4d8a4ba");
     const explanation = document.createElement("p");
     explanation.className = "setup-version-explanation";
     explanation.textContent = message;
@@ -220,16 +220,16 @@ if (versionPolicy && versionInput && specificVersionField) {
   const refresh = async () => {
     const ticket = ++sequence;
     next.disabled = true;
-    showNotice("Checking available versions…");
+    showNotice(jvT("ui.c193a42f50aa"));
     const policy = versionPolicy.value;
     const version = policy === "pinned" ? versionInput.value.trim() : "";
-    if (policy === "pinned" && !version) { showNotice("Enter a Minecraft version to check availability.", "warning"); return; }
+    if (policy === "pinned" && !version) { showNotice(jvT("ui.77012c65b90d"), "warning"); return; }
     try {
       const response = await fetch((form?.dataset.versionPreviewUrl || "/setup/version-preview") + "?" + new URLSearchParams({ policy, version, bedrock_enabled: form?.querySelector("[data-bedrock-toggle]")?.checked ? "on" : "off" }), { credentials: "same-origin", cache: "no-store" });
       if (!response.ok) throw new Error();
       const status = await response.json();
       if (ticket === sequence) show(status, policy);
-    } catch (_) { if (ticket === sequence) showNotice("Version information is unavailable. Try again before continuing.", "error"); }
+    } catch (_) { if (ticket === sequence) showNotice(jvT("ui.6b1be7716cd4"), "error"); }
   };
   const updateVersionHelp = () => {
     const specific = versionPolicy.value === "pinned";
@@ -241,7 +241,7 @@ if (versionPolicy && versionInput && specificVersionField) {
   };
   form?.querySelector("[data-bedrock-toggle]")?.addEventListener("change", refresh);
   versionPolicy.addEventListener("change", updateVersionHelp);
-  versionInput.addEventListener("input", () => { clearTimeout(timer); ++sequence; next.disabled = true; showNotice("Checking available versions…"); timer = setTimeout(refresh, 300); });
+  versionInput.addEventListener("input", () => { clearTimeout(timer); ++sequence; next.disabled = true; showNotice(jvT("ui.c193a42f50aa")); timer = setTimeout(refresh, 300); });
   form?.addEventListener("submit", (event) => { if (event.submitter?.value === "next" && next.disabled) event.preventDefault(); });
   updateVersionHelp();
 }

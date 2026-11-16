@@ -1,6 +1,6 @@
 {{define "migration_workspace_import_review.html"}}<div class="migration-workspace-content" data-migration-workspace-root data-server-id="{{.ServerID}}">
-{{if .Error}}<div class="notice error"><strong>Server Import needs attention.</strong><br>{{.Error}}</div>{{end}}
-  {{if .Prompt}}<div class="notice"><strong>More source information is required.</strong><br>{{.Prompt}}</div>{{end}}
+{{if .Error}}<div class="notice error"><strong>{{t "ui.7623c72221c7"}}</strong><br>{{ts .Error}}</div>{{end}}
+  {{if .Prompt}}<div class="notice"><strong>{{t "ui.22c35a4ebc41"}}</strong><br>{{.Prompt}}</div>{{end}}
 
   {{if and (not .Plan.OK) (not .Incompatible)}}
   {{if .NeedsInput}}
@@ -38,14 +38,14 @@
 
     {{if .NeedsSourcePath}}
     <section class="panel migration-source-picker">
-      <p class="eyebrow">Backups and servers found here</p>
-      <p class="muted compact">Choose what you want to import. JustVoxel found these entries automatically.</p>
+      <p class="eyebrow">{{t "ui.1e0ff1b69da8"}}</p>
+      <p class="muted compact">{{t "ui.7f8e73398a46"}}</p>
       <div class="migration-choice-list">
-        {{range .Plan.SourceEntries}}<label class="migration-choice"><input type="radio" name="source_path" value="{{.Path}}"><span><strong>{{if eq .Kind "archive"}}Backup archive{{else}}Server folder{{end}}</strong><small>{{.Path}}</small></span></label>{{end}}
+        {{range .Plan.SourceEntries}}<label class="migration-choice"><input type="radio" name="source_path" value="{{.Path}}"><span><strong>{{if eq .Kind "archive"}}{{t "ui.d0b5bfae9ea9"}}{{else}}{{t "ui.65d69ce8f891"}}{{end}}</strong><small>{{.Path}}</small></span></label>{{end}}
       </div>
       <details class="migration-advanced">
-        <summary>Advanced: enter a path manually</summary>
-        <label for="server-import-manual-path"><strong>Path inside this source</strong></label>
+        <summary>{{t "ui.2bb2f632ed15"}}</summary>
+        <label for="server-import-manual-path"><strong>{{t "ui.cb2cfbd2890e"}}</strong></label>
         <input id="server-import-manual-path" name="manual_path" placeholder="folder/server-or-archive.tar.gz" autocomplete="off">
       </details>
     </section>
@@ -53,54 +53,54 @@
 
     {{if .NeedsRoot}}
     <section class="panel">
-      <p class="eyebrow">Minecraft server roots</p>
-      <div class="migration-choice-list">{{range .Plan.Candidates}}<label class="migration-choice"><input type="radio" name="selected_root" value="{{.RootRelative}}"><span><strong>{{.SourceType}}{{if .MinecraftVersion}} · Minecraft {{.MinecraftVersion}}{{end}}</strong><small>{{if .RootRelative}}{{.RootRelative}}{{else}}Source root{{end}}</small></span></label>{{end}}</div>
+      <p class="eyebrow">{{t "ui.03ced8c1bf36"}}</p>
+      <div class="migration-choice-list">{{range .Plan.Candidates}}<label class="migration-choice"><input type="radio" name="selected_root" value="{{.RootRelative}}"><span><strong>{{.SourceType}}{{if .MinecraftVersion}} {{t "ui.406eff618db8"}} {{.MinecraftVersion}}{{end}}</strong><small>{{if .RootRelative}}{{.RootRelative}}{{else}}{{t "ui.5623ebf65d8d"}}{{end}}</small></span></label>{{end}}</div>
     </section>
     {{end}}
 
     {{if .NeedsVersion}}
     <section class="panel">
-      <p class="eyebrow">Exact Minecraft version</p>
-      <label for="server-import-required-version"><strong>Source Minecraft version</strong></label>
+      <p class="eyebrow">{{t "ui.eda536a544fd"}}</p>
+      <label for="server-import-required-version"><strong>{{t "ui.47752a6d0709"}}</strong></label>
       <input id="server-import-required-version" name="source_version" value="{{.Request.Source.SourceVersion}}" placeholder="1.21.8" autocomplete="off" required>
-      <p class="muted">JustVoxel requires an exact version only because autodetection could not prove it, so it can verify a matching stable Paper build before Import.</p>
+      <p class="muted">{{t "ui.34df747d7e65"}}</p>
     </section>
     {{end}}
 
 
-    <div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;tab=import&amp;server={{.ServerID}}">Start over</a><button type="submit">Continue review</button></div>
+    <div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;tab=import&amp;server={{.ServerID}}">{{t "ui.5eed7e9fc8f3"}}</a><button type="submit">{{t "ui.e91f40d19f83"}}</button></div>
   </form>
   {{else}}
-  <div class="action-row"><a class="button-link" href="/?workspace=migration&amp;tab=import&amp;server={{.ServerID}}">Back to Server Import</a></div>
+  <div class="action-row"><a class="button-link" href="/?workspace=migration&amp;tab=import&amp;server={{.ServerID}}">{{t "ui.892dd73e9682"}}</a></div>
   {{end}}
   {{else}}
 
   {{if .Plan.Normalized}}
   <div class="migration-review-grid">
   <section class="panel">
-    <p class="eyebrow">Reviewed source plan</p>
-    <h2>{{if or (eq .Plan.Normalized.Source.SourceClass "paper") (eq .Plan.Normalized.Source.SourceClass "itzg-paper") (eq .Plan.Normalized.Source.SourceClass "vanilla")}}{{.SourceSoftware}}{{else}}{{.Plan.Normalized.Source.SourceClass}}{{end}} · Minecraft {{.Plan.Normalized.Source.MinecraftVersion}}</h2>
+    <p class="eyebrow">{{t "ui.86a3b80789fe"}}</p>
+    <h2>{{if or (eq .Plan.Normalized.Source.SourceClass "paper") (eq .Plan.Normalized.Source.SourceClass "itzg-paper") (eq .Plan.Normalized.Source.SourceClass "vanilla")}}{{.SourceSoftware}}{{else}}{{.Plan.Normalized.Source.SourceClass}}{{end}} {{t "ui.406eff618db8"}} {{.Plan.Normalized.Source.MinecraftVersion}}</h2>
     <div class="migration-facts">
-      <div><strong>Selected source</strong><span>{{.Plan.Normalized.Source.Path}}{{if .Plan.Normalized.Source.SelectedRoot}} · root {{.Plan.Normalized.Source.SelectedRoot}}{{end}}</span></div>
-      <div><strong>Server software</strong><span>{{.SourceSoftware}}</span></div>
-      <div><strong>Online identity</strong><span>{{.Plan.Normalized.Source.OnlineMode}}</span></div>
-      <div><strong>Imported data</strong><span>{{.DataSize}}</span></div>
-      <div><strong>Game settings</strong><span>{{.Plan.Normalized.Source.GameMode}} · {{.Plan.Normalized.Source.Difficulty}} · max {{.Plan.Normalized.Source.MaxPlayers}}</span></div>
-      <div><strong>Plugins</strong><span>{{.Plan.Normalized.Source.PluginCount}}</span></div>
+      <div><strong>{{t "ui.4697d02d5c97"}}</strong><span>{{.Plan.Normalized.Source.Path}}{{if .Plan.Normalized.Source.SelectedRoot}} {{t "ui.c0cc784bbdb9"}} {{.Plan.Normalized.Source.SelectedRoot}}{{end}}</span></div>
+      <div><strong>{{t "ui.8b8ee2755acb"}}</strong><span>{{.SourceSoftware}}</span></div>
+      <div><strong>{{t "ui.b5c27df48e80"}}</strong><span>{{.Plan.Normalized.Source.OnlineMode}}</span></div>
+      <div><strong>{{t "ui.364595038f9f"}}</strong><span>{{.DataSize}}</span></div>
+      <div><strong>{{t "ui.fece8604a2c2"}}</strong><span>{{.Plan.Normalized.Source.GameMode}} · {{.Plan.Normalized.Source.Difficulty}} {{t "ui.fce43d6bd8af"}} {{.Plan.Normalized.Source.MaxPlayers}}</span></div>
+      <div><strong>{{t "ui.9514b7ff4860"}}</strong><span>{{.Plan.Normalized.Source.PluginCount}}</span></div>
     </div>
   </section>
 
   <section class="panel">
-    <p class="eyebrow">Reviewed destination plan</p>
-    <h2>Replace configured JustVoxel server</h2>
+    <p class="eyebrow">{{t "ui.6e1d69c5b6e2"}}</p>
+    <h2>{{t "ui.455fd75d0759"}}</h2>
     <div class="migration-facts">
-      <div><strong>Server software</strong><span>{{.DestinationSoftware}}</span></div>
-      <div><strong>Minecraft data</strong><span>{{.Plan.Normalized.Destination.DataPath}}</span></div>
-      <div><strong>Backups</strong><span>{{.Plan.Normalized.Destination.BackupPath}} · keep {{.Plan.Normalized.Destination.BackupKeep}}{{if .Plan.Normalized.Destination.BackupAutomatic}} · {{.Plan.Normalized.Destination.BackupSchedule}}{{end}}</span></div>
-      <div><strong>Ports</strong><span>Java {{.Plan.Normalized.Destination.JavaPort}}/TCP{{if .Plan.Normalized.Source.BedrockEnabled}} · Bedrock {{.Plan.Normalized.Destination.BedrockPort}}/UDP{{end}}</span></div>
-      <div><strong>Memory / timezone</strong><span>{{.Plan.Normalized.Destination.JavaMemory}} heap · {{.Plan.Normalized.Destination.ContainerMemory}} max · {{.Plan.Normalized.Destination.Timezone}}</span></div>
-      {{if .Plan.Normalized.Destination.Storage}}<div><strong>Data storage</strong><span>{{.Plan.Normalized.Destination.Storage.Type}} · {{.Plan.Normalized.Destination.Storage.Path}}{{if .Plan.Normalized.Destination.Storage.Device}} · {{.Plan.Normalized.Destination.Storage.Device}}{{end}}{{if .StorageSize}} · {{.StorageSize}}{{end}}</span></div>{{end}}
-      {{if .Plan.Normalized.Destination.Backups}}<div><strong>Backup storage</strong><span>{{.Plan.Normalized.Destination.Backups.Type}} · {{.Plan.Normalized.Destination.Backups.Path}}{{if .Plan.Normalized.Destination.Backups.Source}} · {{.Plan.Normalized.Destination.Backups.Source}}{{end}}{{if .BackupSize}} · {{.BackupSize}}{{end}}</span></div>{{end}}
+      <div><strong>{{t "ui.8b8ee2755acb"}}</strong><span>{{.DestinationSoftware}}</span></div>
+      <div><strong>{{t "ui.efa27541aca0"}}</strong><span>{{.Plan.Normalized.Destination.DataPath}}</span></div>
+      <div><strong>{{t "ui.3334fee2c77f"}}</strong><span>{{.Plan.Normalized.Destination.BackupPath}} {{t "ui.bc578e200b64"}} {{.Plan.Normalized.Destination.BackupKeep}}{{if .Plan.Normalized.Destination.BackupAutomatic}} · {{.Plan.Normalized.Destination.BackupSchedule}}{{end}}</span></div>
+      <div><strong>{{t "ui.de5648dd8c8e"}}</strong><span>Java {{.Plan.Normalized.Destination.JavaPort}}/TCP{{if .Plan.Normalized.Source.BedrockEnabled}} {{t "ui.591f1387ed3f"}} {{.Plan.Normalized.Destination.BedrockPort}}/UDP{{end}}</span></div>
+      <div><strong>{{t "ui.34c1bebd324c"}}</strong><span>{{.Plan.Normalized.Destination.JavaMemory}} {{t "ui.37e44aba3e79"}} {{.Plan.Normalized.Destination.ContainerMemory}} {{t "ui.18a6752623d2"}} {{.Plan.Normalized.Destination.Timezone}}</span></div>
+      {{if .Plan.Normalized.Destination.Storage}}<div><strong>{{t "ui.c8e913b67563"}}</strong><span>{{.Plan.Normalized.Destination.Storage.Type}} · {{.Plan.Normalized.Destination.Storage.Path}}{{if .Plan.Normalized.Destination.Storage.Device}} · {{.Plan.Normalized.Destination.Storage.Device}}{{end}}{{if .StorageSize}} · {{.StorageSize}}{{end}}</span></div>{{end}}
+      {{if .Plan.Normalized.Destination.Backups}}<div><strong>{{t "ui.581aa38b85b3"}}</strong><span>{{.Plan.Normalized.Destination.Backups.Type}} · {{.Plan.Normalized.Destination.Backups.Path}}{{if .Plan.Normalized.Destination.Backups.Source}} · {{.Plan.Normalized.Destination.Backups.Source}}{{end}}{{if .BackupSize}} · {{.BackupSize}}{{end}}</span></div>{{end}}
     </div>
   </section>
   </div>
@@ -108,33 +108,33 @@
 
   {{if .Incompatible}}
   <section class="panel notice error">
-    <p class="eyebrow">Safety checks and confirmations</p>
-    <h2>This import can’t continue</h2>
+    <p class="eyebrow">{{t "ui.96027dd86d73"}}</p>
+    <h2>{{t "ui.e9850a87194b"}}</h2>
     {{if and (or (eq .SourceSoftware "Paper") (eq .SourceSoftware "Purpur")) (eq .DestinationSoftware "Vanilla")}}
-    <p>This backup uses {{.SourceSoftware}} server software, but your JustVoxel server is currently using Vanilla.</p>
-    <p>{{.SourceSoftware}} server backups cannot be imported into a Vanilla server.</p>
-    <p>Change Server Version to Paper or Purpur, then try the import again.</p>
+    <p>{{t "ui.c75e44c4b154"}} {{.SourceSoftware}} {{t "ui.510d4300c9d3"}}</p>
+    <p>{{.SourceSoftware}} {{t "ui.6bfabf5fb7e5"}}</p>
+    <p>{{t "ui.525638511e56"}}</p>
     {{else if and (eq .SourceSoftware "Vanilla") (eq .DestinationSoftware "Vanilla")}}
-    <p>This backup uses Vanilla server software.</p>
-    <p>Server Import currently supports this backup only when your JustVoxel server uses Paper or Purpur.</p>
-    <p>Change Server Version to Paper or Purpur, then try the import again.</p>
+    <p>{{t "ui.2a3809b8ee6a"}}</p>
+    <p>{{t "ui.e7151f01bcac"}}</p>
+    <p>{{t "ui.525638511e56"}}</p>
     {{else}}
-    <p>This backup and your current server software cannot be imported together safely.</p>
-    <p>Backup server software: {{.SourceSoftware}}<br>Current server software: {{.DestinationSoftware}}</p>
+    <p>{{t "ui.f755b5f59b10"}}</p>
+    <p>{{t "ui.8123a2da7f2b"}} {{.SourceSoftware}}<br>{{t "ui.58358c879744"}} {{.DestinationSoftware}}</p>
     {{end}}
   </section>
-  <div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;tab=import&amp;server={{.ServerID}}">Back to Server Import</a><a class="button-link" href="/?workspace=version&amp;tab=software&amp;server={{.ServerID}}">Server Version</a></div>
+  <div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;tab=import&amp;server={{.ServerID}}">{{t "ui.892dd73e9682"}}</a><a class="button-link" href="/?workspace=version&amp;tab=software&amp;server={{.ServerID}}">{{t "ui.86c1cd65696e"}}</a></div>
   {{else}}
-  {{if .Plan.Warnings}}<section class="panel"><p class="eyebrow">Import warnings</p>{{range .Plan.Warnings}}<div class="notice warning">{{.Message}}</div>{{end}}</section>{{end}}
+  {{if .Plan.Warnings}}<section class="panel"><p class="eyebrow">{{t "ui.39b2572fa78d"}}</p>{{range .Plan.Warnings}}<div class="notice warning">{{ts .Message}}</div>{{end}}</section>{{end}}
 
   {{if .Plan.Requirements}}
   <section class="panel">
-    <p class="eyebrow">Safety checks and confirmations</p>
-    <p>JustVoxel will revalidate the source and destination, preserve rollback state, execute the Import transaction, and validate the resulting Minecraft runtime before reporting success.</p>
-    {{if .Plan.Requirements.PlayersConfirmationRequired}}<div class="notice warning"><strong>{{.Plan.Requirements.Online}} player(s) are online.</strong><br>{{range .Plan.Requirements.Players}}{{.}}<br>{{end}}Import will use the player-aware interruption path.</div>{{end}}
-    {{if .Plan.Requirements.VanillaConfirmationRequired}}<div class="notice warning">This Vanilla source will be opened by Paper at the same reviewed Minecraft version.</div>{{end}}
-    {{if .Plan.Requirements.PluginsConfirmationRequired}}<div class="notice warning">This source contains external plugin JARs. Plugins are executable server code and will be preserved.</div>{{end}}
-    {{if .Plan.Requirements.OnlineModeConfirmationRequired}}<div class="notice warning">JustVoxel could not prove online-mode automatically. You must explicitly confirm the source used online-mode=true.</div>{{end}}
+    <p class="eyebrow">{{t "ui.96027dd86d73"}}</p>
+    <p>{{t "ui.ba2fa3b31f56"}}</p>
+    {{if .Plan.Requirements.PlayersConfirmationRequired}}<div class="notice warning"><strong>{{.Plan.Requirements.Online}} {{t "ui.5b97edf34ff3"}}</strong><br>{{range .Plan.Requirements.Players}}{{.}}<br>{{end}}{{t "ui.ad7402b0b050"}}</div>{{end}}
+    {{if .Plan.Requirements.VanillaConfirmationRequired}}<div class="notice warning">{{t "ui.e1943fcf5bd8"}}</div>{{end}}
+    {{if .Plan.Requirements.PluginsConfirmationRequired}}<div class="notice warning">{{t "ui.5e908069fbb4"}}</div>{{end}}
+    {{if .Plan.Requirements.OnlineModeConfirmationRequired}}<div class="notice warning">{{t "ui.a44fac81efbf"}}</div>{{end}}
   </section>
 
   <form method="post" action="/workspace/migration/import/apply?server={{.ServerID}}" autocomplete="off">
@@ -169,20 +169,20 @@
     <input type="hidden" name="backup_domain" value="{{.Request.Destination.Backups.Domain}}">
     <input type="hidden" name="plan_fingerprint" value="{{.Plan.PlanFingerprint}}">
 
-    {{if .Plan.Requirements.PlayersConfirmationRequired}}<label><input type="checkbox" name="players_confirmed" value="yes"> I understand that the online players may be interrupted.</label>{{end}}
-    {{if .Plan.Requirements.VanillaConfirmationRequired}}<label><input type="checkbox" name="vanilla_confirmed" value="yes"> I understand this Vanilla server will be opened by Paper at the reviewed Minecraft version.</label>{{end}}
-    {{if .Plan.Requirements.PluginsConfirmationRequired}}<label><input type="checkbox" name="plugins_confirmed" value="yes"> I understand the external plugin JARs are executable server code and will be preserved.</label>{{end}}
-    {{if .Plan.Requirements.OnlineModeConfirmationRequired}}<label><input type="checkbox" name="online_mode_confirmed" value="yes"> I confirm this source used online-mode=true and its online UUID identity should be preserved.</label>{{end}}
-    <div class="destructive-confirmation" data-destructive-confirmation data-confirm-value="IMPORT" data-destructive-idle="Slide to confirm Import" data-destructive-armed="Import armed">
+    {{if .Plan.Requirements.PlayersConfirmationRequired}}<label><input type="checkbox" name="players_confirmed" value="yes"> {{t "ui.5619ecca1104"}}</label>{{end}}
+    {{if .Plan.Requirements.VanillaConfirmationRequired}}<label><input type="checkbox" name="vanilla_confirmed" value="yes"> {{t "ui.8345cc58466c"}}</label>{{end}}
+    {{if .Plan.Requirements.PluginsConfirmationRequired}}<label><input type="checkbox" name="plugins_confirmed" value="yes"> {{t "ui.98369829d487"}}</label>{{end}}
+    {{if .Plan.Requirements.OnlineModeConfirmationRequired}}<label><input type="checkbox" name="online_mode_confirmed" value="yes"> {{t "ui.ea6cd83051a8"}}</label>{{end}}
+    <div class="destructive-confirmation" data-destructive-confirmation data-confirm-value="IMPORT" data-destructive-idle="{{t "ui.560a39ef0b25"}}" data-destructive-armed="{{t "ui.03175e87c078"}}">
       <input type="hidden" name="import_confirmation" data-destructive-value>
       <div class="destructive-confirm-slider" data-destructive-slider-shell>
-        <span class="destructive-confirm-slider-text" data-destructive-slider-text>Slide to confirm Import</span>
-        <span class="destructive-confirm-slider-thumb" aria-hidden="true">&gt;</span>
-        <input type="range" min="0" max="100" step="1" value="0" data-destructive-slider aria-label="Slide to confirm Server Import">
+        <span class="destructive-confirm-slider-text" data-destructive-slider-text>{{t "ui.560a39ef0b25"}}</span>
+        <span class="destructive-confirm-slider-thumb" aria-hidden="true">{{t "ui.62b67e1f685b"}}</span>
+        <input type="range" min="0" max="100" step="1" value="0" data-destructive-slider aria-label="{{t "ui.6e66fd429f32"}}">
       </div>
-      <label class="destructive-confirm-toggle-row" data-destructive-toggle-row hidden><span class="destructive-confirm-toggle-callout">Confirm &gt;</span><input class="destructive-confirm-toggle" type="checkbox" data-destructive-toggle aria-label="Confirm Server Import"></label>
+      <label class="destructive-confirm-toggle-row" data-destructive-toggle-row hidden><span class="destructive-confirm-toggle-callout">{{t "ui.8ba7a99174e0"}}</span><input class="destructive-confirm-toggle" type="checkbox" data-destructive-toggle aria-label="{{t "ui.27308d93c293"}}"></label>
     </div>
-    <div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;tab=import&amp;server={{.ServerID}}">Cancel</a><button type="submit" data-destructive-submit disabled>Start Server Import</button></div>
+    <div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;tab=import&amp;server={{.ServerID}}">{{t "ui.19766ed6ccb2"}}</a><button type="submit" data-destructive-submit disabled>{{t "ui.4add1ad017f5"}}</button></div>
   </form>
   {{end}}
   {{end}}

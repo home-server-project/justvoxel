@@ -411,7 +411,7 @@ func TestSetupRecoveryActionAtRuntimeAndStorageRollback(t *testing.T) {
 }
 
 func TestSetupElapsedTimerSource(t *testing.T) {
-	js, err := assets.ReadFile("static/setup-operation.js")
+	js, err := englishPresentationAsset("static/setup-operation.js")
 	if err != nil {
 		t.Fatal(err)
 	}

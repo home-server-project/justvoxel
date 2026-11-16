@@ -140,7 +140,7 @@ func assertStorageMinecraftMigrationSource(t *testing.T) {
 		"templates/storage_browser.html",
 		"static/storage-browser.js",
 	} {
-		content, err := assets.ReadFile(name)
+		content, err := englishPresentationAsset(name)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -151,7 +151,7 @@ func assertStorageMinecraftMigrationSource(t *testing.T) {
 		}
 	}
 
-	js, err := assets.ReadFile("static/storage-browser.js")
+	js, err := englishPresentationAsset("static/storage-browser.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +267,7 @@ func TestStandaloneDataMigrationUIRetired(t *testing.T) {
 		"templates/data_migration_progress.html",
 		"static/data-migration-operation.js",
 	} {
-		if _, err := assets.ReadFile(name); !os.IsNotExist(err) {
+		if _, err := englishPresentationAsset(name); !os.IsNotExist(err) {
 			t.Fatalf("retired asset %s: expected not found, got %v", name, err)
 		}
 	}

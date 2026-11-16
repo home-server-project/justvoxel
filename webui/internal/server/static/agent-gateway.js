@@ -35,30 +35,30 @@
     dialog.dispatchEvent(new CustomEvent('gateway-surface-change', {detail: name}));
   };
   const showOverview = () => { if (busy) return; selectedID = ''; details.replaceChildren(); showSurface('overview'); };
-  const levelLabel = level => ({1: 'Level 1', 2: 'Level 2', 3: 'Level 3', 4: 'Level 4'}[level] || 'Unknown access level');
+  const levelLabel = level => ({1: jvT("ui.b75cf05d6d2a"), 2: jvT("ui.29cc4eb6673b"), 3: jvT("ui.42b03421cde7"), 4: jvT("ui.3d275ef75669")}[level] || jvT("ui.8347689b46f2"));
   const providers = new Map([
-    ['OpenAI', {icon: 'openai', label: 'OpenAI · ChatGPT & Codex'}],
+    ['OpenAI', {icon: 'openai', label: jvT("ui.3f182492f5bd")}],
     ['Claude', {icon: 'claude', label: 'Claude'}],
     ['Grok', {icon: 'grok', label: 'Grok'}],
     ['Gemini', {icon: 'googlegemini', label: 'Gemini'}],
-    ['GitHub Copilot', {icon: 'githubcopilot', label: 'GitHub Copilot'}],
+    ["GitHub Copilot", {icon: 'githubcopilot', label: jvT("ui.ed249d417dcd")}],
     ['OpenClaw', {icon: 'openclaw', label: 'OpenClaw'}],
-    ['Other AI / MCP app', {label: 'Other AI / MCP app'}],
-    ['Automation / REST API', {label: 'Automation / REST API'}],
+    ["Other AI / MCP app", {label: jvT("ui.7658e93fa9fd")}],
+    ["Automation / REST API", {label: jvT("ui.1e94ea6baaaf")}],
   ]);
   const providerAuthMode = purpose => providers.get(purpose)?.icon ? 'oauth_local' : 'token';
   const providerCompatibility = new Map([
-    ['OpenAI', 'ChatGPT: Secure MCP Tunnel or reachable public HTTPS · Codex: local/LAN supported'],
-    ['Claude', 'Claude: remotely reachable MCP required · Claude Code: local/LAN supported'],
-    ['Grok', 'Public Internet MCP endpoint required'],
-    ['Gemini', 'Gemini: public HTTPS required · Gemini CLI: private HTTPS supported with OAuth private-network opt-in'],
-    ['GitHub Copilot', 'CLI & VS Code: local/LAN supported'],
-    ['OpenClaw', 'Control UI & CLI: local/LAN supported'],
-    ['Other AI / MCP app', 'Depends on whether the MCP client runs locally or in the cloud'],
-    ['Automation / REST API', 'Client must be able to reach the REST API endpoint'],
+    ['OpenAI', jvT("ui.5d9dbab55845")],
+    ['Claude', jvT("ui.b7d115720c81")],
+    ['Grok', jvT("ui.3c9d80d152e4")],
+    ['Gemini', jvT("ui.afa1380f26a9")],
+    ["GitHub Copilot", jvT("ui.a1b9e51763a8")],
+    ['OpenClaw', jvT("ui.a065a025921b")],
+    ["Other AI / MCP app", jvT("ui.14342c819449")],
+    ["Automation / REST API", jvT("ui.d7ff96ebe204")],
   ]);
-  const legacyPurposes = new Map([['AI Agent', 'AI assistant'], ['API Client', 'Automation or app'], ['Other', 'Other']]);
-  const purposeLabel = purpose => providers.get(purpose)?.label || legacyPurposes.get(purpose) || purpose || 'Other AI / MCP app';
+  const legacyPurposes = new Map([["AI Agent", jvT("ui.ab6eb4ac63b5")], ["API Client", jvT("ui.50b8f3892055")], ["Other", jvT("ui.f97e9da0e3b8")]]);
+  const purposeLabel = purpose => providers.get(purpose)?.label || legacyPurposes.get(purpose) || purpose || jvT("ui.7658e93fa9fd");
   const providerIcon = purpose => {
     const icon = document.createElement('img');
     const provider = providers.get(purpose);
@@ -67,11 +67,11 @@
     icon.src = provider?.icon ? `/static/ai-providers/${provider.icon}.svg` : '/static/justvoxel-logo.png';
     return icon;
   };
-  const activityLabel = value => value ? new Date(value).toLocaleString() : 'No activity yet';
-  const scopeLabel = connection => connection.all_instances ? 'All servers' : (connection.instance_ids || []).map(id => {
+  const activityLabel = value => value ? new Date(value).toLocaleString() : jvT("ui.0a12b92ce789");
+  const scopeLabel = connection => connection.all_instances ? jvT("ui.3205261a6537") : (connection.instance_ids || []).map(id => {
     const instance = instances.find(item => item.id === id);
-    return instance ? (instance.display_name || instance.name || 'Minecraft server') : 'Unavailable server';
-  }).join(', ') || 'No servers selected';
+    return instance ? (instance.display_name || instance.name || jvT("ui.fc80df490dea")) : jvT("ui.2a17a7baf7f8");
+  }).join(', ') || jvT("ui.8da895ce9e50");
   let pendingLevel4 = null;
   let busy = false;
   let generation = 0;
@@ -79,14 +79,14 @@
   const message = text => { feedback.textContent = text; };
   const text = (tag, value) => { const element = document.createElement(tag); element.textContent = value; return element; };
   const send = async payload => {
-    if (!primary()) throw new Error('Sign in as the primary voxel administrator.');
+    if (!primary()) throw new Error(jvT("ui.220fabe28e2a"));
     const options = {credentials: 'same-origin', cache: 'no-store', headers: {Accept: 'application/json'}};
     if (payload) {
-      options.method = 'POST';
+      options.method = "POST";
       options.body = new URLSearchParams({csrf: content.dataset.gatewayCsrf, request: JSON.stringify(payload)});
     }
     const response = await fetch('/api/agent-gateway', options);
-    if (!response.ok || response.redirected) throw new Error('Connection settings could not be loaded or saved. Check your session, settings, and any pending Factory Reset.');
+    if (!response.ok || response.redirected) throw new Error(jvT("ui.8e688688533a"));
     return response.json();
   };
   const clearToken = () => { tokenNode.textContent = ''; tokenDialog.querySelector('[data-gateway-copy-status]').textContent = ''; };
@@ -95,8 +95,8 @@
   window.addEventListener('pagehide', clearToken);
   tokenDialog.querySelector('[data-gateway-token-done]').addEventListener('click', () => tokenDialog.close());
   tokenDialog.querySelector('[data-gateway-token-copy]').addEventListener('click', async () => {
-    try { await navigator.clipboard.writeText(tokenNode.textContent); tokenDialog.querySelector('[data-gateway-copy-status]').textContent = 'Copied. Store it securely.'; }
-    catch (_) { tokenDialog.querySelector('[data-gateway-copy-status]').textContent = 'Copy is unavailable here. Select and copy the token manually.'; }
+    try { await navigator.clipboard.writeText(tokenNode.textContent); tokenDialog.querySelector('[data-gateway-copy-status]').textContent = jvT("ui.d47682fb2296"); }
+    catch (_) { tokenDialog.querySelector('[data-gateway-copy-status]').textContent = jvT("ui.cdc06c2ea312"); }
   });
   const showTokenOnce = result => {
     if (result.connection?.auth_mode === 'oauth_local' || !result.token) return;
@@ -122,13 +122,13 @@
   const load = async () => {
     if (!primary()) return;
     const ticket = ++generation;
-    message('Loading connections…');
+    message(jvT("ui.8aa3f4352701"));
     try {
       const next = await send();
       // Use the established inventory presentation endpoint; only immutable IDs
       // are submitted as privileged selectors.
       const response = await fetch('/api/minecraft/workspace/selection?selection=none', {credentials: 'same-origin', cache: 'no-store'});
-      if (!response.ok || response.redirected) throw new Error('Minecraft instance inventory is unavailable. Refresh before changing scope.');
+      if (!response.ok || response.redirected) throw new Error(jvT("ui.5f9a2524ea77"));
       const inventory = await response.json();
       if (ticket !== generation) return;
       snapshot = next; instances = inventory.servers || [];
@@ -162,7 +162,7 @@
   });
   const showGatewayState = enabled => {
     gatewaySwitch.checked = enabled;
-    find('[data-gateway-state]').textContent = `Gateway ${enabled ? 'Enabled' : 'Disabled'}`;
+    find('[data-gateway-state]').textContent = jvT("ui.c88bd6a57a8e", {v0: (enabled ? jvT("ui.92c1cdfdf4cb") : jvT("ui.75081b593d15"))});
     renderCards(enabled);
   };
   gatewaySwitch.addEventListener('change', () => {
@@ -174,18 +174,18 @@
   });
   const renderCards = (gatewayEnabled = snapshot.enabled) => {
     cards.replaceChildren();
-    if (!snapshot.connections.length && !telegramState.configured && !discordState.configured) cards.append(text('p', 'No connections yet. Select Add to get started.'));
+    if (!snapshot.connections.length && !telegramState.configured && !discordState.configured) cards.append(text('p', jvT("ui.e9136943e7ea")));
     for (const connection of snapshot.connections) {
       const active = gatewayEnabled && connection.enabled;
       const card = text('article', ''); card.className = `panel minecraft-server-card minecraft-server-health-${active ? 'success' : 'neutral'}`; card.dataset.gatewayConnection = connection.id;
       const heading = text('div', ''); heading.className = 'minecraft-server-heading';
-      const state = text('strong', active ? 'Enabled' : 'Disabled'); state.className = `minecraft-server-state ${active ? 'success' : 'neutral'}`;
+      const state = text('strong', active ? jvT("ui.92c1cdfdf4cb") : jvT("ui.75081b593d15")); state.className = `minecraft-server-state ${active ? 'success' : 'neutral'}`;
       heading.append(text('h2', connection.name), state); card.append(heading);
       const identity = text('div', ''); identity.className = 'minecraft-server-software-row';
       const provider = text('p', ''); provider.className = 'muted';
       provider.append(providerIcon(connection.purpose), text('span', purposeLabel(connection.purpose)));
       const actions = text('details', ''); actions.className = 'storage-action-menu minecraft-server-more';
-      const button = text('summary', '⋯'); button.setAttribute('aria-label', `Settings for ${connection.name}`);
+      const button = text('summary', '⋯'); button.setAttribute('aria-label', jvT("ui.34ae6f7b58c5", {v0: (connection.name)}));
       button.addEventListener('click', event => {
         event.preventDefault();
         if (busy) return;
@@ -193,28 +193,28 @@
       });
       actions.append(button); identity.append(provider, actions); card.append(identity);
       const metrics = text('div', ''); metrics.className = 'minecraft-server-metrics';
-      const auth = connection.auth_mode === 'oauth' || connection.auth_mode === 'oauth_local' ? 'OAuth' : 'Token';
-      for (const [label, value] of [['Access', levelLabel(connection.level)], ['Scope', scopeLabel(connection)], ['Auth', auth]]) {
+      const auth = connection.auth_mode === 'oauth' || connection.auth_mode === 'oauth_local' ? 'OAuth' : jvT("ui.d2089be67295");
+      for (const [label, value] of [[jvT("ui.ec5ba0abb717"), levelLabel(connection.level)], [jvT("ui.b073f6c68ef8"), scopeLabel(connection)], [jvT("ui.8eb3ea9bbde6"), auth]]) {
         const metric = text('div', ''); metric.append(text('span', label), text('strong', value)); metrics.append(metric);
       }
       card.append(metrics);
       const activity = text('div', ''); activity.className = 'gateway-card-activity';
-      activity.append(text('span', 'Last activity'), text('p', activityLabel(connection.last_activity))); card.append(activity);
+      activity.append(text('span', jvT("ui.06475633ed3e")), text('p', activityLabel(connection.last_activity))); card.append(activity);
       cards.append(card);
     }
     if (telegramState.configured) {
       const statuses = {
-        connected: ['Connected', 'good'], verified: ['Bot verified', 'good'],
-        disabled: ['Disabled', 'muted'], unverified: ['Needs verification', 'muted'],
-        verification_failed: ['Verification failed', 'danger'], connecting: ['Connecting', 'muted'],
-        connection_retry: ['Retrying', 'danger'], connection_paused: ['Needs attention', 'danger'],
-        disconnected: ['Disconnected', 'muted'],
+        connected: [jvT("ui.22965568d22a"), 'good'], verified: [jvT("ui.f724fb6f802d"), 'good'],
+        disabled: [jvT("ui.75081b593d15"), 'muted'], unverified: [jvT("ui.3dddf7d417a7"), 'muted'],
+        verification_failed: [jvT("ui.f0f2383f8af8"), 'danger'], connecting: [jvT("ui.d403c686f6a1"), 'muted'],
+        connection_retry: [jvT("ui.f8fe6f863109"), 'danger'], connection_paused: [jvT("ui.c1ebc7817870"), 'danger'],
+        disconnected: [jvT("ui.04dfac3671b4"), 'muted'],
       };
-      const [label, tone] = Object.hasOwn(statuses, telegramState.status) ? statuses[telegramState.status] : ['Status unavailable', 'muted'];
+      const [label, tone] = Object.hasOwn(statuses, telegramState.status) ? statuses[telegramState.status] : [jvT("ui.7eb5af92e49c"), 'muted'];
       const card = text('article', ''); card.className = 'panel minecraft-server-card';
       card.setAttribute('data-telegram-integration', '');
       card.setAttribute('role', 'button'); card.setAttribute('tabindex', '0');
-      card.setAttribute('aria-label', `Telegram: ${label}. Open settings`);
+      card.setAttribute('aria-label', jvT("ui.e643538cd7f0", {v0: (label)}));
       const heading = text('div', ''); heading.className = 'minecraft-server-heading';
       const identity = text('div', ''); identity.className = 'gateway-connection-identity';
       identity.append(telegramHelpIcon(), text('h2', 'Telegram'));
@@ -228,17 +228,17 @@
     }
     if (discordState.configured) {
       const statuses = {
-        connected: ['Connected', 'good'], verified: ['Bot verified', 'good'],
-        disabled: ['Disabled', 'muted'], unverified: ['Needs verification', 'muted'],
-        connecting: ['Connecting', 'muted'],
-        connection_retry: ['Retrying', 'danger'], connection_paused: ['Needs attention', 'danger'],
-        disconnected: ['Disconnected', 'muted'],
+        connected: [jvT("ui.22965568d22a"), 'good'], verified: [jvT("ui.f724fb6f802d"), 'good'],
+        disabled: [jvT("ui.75081b593d15"), 'muted'], unverified: [jvT("ui.3dddf7d417a7"), 'muted'],
+        connecting: [jvT("ui.d403c686f6a1"), 'muted'],
+        connection_retry: [jvT("ui.f8fe6f863109"), 'danger'], connection_paused: [jvT("ui.c1ebc7817870"), 'danger'],
+        disconnected: [jvT("ui.04dfac3671b4"), 'muted'],
       };
-      const [label, tone] = Object.hasOwn(statuses, discordState.status) ? statuses[discordState.status] : ['Status unavailable', 'muted'];
+      const [label, tone] = Object.hasOwn(statuses, discordState.status) ? statuses[discordState.status] : [jvT("ui.7eb5af92e49c"), 'muted'];
       const card = text('article', ''); card.className = 'panel minecraft-server-card';
       card.setAttribute('data-discord-integration', '');
       card.setAttribute('role', 'button'); card.setAttribute('tabindex', '0');
-      card.setAttribute('aria-label', `Discord: ${label}. Open settings`);
+      card.setAttribute('aria-label', jvT("ui.4dff51bb17fb", {v0: (label)}));
       const heading = text('div', ''); heading.className = 'minecraft-server-heading';
       const identity = text('div', ''); identity.className = 'gateway-connection-identity';
       identity.append(discordHelpIcon(), text('h2', 'Discord'));
@@ -257,8 +257,8 @@
     button.gatewayCopyLabel = originalLabel;
     const feedback = copied => {
       clearTimeout(button.gatewayCopyTimer);
-      button.textContent = copied ? 'Copied' : 'Selected';
-      button.title = copied ? 'Copied' : 'Address selected — press Ctrl+C';
+      button.textContent = copied ? jvT("ui.8d525e5f158b") : jvT("ui.57fd7a0cf33f");
+      button.title = copied ? jvT("ui.8d525e5f158b") : jvT("ui.6c46b62dc3f2");
       status.textContent = button.title;
       button.gatewayCopyTimer = setTimeout(() => {
         button.textContent = originalLabel;
@@ -293,7 +293,7 @@
     feedback(false);
   };
   const settingsDate = value => {
-    if (!value) return 'Unavailable';
+    if (!value) return jvT("ui.ca1844969742");
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? value : date.toLocaleString(undefined, {
       year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
@@ -338,7 +338,7 @@
     if (!options.settings) {
       const identity = text('div', ''); identity.className = 'gateway-connection-identity';
       const titles = text('div', '');
-      const subtitle = {OpenAI: 'ChatGPT & Codex', Claude: 'Claude & Claude Code', Grok: 'Custom MCP connector', Gemini: 'Gemini & Gemini CLI', 'GitHub Copilot': 'CLI & VS Code', OpenClaw: 'Control UI & CLI'}[purpose];
+      const subtitle = {OpenAI: jvT("ui.27f0f7393c73"), Claude: jvT("ui.46bbfcd46443"), Grok: jvT("ui.8d1a3156faa2"), Gemini: jvT("ui.d1f40ecdf296"), 'GitHub Copilot': jvT("ui.a46c86c8dfe5"), OpenClaw: jvT("ui.e6f8e976a215")}[purpose];
       titles.append(text('h3', purpose));
       if (subtitle) titles.append(text('p', subtitle));
       identity.append(providerIcon(purpose), titles); host.append(identity);
@@ -350,20 +350,20 @@
       const status = text('p', ''); status.className = 'gateway-visually-hidden'; status.setAttribute('role', 'status');
       const field = document.createElement('input');
       field.type = 'text'; field.readOnly = true; field.value = value;
-      field.className = 'gateway-copy-field'; field.setAttribute('aria-label', caption || (label === 'Copy command' ? 'Command' : 'Address'));
+      field.className = 'gateway-copy-field'; field.setAttribute('aria-label', caption || (label === jvT("ui.9a01feecae67") ? 'Command' : 'Address'));
       field.addEventListener('click', () => field.select());
       copy.addEventListener('click', () => copyText(value, field, status, copy));
       if (caption) row.append(text('span', caption));
       row.append(field, copy); host.append(row, status);
     };
-    const addressLabel = automation ? 'REST API address' : 'MCP address';
+    const addressLabel = automation ? 'REST API address' : jvT("ui.973480a1f339");
     if (!prerequisite) {
-      if (options.help && !automation && providers.get(purpose)?.icon) host.append(text('p', 'Copy the connection-specific MCP address from Settings if this client can reach it.'));
-      else copyBlock(address, 'Copy', addressLabel);
+      if (options.help && !automation && providers.get(purpose)?.icon) host.append(text('p', jvT("ui.d2bdb3fe418d")));
+      else copyBlock(address, jvT("ui.e21f935f11d7"), addressLabel);
     }
     const toolbar = options.settings ? text('div', '') : host;
     if (options.settings) { toolbar.className = 'gateway-guide-toolbar'; host.append(toolbar); }
-    toolbar.append(text('h4', 'How to connect'));
+    toolbar.append(text('h4', jvT("ui.2198ec8ff357")));
     if (modes.length > 1) {
       const tabs = text('div', ''); tabs.className = 'gateway-guide-modes'; tabs.setAttribute('role', 'group'); tabs.setAttribute('aria-label', purpose + ' app');
       for (const choice of modes) {
@@ -384,9 +384,9 @@
     };
     const details = entries => {
       const line = text('p', '');
-      line.append(text('span', 'For details see '));
+      line.append(text('span', jvT("ui.9b98da0a3bc7")));
       entries.forEach(([label, url], index) => {
-        if (index) line.append(text('span', ' and '));
+        if (index) line.append(text('span', jvT("ui.e3ee915a8e8c")));
         link(label, url, line);
       });
       line.append(text('span', '.')); host.append(line);
@@ -400,164 +400,164 @@
       OpenClaw: mode === 'CLI' ? 'https://docs.openclaw.ai/cli/mcp/transports' : 'https://docs.openclaw.ai/tools/mcp',
     }[purpose];
     const providerDetails = () => {
-      if (purpose === 'OpenAI' && mode === 'ChatGPT') details([['Secure MCP Tunnel guide', tunnelGuide], ['Official ChatGPT MCP guide', official]]);
-      else if (purpose === 'Claude' && mode === 'Claude') details([['Official setup guide', official]]);
-      else if (purpose === 'Grok') details([['Official Grok tunneling guide', 'https://docs.x.ai/grok/connectors/custom-mcp-tunneling'], ['Official setup guide', official]]);
-      else if (purpose === 'Gemini') details(geminiCLI ? [['Official Gemini CLI MCP guide', official]] : [['Official setup guide', official], ['Official endpoint prerequisites', 'https://developers.google.com/connected-apps/gpc/prerequisites']]);
+      if (purpose === 'OpenAI' && mode === 'ChatGPT') details([[jvT("ui.0f4d4965e00e"), tunnelGuide], [jvT("ui.50b01c1a90ce"), official]]);
+      else if (purpose === 'Claude' && mode === 'Claude') details([[jvT("ui.8686d2209b63"), official]]);
+      else if (purpose === 'Grok') details([[jvT("ui.1665e9ed18fa"), 'https://docs.x.ai/grok/connectors/custom-mcp-tunneling'], [jvT("ui.8686d2209b63"), official]]);
+      else if (purpose === 'Gemini') details(geminiCLI ? [[jvT("ui.a5e3a09cd572"), official]] : [[jvT("ui.8686d2209b63"), official], [jvT("ui.38011af023e6"), 'https://developers.google.com/connected-apps/gpc/prerequisites']]);
     };
     const compactProviderLinks = purpose === 'OpenAI' && mode === 'ChatGPT' || purpose === 'Claude' && mode === 'Claude' || purpose === 'Grok' || purpose === 'Gemini';
-    if (official && !prerequisite && !compactProviderLinks) link('Official setup guide ↗', official, toolbar);
+    if (official && !prerequisite && !compactProviderLinks) link(jvT("ui.4c52f781cbd4"), official, toolbar);
     if (purpose === 'Claude' && mode === 'Claude' && options.help) {
-      inline('For Team/Enterprise, an Owner or Primary Owner first adds the connector from Organization settings → Connectors.');
+      inline(jvT("ui.4d29ef581a56"));
     }
     if (purpose === 'Gemini' && options.help) {
-      host.append(text('h4', 'Availability'));
-      inline('Gemini custom apps currently have Google account, region and feature-availability requirements. See Google’s current setup guide.');
-      host.append(text('h4', 'Authentication'));
-      inline('JustVoxel supports automatic OAuth client registration (Dynamic Client Registration). Manual OAuth credentials are normally not required.');
+      host.append(text('h4', jvT("ui.12f67f8539c4")));
+      inline(jvT("ui.aa142e7dbe0a"));
+      host.append(text('h4', jvT("ui.66880d2d8216")));
+      inline(jvT("ui.8c41d90837b7"));
       if (geminiCLI) {
-        host.append(text('h4', 'Gemini CLI'));
-        inline('Gemini CLI supports Streamable HTTP MCP servers, OAuth discovery and Dynamic Client Registration when supported.');
+        host.append(text('h4', jvT("ui.731732835cd7")));
+        inline(jvT("ui.6bbd7cca433b"));
         host.append(text('code', 'gemini mcp add --transport http justvoxel <MCP_URL>'), text('code', 'gemini mcp list'));
-        inline('Inside Gemini CLI, authenticate with:');
+        inline(jvT("ui.c643925e0906"));
         host.append(text('code', '/mcp auth justvoxel'));
-        inline('For private-network JustVoxel OAuth, Gemini CLI requires HTTPS for non-loopback private endpoints and private-network OAuth opt-in. allowPrivateNetwork defaults to false.');
-        inline('In Gemini CLI settings.json, configure the server OAuth access as follows. Replace the placeholder with the exact connection-specific server URL from Settings:');
+        inline(jvT("ui.3cae2c5ae515"));
+        inline(jvT("ui.f99058a7900c"));
         const config = text('pre', ''); config.className = 'gateway-cli-config';
         config.append(text('code', JSON.stringify({mcpServers: {justvoxel: {httpUrl: 'https://<justvoxel-lan-host>/mcp/<connection-id>', oauth: {allowPrivateNetwork: true}}}}, null, 2)));
         host.append(config);
-        details([['Official Google setup guide', 'https://support.google.com/gemini/answer/17209137']]);
+        details([[jvT("ui.ff429b184a80"), 'https://support.google.com/gemini/answer/17209137']]);
       }
     }
     if (options.help) {
       if (purpose === 'OpenAI' && mode === 'ChatGPT') {
-        host.append(text('h4', 'Option 1 — Secure MCP Tunnel'));
-        inline('ChatGPT → OpenAI Secure MCP Tunnel → tunnel-client on a machine that can reach JustVoxel → private JustVoxel MCP endpoint.');
-        inline('The tunnel-client makes an outbound connection to OpenAI; the JustVoxel MCP server itself can remain private on the LAN. Inbound exposure of port 8099 is not required merely for the tunnel.');
-        inline('Tunnel setup depends on OpenAI Platform/workspace availability and permissions. It requires Platform tunnel configuration and a running tunnel-client.');
-        host.append(text('h4', 'Option 2 — Public HTTPS endpoint'));
-        inline('Expose the JustVoxel MCP endpoint through a secure public HTTPS endpoint reachable by ChatGPT, then configure the ChatGPT custom MCP/plugin with that HTTPS endpoint. JustVoxel OAuth remains the authentication flow.');
+        host.append(text('h4', jvT("ui.1cae5f09b2a7")));
+        inline(jvT("ui.8da98ebfa7fb"));
+        inline(jvT("ui.5fbb403c1897"));
+        inline(jvT("ui.47d54dc7e91d"));
+        host.append(text('h4', jvT("ui.9de420f9b3f0")));
+        inline(jvT("ui.d892b800e7de"));
       } else if (purpose === 'Claude' && mode === 'Claude') {
-        inline('Claude remote connector requests originate from Anthropic infrastructure. A private JustVoxel LAN URL is not directly reachable; use an MCP endpoint reachable from Anthropic infrastructure.');
+        inline(jvT("ui.9ae76da02655"));
       } else if (purpose === 'OpenAI' && mode === 'Codex') {
-        inline('Codex may use the JustVoxel LAN MCP URL directly when the machine running Codex can reach JustVoxel.');
+        inline(jvT("ui.72b6516f5b67"));
       } else if (purpose === 'Claude' && mode === 'Claude Code') {
-        inline('Claude Code is a local client. It can use the JustVoxel LAN HTTP MCP endpoint when its machine can reach JustVoxel.');
+        inline(jvT("ui.769a8a38165c"));
       } else if (purpose === 'Grok') {
-        inline('Grok custom MCP requires public Internet reachability. Private LAN URLs do not work directly. xAI documents tunneling for local MCP servers in its official tunneling guide.');
+        inline(jvT("ui.22023905f6d8"));
       } else if (purpose === 'Gemini' && !geminiCLI) {
-        inline('Gemini custom Connected Apps require a publicly reachable HTTPS Streamable HTTP MCP endpoint. Private LAN HTTP does not qualify. JustVoxel does not provide an automatic Google tunnel.');
+        inline(jvT("ui.10d79491fd38"));
       } else if (purpose === 'GitHub Copilot') {
-        inline('Copilot CLI and VS Code run locally. Their machine must be able to reach JustVoxel, so a private LAN URL may work directly.');
+        inline(jvT("ui.e3a2c1d9ce95"));
       } else if (purpose === 'OpenClaw') {
-        inline('The OpenClaw Gateway owns the MCP connection for Control UI and CLI. If that Gateway can reach JustVoxel on the LAN, it can use the private endpoint directly. Public Internet exposure is not required just for that OpenClaw connection.');
+        inline(jvT("ui.3283a0d8a123"));
       }
     }
     if (prerequisite) {
       if (geminiCLI) {
-        host.append(text('strong', definitelyPrivate ? 'Private HTTPS required for OAuth' : 'HTTPS required for OAuth'));
-        host.append(text('p', 'Gemini CLI can use a private Streamable HTTP MCP server, but its OAuth security policy requires HTTPS for non-loopback private endpoints.'));
-        host.append(text('p', definitelyPrivate ? 'Open JustVoxel through a trusted LAN HTTPS endpoint before connecting Gemini CLI.' : 'Open JustVoxel through a trusted HTTPS endpoint before connecting Gemini CLI.'));
-        if (definitelyPrivate) host.append(text('p', 'Private-network OAuth discovery must also be explicitly enabled in Gemini CLI.'));
+        host.append(text('strong', definitelyPrivate ? jvT("ui.baa2c510fb25") : jvT("ui.920e0b40b908")));
+        host.append(text('p', jvT("ui.57eaa790bf77")));
+        host.append(text('p', definitelyPrivate ? jvT("ui.c2da5c36980e") : jvT("ui.44d059432f21")));
+        if (definitelyPrivate) host.append(text('p', jvT("ui.4a64b7f0c0e8")));
       } else if (purpose === 'OpenAI') {
-        host.append(text('strong', 'ChatGPT needs a reachable connection'));
+        host.append(text('strong', jvT("ui.5f39c0c78ca3")));
         host.append(text('p', definitelyPrivate
-          ? `The current JustVoxel MCP endpoint is inside your local network. Do not paste this ${new URL(address).hostname} address into ChatGPT.`
-          : 'The current JustVoxel MCP endpoint is not HTTPS. Use a public HTTPS MCP endpoint that ChatGPT can reach, or Secure MCP Tunnel.'));
+          ? jvT("ui.e594370ec456", {v0: (new URL(address).hostname)})
+          : jvT("ui.ad43e5b285e1")));
         if (!options.help) {
-          host.append(text('p', 'For a private JustVoxel server, use ChatGPT Secure MCP Tunnel. Alternatively expose JustVoxel through a public HTTPS MCP endpoint.'));
-          host.append(text('p', 'Secure MCP Tunnel runs OpenAI’s tunnel-client on a machine that can already reach JustVoxel and creates an outbound path to OpenAI. The JustVoxel MCP server itself can remain private.'));
+          host.append(text('p', jvT("ui.9e16d2323fb5")));
+          host.append(text('p', jvT("ui.c15595ce8165")));
         }
         if (definitelyPrivate) {
           const reference = text('div', ''); reference.className = 'gateway-endpoint-reference';
-          reference.append(text('p', 'Local JustVoxel endpoint — reference only'), text('code', address));
+          reference.append(text('p', jvT("ui.06e5fd1dff3b")), text('code', address));
           host.append(reference);
         }
       } else if (purpose === 'Claude') {
-        host.append(text('strong', 'Claude needs a reachable MCP endpoint'));
+        host.append(text('strong', jvT("ui.0f6f73e442af")));
         host.append(text('p', definitelyPrivate
-          ? 'Claude remote connectors connect from Anthropic infrastructure. The current JustVoxel address is private and cannot be reached directly.'
-          : 'Claude remote connectors connect from Anthropic infrastructure. Open JustVoxel through an HTTPS MCP endpoint reachable from that infrastructure.'));
-        host.append(text('p', 'Make the MCP endpoint reachable from Anthropic infrastructure before continuing. This also applies to the normal remote-connector flow in Claude Desktop.'));
+          ? jvT("ui.753f9218ab90")
+          : jvT("ui.811c3776af4a")));
+        host.append(text('p', jvT("ui.d7a464b25923")));
       } else if (purpose === 'Grok') {
-        host.append(text('strong', 'Public endpoint required'));
+        host.append(text('strong', jvT("ui.cef453ff6619")));
         host.append(text('p', definitelyPrivate
-          ? 'Grok cannot use the current private JustVoxel address directly. xAI requires a custom MCP server to be reachable over the public internet.'
-          : 'Use a secure public HTTPS MCP endpoint that Grok can reach over the public internet.'));
-        host.append(text('p', 'Use a secure public endpoint or a tunnel, then return here with JustVoxel opened through that endpoint.'));
+          ? jvT("ui.c08b843a5d9a")
+          : jvT("ui.6d084dec6cb2")));
+        host.append(text('p', jvT("ui.fd8f19bdd769")));
       } else if (purpose === 'Gemini') {
-        host.append(text('strong', 'Public HTTPS endpoint required'));
-        host.append(text('p', 'Gemini custom Connected Apps require a publicly reachable HTTPS Streamable HTTP MCP endpoint. The current JustVoxel endpoint does not meet that requirement.'));
+        host.append(text('strong', jvT("ui.205c94ebdd0e")));
+        host.append(text('p', jvT("ui.ae27db11d5c3")));
       }
       providerDetails();
       return;
     }
     if (geminiCLI && options.help) { providerDetails(); return; }
     const commandAddress = options.help ? '<MCP_URL>' : address;
-    if (reachability === 'cloud') inline(`The HTTPS MCP endpoint must be reachable by ${purpose === 'OpenAI' ? 'ChatGPT' : purpose === 'Claude' ? 'Anthropic infrastructure' : purpose}. Its URL alone does not prove reachability.`);
+    if (reachability === 'cloud') inline(jvT("ui.64bd807e67bf", {v0: (purpose === 'OpenAI' ? 'ChatGPT' : purpose === 'Claude' ? 'Anthropic infrastructure' : purpose)}));
     if (purpose === 'OpenAI' && mode === 'ChatGPT') {
-      steps(['Open ChatGPT → Plugins.', 'Select + → Add custom MCP server.', 'Under Connection, enter the public HTTPS MCP endpoint. If using Secure MCP Tunnel, choose Tunnel instead and select the tunnel.', 'Configure authentication.', 'Review the risk warning.', 'Select Create as a plugin.', 'Complete JustVoxel sign-in/approval when prompted.']);
-      inline('If your ChatGPT desktop Settings shows Plugins → MCPs → Add, choose Streamable HTTP for a URL-based JustVoxel connection. STDIO is for launching a local MCP process and is not the JustVoxel HTTP endpoint. Enter the reachable HTTPS MCP address in URL. Leave Bearer token env var and Headers empty for JustVoxel OAuth.');
-      if (options.help) details([['Official ChatGPT plugin guide', 'https://developers.openai.com/plugins/deploy/connect-chatgpt']]);
+      steps([jvT("ui.bbac82f70a21"), jvT("ui.05e7b1465503"), jvT("ui.8163358a2d01"), jvT("ui.5e0fa2869342"), jvT("ui.73559c6fae27"), jvT("ui.730a3af10dba"), jvT("ui.8bdebdac44d1")]);
+      inline(jvT("ui.4d7040789ec8"));
+      if (options.help) details([[jvT("ui.47e6400594ba"), 'https://developers.openai.com/plugins/deploy/connect-chatgpt']]);
     } else if (purpose === 'OpenAI') {
-      copyBlock(`codex mcp add justvoxel --url ${commandAddress}`, 'Copy command');
+      copyBlock(`codex mcp add justvoxel --url ${commandAddress}`, jvT("ui.9a01feecae67"));
       host.append(text('code', 'codex mcp list'));
-      inline('If authentication is required, Codex opens the JustVoxel sign-in flow.');
-      if (definitelyPrivate) inline('This local address can work when the computer running Codex can reach JustVoxel.');
+      inline(jvT("ui.88d7a61b8655"));
+      if (definitelyPrivate) inline(jvT("ui.9d65cf3dbb3d"));
     } else if (purpose === 'Claude' && mode === 'Claude Code') {
-      copyBlock(`claude mcp add --transport http justvoxel ${commandAddress}`, 'Copy command');
+      copyBlock(`claude mcp add --transport http justvoxel ${commandAddress}`, jvT("ui.9a01feecae67"));
       for (const command of ['claude mcp login justvoxel', 'claude mcp get justvoxel', 'claude mcp list']) host.append(text('code', command));
-      inline('Claude Code connects from the machine where the CLI is running. This local JustVoxel address can work when that machine can reach the server.');
-      inline('Remote HTTP is the recommended transport. HTTP servers support OAuth; claude mcp login runs the configured server’s OAuth flow. No static bearer token is required for JustVoxel oauth_local. Interactive alternative inside Claude Code: /mcp');
+      inline(jvT("ui.56790abea4f9"));
+      inline(jvT("ui.b71c1a46d49c"));
     } else if (purpose === 'Claude') {
-      steps(['For Pro/Max: open Claude → Customize → Connectors.', 'Select + Add → Add custom connector.', 'Enter a name and the JustVoxel MCP URL.', 'Select Continue.', 'Choose Sign in now or Sign in when needed.', 'Under OAuth client choose Register automatically.', 'Add the connector.', 'Complete JustVoxel sign-in and approval.']);
-      inline('JustVoxel supports Dynamic Client Registration.');
+      steps([jvT("ui.0361d12887d4"), jvT("ui.0be48ada4d63"), jvT("ui.1665228725ed"), jvT("ui.5cecddd740e1"), jvT("ui.77c9d1209ce7"), jvT("ui.cdfd6440459a"), jvT("ui.663ae13654cf"), jvT("ui.9804e20eb2d4")]);
+      inline(jvT("ui.fb8db7be2981"));
     } else if (purpose === 'Grok') {
-      steps(['Open grok.com/connectors.', 'Select New Connector → Custom.', 'Enter the reachable JustVoxel MCP URL.', 'Complete authentication.']);
+      steps([jvT("ui.cfbf3799fff2"), jvT("ui.f31d41c5e683"), jvT("ui.1b78ee00cdbc"), jvT("ui.4f06da02c5cc")]);
     } else if (geminiCLI) {
-      copyBlock(`gemini mcp add --transport http justvoxel ${commandAddress}`, 'Copy command');
+      copyBlock(`gemini mcp add --transport http justvoxel ${commandAddress}`, jvT("ui.9a01feecae67"));
       host.append(text('code', 'gemini mcp list'));
-      host.append(text('p', 'Inside Gemini CLI:'));
+      host.append(text('p', jvT("ui.7012c6127cf6")));
       host.append(text('code', '/mcp auth justvoxel'));
-      host.append(text('p', 'Gemini CLI supports Streamable HTTP and OAuth discovery.'));
+      host.append(text('p', jvT("ui.07ebd13c7581")));
       if (definitelyPrivate) {
-        host.append(text('p', 'For a private network OAuth endpoint, enable Gemini CLI private-network OAuth access for this server. In Gemini CLI settings.json, the server OAuth configuration must set allowPrivateNetwork: true. See Help → Provider reference → Gemini → Gemini CLI for the settings example.'));
+        host.append(text('p', jvT("ui.ca2397a2ad99")));
       }
-      inline('The computer running Gemini CLI must be able to reach this endpoint. Its URL alone does not prove reachability.');
+      inline(jvT("ui.0618d504a654"));
     } else if (purpose === 'Gemini') {
-      steps(['Open gemini.google.com.', 'Settings → Connected Apps. If needed: Personal Intelligence → Connected Apps.', 'Under Custom apps select Add a custom app.', 'Enter the JustVoxel MCP URL.', 'Select Next.', 'Complete JustVoxel authentication.']);
+      steps([jvT("ui.657e24a6a3c2"), jvT("ui.acc10a4930c3"), jvT("ui.d624281d038f"), jvT("ui.1f882f15e00d"), jvT("ui.eb7a04d06f1e"), jvT("ui.0afa94b05e7f")]);
     } else if (purpose === 'GitHub Copilot') {
       if (mode === 'VS Code') {
-        steps(['Open Command Palette.', 'Run MCP: Add Server.', 'Choose HTTP.', 'Paste the JustVoxel MCP endpoint.', 'Enter server ID: justvoxel.', 'Choose Global.', 'Choose Copilot Global.', 'Complete OAuth/browser authentication if requested.']);
-        inline('HTTP is correct because JustVoxel provides a URL. Command/stdio is for launching a local MCP process.');
-        if (options.help) inline('Alternative: Chat → Open Customizations → MCP Servers → Add Server.');
+        steps([jvT("ui.e76d0db0f762"), jvT("ui.c0c62652afba"), jvT("ui.4e39a71c8fab"), jvT("ui.907bc967e9c3"), jvT("ui.e3e67e965f6f"), jvT("ui.edd32adb6c38"), jvT("ui.de8ca5b08c4f"), jvT("ui.dc5d00befc86")]);
+        inline(jvT("ui.6cb885cdc7c1"));
+        if (options.help) inline(jvT("ui.e950c2733608"));
       } else {
-        copyBlock(`copilot mcp add --transport http justvoxel ${commandAddress}`, 'Copy command');
+        copyBlock(`copilot mcp add --transport http justvoxel ${commandAddress}`, jvT("ui.9a01feecae67"));
         host.append(text('code', '/mcp auth justvoxel'), text('code', 'copilot mcp list'));
-        inline('Interactive alternative: /mcp add — choose HTTP and press Ctrl+S to save. JustVoxel is a remote HTTP server; STDIO is for launching a local MCP process. /mcp auth justvoxel starts OAuth re-authentication for a remote MCP server.');
+        inline(jvT("ui.d06dcf719ff6"));
       }
-      if (definitelyPrivate) inline(`This local address can work when the computer running ${mode === 'VS Code' ? 'VS Code' : 'Copilot CLI'} can reach JustVoxel.`);
-      inline('Repository-level Copilot cloud agent and code review do not currently support remote OAuth MCP servers.');
+      if (definitelyPrivate) inline(jvT("ui.42ee8afce10f", {v0: (mode === 'VS Code' ? 'VS Code' : "Copilot CLI")}));
+      inline(jvT("ui.842ecc61fdec"));
     } else if (purpose === 'OpenClaw') {
       if (mode === 'CLI') {
-        copyBlock(`openclaw mcp add justvoxel --url ${commandAddress} --transport streamable-http`, 'Copy command');
+        copyBlock(`openclaw mcp add justvoxel --url ${commandAddress} --transport streamable-http`, jvT("ui.9a01feecae67"));
         const config = JSON.stringify({url: commandAddress, transport: 'streamable-http', auth: 'oauth'}).replace(/'/g, "'\\''");
-        inline('Configure OAuth if needed:');
-        copyBlock(`openclaw mcp set justvoxel '${config}'`, 'Copy command');
+        inline(jvT("ui.5c8d0e398c84"));
+        copyBlock(`openclaw mcp set justvoxel '${config}'`, jvT("ui.9a01feecae67"));
         host.append(text('code', 'openclaw mcp login justvoxel'));
-        inline('OpenClaw opens the JustVoxel OAuth authorization flow during login.');
+        inline(jvT("ui.17b83c455562"));
       } else {
-        steps(['Open OpenClaw Control UI → Settings → MCP.', 'Under Configured servers select Add server.', 'Name: JustVoxel.', 'Transport: Streamable HTTP.', 'Paste the JustVoxel MCP URL.', 'Select Add server.', 'Configure auth as OAuth and select Sign in when available.', 'Verify: openclaw mcp doctor justvoxel --probe']);
-        if (options.help) inline('Composer: + → Plugins → Add MCP server…');
+        steps([jvT("ui.00d61f589221"), jvT("ui.22f394ca9d26"), jvT("ui.6922b2371dc7"), jvT("ui.0a965eeb509f"), jvT("ui.cf8725a33727"), jvT("ui.049cd9917979"), jvT("ui.f428fd9ee935"), jvT("ui.9b40e07142b1")]);
+        if (options.help) inline(jvT("ui.d22735ff6812"));
       }
       host.append(text('code', 'openclaw mcp doctor justvoxel --probe'), text('code', 'openclaw mcp status --verbose'));
-      if (definitelyPrivate) inline('This local address can work when the OpenClaw Gateway can reach JustVoxel.');
+      if (definitelyPrivate) inline(jvT("ui.01ad6a584216"));
     } else if (automation) {
-      steps(['Copy the REST API address. The REST client/automation must be able to reach it.', 'Copy the one-time JustVoxel API token after creating the connection.', 'Store the token securely.', 'Use it as the connection credential in the automation/client.']);
+      steps([jvT("ui.e56b3bed7a9a"), jvT("ui.e298d6354244"), jvT("ui.feb357d1f7c0"), jvT("ui.24d248e94a3f")]);
     } else {
-      inline('This connection type depends on where your MCP client runs. A local client can use this LAN address when it can reach JustVoxel. A cloud-hosted client usually needs an endpoint reachable from its own infrastructure.');
-      steps(['Find the MCP server settings in your client.', 'Choose Streamable HTTP / HTTP for a URL-based server.', 'Paste the JustVoxel MCP address if that client can reach it.', 'Use the client’s OAuth flow when supported.']);
-      inline('Compatibility depends on the client. For token connections, use the scoped JustVoxel API token.');
+      inline(jvT("ui.cd50e192ff3b"));
+      steps([jvT("ui.c4c82d168f27"), jvT("ui.6c0f90a23960"), jvT("ui.4a7744e45640"), jvT("ui.3bd948eee224")]);
+      inline(jvT("ui.3e9c731a1ead"));
     }
     providerDetails();
   };
@@ -567,8 +567,8 @@
     const allServers = form.querySelector('[data-gateway-all-servers]');
     allServers.checked = Boolean(c.all_instances);
     const instanceOptions = form.querySelector('[data-gateway-instance-options]');
-    const known = new Map(instances.map(instance => [instance.id, instance.display_name || instance.name || 'Minecraft server']));
-    for (const id of c.instance_ids || []) if (!known.has(id)) known.set(id, 'Unavailable server');
+    const known = new Map(instances.map(instance => [instance.id, instance.display_name || instance.name || jvT("ui.fc80df490dea")]));
+    for (const id of c.instance_ids || []) if (!known.has(id)) known.set(id, jvT("ui.2a17a7baf7f8"));
     for (const [id, name] of known) {
       const label = text('label', ''); label.className = 'gateway-server-item';
       const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.name = 'instance_ids'; checkbox.value = id; checkbox.checked = (c.instance_ids || []).includes(id);
@@ -578,7 +578,7 @@
       label.append(checkbox, icon, text('span', name));
       instanceOptions.append(label);
     }
-    if (!known.size) instanceOptions.append(text('p', 'No Minecraft servers are available to choose.'));
+    if (!known.size) instanceOptions.append(text('p', jvT("ui.5a86fd3107d4")));
     const sync = () => {
       const all = allServers.checked;
       field('server_scope').value = all ? 'all' : 'selected';
@@ -598,20 +598,20 @@
     const identity = text('div', ''); identity.className = 'gateway-connection-identity';
     const titles = text('div', ''); titles.append(text('h3', 'Telegram'));
     identity.append(telegramHelpIcon(), titles); host.append(identity);
-    host.append(text('h4', 'How to connect'));
+    host.append(text('h4', jvT("ui.2198ec8ff357")));
     const steps = text('ol', '');
     for (const step of [
-      'Open AI & API Connections → Add → Telegram.',
-      'Create a dedicated Telegram bot with BotFather.',
-      'Enter Bot Token and choose Save. Save automatically verifies the bot.',
-      'Enable Telegram, then select Pair user.',
+      jvT("ui.dc6f20d1b7b1"),
+      jvT("ui.fbf2622d98c6"),
+      jvT("ui.76a8923ba81b"),
+      jvT("ui.06e2146f5b3b"),
       'Copy the exact one-time /start <challenge> command and send it in a private chat with the bot.',
-      'Telegram acknowledges the request and WebUI automatically shows the numeric ID. The primary administrator must check and explicitly approve the numeric Telegram user ID. Choose Read Only or Server Management from the permission dropdown. Notifications are optional.',
+      jvT("ui.330ec92ebd47"),
     ]) steps.append(text('li', step));
     host.append(steps,
-      text('p', 'Telegram uses outbound long polling. No webhook, inbound port, or AI model is required.'),
-      text('p', 'Telegram operates independently of the AI/API Gateway switch and does not use AI/API Levels 1–4.'),
-      text('p', 'Unknown or unapproved Telegram users are silently ignored. Only the exact active pairing challenge receives the pending-approval acknowledgement.'));
+      text('p', jvT("ui.7f2ddc531083")),
+      text('p', jvT("ui.a6e52c72a38a")),
+      text('p', jvT("ui.d0cd89af1978")));
   };
   const discordHelpIcon = () => {
     const icon = document.createElement('img');
@@ -624,29 +624,29 @@
     const identity = text('div', ''); identity.className = 'gateway-connection-identity';
     const titles = text('div', ''); titles.append(text('h3', 'Discord'));
     identity.append(discordHelpIcon(), titles); host.append(identity);
-    host.append(text('h4', 'How to connect'));
+    host.append(text('h4', jvT("ui.2198ec8ff357")));
     const steps = text('ol', '');
-    const portalStep = text('li', 'Create a dedicated Discord application and bot in the ');
-    const portal = text('a', 'Discord Developer Portal');
+    const portalStep = text('li', jvT("ui.a43fde646a4d"));
+    const portal = text('a', jvT("ui.689ec8e0baf2"));
     portal.href = 'https://discord.com/developers/home';
     portal.target = '_blank';
     portal.rel = 'noopener noreferrer';
     portalStep.append(portal, document.createTextNode('.'));
     for (const step of [
-      'Open AI & API Connections → Add → Discord.',
+      jvT("ui.19a2d1f17ee4"),
       portalStep,
-      'Copy the bot token into JustVoxel and choose Save. Use Retry to verify as needed.',
-      'Use Add bot to Discord server to install the bot using JustVoxel’s fixed least-privilege install link.',
-      'Enable Discord from the top navigation switch.',
-      'Choose the intended Discord server and select Use this server.',
-      'In Discord use /jv or /help.',
-      'Ordinary members of the bound server get the allowed read-only and community experience. Management requires explicit JustVoxel administrator approval.',
+      jvT("ui.234203edaa69"),
+      jvT("ui.a75fafa34d9e"),
+      jvT("ui.8e97edcbbc90"),
+      jvT("ui.156fe4156207"),
+      jvT("ui.2e78c6f1cedb"),
+      jvT("ui.01cd932c2b9d"),
     ]) steps.append(typeof step === 'string' ? text('li', step) : step);
     host.append(steps,
-      text('p', 'JustVoxel uses one explicitly bound Discord server, with no automatic binding. Discord roles are not JustVoxel authority.'),
-      text('p', 'Guilds intent only. No Message Content, Guild Members, Presence, or Guild Messages intent. No DM reading; ordinary messages and channel history are not read.'),
-      text('p', 'The fixed minimum install permission value is 3072: View Channel + Send Messages. No Administrator permission.'),
-      text('p', 'Discord is independent of AI/API Gateway levels. All management passes through authoritative JustVoxel operations.'));
+      text('p', jvT("ui.a293e37ede76")),
+      text('p', jvT("ui.1e61ed689cc2")),
+      text('p', jvT("ui.1ac2b9fd2317")),
+      text('p', jvT("ui.98a3ee076e13")));
   };
   const resetHelpGuide = () => {
     for (const button of find('[data-gateway-help-providers]').querySelectorAll('button')) button.setAttribute('aria-pressed', 'false');
@@ -711,23 +711,23 @@
     compatibility.hidden = Boolean(c.id);
     if (!c.id) {
       const previewCompatibility = () => {
-        compatibility.textContent = providerCompatibility.get(field('purpose').value) || providerCompatibility.get('Other AI / MCP app');
+        compatibility.textContent = providerCompatibility.get(field('purpose').value) || providerCompatibility.get(jvT("ui.7658e93fa9fd"));
       };
       form.querySelectorAll('input[name="purpose"]').forEach(input => input.addEventListener('change', previewCompatibility));
       previewCompatibility();
     }
     if (c.id) {
-      form.querySelector('[data-gateway-purpose-label]').textContent = 'Provider';
-      form.querySelector('[data-gateway-level-label]').textContent = 'Access level';
+      form.querySelector('[data-gateway-purpose-label]').textContent = jvT("ui.472590ae974d");
+      form.querySelector('[data-gateway-level-label]').textContent = jvT("ui.86da9c960cf9");
     }
-    form.querySelector('[data-gateway-save]').textContent = c.id ? 'Apply' : 'Create';
+    form.querySelector('[data-gateway-save]').textContent = c.id ? jvT("ui.31e392d1c037") : jvT("ui.4759498ac2a7");
     form.querySelector('[data-gateway-advanced]').hidden = !c.id;
     for (const selector of ['[data-gateway-delete]', '[data-gateway-live-note]']) form.querySelector(selector).hidden = !c.id;
     field('enabled').checked = Boolean(c.enabled);
     const syncEnabled = () => {
       const enabled = field('enabled').checked;
       const state = form.querySelector('[data-gateway-connection-state]');
-      state.textContent = enabled ? 'Enable' : 'Disable';
+      state.textContent = enabled ? 'Enable' : jvT("ui.b7e3e4aa4257");
       state.className = enabled ? 'gateway-connection-state success' : 'gateway-connection-state error';
     };
     field('enabled').addEventListener('change', syncEnabled);
@@ -766,16 +766,16 @@
     status.className = 'minecraft-server-metrics gateway-status-metrics';
     const expiration = text('div', '');
     if (c.id) {
-      expiration.append(text('span', 'EXPIRATION'), field('expires_at')); status.append(expiration);
+      expiration.append(text('span', "EXPIRATION"), field('expires_at')); status.append(expiration);
     }
     const safeDetails = form.querySelector('[data-gateway-safe-details]');
     if (c.id) {
-      for (const [name, value] of [['Connection ID', c.id], ['Safe credential fingerprint', c.fingerprint || 'None'], ['Created', settingsDate(c.created_at)], ['Updated', settingsDate(c.updated_at)]]) {
-        safeDetails.append(text('dt', name), text('dd', value || 'Unavailable'));
+      for (const [name, value] of [[jvT("ui.f8ca8ad99b78"), c.id], [jvT("ui.97db311936e4"), c.fingerprint || jvT("ui.dc937b598926")], [jvT("ui.d70b9e24bca2"), settingsDate(c.created_at)], [jvT("ui.3a5ecca188c0"), settingsDate(c.updated_at)]]) {
+        safeDetails.append(text('dt', name), text('dd', value || jvT("ui.ca1844969742")));
       }
-      const state = !c.enabled ? 'Disabled' : !snapshot.enabled ? 'Gateway off' : 'Ready';
-      const auth = c.auth_mode === 'oauth_local' || c.auth_mode === 'oauth' ? 'OAuth' : 'Token';
-      for (const [label, value] of [['STATUS', state], ['LAST ACTIVITY', activityLabel(c.last_activity)], ['AUTH', auth], ['SCOPE', c.all_instances ? 'All servers' : `${(c.instance_ids || []).length} servers`]]) {
+      const state = !c.enabled ? jvT("ui.75081b593d15") : !snapshot.enabled ? jvT("ui.9300c6044988") : jvT("ui.5fa7aac5375c");
+      const auth = c.auth_mode === 'oauth_local' || c.auth_mode === 'oauth' ? 'OAuth' : jvT("ui.d2089be67295");
+      for (const [label, value] of [[jvT("ui.8c2e4a035f5f"), state], [jvT("ui.69b1d8bd3ab7"), activityLabel(c.last_activity)], ["AUTH", auth], [jvT("ui.f035065747e2"), c.all_instances ? jvT("ui.3205261a6537") : `${(c.instance_ids || []).length} servers`]]) {
         const metric = text('div', ''); metric.append(text('span', label), text('strong', value)); status.append(metric);
       }
     }
@@ -783,7 +783,7 @@
     for (const action of ['rotate', 'revoke', 'delete']) {
       const button = setting(action);
       button.addEventListener('click', () => {
-        if (['delete', 'revoke'].includes(action) && !window.confirm(`${action === 'delete' ? 'Delete' : 'Revoke the token for'} ${c.name}? Existing credentials will stop working.`)) return;
+        if (['delete', 'revoke'].includes(action) && !window.confirm(jvT("ui.de572b7a9876", {v0: (action === 'delete' ? 'Delete' : jvT("ui.d4f88304623c")), v1: (c.name)}))) return;
         mutate({action, id: c.id});
       });
     }

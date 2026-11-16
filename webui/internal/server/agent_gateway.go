@@ -180,6 +180,9 @@ func (a *App) gatewayREST(w http.ResponseWriter, r *http.Request) {
 	}
 	gatewayJSON(w, result.Status, result.Data)
 }
+
+// External discovery and execution contracts stay English; only browser
+// administration notices below participate in WebUI localization.
 func gatewayOpenAPI(catalog api.GatewayCatalog) map[string]any {
 	paths := map[string]any{}
 	for _, op := range catalog.Operations {
@@ -305,7 +308,7 @@ func (a *App) gatewayAdmin(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := client.GatewayAdmin(r.Context(), session, body)
 	if err != nil {
-		gatewayJSON(w, 400, map[string]string{"error": "Connection settings could not be saved. Check settings and Level 4 confirmation."})
+		gatewayJSON(w, 400, map[string]string{"error": ui(w, "ui.84dafc8e92b2")})
 		return
 	}
 	gatewayJSON(w, 200, result)

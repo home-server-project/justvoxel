@@ -118,7 +118,7 @@ func TestNormalLoginClearsFactoryResetCompletionMarker(t *testing.T) {
 }
 
 func TestFactoryResetCompletionAppContract(t *testing.T) {
-	source, err := assets.ReadFile("static/app.js")
+	source, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestFactoryResetCompletionAppContract(t *testing.T) {
 }
 
 func TestPasswordScriptStaysCredentialOnly(t *testing.T) {
-	source, err := assets.ReadFile("static/password.js")
+	source, err := englishPresentationAsset("static/password.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,11 +178,11 @@ func TestPasswordScriptStaysCredentialOnly(t *testing.T) {
 }
 
 func TestPasswordScriptOptOutAndRealPasswords(t *testing.T) {
-	node, err := exec.LookPath("node")
+	_, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node unavailable")
 	}
-	source, err := assets.ReadFile("static/password.js")
+	source, err := englishPresentationAsset("static/password.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +264,7 @@ for (const input of inputs) {
 	telegramFields := 0
 	discordFields := 0
 	for _, template := range []string{"templates/login.html", "templates/password.html", "templates/header.html"} {
-		markup, err := assets.ReadFile(template)
+		markup, err := englishPresentationAsset(template)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -315,7 +315,7 @@ for (const input of inputs) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	app, err := assets.ReadFile("static/app.js")
+	app, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,7 +336,7 @@ for (const input of inputs) {
 	for name, script := range map[string]string{"standalone": string(source), "shared": shared} {
 		t.Run(name, func(t *testing.T) {
 			program := strings.Replace(harness, "__PASSWORD_ENHANCER__", script, 1)
-			if out, err := exec.Command(node, "-e", program, string(encoded), name).CombinedOutput(); err != nil {
+			if out, err := nodeTestCommand("-e", program, string(encoded), name).CombinedOutput(); err != nil {
 				t.Fatalf("password enhancement: %v\n%s", err, out)
 			}
 		})
@@ -344,7 +344,7 @@ for (const input of inputs) {
 }
 
 func TestPasswordRevealStyleContract(t *testing.T) {
-	source, err := assets.ReadFile("static/app.css")
+	source, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}

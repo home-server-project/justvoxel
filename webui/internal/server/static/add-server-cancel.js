@@ -14,9 +14,9 @@
   const showCancelled = () => {
     const main = document.createElement("main");
     for (const [tag, text] of [
-      ["h1", "Setup cancelled."],
-      ["p", "Minecraft Servers remains open in your original JustVoxel tab."],
-      ["p", "You can close this tab."],
+      ["h1", jvT("ui.68817f9bc395")],
+      ["p", jvT("ui.1f24ad373052")],
+      ["p", jvT("ui.b3a62533c186")],
     ]) {
       const node = document.createElement(tag);
       node.textContent = text;
@@ -24,12 +24,12 @@
     }
     const retry = document.createElement("button");
     retry.type = "button";
-    retry.textContent = "Close tab";
+    retry.textContent = jvT("ui.50a3f9523122");
     retry.addEventListener("click", closeTab);
     main.appendChild(retry);
     document.body.className = "add-server-cancelled";
     document.body.replaceChildren(main);
-    document.title = "JustVoxel - Setup cancelled";
+    document.title = jvT("ui.771d7013ba7f");
     closeTab();
   };
   document.addEventListener("submit", async (event) => {
@@ -51,14 +51,14 @@
         method: "POST", body: new FormData(form), credentials: "same-origin",
         headers: { Accept: "application/json" }, redirect: "error",
       });
-      if (response.status !== 204) throw new Error("Cancellation was not confirmed");
+      if (response.status !== 204) throw new Error(jvT("ui.59611746b055"));
       showCancelled();
     } catch {
       error = document.createElement("p");
       error.className = "notice error";
       error.dataset.addServerCancelError = "";
       error.setAttribute("role", "alert");
-      error.textContent = "Setup could not be cancelled. Please try Cancel again.";
+      error.textContent = jvT("ui.9ed7bd151e96");
       form.appendChild(error);
       pending = false;
       if (button) button.disabled = false;

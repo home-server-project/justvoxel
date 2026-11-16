@@ -1,6 +1,6 @@
 // Approved Minecraft presentation and existing-endpoint coordination regressions.
 const assert = require('node:assert/strict');
-const {readFileSync} = require('node:fs');
+const {readFileSync, englishPresentationSource} = require('./helpers/webui-i18n.cjs');
 const {test} = require('node:test');
 const vm = require('node:vm');
 const read = name => readFileSync(`${__dirname}/../webui/internal/server/${name}`, 'utf8');
@@ -554,7 +554,11 @@ test('Reviewed settings reuse confirmed graceful lifecycle and preserve protecte
     'mjust/libexec/common.sh': '43ff235f98495f5c02528a85185ff052707480625578bff584256f20c7349df0',
   };
   for (const [path, expected] of Object.entries(protectedFiles)) {
-    assert.equal(createHash('sha256').update(readFileSync(`${__dirname}/../${path}`)).digest('hex'), expected, path);
+    const data = readFileSync(`${__dirname}/../${path}`);
+    // Keep the original policy pin: resolving only catalog calls must reproduce
+    // every byte of the reviewed English script, including its behavior.
+    const canonical = path.endsWith('/settings.js') ? englishPresentationSource(data.toString('utf8'), path) : data;
+    assert.equal(createHash('sha256').update(canonical).digest('hex'), expected, path);
   }
 });
 

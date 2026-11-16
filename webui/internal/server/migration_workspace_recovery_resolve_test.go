@@ -82,7 +82,7 @@ func TestMigrationWorkspaceRecoveryAttentionWithoutTransactions(t *testing.T) {
 }
 
 func TestMigrationRecoveryTabVisibilityContract(t *testing.T) {
-	script, err := assets.ReadFile("static/app.js")
+	script, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}

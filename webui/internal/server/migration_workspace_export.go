@@ -71,7 +71,7 @@ func (a *App) migrationWorkspaceExportRequest(w http.ResponseWriter, r *http.Req
 	}
 	client, ok := a.api.(adminMigrationWorkspaceExportAPI)
 	if !ok {
-		http.Error(w, "Server Export management is unavailable", http.StatusServiceUnavailable)
+		http.Error(w, ui(w, "ui.5b372da0b3ba"), http.StatusServiceUnavailable)
 		return "", nil, api.SessionInfo{}, false
 	}
 	return session, client, identity, true
@@ -90,7 +90,7 @@ func (a *App) migrationWorkspaceExportPage(w http.ResponseWriter, r *http.Reques
 	}
 	discovery, err := client.AdminMigrationExportDiscovery(r.Context(), session)
 	if err != nil {
-		a.handleMigrationWorkspaceRequestError(w, r, err, "Server Export discovery is unavailable.")
+		a.handleMigrationWorkspaceRequestError(w, r, err, ui(w, "ui.9b0f8d42e43d"))
 		return
 	}
 	a.renderMigrationWorkspaceExportPage(w, http.StatusOK, identity, discovery, csrfFromRequest(r), "", migrationWorkspaceSelectedID(r))
@@ -106,7 +106,7 @@ func (a *App) migrationWorkspaceExportReview(w http.ResponseWriter, r *http.Requ
 	}
 	discovery, err := client.AdminMigrationExportDiscovery(r.Context(), session)
 	if err != nil {
-		a.handleMigrationWorkspaceRequestError(w, r, err, "Server Export discovery is unavailable.")
+		a.handleMigrationWorkspaceRequestError(w, r, err, ui(w, "ui.9b0f8d42e43d"))
 		return
 	}
 	request, err := parseMigrationWorkspaceExportForm(r, discovery)
@@ -118,10 +118,10 @@ func (a *App) migrationWorkspaceExportReview(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		var responseErr *api.ResponseError
 		if errors.As(err, &responseErr) && responseErr.StatusCode == http.StatusBadRequest && plan.SchemaVersion != "" {
-			a.renderMigrationWorkspaceExportReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), apiMessage(err, "Server Export planning was rejected."), migrationWorkspaceSelectedID(r))
+			a.renderMigrationWorkspaceExportReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), apiMessage(err, ui(w, "ui.99606fd06234")), migrationWorkspaceSelectedID(r))
 			return
 		}
-		a.handleMigrationWorkspaceRequestError(w, r, err, "Server Export planning is unavailable.")
+		a.handleMigrationWorkspaceRequestError(w, r, err, ui(w, "ui.f1b7caca8e5d"))
 		return
 	}
 	a.renderMigrationWorkspaceExportReview(w, http.StatusOK, identity, request, plan, csrfFromRequest(r), "", migrationWorkspaceSelectedID(r))
@@ -137,7 +137,7 @@ func (a *App) migrationWorkspaceExportApply(w http.ResponseWriter, r *http.Reque
 	}
 	discovery, err := client.AdminMigrationExportDiscovery(r.Context(), session)
 	if err != nil {
-		a.handleMigrationWorkspaceRequestError(w, r, err, "Server Export discovery is unavailable.")
+		a.handleMigrationWorkspaceRequestError(w, r, err, ui(w, "ui.9b0f8d42e43d"))
 		return
 	}
 	request, err := parseMigrationWorkspaceExportForm(r, discovery)
@@ -149,25 +149,25 @@ func (a *App) migrationWorkspaceExportApply(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		var responseErr *api.ResponseError
 		if errors.As(err, &responseErr) && responseErr.StatusCode == http.StatusBadRequest && plan.SchemaVersion != "" {
-			a.renderMigrationWorkspaceExportReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), apiMessage(err, "Server Export planning was rejected."), migrationWorkspaceSelectedID(r))
+			a.renderMigrationWorkspaceExportReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), apiMessage(err, ui(w, "ui.99606fd06234")), migrationWorkspaceSelectedID(r))
 			return
 		}
-		a.handleMigrationWorkspaceRequestError(w, r, err, "Server Export planning is unavailable.")
+		a.handleMigrationWorkspaceRequestError(w, r, err, ui(w, "ui.f1b7caca8e5d"))
 		return
 	}
 
 	submittedFingerprint := strings.TrimSpace(r.FormValue("plan_fingerprint"))
 	if submittedFingerprint == "" || submittedFingerprint != plan.PlanFingerprint {
-		a.renderMigrationWorkspaceExportReview(w, http.StatusConflict, identity, request, plan, csrfFromRequest(r), "This Server Export changed since it was reviewed. Review the current destination again before continuing.", migrationWorkspaceSelectedID(r))
+		a.renderMigrationWorkspaceExportReview(w, http.StatusConflict, identity, request, plan, csrfFromRequest(r), ui(w, "ui.301807232647"), migrationWorkspaceSelectedID(r))
 		return
 	}
 	if strings.TrimSpace(r.FormValue("export_confirmation")) != "EXPORT" {
-		a.renderMigrationWorkspaceExportReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), "Complete the Export confirmation slider before starting this Server Export.", migrationWorkspaceSelectedID(r))
+		a.renderMigrationWorkspaceExportReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), ui(w, "ui.fc008692fded"), migrationWorkspaceSelectedID(r))
 		return
 	}
 	playersConfirmed := r.FormValue("players_confirmed") == "yes"
 	if plan.Requirements != nil && plan.Requirements.PlayersConfirmationRequired && !playersConfirmed {
-		a.renderMigrationWorkspaceExportReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), "Confirm that the online players may be interrupted before starting Server Export.", migrationWorkspaceSelectedID(r))
+		a.renderMigrationWorkspaceExportReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), ui(w, "ui.47e685e28464"), migrationWorkspaceSelectedID(r))
 		return
 	}
 
@@ -175,7 +175,7 @@ func (a *App) migrationWorkspaceExportApply(w http.ResponseWriter, r *http.Reque
 	if plan.Requirements != nil && plan.Requirements.SMBPasswordRequired {
 		smbPassword = r.FormValue("smb_password")
 		if smbPassword == "" {
-			a.renderMigrationWorkspaceExportReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), "Enter the SMB password to start this reviewed Server Export.", migrationWorkspaceSelectedID(r))
+			a.renderMigrationWorkspaceExportReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), ui(w, "ui.219faeffd07d"), migrationWorkspaceSelectedID(r))
 			return
 		}
 	}
@@ -189,11 +189,11 @@ func (a *App) migrationWorkspaceExportApply(w http.ResponseWriter, r *http.Reque
 	})
 	smbPassword = ""
 	if err != nil {
-		a.renderMigrationWorkspaceExportReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), apiMessage(err, "Could not start Server Export."), migrationWorkspaceSelectedID(r))
+		a.renderMigrationWorkspaceExportReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), apiMessage(err, ui(w, "ui.e65e1f03e013")), migrationWorkspaceSelectedID(r))
 		return
 	}
 	if !result.OK || result.Operation == nil || result.Operation.OperationType != "migration_export" {
-		a.renderMigrationWorkspaceExportReview(w, http.StatusBadGateway, identity, request, plan, csrfFromRequest(r), "Server Export did not return a valid persistent operation.", migrationWorkspaceSelectedID(r))
+		a.renderMigrationWorkspaceExportReview(w, http.StatusBadGateway, identity, request, plan, csrfFromRequest(r), ui(w, "ui.85689180d9a0"), migrationWorkspaceSelectedID(r))
 		return
 	}
 	http.Redirect(w, r, migrationSelectedURL(r, "/workspace/migration/progress/"+result.Operation.OperationID), http.StatusSeeOther)
@@ -265,7 +265,7 @@ func parseMigrationWorkspaceExportForm(r *http.Request, discovery api.AdminMigra
 		return api.AdminMigrationExportTargetRequest{}, errors.New("unsupported Server Export destination type")
 	}
 	if strings.ContainsAny(request.Path+request.Device+request.Source+request.Username+request.Domain, "\r\n") {
-		return api.AdminMigrationExportTargetRequest{}, errors.New("Server Export destination contains invalid characters")
+		return api.AdminMigrationExportTargetRequest{}, errors.New(uiText("ui.a931435e8e31"))
 	}
 	return request, nil
 }
@@ -292,7 +292,7 @@ func (a *App) renderMigrationWorkspaceExportPage(w http.ResponseWriter, status i
 	}
 	a.renderMigrationWorkspace(w, "migration_workspace_export.html", status, migrationWorkspaceExportPageData{
 		ServerID:         serverID,
-		Title:            "Server Export",
+		Title:            ui(w, "ui.d1f081749243"),
 		Version:          a.config.Version,
 		ManagementAPI:    a.config.ManagementAPI,
 		CSRF:             csrf,
@@ -320,7 +320,7 @@ func (a *App) renderMigrationWorkspaceExportReview(w http.ResponseWriter, status
 	}
 	a.renderMigrationWorkspace(w, "migration_workspace_export_review.html", status, migrationWorkspaceExportReviewPageData{
 		ServerID:      serverID,
-		Title:         "Review Server Export",
+		Title:         ui(w, "ui.805afef53d4c"),
 		Version:       a.config.Version,
 		ManagementAPI: a.config.ManagementAPI,
 		CSRF:          csrf,
@@ -336,14 +336,14 @@ func (a *App) renderMigrationWorkspaceExportReview(w http.ResponseWriter, status
 func (a *App) redirectCurrentMigrationWorkspaceOperation(w http.ResponseWriter, r *http.Request, session string, client adminMigrationWorkspaceAPI) bool {
 	response, err := client.AdminCurrentMigrationOperation(r.Context(), session)
 	if err != nil {
-		a.handleMigrationWorkspaceRequestError(w, r, err, "Server Migration operation status is unavailable.")
+		a.handleMigrationWorkspaceRequestError(w, r, err, ui(w, "ui.9ebe3ac32640"))
 		return true
 	}
 	if response.Operation == nil {
 		return false
 	}
 	if response.Operation.InstanceID != migrationWorkspaceSelectedID(r) || !migrationWorkspaceOperationType(response.Operation.OperationType) {
-		http.Error(w, "Server Migration operation status is invalid", http.StatusBadGateway)
+		http.Error(w, ui(w, "ui.a2ee2f05ca1e"), http.StatusBadGateway)
 		return true
 	}
 	http.Redirect(w, r, migrationSelectedURL(r, "/workspace/migration/progress/"+response.Operation.OperationID), http.StatusSeeOther)
@@ -353,30 +353,30 @@ func (a *App) redirectCurrentMigrationWorkspaceOperation(w http.ResponseWriter, 
 func (a *App) migrationWorkspaceProgressStatus(w http.ResponseWriter, r *http.Request) {
 	session, ok := sessionFromRequest(r)
 	if !ok {
-		http.Error(w, "authentication required", http.StatusUnauthorized)
+		http.Error(w, ui(w, "ui.cbac8bee7536"), http.StatusUnauthorized)
 		return
 	}
 	client, ok := a.api.(adminMigrationWorkspaceAPI)
 	if !ok {
-		http.Error(w, "Server Migration operation tracking is unavailable", http.StatusServiceUnavailable)
+		http.Error(w, ui(w, "ui.0af96830990b"), http.StatusServiceUnavailable)
 		return
 	}
 	identity, err := client.Session(r.Context(), session)
 	if err != nil {
 		if errors.Is(err, api.ErrUnauthorized) {
 			a.clearSessionCookies(w)
-			http.Error(w, "authentication required", http.StatusUnauthorized)
+			http.Error(w, ui(w, "ui.cbac8bee7536"), http.StatusUnauthorized)
 			return
 		}
 		if errors.Is(err, api.ErrPasswordChangeRequired) {
-			http.Error(w, "password change required", http.StatusForbidden)
+			http.Error(w, ui(w, "ui.63bae92440ec"), http.StatusForbidden)
 			return
 		}
-		http.Error(w, "management service unavailable", http.StatusBadGateway)
+		http.Error(w, ui(w, "ui.0b8e73a792bb"), http.StatusBadGateway)
 		return
 	}
 	if identity.Role != "administrator" {
-		http.Error(w, "Administrator access required", http.StatusForbidden)
+		http.Error(w, ui(w, "ui.031cc7a3ec82"), http.StatusForbidden)
 		return
 	}
 	selected, ok := a.selectedMinecraft(w, r, session)
@@ -392,94 +392,94 @@ func (a *App) migrationWorkspaceProgressStatus(w http.ResponseWriter, r *http.Re
 		var responseErr *api.ResponseError
 		if errors.Is(err, api.ErrUnauthorized) {
 			a.clearSessionCookies(w)
-			http.Error(w, "authentication required", http.StatusUnauthorized)
+			http.Error(w, ui(w, "ui.cbac8bee7536"), http.StatusUnauthorized)
 			return
 		}
 		if errors.Is(err, api.ErrPasswordChangeRequired) {
-			http.Error(w, "password change required", http.StatusForbidden)
+			http.Error(w, ui(w, "ui.63bae92440ec"), http.StatusForbidden)
 			return
 		}
 		if errors.As(err, &responseErr) && responseErr.StatusCode == http.StatusNotFound {
-			http.Error(w, "Server Migration operation not found", http.StatusNotFound)
+			http.Error(w, ui(w, "ui.da2ab6e39c29"), http.StatusNotFound)
 			return
 		}
-		http.Error(w, "Server Migration operation status is unavailable", http.StatusBadGateway)
+		http.Error(w, ui(w, "ui.1c7066d01f2d"), http.StatusBadGateway)
 		return
 	}
 	if response.Operation == nil || response.Operation.InstanceID != migrationWorkspaceSelectedID(r) || !migrationWorkspaceOperationType(response.Operation.OperationType) {
-		http.Error(w, "Server Migration operation not found", http.StatusNotFound)
+		http.Error(w, ui(w, "ui.da2ab6e39c29"), http.StatusNotFound)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		http.Error(w, "could not encode Server Migration operation", http.StatusInternalServerError)
+		http.Error(w, ui(w, "ui.d9b0da01ddf3"), http.StatusInternalServerError)
 	}
 }
 
 func migrationWorkspaceStageLabel(operationType, value string) string {
 	if value == "queued" {
-		return "Waiting to start"
+		return uiText("ui.f5e5f81fd256")
 	}
 	if value == "completed" {
 		return "Complete"
 	}
 	if value == "player_recheck" {
-		return "Rechecking online players"
+		return uiText("ui.ab2d5bb1e79d")
 	}
 	if value == "minecraft_stop" {
-		return "Stopping Minecraft safely"
+		return uiText("ui.995beb2af122")
 	}
 	if value == "invalid_execution_plan" || value == "interrupted" {
-		return "Administrator attention required"
+		return uiText("ui.1e1b96ec8fd9")
 	}
 	switch operationType {
 	case "migration_export":
 		switch value {
 		case "export_preflight":
-			return "Rechecking reviewed Export"
+			return uiText("ui.60117bda3d60")
 		case "archive_integrity", "integrity_verification":
-			return "Verifying migration bundle"
+			return uiText("ui.78c93c0ea236")
 		case "export_failed":
-			return "Preparing safe Export recovery"
+			return uiText("ui.a689980fba1b")
 		case "rollback":
-			return "Finalizing Export recovery state"
+			return uiText("ui.d0d1b11758c9")
 		case "export_rolled_back":
-			return "Export rolled back"
+			return uiText("ui.39aec9840b2d")
 		case "export_needs_attention", "export_backend_interrupted", "export_backend_incomplete":
-			return "Administrator attention required"
+			return uiText("ui.1e1b96ec8fd9")
 		}
 	case "migration_import":
 		switch value {
 		case "recovery_handoff":
-			return "Recovery responsibility transferred"
+			return uiText("ui.8c5a07566067")
 		case "import_preflight":
-			return "Rechecking reviewed Import"
+			return uiText("ui.1db8eecfbe9b")
 		case "import_storage":
-			return "Preparing fresh destination storage"
+			return uiText("ui.1b553da67100")
 		case "import_execute":
-			return "Importing Minecraft server data"
+			return uiText("ui.44c03884fea1")
 		case "import_verify":
-			return "Validating imported Minecraft"
+			return uiText("ui.70c4b99c7c87")
 		case "import_failed":
-			return "Preparing safe Import rollback"
+			return uiText("ui.44d2868f2a28")
 		case "rollback":
-			return "Finalizing Import rollback"
+			return uiText("ui.f6e0f42acf8e")
 		case "import_rolled_back":
-			return "Import rolled back"
+			return uiText("ui.3d9d723dfd19")
 		case "import_needs_attention", "import_backend_interrupted", "import_backend_incomplete":
-			return "Administrator attention required"
+			return uiText("ui.1e1b96ec8fd9")
 		}
 	case "migration_recovery":
 		switch value {
 		case "recovery_preflight":
-			return "Rechecking retained recovery state"
+			return uiText("ui.8e649c951902")
 		case "recovery_finalize":
-			return "Finalizing retained recovery state"
+			return uiText("ui.665aaa8d5d59")
 		case "recovery_verify":
-			return "Verifying recovery finalization"
+			return uiText("ui.0cc638ce0ff6")
 		case "recovery_backend_failed", "recovery_backend_invalid", "recovery_backend_incomplete":
-			return "Administrator attention required"
+			return uiText("ui.1e1b96ec8fd9")
 		}
 	}
 	return migrationWorkspaceFriendlyToken(value)

@@ -15,15 +15,15 @@ type setupSoftwareChoice struct{ ID, Name, Description string }
 func simpleSoftware(family string) []setupSoftwareChoice {
 	switch family {
 	case "plugins":
-		return []setupSoftwareChoice{{"paper", "Paper", "Plugins · Cross-play"}, {"purpur", "Purpur", "Plugins · Cross-play"}, {"spigot", "Spigot", "Plugins · Cross-play"}, {"pufferfish", "Pufferfish", "Plugins · Cross-play"}, {"leaf", "Leaf", "Plugins · Cross-play"}}
+		return []setupSoftwareChoice{{"paper", "Paper", uiText("ui.53f743143895")}, {"purpur", "Purpur", uiText("ui.53f743143895")}, {"spigot", "Spigot", uiText("ui.53f743143895")}, {"pufferfish", "Pufferfish", uiText("ui.53f743143895")}, {"leaf", "Leaf", uiText("ui.53f743143895")}}
 	case "mods":
-		return []setupSoftwareChoice{{"fabric", "Fabric", "Mod loader · Cross-play supported when compatible"}, {"neoforge", "NeoForge", "Mod loader · Cross-play supported when compatible"}, {"forge", "Forge", "Mod loader · Java only"}, {"quilt", "Quilt", "Mod loader · Java only"}}
+		return []setupSoftwareChoice{{"fabric", "Fabric", uiText("ui.f13c262f14d9")}, {"neoforge", "NeoForge", uiText("ui.f13c262f14d9")}, {"forge", "Forge", uiText("ui.55843cb14754")}, {"quilt", "Quilt", uiText("ui.55843cb14754")}}
 	case "original":
-		return []setupSoftwareChoice{{"vanilla", "Vanilla", "Original Minecraft · no plugins or mods"}, {"bedrock", "Bedrock", "Native Bedrock server · no plugins or mods"}}
+		return []setupSoftwareChoice{{"vanilla", "Vanilla", uiText("ui.499c75715ac6")}, {"bedrock", "Bedrock", uiText("ui.3967fbfbcbd4")}}
 	case "bedrock":
-		return []setupSoftwareChoice{{"bedrock", "Bedrock", "Native Bedrock · no plugins or mods"}}
+		return []setupSoftwareChoice{{"bedrock", "Bedrock", uiText("ui.e6a9810433d3")}}
 	case "vanilla":
-		return []setupSoftwareChoice{{"vanilla", "Vanilla", "Java only · no plugins or mods"}}
+		return []setupSoftwareChoice{{"vanilla", "Vanilla", uiText("ui.ca7c1afad299")}}
 	}
 	return nil
 }
@@ -64,18 +64,18 @@ func (a *App) resolveSetupRuntime(ctx context.Context, session string, draft *se
 			AdminSetupNativeBedrockPreview(context.Context, string, int) (api.AdminVersionStatus, error)
 		})
 		if !ok {
-			return errors.New("Native Bedrock version information is unavailable")
+			return errors.New(uiText("ui.916ba8225584"))
 		}
 		players, err := strconv.Atoi(draft.Server.MaxPlayers)
 		if err != nil || players < 1 || players > 1000 {
-			return errors.New("Bedrock maximum players must be between 1 and 1000")
+			return errors.New(uiText("ui.5dc62ee66d3b"))
 		}
 		status, err := client.AdminSetupNativeBedrockPreview(ctx, session, players)
 		if err != nil || !regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$`).MatchString(status.SelectedCandidate) || status.ImageTag != "stable" || status.BedrockTCPPort < 1 || status.BedrockUDPStart < 1 || status.BedrockUDPEnd > 65535 || status.BedrockUDPEnd-status.BedrockUDPStart+1 < players {
-			return errors.New("An exact official Bedrock release and safe connection ports could not be verified. Try again.")
+			return errors.New(uiText("ui.67fa3d28dccf"))
 		}
 		if draft.Minecraft.ResolvedVersion != "" && (draft.Minecraft.ResolvedVersion != status.SelectedCandidate || draft.Minecraft.BedrockTCPPort != status.BedrockTCPPort || draft.Minecraft.BedrockUDPStart != status.BedrockUDPStart || draft.Minecraft.BedrockUDPEnd != status.BedrockUDPEnd) {
-			return errors.New("The recommended Bedrock release or connection ports changed. Return to Server and review setup again.")
+			return errors.New(uiText("ui.b2fb4f8d2de6"))
 		}
 		draft.Server.BedrockEnabled = false
 		draft.Minecraft.JavaPort, draft.Minecraft.JavaMemory, draft.Minecraft.BedrockPort = "0", "", "0"
@@ -96,7 +96,7 @@ func (a *App) resolveSetupRuntime(ctx context.Context, session string, draft *se
 	}
 	client, ok := a.api.(setupVersionPreviewAPI)
 	if !ok {
-		return errors.New("Version information is unavailable. Try again before continuing.")
+		return errors.New(uiText("ui.6b1be7716cd4"))
 	}
 	bedrock := draft.Server.BedrockEnabled
 	if automaticCrossplay {
@@ -104,10 +104,10 @@ func (a *App) resolveSetupRuntime(ctx context.Context, session string, draft *se
 	}
 	status, err := client.AdminSetupVersionPreview(ctx, session, draft.Minecraft.VersionPolicy, draft.Minecraft.Version, bedrock, draft.Minecraft.ServerType)
 	if err != nil || status.SelectedCandidate == "" {
-		return errors.New("An exact compatible Minecraft runtime could not be resolved. Try again or choose a supported Specific version.")
+		return errors.New(uiText("ui.149789b66d59"))
 	}
 	if draft.Minecraft.VersionPolicy == "pinned" && status.SelectedCandidate != draft.Minecraft.Version {
-		return errors.New("The resolved Minecraft release does not match the selected release.")
+		return errors.New(uiText("ui.5feedd259f95"))
 	}
 	if automaticCrossplay && recommendedServerSupportsBedrock(draft.Minecraft.ServerType) {
 		// Ask about this exact release; cross-play must never choose a different
@@ -116,18 +116,18 @@ func (a *App) resolveSetupRuntime(ctx context.Context, session string, draft *se
 		bedrock = crossErr == nil && crossplay.SelectedCandidate == status.SelectedCandidate && crossplay.LoaderVersion == status.LoaderVersion && crossplay.CrossplayCompatible && (draft.Minecraft.ServerType != "fabric" && draft.Minecraft.ServerType != "neoforge" || crossplay.ManagedCrossplayAvailable)
 	}
 	if bedrock && !automaticCrossplay && (!status.CrossplayCompatible || ((draft.Minecraft.ServerType == "fabric" || draft.Minecraft.ServerType == "neoforge") && !status.ManagedCrossplayAvailable)) {
-		return errors.New("Managed cross-play compatibility could not be confirmed. Disable cross-play to continue with Java setup.")
+		return errors.New(uiText("ui.b3f2d3d83df9"))
 	}
 	if setupNeedsExactRuntime(draft.Minecraft.ServerType) {
 		required := setupRuntimeImage(draft.Minecraft.ServerType, status.SelectedCandidate)
 		if required == "" || status.ImageTag != required {
-			return errors.New("The resolved runtime does not match its Minecraft release.")
+			return errors.New(uiText("ui.4f91c4c63533"))
 		}
 		if draft.Minecraft.ServerType != "spigot" && draft.Minecraft.ServerType != "pufferfish" && draft.Minecraft.ServerType != "leaf" && !regexp.MustCompile(`^[0-9]+(\.[0-9]+){1,3}$`).MatchString(status.LoaderVersion) {
-			return errors.New("An exact stable loader could not be resolved.")
+			return errors.New(uiText("ui.e100c7053df0"))
 		}
 		if (draft.Minecraft.ServerType == "pufferfish" || draft.Minecraft.ServerType == "leaf") && status.LoaderVersion != "" {
-			return errors.New("This server software does not use a loader version.")
+			return errors.New(uiText("ui.bed81074f24f"))
 		}
 		draft.Minecraft.RuntimeImageTag, draft.Minecraft.LoaderVersion = required, status.LoaderVersion
 	}
@@ -167,7 +167,7 @@ func (a *App) setupWizardSimple(w http.ResponseWriter, r *http.Request) {
 		case 1:
 			family := r.FormValue("family")
 			if len(simpleSoftware(family)) == 0 {
-				fail("Choose a usable server family.")
+				fail(ui(w, "ui.57379d1f0bb3"))
 				return
 			}
 			draft.SimpleFamily, draft.SimpleState = family, 2
@@ -181,7 +181,7 @@ func (a *App) setupWizardSimple(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if !valid {
-				fail("Choose software from the selected family.")
+				fail(ui(w, "ui.d3f83a613cc5"))
 				return
 			}
 			draft.Minecraft.ServerType, draft.SimpleState = selected, 3
@@ -193,12 +193,12 @@ func (a *App) setupWizardSimple(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if !validSetupGameMode(gameMode) || draft.Minecraft.ServerType == "bedrock" && gameMode == "spectator" {
-				fail("Choose a valid game mode.")
+				fail(ui(w, "ui.9b4e69acae19"))
 				return
 			}
 			resolved, err := a.newSetupDraft(r.Context(), session, client, draft.AddServer)
 			if err != nil {
-				fail("Server defaults are unavailable. Check existing server configuration and storage, then try again.")
+				fail(ui(w, "ui.1d5d096ce8c5"))
 				return
 			}
 			resolved.Mode, resolved.SimpleState, resolved.SimpleFamily = "recommended", 3, draft.SimpleFamily
@@ -222,7 +222,7 @@ func (a *App) setupWizardSimple(w http.ResponseWriter, r *http.Request) {
 			draft = resolved
 			a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "simple WebUI setup defaults accepted", draft)
 		default:
-			fail("Restart Simple setup.")
+			fail(ui(w, "ui.e74fead2afaa"))
 			return
 		}
 	}
@@ -238,8 +238,8 @@ type setupSoftwareGroup struct {
 
 func setupSoftwareGroups() []setupSoftwareGroup {
 	return []setupSoftwareGroup{
-		{Name: "Plugins · Cross-play", Software: simpleSoftware("plugins")},
-		{Name: "Mod loaders · Cross-play", Software: simpleSoftware("mods")},
-		{Name: "Vanilla Java · Bedrock", Software: simpleSoftware("original")},
+		{Name: uiText("ui.53f743143895"), Software: simpleSoftware("plugins")},
+		{Name: uiText("ui.6a5397e7245c"), Software: simpleSoftware("mods")},
+		{Name: uiText("ui.10ef48de6660"), Software: simpleSoftware("original")},
 	}
 }

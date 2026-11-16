@@ -15,7 +15,7 @@ import (
 func TestProviderIconsAreLocalColourSVGs(t *testing.T) {
 	for _, name := range []string{"local-network", "tailscale", "netbird", "playit", "nordvpn"} {
 		t.Run(name, func(t *testing.T) {
-			data, err := assets.ReadFile("static/provider-icons/" + name + ".svg")
+			data, err := englishPresentationAsset("static/provider-icons/" + name + ".svg")
 			if err != nil {
 				t.Fatal(err)
 			}

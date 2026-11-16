@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { readFileSync } = require('node:fs');
+const { readFileSync } = require('./helpers/webui-i18n.cjs');
 const path = require('node:path');
 const { test } = require('node:test');
 const vm = require('node:vm');

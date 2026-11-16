@@ -1,7 +1,6 @@
 package server
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -9,7 +8,7 @@ import (
 
 func TestDateTimeAndVersionWorkspaceContracts(t *testing.T) {
 	read := func(name string) string {
-		data, err := os.ReadFile(filepath.Join(name))
+		data, err := englishPresentationAsset(filepath.Join(name))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -176,7 +175,7 @@ func TestDateTimeAndVersionWorkspaceContracts(t *testing.T) {
 
 func TestSecondRoundWorkspacePresentationContracts(t *testing.T) {
 	read := func(name string) string {
-		data, err := assets.ReadFile(name)
+		data, err := englishPresentationAsset(name)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -224,7 +223,7 @@ func TestSecondRoundWorkspacePresentationContracts(t *testing.T) {
 
 func TestApprovedSystemAndNetworkRepairContracts(t *testing.T) {
 	read := func(path string) string {
-		data, err := assets.ReadFile(path)
+		data, err := englishPresentationAsset(path)
 		if err != nil {
 			t.Fatal(err)
 		}

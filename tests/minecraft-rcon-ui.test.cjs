@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const {readFileSync} = require('node:fs');
+const {readFileSync} = require('./helpers/webui-i18n.cjs');
 const {test} = require('node:test');
 const vm = require('node:vm');
 const source = readFileSync(`${__dirname}/../webui/internal/server/static/app.js`, 'utf8');

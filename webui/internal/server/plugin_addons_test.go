@@ -7,7 +7,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 
@@ -117,7 +116,7 @@ func TestAddonWorkspaceStreamingAuthorizationAndContract(t *testing.T) {
 }
 func TestAddonWorkspaceRenderingContract(t *testing.T) {
 	script := pluginWorkspaceScript(t)
-	raw, err := os.ReadFile("templates/header.html")
+	raw, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}

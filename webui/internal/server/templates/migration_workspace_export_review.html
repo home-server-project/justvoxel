@@ -1,33 +1,33 @@
 {{define "migration_workspace_export_review.html"}}<div class="migration-workspace-content" data-migration-workspace-root data-server-id="{{.ServerID}}">
-{{if .Error}}<div class="notice error"><strong>Server Export cannot continue as submitted.</strong><br>{{.Error}}</div>{{end}}
+{{if .Error}}<div class="notice error"><strong>{{t "ui.b178c9a91b73"}}</strong><br>{{ts .Error}}</div>{{end}}
 
   {{if .Plan.Normalized}}
   <section class="panel">
-    <p class="eyebrow">Reviewed Export plan</p>
+    <p class="eyebrow">{{t "ui.176757af89c8"}}</p>
     <h2>{{.Plan.Normalized.TargetDisplay}}</h2>
     <div class="migration-facts">
-      <div><strong>Destination type</strong><span>{{.Plan.Normalized.Kind}}</span></div>
-      <div><strong>Bundle filename</strong><span>{{.Plan.Normalized.Filename}}</span></div>
-      <div><strong>Minecraft data</strong><span>{{.Plan.Normalized.DataPath}} · {{.DataSize}}</span></div>
-      {{if .Plan.Normalized.TargetFilesystem}}<div><strong>Filesystem</strong><span>{{.Plan.Normalized.TargetFilesystem}}</span></div>{{end}}
-      {{if .AvailableSize}}<div><strong>Available space</strong><span>{{.AvailableSize}}</span></div>{{end}}
+      <div><strong>{{t "ui.6fdf76147c19"}}</strong><span>{{.Plan.Normalized.Kind}}</span></div>
+      <div><strong>{{t "ui.ffb7cda0873b"}}</strong><span>{{.Plan.Normalized.Filename}}</span></div>
+      <div><strong>{{t "ui.efa27541aca0"}}</strong><span>{{.Plan.Normalized.DataPath}} · {{.DataSize}}</span></div>
+      {{if .Plan.Normalized.TargetFilesystem}}<div><strong>{{t "ui.8230c68a6158"}}</strong><span>{{.Plan.Normalized.TargetFilesystem}}</span></div>{{end}}
+      {{if .AvailableSize}}<div><strong>{{t "ui.175c7a261f1b"}}</strong><span>{{.AvailableSize}}</span></div>{{end}}
     </div>
   </section>
   {{end}}
 
   {{if .Plan.Warnings}}
-  <section class="panel"><p class="eyebrow">Export warnings</p>{{range .Plan.Warnings}}<div class="notice warning">{{.Message}}</div>{{end}}</section>
+  <section class="panel"><p class="eyebrow">{{t "ui.4389214b9da3"}}</p>{{range .Plan.Warnings}}<div class="notice warning">{{ts .Message}}</div>{{end}}</section>
   {{end}}
 
   {{if and .Plan.OK .Plan.Requirements}}
   <section class="panel">
-    <p class="eyebrow">Safety checks</p>
-    <p>JustVoxel will revalidate the reviewed destination, Minecraft state, source identity, destination identity, and bundle integrity before and during execution.</p>
+    <p class="eyebrow">{{t "ui.034717e773a1"}}</p>
+    <p>{{t "ui.c6ca19f4b29d"}}</p>
     {{if .Plan.Requirements.PlayersConfirmationRequired}}
-    <div class="notice warning"><strong>{{.Plan.Requirements.Online}} player(s) are online.</strong><br>{{range .Plan.Requirements.Players}}{{.}}<br>{{end}}Server Export may briefly interrupt players while JustVoxel prepares the consistent migration snapshot.</div>
+    <div class="notice warning"><strong>{{.Plan.Requirements.Online}} {{t "ui.5b97edf34ff3"}}</strong><br>{{range .Plan.Requirements.Players}}{{.}}<br>{{end}}{{t "ui.4847220bc327"}}</div>
     {{end}}
     {{if .Plan.Requirements.SMBPasswordRequired}}
-    <div class="notice"><strong>SMB credential handling</strong><br>JustVoxel requests the SMB password only when you start the reviewed Export. It is sent only with that Apply request and is not part of the reviewed plan, hidden state, URL, or persistent operation journal.</div>
+    <div class="notice"><strong>{{t "ui.8b35a007bdb2"}}</strong><br>{{t "ui.54ab3ebf282f"}}</div>
     {{end}}
   </section>
 
@@ -41,19 +41,19 @@
     <input type="hidden" name="domain" value="{{.Request.Domain}}">
     <input type="hidden" name="filename" value="{{.Request.Filename}}">
     <input type="hidden" name="plan_fingerprint" value="{{.Plan.PlanFingerprint}}">
-    {{if .Plan.Requirements.PlayersConfirmationRequired}}<label><input type="checkbox" name="players_confirmed" value="yes"> I understand that the online players may be interrupted.</label>{{end}}
-    <div class="destructive-confirmation" data-destructive-confirmation data-confirm-value="EXPORT" data-destructive-idle="Slide to confirm Export" data-destructive-armed="Export armed">
+    {{if .Plan.Requirements.PlayersConfirmationRequired}}<label><input type="checkbox" name="players_confirmed" value="yes"> {{t "ui.5619ecca1104"}}</label>{{end}}
+    <div class="destructive-confirmation" data-destructive-confirmation data-confirm-value="EXPORT" data-destructive-idle="{{t "ui.c5c81a2c5949"}}" data-destructive-armed="{{t "ui.8dbc407f10bd"}}">
       <input type="hidden" name="export_confirmation" data-destructive-value>
       <div class="destructive-confirm-slider" data-destructive-slider-shell>
-        <span class="destructive-confirm-slider-text" data-destructive-slider-text>Slide to confirm Export</span>
-        <span class="destructive-confirm-slider-thumb" aria-hidden="true">&gt;</span>
-        <input type="range" min="0" max="100" step="1" value="0" data-destructive-slider aria-label="Slide to confirm Server Export">
+        <span class="destructive-confirm-slider-text" data-destructive-slider-text>{{t "ui.c5c81a2c5949"}}</span>
+        <span class="destructive-confirm-slider-thumb" aria-hidden="true">{{t "ui.62b67e1f685b"}}</span>
+        <input type="range" min="0" max="100" step="1" value="0" data-destructive-slider aria-label="{{t "ui.fb2773d2745e"}}">
       </div>
-      <label class="destructive-confirm-toggle-row" data-destructive-toggle-row hidden><span class="destructive-confirm-toggle-callout">Confirm &gt;</span><input class="destructive-confirm-toggle" type="checkbox" data-destructive-toggle aria-label="Confirm Server Export"></label>
+      <label class="destructive-confirm-toggle-row" data-destructive-toggle-row hidden><span class="destructive-confirm-toggle-callout">{{t "ui.8ba7a99174e0"}}</span><input class="destructive-confirm-toggle" type="checkbox" data-destructive-toggle aria-label="{{t "ui.51a4913e8280"}}"></label>
     </div>
-    <div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;tab=export&amp;server={{.ServerID}}">Cancel</a><button type="submit" data-destructive-submit disabled>Start Server Export</button></div>
+    <div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;tab=export&amp;server={{.ServerID}}">{{t "ui.19766ed6ccb2"}}</a><button type="submit" data-destructive-submit disabled>{{t "ui.505cad36451d"}}</button></div>
   </form>
   {{else}}
-  <div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;tab=export&amp;server={{.ServerID}}">Choose another Export destination</a></div>
+  <div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;tab=export&amp;server={{.ServerID}}">{{t "ui.dda56c22490b"}}</a></div>
   {{end}}
 </div>{{end}}

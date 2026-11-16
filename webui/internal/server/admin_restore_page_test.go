@@ -36,11 +36,11 @@ func TestStandaloneRestoreUIRetired(t *testing.T) {
 		"templates/restore_review.html",
 		"templates/restore_progress.html",
 	} {
-		if _, err := assets.ReadFile(path); !errors.Is(err, fs.ErrNotExist) {
+		if _, err := englishPresentationAsset(path); !errors.Is(err, fs.ErrNotExist) {
 			t.Errorf("retired template %s: expected absence, got %v", path, err)
 		}
 	}
-	content, err := assets.ReadFile("templates/backups_workspace.html")
+	content, err := englishPresentationAsset("templates/backups_workspace.html")
 	if err != nil {
 		t.Fatal(err)
 	}

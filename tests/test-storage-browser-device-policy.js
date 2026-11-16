@@ -1,6 +1,6 @@
 // Run with node. Exercises the browser's actual action logic without a DOM.
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
+const fs = require('./helpers/webui-i18n.cjs');
 const path = require("node:path");
 const vm = require("node:vm");
 const source = fs.readFileSync(path.join(__dirname, "../webui/internal/server/static/storage-browser.js"), "utf8");

@@ -1,53 +1,53 @@
 {{define "migration_workspace_recovery.html"}}<div class="migration-workspace-content" data-migration-workspace-root data-server-id="{{.ServerID}}" data-migration-recovery-available="true">
-<p class="muted">If a Server Import failed, check what happened and clean up leftover files when JustVoxel says it is safe.</p>
-  {{if .Error}}<div class="notice error">{{.Error}}</div>{{end}}
-  {{if .ImportNeedsAttention}}<div class="notice warning"><strong>Server Import needs attention.</strong><br>JustVoxel has not confirmed that the selected destination instance was fully restored. Review the current server before taking further action.</div>{{end}}
-  {{if .RecoveryNeedsAttention}}<div class="notice warning"><strong>Migration Recovery needs attention.</strong><br>Review the current appliance before releasing the failed recovery operation.</div>{{end}}
+<p class="muted">{{t "ui.491f6fbc1148"}}</p>
+  {{if .Error}}<div class="notice error">{{ts .Error}}</div>{{end}}
+  {{if .ImportNeedsAttention}}<div class="notice warning"><strong>{{t "ui.7623c72221c7"}}</strong><br>{{t "ui.b2d9bd5994e0"}}</div>{{end}}
+  {{if .RecoveryNeedsAttention}}<div class="notice warning"><strong>{{t "ui.fce4ec5d876b"}}</strong><br>{{t "ui.a75db43bb9a5"}}</div>{{end}}
 
   {{if .Transactions}}
     {{range .Transactions}}
     <section class="panel">
-      <p class="eyebrow">Previous Server Import</p>
+      <p class="eyebrow">{{t "ui.cc1007b54500"}}</p>
       {{if eq .Summary.Phase "rolled-back"}}
-      <h2>The selected destination instance was restored</h2>
-      <p>✓ The failed Import was rolled back.<br>✓ The selected destination instance was restored.<br>✓ Your server data is safe.</p>
-      <p>JustVoxel kept temporary recovery files from the failed Import. They are no longer needed. Before removing them, JustVoxel will first make sure the current Minecraft server is working.</p>
+      <h2>{{t "ui.563fa253be37"}}</h2>
+      <p>{{t "ui.d22cf05cd2e2"}}<br>{{t "ui.fa7f9728567a"}}<br>{{t "ui.ef2e74964ad4"}}</p>
+      <p>{{t "ui.36b7400d438a"}}</p>
       {{else if and (eq .Summary.Phase "rolled-back-fresh") (eq .Summary.Mode "fresh-unconfigured")}}
-      <h2>Your setup state was restored</h2>
-      <p>✓ The failed Import was rolled back.<br>✓ JustVoxel was returned to setup mode.<br>✓ No Minecraft server was configured before this Import.</p>
-      <p>Temporary recovery files from the failed Import are still present.</p>
-      <p>Before removing them, JustVoxel will make sure the appliance is still in its expected unconfigured state.</p>
+      <h2>{{t "ui.3ca9e4c56252"}}</h2>
+      <p>{{t "ui.d22cf05cd2e2"}}<br>{{t "ui.991d8d32649f"}}<br>{{t "ui.c4536375042d"}}</p>
+      <p>{{t "ui.681953ad8b4c"}}</p>
+      <p>{{t "ui.b2c4c6446d15"}}</p>
       {{else}}
-      <h2>Server Import needs attention</h2>
-      <div class="notice warning">JustVoxel cannot confirm that the selected destination instance was fully restored. Check the current server before removing any recovery files.</div>
+      <h2>{{t "ui.a2bdd92df4cc"}}</h2>
+      <div class="notice warning">{{t "ui.b2bb02b354cb"}}</div>
       {{end}}
       {{if .Summary.Finalizable}}
       <form method="post" action="/workspace/migration/recovery/review?server={{$.ServerID}}">
         <input type="hidden" name="csrf" value="{{$.CSRF}}">
         <input type="hidden" name="transaction" value="{{.Summary.Transaction}}">
-        <div class="action-row"><button type="submit">Clean Up Recovery Files</button></div>
+        <div class="action-row"><button type="submit">{{t "ui.81a20d94aa1d"}}</button></div>
       </form>
-      {{else}}<p>Cleanup is unavailable until JustVoxel can confirm the current server state.</p>{{end}}
+      {{else}}<p>{{t "ui.4cd6f03506df"}}</p>{{end}}
     </section>
     {{end}}
   {{else}}
     <section class="panel migration-recovery-empty">
-      <div class="notice">No recovery files need cleanup.</div>
+      <div class="notice">{{t "ui.96d3d2c4ee77"}}</div>
       {{if .CanKeepCurrent}}
       {{if .RecoveryNeedsAttention}}
-      <div class="notice warning"><strong>The previous Migration Recovery still needs attention.</strong><br>No retained recovery files remain. JustVoxel will validate the current appliance before releasing the failed recovery operation.</div>
+      <div class="notice warning"><strong>{{t "ui.d61f87b3afc6"}}</strong><br>{{t "ui.ff334bfff94c"}}</div>
       {{else}}
-      <div class="notice warning"><strong>The previous Import still needs attention.</strong><br>Keeping the current server first revalidates the running Minecraft and JustVoxel state. Nothing is deleted and the failed Import is not retried.</div>
+      <div class="notice warning"><strong>{{t "ui.442b2bf916c0"}}</strong><br>{{t "ui.b545c80d8abd"}}</div>
       {{end}}
       <form method="post" action="/workspace/migration/recovery/resolve?server={{.ServerID}}">
         <input type="hidden" name="csrf" value="{{.CSRF}}">
         <input type="hidden" name="operation_id" value="{{.OperationID}}">
         <input type="hidden" name="keep_current_state" value="yes">
-        <div class="action-row"><button type="submit">Keep current server and continue</button></div>
+        <div class="action-row"><button type="submit">{{t "ui.26b880016fca"}}</button></div>
       </form>
       {{end}}
     </section>
   {{end}}
 
-  {{if not (or .ImportNeedsAttention .RecoveryNeedsAttention)}}<div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;server={{.ServerID}}">Back to Server Migration</a></div>{{end}}
+  {{if not (or .ImportNeedsAttention .RecoveryNeedsAttention)}}<div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;server={{.ServerID}}">{{t "ui.b818a2101b89"}}</a></div>{{end}}
 </div>{{end}}

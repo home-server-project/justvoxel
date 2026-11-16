@@ -25,7 +25,7 @@ func TestInteractiveHoverAndFocusStayUnderPointer(t *testing.T) {
 	movement := regexp.MustCompile(`transform\s*:\s*(?:translateY|scale)\s*\(`)
 	for _, tc := range cases {
 		t.Run(tc.selector, func(t *testing.T) {
-			content, err := assets.ReadFile(tc.file)
+			content, err := englishPresentationAsset(tc.file)
 			if err != nil {
 				t.Fatal(err)
 			}

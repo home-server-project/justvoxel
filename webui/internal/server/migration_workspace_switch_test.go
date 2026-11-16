@@ -9,11 +9,11 @@ import (
 )
 
 func TestMigrationSwitchUsesCompleteSetupCatalogueAndArtwork(t *testing.T) {
-	source, err := assets.ReadFile("templates/migration_workspace_switch.html")
+	source, err := englishPresentationAsset("templates/migration_workspace_switch.html")
 	if err != nil {
 		t.Fatal(err)
 	}
-	parsed, err := template.New("switch").Parse(string(source))
+	parsed, err := template.New("switch").Funcs(localeTemplateFuncs("en", "/login")).Parse(string(source))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,14 +38,14 @@ func TestMigrationSwitchUsesCompleteSetupCatalogueAndArtwork(t *testing.T) {
 		if strings.Count(markup, `data-switch-target="`+id+`"`) != 1 || !strings.Contains(markup, `/static/server-software/`+id+`.svg`) {
 			t.Fatalf("missing or duplicated shared software/artwork: %s", id)
 		}
-		if _, err = assets.ReadFile("static/server-software/" + id + ".svg"); err != nil {
+		if _, err = englishPresentationAsset("static/server-software/" + id + ".svg"); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if strings.Count(markup, `data-switch-target=`) != 11 || strings.Contains(markup, "data-server-selector-slot") || !strings.Contains(markup, `disabled>`) {
 		t.Fatal("catalogue hides software, duplicates the selector, or enables unverified actions")
 	}
-	stylesheet, err := assets.ReadFile("static/server-migration-switch.css")
+	stylesheet, err := englishPresentationAsset("static/server-migration-switch.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestMigrationSwitchUsesCompleteSetupCatalogueAndArtwork(t *testing.T) {
 }
 
 func TestMigrationAndVersionNavigationBoundaries(t *testing.T) {
-	header, err := assets.ReadFile("templates/header.html")
+	header, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,14 +75,14 @@ func TestMigrationAndVersionNavigationBoundaries(t *testing.T) {
 	if strings.Count(version, "data-version-tab=") != 2 || !strings.Contains(version, `data-version-tab="container"`) || !strings.Contains(version, `data-version-tab="minecraft"`) || strings.Contains(version, "Switch") {
 		t.Fatal("Minecraft Update must contain only Container and Version")
 	}
-	progress, err := assets.ReadFile("templates/migration_workspace_progress.html")
+	progress, err := englishPresentationAsset("templates/migration_workspace_progress.html")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(progress), "tab=recovery") || !strings.Contains(string(progress), "CanReviewRecovery") {
 		t.Fatal("contextual migration recovery was lost")
 	}
-	versionScript, err := assets.ReadFile("static/version-workspace.js")
+	versionScript, err := englishPresentationAsset("static/version-workspace.js")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -45,14 +45,14 @@ func dataMigrationPlanReviewed(ctx context.Context, client dataMigrationPlanAppl
 	if err != nil {
 		return plan, &dataMigrationOrchestrationError{
 			StatusCode: dataMigrationErrorStatus(err),
-			Message:    apiMessage(err, "Minecraft data migration planning is unavailable."),
+			Message:    apiMessage(err, uiText("ui.1c31a7a8ff49")),
 			Plan:       plan,
 		}
 	}
 	if !plan.OK || plan.Normalized == nil || plan.Requirements == nil {
 		return plan, &dataMigrationOrchestrationError{
 			StatusCode: http.StatusBadGateway,
-			Message:    "Minecraft data migration returned an incomplete Review plan.",
+			Message:    uiText("ui.e2c9a06cdb68"),
 			Plan:       plan,
 		}
 	}
@@ -67,28 +67,28 @@ func dataMigrationApplyReviewed(ctx context.Context, client dataMigrationPlanApp
 	if proof.PlanFingerprint == "" || proof.PlanFingerprint != plan.PlanFingerprint {
 		return plan, nil, &dataMigrationOrchestrationError{
 			StatusCode: http.StatusConflict,
-			Message:    "This migration plan changed since Review. Review the current target again before continuing.",
+			Message:    uiText("ui.06253675a04c"),
 			Plan:       plan,
 		}
 	}
 	if !proof.MigrationConfirmed {
 		return plan, nil, &dataMigrationOrchestrationError{
 			StatusCode: http.StatusBadRequest,
-			Message:    "Type MIGRATE exactly to confirm this Minecraft data migration.",
+			Message:    uiText("ui.5055ed51ad2a"),
 			Plan:       plan,
 		}
 	}
 	if plan.Requirements.PlayersConfirmationRequired && !proof.PlayersConfirmed {
 		return plan, nil, &dataMigrationOrchestrationError{
 			StatusCode: http.StatusBadRequest,
-			Message:    "Confirm that online players may be interrupted before starting migration.",
+			Message:    uiText("ui.3c7f61aaf681"),
 			Plan:       plan,
 		}
 	}
 	if plan.Requirements.DestructiveConfirmationRequired && proof.Confirmation != plan.Requirements.ConfirmationPhrase {
 		return plan, nil, &dataMigrationOrchestrationError{
 			StatusCode: http.StatusBadRequest,
-			Message:    "The destructive storage confirmation does not match the exact reviewed phrase.",
+			Message:    uiText("ui.1ab8cf459954"),
 			Plan:       plan,
 		}
 	}
@@ -102,14 +102,14 @@ func dataMigrationApplyReviewed(ctx context.Context, client dataMigrationPlanApp
 	if err != nil {
 		return plan, nil, &dataMigrationOrchestrationError{
 			StatusCode: dataMigrationErrorStatus(err),
-			Message:    apiMessage(err, "Could not start Minecraft data migration."),
+			Message:    apiMessage(err, uiText("ui.3bc4fd9254b3")),
 			Plan:       plan,
 		}
 	}
 	if !result.OK || result.Operation == nil || result.Operation.OperationType != "data_migration" {
 		return plan, nil, &dataMigrationOrchestrationError{
 			StatusCode: http.StatusBadGateway,
-			Message:    "Minecraft data migration did not return a valid persistent operation.",
+			Message:    uiText("ui.aa9162cf694f"),
 			Plan:       plan,
 		}
 	}
@@ -127,7 +127,7 @@ func dataMigrationCurrentOperation(ctx context.Context, client dataMigrationOper
 	if response.Operation.OperationType != "data_migration" {
 		return nil, &dataMigrationOrchestrationError{
 			StatusCode: http.StatusBadGateway,
-			Message:    "Minecraft data migration operation status is invalid.",
+			Message:    uiText("ui.5425e36b1921"),
 		}
 	}
 	return response.Operation, nil
@@ -141,7 +141,7 @@ func dataMigrationOperation(ctx context.Context, client dataMigrationOperationAP
 	if response.Operation == nil || response.Operation.OperationType != "data_migration" {
 		return nil, &dataMigrationOrchestrationError{
 			StatusCode: http.StatusNotFound,
-			Message:    "Minecraft data migration operation not found.",
+			Message:    uiText("ui.8167e35f373e"),
 		}
 	}
 	return response.Operation, nil

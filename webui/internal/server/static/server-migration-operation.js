@@ -20,62 +20,62 @@ function initServerMigrationOperation(root = document) {
   let finished = false;
 
   const operationName = (type) => {
-    if (type === "migration_export") return "Server Export";
-    if (type === "migration_import") return "Server Import";
-    if (type === "migration_recovery") return "Migration Recovery";
-    return "Server Migration";
+    if (type === "migration_export") return jvT("ui.d1f081749243");
+    if (type === "migration_import") return jvT("ui.ffe624a69618");
+    if (type === "migration_recovery") return jvT("ui.504ca73ba883");
+    return jvT("ui.0f8e0d8c6039");
   };
 
   const stateLabel = (state) => {
-    if (state === "queued") return "Queued";
-    if (state === "validating") return "Validating";
-    if (state === "running") return "Running";
-    if (state === "verifying") return "Verifying";
-    if (state === "failed") return "Recovering";
-    if (state === "rolling_back") return "Rolling back";
-    if (state === "succeeded") return "Succeeded";
-    if (state === "rolled_back") return "Rolled back";
-    if (state === "needs_attention") return "Needs attention";
-    if (state === "resolved") return "Resolved";
-    return "Working";
+    if (state === "queued") return jvT("ui.661ff40a07e0");
+    if (state === "validating") return jvT("ui.5a1a167e3d90");
+    if (state === "running") return jvT("ui.f4ccae29e1bb");
+    if (state === "verifying") return jvT("ui.a7d4a9f301ed");
+    if (state === "failed") return jvT("ui.d90064dbdb11");
+    if (state === "rolling_back") return jvT("ui.8b9e964b606b");
+    if (state === "succeeded") return jvT("ui.6d9a6f97a5fd");
+    if (state === "rolled_back") return jvT("ui.71592236d852");
+    if (state === "needs_attention") return jvT("ui.c1ebc7817870");
+    if (state === "resolved") return jvT("ui.5be3c2c8354e");
+    return jvT("ui.a92f0449a9f7");
   };
 
   const friendlyToken = (value) => {
-    if (!value) return "Working";
+    if (!value) return jvT("ui.a92f0449a9f7");
     const text = value.replaceAll("_", " ");
     return text.charAt(0).toUpperCase() + text.slice(1);
   };
 
   const stageLabel = (type, stage) => {
-    if (stage === "queued") return "Waiting to start";
-    if (stage === "completed") return "Complete";
-    if (stage === "player_recheck") return "Rechecking online players";
-    if (stage === "minecraft_stop") return "Stopping Minecraft safely";
-    if (["invalid_execution_plan", "interrupted"].includes(stage)) return "Administrator attention required";
+    if (stage === "queued") return jvT("ui.f5e5f81fd256");
+    if (stage === "completed") return jvT("ui.143b270a3260");
+    if (stage === "player_recheck") return jvT("ui.ab2d5bb1e79d");
+    if (stage === "minecraft_stop") return jvT("ui.995beb2af122");
+    if (["invalid_execution_plan", "interrupted"].includes(stage)) return jvT("ui.1e1b96ec8fd9");
     if (type === "migration_export") {
-      if (stage === "export_preflight") return "Rechecking reviewed Export";
-      if (stage === "archive_integrity" || stage === "integrity_verification") return "Verifying migration bundle";
-      if (stage === "export_failed") return "Preparing safe Export recovery";
-      if (stage === "rollback") return "Finalizing Export recovery state";
-      if (stage === "export_rolled_back") return "Export rolled back";
-      if (["export_needs_attention", "export_backend_interrupted", "export_backend_incomplete"].includes(stage)) return "Administrator attention required";
+      if (stage === "export_preflight") return jvT("ui.60117bda3d60");
+      if (stage === "archive_integrity" || stage === "integrity_verification") return jvT("ui.78c93c0ea236");
+      if (stage === "export_failed") return jvT("ui.a689980fba1b");
+      if (stage === "rollback") return jvT("ui.d0d1b11758c9");
+      if (stage === "export_rolled_back") return jvT("ui.39aec9840b2d");
+      if (["export_needs_attention", "export_backend_interrupted", "export_backend_incomplete"].includes(stage)) return jvT("ui.1e1b96ec8fd9");
     }
     if (type === "migration_import") {
-      if (stage === "recovery_handoff") return "Recovery responsibility transferred";
-      if (stage === "import_preflight") return "Rechecking reviewed Import";
-      if (stage === "import_storage") return "Preparing fresh destination storage";
-      if (stage === "import_execute") return "Importing Minecraft server data";
-      if (stage === "import_verify") return "Validating imported Minecraft";
-      if (stage === "import_failed") return "Preparing safe Import rollback";
-      if (stage === "rollback") return "Finalizing Import rollback";
-      if (stage === "import_rolled_back") return "Import rolled back";
-      if (["import_needs_attention", "import_backend_interrupted", "import_backend_incomplete"].includes(stage)) return "Administrator attention required";
+      if (stage === "recovery_handoff") return jvT("ui.8c5a07566067");
+      if (stage === "import_preflight") return jvT("ui.1db8eecfbe9b");
+      if (stage === "import_storage") return jvT("ui.1b553da67100");
+      if (stage === "import_execute") return jvT("ui.44c03884fea1");
+      if (stage === "import_verify") return jvT("ui.70c4b99c7c87");
+      if (stage === "import_failed") return jvT("ui.44d2868f2a28");
+      if (stage === "rollback") return jvT("ui.f6e0f42acf8e");
+      if (stage === "import_rolled_back") return jvT("ui.3d9d723dfd19");
+      if (["import_needs_attention", "import_backend_interrupted", "import_backend_incomplete"].includes(stage)) return jvT("ui.1e1b96ec8fd9");
     }
     if (type === "migration_recovery") {
-      if (stage === "recovery_preflight") return "Rechecking retained recovery state";
-      if (stage === "recovery_finalize") return "Finalizing retained recovery state";
-      if (stage === "recovery_verify") return "Verifying recovery finalization";
-      if (["recovery_backend_failed", "recovery_backend_invalid", "recovery_backend_incomplete"].includes(stage)) return "Administrator attention required";
+      if (stage === "recovery_preflight") return jvT("ui.8e649c951902");
+      if (stage === "recovery_finalize") return jvT("ui.665aaa8d5d59");
+      if (stage === "recovery_verify") return jvT("ui.0cc638ce0ff6");
+      if (["recovery_backend_failed", "recovery_backend_invalid", "recovery_backend_incomplete"].includes(stage)) return jvT("ui.1e1b96ec8fd9");
     }
     return friendlyToken(stage);
   };
@@ -88,7 +88,7 @@ function initServerMigrationOperation(root = document) {
     failures = 0;
     if (reconnectNote) reconnectNote.hidden = true;
     if (nameText) nameText.textContent = operationName(operation.operation_type);
-    if (statusText) statusText.textContent = operation.status || "Server migration is running.";
+    if (statusText) statusText.textContent = operation.status || jvT("ui.1d593de3d211");
     if (stateBadge) stateBadge.textContent = stateLabel(operation.state);
     if (stageText) stageText.textContent = stageLabel(operation.operation_type, operation.stage);
 
@@ -102,7 +102,7 @@ function initServerMigrationOperation(root = document) {
     if (dashboardLink) {
       dashboardLink.hidden = !succeeded;
       if (operation.operation_type === "migration_export") {
-        dashboardLink.textContent = "Done";
+        dashboardLink.textContent = jvT("ui.11a6767d5674");
         dashboardLink.href = "/?workspace=migration&tab=export&server=" + encodeURIComponent(panel.closest("[data-server-id]").dataset.serverId);
       }
     }
@@ -129,7 +129,7 @@ function initServerMigrationOperation(root = document) {
         window.location.assign("/password");
         return;
       }
-      if (!response.ok) throw new Error("status unavailable");
+      if (!response.ok) throw new Error(jvT("ui.180119be630b"));
       const payload = await response.json();
       render(payload.operation);
     } catch (_) {

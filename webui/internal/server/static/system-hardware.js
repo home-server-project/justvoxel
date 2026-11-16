@@ -22,7 +22,7 @@
 
   const get = async (path) => {
     const response = await fetch(path, { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } });
-    if (!response.ok) throw new Error("Hardware status is unavailable.");
+    if (!response.ok) throw new Error(jvT("ui.4b7942a852c3"));
     return response.json();
   };
   const batteryIndicator = (label, percentage, state, status) => {
@@ -43,8 +43,8 @@
     indicators.replaceChildren();
     if (hardware.hws !== true) { indicators.hidden = true; return; }
     (hardware.batteries || []).forEach((battery) => {
-      const state = battery.status === "Discharging" ? (battery.capacity != null && battery.capacity <= 10 ? "low_battery" : "on_battery") : (["Charging", "Full", "Not charging"].includes(battery.status) ? "online" : "unknown");
-      indicators.append(batteryIndicator("Onboard", battery.capacity, state, battery.status));
+      const state = battery.status === "Discharging" ? (battery.capacity != null && battery.capacity <= 10 ? "low_battery" : "on_battery") : ([jvT("ui.22b693223fcb"), jvT("ui.008dacb6d1e8"), jvT("ui.acffe1d0b34b")].includes(battery.status) ? "online" : "unknown");
+      indicators.append(batteryIndicator(jvT("ui.b97d4ee01b8a"), battery.capacity, state, battery.status));
     });
     // The existing NUT path supplies the configured source, devices and states.
     if (ups && ups.available && ups.monitoring === true && ups.source && ["local", "remote"].includes(ups.source.mode)) {
@@ -95,7 +95,7 @@
         body.set("action", action);
         if (action === "display-delay") body.set("delay_seconds", delay.value);
         const response = await fetch("/api/system-actions/display", { method: "POST", credentials: "same-origin", headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" }, body: body.toString() });
-        if (!response.ok) throw new Error("The display or lid action could not be applied.");
+        if (!response.ok) throw new Error(jvT("ui.2ca7c1b4ab8b"));
         snapshot = await response.json();
         // Clear each successful command before attempting the next one.
         if (action === "display-on" || action === "display-off") {

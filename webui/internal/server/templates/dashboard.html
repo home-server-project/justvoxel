@@ -1,10 +1,10 @@
 {{define "dashboard.html"}}<!doctype html>
-<html lang="en">
-<head>
+<html lang="{{locale}}">
+<head><script src="/i18n.js"></script><script src="/static/i18n.js"></script>
   <link rel="icon" type="image/png" href="/static/justvoxel-favicon.png">
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>JustVoxel - Dashboard</title>
+  <title>{{t "ui.9c8511b93094"}}</title>
   <link rel="stylesheet" href="/static/app.css">
   <script src="/static/first-run.js" defer></script>
   <script src="/static/app.js" defer></script>
@@ -15,47 +15,47 @@
   <img class="dashboard-wallpaper" data-dashboard-wallpaper hidden alt="" aria-hidden="true">
   <section class="first-run-choice" data-first-run-choice hidden aria-labelledby="first-run-choice-title">
     <div class="first-run-choice-panel">
-      <p class="eyebrow">Welcome to JustVoxel</p>
-      <h1 id="first-run-choice-title">What would you like to do first?</h1>
-      <p class="first-run-choice-lead">Minecraft is not configured yet. You can set it up now or explore JustVoxel first.</p>
+      <p class="eyebrow">{{t "ui.45f26b3435ce"}}</p>
+      <h1 id="first-run-choice-title">{{t "ui.36936dccd10f"}}</h1>
+      <p class="first-run-choice-lead">{{t "ui.fc33243afd12"}}</p>
       <div class="first-run-choice-grid">
         <button class="first-run-choice-card first-run-explore-card" type="button" data-first-run-explore>
-          <span class="first-run-card-kicker">Explore first</span>
-          <strong>Look around JustVoxel</strong>
-          <small>Open the Workspace, Control Center and system tools. Minecraft setup will stay available when you are ready.</small>
+          <span class="first-run-card-kicker">{{t "ui.b75cbfcffb80"}}</span>
+          <strong>{{t "ui.afffcdd21d4f"}}</strong>
+          <small>{{t "ui.55976d814791"}}</small>
         </button>
         <a class="first-run-choice-card first-run-setup-card" href="/setup" data-first-run-setup>
-          <span class="first-run-card-kicker">Recommended</span>
-          <strong>Set up Minecraft</strong>
-          <small>Start the guided Minecraft server setup now.</small>
+          <span class="first-run-card-kicker">{{t "ui.d70604e84304"}}</span>
+          <strong>{{t "ui.4636095ef316"}}</strong>
+          <small>{{t "ui.e216bc2bef5d"}}</small>
         </a>
       </div>
     </div>
   </section>
 
-  {{if .Message}}<div class="notice success">{{.Message}}</div>{{end}}
-  {{if .Error}}<div class="notice error">{{.Error}}</div>{{end}}
+  {{if .Message}}<div class="notice success">{{ts .Message}}</div>{{end}}
+  {{if .Error}}<div class="notice error">{{ts .Error}}</div>{{end}}
   <div class="notice error dashboard-attention" id="dashboard-attention" {{if not .Attention}}hidden{{end}}>
-    <strong id="dashboard-attention-title">{{if .Attention}}{{.Attention.Title}}{{end}}</strong>
-    <span id="dashboard-attention-status">{{if .Attention}}{{.Attention.Status}}{{end}}</span>
+    <strong id="dashboard-attention-title">{{if .Attention}}{{ts .Attention.Title}}{{end}}</strong>
+    <span id="dashboard-attention-status">{{if .Attention}}{{ts .Attention.Status}}{{end}}</span>
     <a class="button-link secondary" id="dashboard-attention-action" href="{{if .Attention}}{{.Attention.Action}}{{else}}#{{end}}" {{if or (not .Attention) (not .Attention.Action)}}hidden{{end}}>{{if .Attention}}{{.Attention.Label}}{{end}}</a>
   </div>
 
   {{if .ConfirmAction}}
   <section class="panel confirmation {{if eq .ConfirmAction "stop"}}role-admin{{else}}role-admin-or-operator{{end}}">
-    <p class="eyebrow">Confirmation required</p>
-    <h2>Players are online</h2>
-    <p>{{.ConfirmOnline}} player{{if ne .ConfirmOnline 1}}s are{{else}} is{{end}} currently online. {{.ConfirmOperation}} will disconnect {{if eq .ConfirmOnline 1}}that player{{else}}those players{{end}}.</p>
+    <p class="eyebrow">{{t "ui.5529118b0637"}}</p>
+    <h2>{{t "ui.9c9a3156ead1"}}</h2>
+    <p>{{.ConfirmOnline}} {{t "ui.cdb59355f3ba"}}{{if ne .ConfirmOnline 1}}{{t "ui.9cdade103bc6"}}{{else}} {{t "ui.fa51fd49abf6"}}{{end}} {{t "ui.5f30260291f7"}} {{ts .ConfirmOperation}} {{t "ui.fdf441cb4e3c"}} {{if eq .ConfirmOnline 1}}{{t "ui.c0b9bc971d8e"}}{{else}}{{t "ui.4a20166c49a2"}}{{end}}.</p>
     {{if .ConfirmPlayers}}
     <div class="player-list">{{range .ConfirmPlayers}}<span class="player-chip">{{.}}</span>{{end}}</div>
     {{end}}
     <div class="action-row">
-      <a class="button-link secondary" href="/{{if .SelectedMinecraftID}}?server={{.SelectedMinecraftID}}{{end}}">Cancel</a>
-      <form method="post" action="/minecraft/{{.ConfirmAction}}" class="action-form" data-progress="{{.ConfirmProgress}}" data-minecraft-action="{{.ConfirmAction}}">
+      <a class="button-link secondary" href="/{{if .SelectedMinecraftID}}?server={{.SelectedMinecraftID}}{{end}}">{{t "ui.19766ed6ccb2"}}</a>
+      <form method="post" action="/minecraft/{{.ConfirmAction}}" class="action-form" data-progress="{{ts .ConfirmProgress}}" data-minecraft-action="{{.ConfirmAction}}">
         <input type="hidden" name="csrf" value="{{.CSRF}}">
         <input type="hidden" name="confirm_players" value="yes">
         {{if .SelectedMinecraftID}}<input type="hidden" name="server" value="{{.SelectedMinecraftID}}">{{end}}
-        <button class="danger" type="submit">{{.ConfirmLabel}}</button>
+        <button class="danger" type="submit">{{ts .ConfirmLabel}}</button>
       </form>
     </div>
   </section>
@@ -63,13 +63,13 @@
 
   <div class="dashboard-setup-area" data-dashboard-setup-area {{if .Status.Minecraft.Configured}}hidden{{end}}>
     <a class="minecraft-setup-invitation" href="/setup" data-minecraft-setup-invitation>
-      <span class="minecraft-setup-invitation-kicker">Minecraft is not configured</span>
-      <strong>Set up your Minecraft server</strong>
-      <small><span>Start setup when you are ready.</span><span>You can continue exploring JustVoxel until then.</span></small>
+      <span class="minecraft-setup-invitation-kicker">{{t "ui.cb2d15d95384"}}</span>
+      <strong>{{t "ui.78345d7c8cb9"}}</strong>
+      <small><span>{{t "ui.fc8aa6c6ff0e"}}</span><span>{{t "ui.c4421f21b9ef"}}</span></small>
     </a>
   </div>
 
   {{template "project-footer" .}}
 </main>
-</body>
+{{template "language-dialog" .}}</body>
 </html>{{end}}

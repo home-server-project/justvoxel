@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
-	"os/exec"
 	"strings"
 	"testing"
 )
@@ -80,7 +79,7 @@ func TestSetupStorageBrowserFormSubmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("node", "../../../tests/test-setup-form-submission.js")
+	cmd := nodeTestCommand("../../../tests/test-setup-form-submission.js")
 	cmd.Stdin = strings.NewReader(string(payload))
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("rendered Setup DOM submission: %v\n%s", err, output)

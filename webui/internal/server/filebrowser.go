@@ -29,7 +29,7 @@ func (a *App) fileBrowserIdentity(w http.ResponseWriter, r *http.Request) (strin
 		return "", api.SessionInfo{}, false
 	}
 	if identity.MustChange || identity.Role != "administrator" || identity.Username != "voxel" {
-		http.Error(w, "Administrator access required", http.StatusForbidden)
+		http.Error(w, translate(requestLocale(r), "ui.031cc7a3ec82"), http.StatusForbidden)
 		return "", api.SessionInfo{}, false
 	}
 	return session, identity, true
@@ -42,7 +42,7 @@ func (a *App) fileBrowserStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	client, ok := a.api.(fileBrowserAPI)
 	if !ok {
-		http.Error(w, "File Browser unavailable", http.StatusServiceUnavailable)
+		http.Error(w, translate(requestLocale(r), "ui.c1357484b7a9"), http.StatusServiceUnavailable)
 		return
 	}
 	status, err := client.AdminFileBrowser(r.Context(), session)
@@ -65,7 +65,7 @@ func (a *App) fileBrowserAction(w http.ResponseWriter, r *http.Request) {
 	}
 	client, ok := a.api.(fileBrowserAPI)
 	if !ok {
-		http.Error(w, "File Browser unavailable", http.StatusServiceUnavailable)
+		http.Error(w, translate(requestLocale(r), "ui.c1357484b7a9"), http.StatusServiceUnavailable)
 		return
 	}
 	action := r.PathValue("action")
@@ -116,12 +116,12 @@ func (a *App) fileBrowserProxy(w http.ResponseWriter, r *http.Request) {
 	if origin := r.Header.Get("Origin"); origin != "" {
 		u, err := url.Parse(origin)
 		if err != nil || u.Host != r.Host || u.Scheme != a.config.ExternalScheme {
-			http.Error(w, "invalid origin", http.StatusForbidden)
+			http.Error(w, translate(requestLocale(r), "ui.ca3c09d0c33b"), http.StatusForbidden)
 			return
 		}
 	}
 	if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
-		http.Error(w, "invalid origin", http.StatusForbidden)
+		http.Error(w, translate(requestLocale(r), "ui.ca3c09d0c33b"), http.StatusForbidden)
 		return
 	}
 	target, _ := url.Parse(fileBrowserBackend)
@@ -173,7 +173,7 @@ func (a *App) fileBrowserProxy(w http.ResponseWriter, r *http.Request) {
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			http.Error(w, "File Browser unavailable. Close Files and retry.", http.StatusBadGateway)
+			http.Error(w, translate(requestLocale(r), "ui.33d682089c9d"), http.StatusBadGateway)
 		},
 	}
 	fileBrowserFrameHeaders(w.Header())

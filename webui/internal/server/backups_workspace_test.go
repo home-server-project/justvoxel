@@ -21,7 +21,7 @@ func TestBackupsWorkspaceUsesOnlyNormalInstanceBackupContext(t *testing.T) {
 }
 
 func TestBackupsWorkspaceOwnsUnifiedBackupTools(t *testing.T) {
-	header, err := assets.ReadFile("templates/header.html")
+	header, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestBackupsWorkspaceOwnsUnifiedBackupTools(t *testing.T) {
 }
 
 func TestBackupsWorkspaceUsesIndependentWorkspaceRoutes(t *testing.T) {
-	script, err := assets.ReadFile("static/app.js")
+	script, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestBackupsWorkspaceUsesIndependentWorkspaceRoutes(t *testing.T) {
 }
 
 func TestBackupsScriptsCanInitializeInsideWorkspaceFragment(t *testing.T) {
-	backups, err := assets.ReadFile("static/new-backups.js")
+	backups, err := englishPresentationAsset("static/new-backups.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestBackupsScriptsCanInitializeInsideWorkspaceFragment(t *testing.T) {
 }
 
 func TestBackupsWorkspaceNormalCardsShowOnlyFilenameAndSize(t *testing.T) {
-	source, err := assets.ReadFile("templates/backups_workspace.html")
+	source, err := englishPresentationAsset("templates/backups_workspace.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestBackupsWorkspaceNormalCardsShowOnlyFilenameAndSize(t *testing.T) {
 			t.Errorf("normal card retains %q", removed)
 		}
 	}
-	view, err := template.New("card").Parse(card + "</label>")
+	view, err := template.New("card").Funcs(localeTemplateFuncs("en", "/login")).Parse(card + "</label>")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestBackupsWorkspaceNormalCardsShowOnlyFilenameAndSize(t *testing.T) {
 }
 
 func TestQuickLookManualBackupUsesWorkspaceNativeAPI(t *testing.T) {
-	header, err := assets.ReadFile("templates/header.html")
+	header, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestQuickLookManualBackupUsesWorkspaceNativeAPI(t *testing.T) {
 	if strings.Contains(string(header), "/operations#manual-backup") {
 		t.Fatal("Quick Look still links to Operations manual backup")
 	}
-	script, err := assets.ReadFile("static/app.js")
+	script, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -387,10 +387,10 @@ func TestStandaloneBackupStorageUIRetired(t *testing.T) {
 			}
 		})
 	}
-	if _, err := assets.ReadFile("templates/backup_storage.html"); err == nil {
+	if _, err := englishPresentationAsset("templates/backup_storage.html"); err == nil {
 		t.Fatal("retired standalone Backup Storage template remains embedded")
 	}
-	markup, err := assets.ReadFile("templates/backups_workspace.html")
+	markup, err := englishPresentationAsset("templates/backups_workspace.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -430,10 +430,10 @@ func TestStandaloneNewBackupsUIRetired(t *testing.T) {
 			}
 		})
 	}
-	if _, err := assets.ReadFile("templates/new_backups.html"); err == nil {
+	if _, err := englishPresentationAsset("templates/new_backups.html"); err == nil {
 		t.Fatal("retired standalone New Backups template remains embedded")
 	}
-	script, err := assets.ReadFile("static/new-backups.js")
+	script, err := englishPresentationAsset("static/new-backups.js")
 	if err != nil {
 		t.Fatal(err)
 	}

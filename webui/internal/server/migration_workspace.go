@@ -97,7 +97,7 @@ func (a *App) registerAdminMigrationWorkspacePages(mux *http.ServeMux) {
 
 func (a *App) migrationWorkspaceRequest(w http.ResponseWriter, r *http.Request) (string, adminMigrationWorkspaceAPI, api.SessionInfo, bool) {
 	if mustChange(r) {
-		http.Error(w, "Password change required.", http.StatusForbidden)
+		http.Error(w, ui(w, "ui.fe5ad66e02ea"), http.StatusForbidden)
 		return "", nil, api.SessionInfo{}, false
 	}
 	session, ok := sessionFromRequest(r)
@@ -107,7 +107,7 @@ func (a *App) migrationWorkspaceRequest(w http.ResponseWriter, r *http.Request) 
 	}
 	client, ok := a.api.(adminMigrationWorkspaceAPI)
 	if !ok {
-		http.Error(w, "Server Migration management is unavailable", http.StatusServiceUnavailable)
+		http.Error(w, ui(w, "ui.ea1db1932134"), http.StatusServiceUnavailable)
 		return "", nil, api.SessionInfo{}, false
 	}
 	identity, err := client.Session(r.Context(), session)
@@ -116,7 +116,7 @@ func (a *App) migrationWorkspaceRequest(w http.ResponseWriter, r *http.Request) 
 		return "", nil, api.SessionInfo{}, false
 	}
 	if identity.Role != "administrator" {
-		http.Error(w, "Administrator access required", http.StatusForbidden)
+		http.Error(w, ui(w, "ui.031cc7a3ec82"), http.StatusForbidden)
 		return "", nil, api.SessionInfo{}, false
 	}
 	selected, ok := a.selectedMinecraft(w, r, session)
@@ -140,7 +140,7 @@ func (a *App) migrationWorkspacePage(w http.ResponseWriter, r *http.Request) {
 	}
 	current, err := client.AdminCurrentMigrationOperation(r.Context(), session)
 	if err != nil {
-		a.handleMigrationWorkspaceRequestError(w, r, err, "Server Migration operation status is unavailable.")
+		a.handleMigrationWorkspaceRequestError(w, r, err, ui(w, "ui.9ebe3ac32640"))
 		return
 	}
 	if current.Operation != nil {
@@ -150,23 +150,23 @@ func (a *App) migrationWorkspacePage(w http.ResponseWriter, r *http.Request) {
 
 	exportDiscovery, err := client.AdminMigrationExportDiscovery(r.Context(), session)
 	if err != nil {
-		a.handleMigrationWorkspaceRequestError(w, r, err, "Server Export discovery is unavailable.")
+		a.handleMigrationWorkspaceRequestError(w, r, err, ui(w, "ui.9b0f8d42e43d"))
 		return
 	}
 	importDiscovery, err := client.AdminMigrationImportDiscovery(r.Context(), session)
 	if err != nil {
-		a.handleMigrationWorkspaceRequestError(w, r, err, "Server Import discovery is unavailable.")
+		a.handleMigrationWorkspaceRequestError(w, r, err, ui(w, "ui.11ba32d5bbba"))
 		return
 	}
 	recoveryDiscovery, err := client.AdminMigrationRecoveryDiscovery(r.Context(), session)
 	if err != nil {
-		a.handleMigrationWorkspaceRequestError(w, r, err, "Server Migration Recovery discovery is unavailable.")
+		a.handleMigrationWorkspaceRequestError(w, r, err, ui(w, "ui.5bcd2d41599b"))
 		return
 	}
 
 	a.renderMigrationWorkspace(w, "migration_workspace.html", http.StatusOK, migrationWorkspacePageData{
 		ServerID:      migrationWorkspaceSelectedID(r),
-		Title:         "Server Migration",
+		Title:         ui(w, "ui.0f8e0d8c6039"),
 		Version:       a.config.Version,
 		ManagementAPI: a.config.ManagementAPI,
 		CSRF:          csrfFromRequest(r),
@@ -191,19 +191,19 @@ func (a *App) migrationWorkspaceProgressPage(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		var responseErr *api.ResponseError
 		if errors.As(err, &responseErr) && responseErr.StatusCode == http.StatusNotFound {
-			http.Error(w, "Server Migration operation not found", http.StatusNotFound)
+			http.Error(w, ui(w, "ui.da2ab6e39c29"), http.StatusNotFound)
 			return
 		}
-		a.handleMigrationWorkspaceRequestError(w, r, err, "Server Migration operation status is unavailable.")
+		a.handleMigrationWorkspaceRequestError(w, r, err, ui(w, "ui.9ebe3ac32640"))
 		return
 	}
 	if response.Operation == nil || response.Operation.InstanceID != migrationWorkspaceSelectedID(r) || !migrationWorkspaceOperationType(response.Operation.OperationType) {
-		http.Error(w, "Server Migration operation not found", http.StatusNotFound)
+		http.Error(w, ui(w, "ui.da2ab6e39c29"), http.StatusNotFound)
 		return
 	}
 	a.renderMigrationWorkspace(w, "migration_workspace_progress.html", http.StatusOK, migrationWorkspaceProgressPageData{
 		ServerID:          migrationWorkspaceSelectedID(r),
-		Title:             "Server Migration progress",
+		Title:             ui(w, "ui.71f3d0a2b247"),
 		Version:           a.config.Version,
 		ManagementAPI:     a.config.ManagementAPI,
 		CSRF:              csrfFromRequest(r),
@@ -228,34 +228,34 @@ func migrationWorkspaceOperationType(value string) bool {
 func migrationWorkspaceOperationName(value string) string {
 	switch value {
 	case "migration_export":
-		return "Server Export"
+		return uiText("ui.d1f081749243")
 	case "migration_import":
-		return "Server Import"
+		return uiText("ui.ffe624a69618")
 	case "migration_recovery":
-		return "Migration Recovery"
+		return uiText("ui.504ca73ba883")
 	default:
-		return "Server Migration"
+		return uiText("ui.0f8e0d8c6039")
 	}
 }
 
 func migrationWorkspaceStateLabel(value string) string {
 	switch value {
 	case "queued":
-		return "Queued"
+		return uiText("ui.661ff40a07e0")
 	case "validating":
 		return "Validating"
 	case "running":
-		return "Running"
+		return uiText("ui.f4ccae29e1bb")
 	case "verifying":
 		return "Verifying"
 	case "rolling_back":
-		return "Rolling back"
+		return uiText("ui.8b9e964b606b")
 	case "succeeded":
 		return "Succeeded"
 	case "rolled_back":
-		return "Rolled back"
+		return uiText("ui.71592236d852")
 	case "needs_attention":
-		return "Needs attention"
+		return uiText("ui.c1ebc7817870")
 	default:
 		return migrationWorkspaceFriendlyToken(value)
 	}
@@ -264,7 +264,7 @@ func migrationWorkspaceStateLabel(value string) string {
 func migrationWorkspaceFriendlyToken(value string) string {
 	value = strings.TrimSpace(strings.ReplaceAll(value, "_", " "))
 	if value == "" {
-		return "Unknown"
+		return uiText("ui.b764cdc0eab7")
 	}
 	return strings.ToUpper(value[:1]) + value[1:]
 }
@@ -279,7 +279,7 @@ func (a *App) handleMigrationWorkspaceAuthError(w http.ResponseWriter, r *http.R
 		http.Redirect(w, r, "/password", http.StatusSeeOther)
 		return
 	}
-	http.Error(w, "management service unavailable", http.StatusBadGateway)
+	http.Error(w, ui(w, "ui.0b8e73a792bb"), http.StatusBadGateway)
 }
 
 func (a *App) handleMigrationWorkspaceRequestError(w http.ResponseWriter, r *http.Request, err error, fallback string) {
@@ -311,8 +311,8 @@ func (a *App) renderMigrationWorkspace(w http.ResponseWriter, templateName strin
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
-	if err := a.templates.ExecuteTemplate(w, templateName, data); err != nil {
-		http.Error(w, "render error", http.StatusInternalServerError)
+	if err := a.executeTemplate(w, templateName, data); err != nil {
+		http.Error(w, ui(w, "ui.4a9d9119358b"), http.StatusInternalServerError)
 	}
 }
 

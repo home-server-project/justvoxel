@@ -6,7 +6,7 @@ import (
 )
 
 func TestAdvancedStorageNavigation(t *testing.T) {
-	header, err := assets.ReadFile("templates/header.html")
+	header, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}

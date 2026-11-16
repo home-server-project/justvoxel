@@ -33,23 +33,23 @@ func (a *App) systemMonitor(w http.ResponseWriter, r *http.Request) {
 
 	request, err := http.NewRequestWithContext(r.Context(), http.MethodGet, systemMonitorGlancesURL, nil)
 	if err != nil {
-		http.Error(w, "system monitor unavailable", http.StatusBadGateway)
+		http.Error(w, ui(w, "ui.2001632f3a5f"), http.StatusBadGateway)
 		return
 	}
 	request.Header.Set("Accept", "application/json")
 	response, err := (&http.Client{Timeout: 3 * time.Second}).Do(request)
 	if err != nil {
-		http.Error(w, "system monitor unavailable", http.StatusBadGateway)
+		http.Error(w, ui(w, "ui.2001632f3a5f"), http.StatusBadGateway)
 		return
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		http.Error(w, "system monitor unavailable", http.StatusBadGateway)
+		http.Error(w, ui(w, "ui.2001632f3a5f"), http.StatusBadGateway)
 		return
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, 8<<20))
 	if err != nil || !json.Valid(body) {
-		http.Error(w, "invalid system monitor response", http.StatusBadGateway)
+		http.Error(w, ui(w, "ui.6e06a14026d4"), http.StatusBadGateway)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -65,7 +65,7 @@ func (a *App) systemMonitorProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	client, ok := a.api.(systemMonitorProfileAPI)
 	if !ok {
-		http.Error(w, "system monitor profile unavailable", http.StatusServiceUnavailable)
+		http.Error(w, ui(w, "ui.73e342052a81"), http.StatusServiceUnavailable)
 		return
 	}
 	profile, err := client.SystemMonitorProfile(r.Context(), session)
@@ -87,11 +87,11 @@ func (a *App) systemMonitorProfileSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if identity.Role != "administrator" {
-		http.Error(w, "Administrator access required", http.StatusForbidden)
+		http.Error(w, ui(w, "ui.031cc7a3ec82"), http.StatusForbidden)
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "invalid system monitor profile", http.StatusBadRequest)
+		http.Error(w, ui(w, "ui.ee6d2fc89256"), http.StatusBadRequest)
 		return
 	}
 
@@ -100,68 +100,68 @@ func (a *App) systemMonitorProfileSave(w http.ResponseWriter, r *http.Request) {
 	}
 	system, err := readBool("system")
 	if err != nil {
-		http.Error(w, "invalid system monitor profile", http.StatusBadRequest)
+		http.Error(w, ui(w, "ui.ee6d2fc89256"), http.StatusBadRequest)
 		return
 	}
 	cpu, err := readBool("cpu")
 	if err != nil {
-		http.Error(w, "invalid system monitor profile", http.StatusBadRequest)
+		http.Error(w, ui(w, "ui.ee6d2fc89256"), http.StatusBadRequest)
 		return
 	}
 	memory, err := readBool("memory")
 	if err != nil {
-		http.Error(w, "invalid system monitor profile", http.StatusBadRequest)
+		http.Error(w, ui(w, "ui.ee6d2fc89256"), http.StatusBadRequest)
 		return
 	}
 	load, err := readBool("load")
 	if err != nil {
-		http.Error(w, "invalid system monitor profile", http.StatusBadRequest)
+		http.Error(w, ui(w, "ui.ee6d2fc89256"), http.StatusBadRequest)
 		return
 	}
 	filesystem, err := readBool("filesystem")
 	if err != nil {
-		http.Error(w, "invalid system monitor profile", http.StatusBadRequest)
+		http.Error(w, ui(w, "ui.ee6d2fc89256"), http.StatusBadRequest)
 		return
 	}
 	diskIO, err := readBool("diskio")
 	if err != nil {
-		http.Error(w, "invalid system monitor profile", http.StatusBadRequest)
+		http.Error(w, ui(w, "ui.ee6d2fc89256"), http.StatusBadRequest)
 		return
 	}
 	network, err := readBool("network")
 	if err != nil {
-		http.Error(w, "invalid system monitor profile", http.StatusBadRequest)
+		http.Error(w, ui(w, "ui.ee6d2fc89256"), http.StatusBadRequest)
 		return
 	}
 	processes, err := readBool("processes")
 	if err != nil {
-		http.Error(w, "invalid system monitor profile", http.StatusBadRequest)
+		http.Error(w, ui(w, "ui.ee6d2fc89256"), http.StatusBadRequest)
 		return
 	}
 	containers, err := readBool("containers")
 	if err != nil {
-		http.Error(w, "invalid system monitor profile", http.StatusBadRequest)
+		http.Error(w, ui(w, "ui.ee6d2fc89256"), http.StatusBadRequest)
 		return
 	}
 	sensors, err := readBool("sensors")
 	if err != nil {
-		http.Error(w, "invalid system monitor profile", http.StatusBadRequest)
+		http.Error(w, ui(w, "ui.ee6d2fc89256"), http.StatusBadRequest)
 		return
 	}
 	alerts, err := readBool("alerts")
 	if err != nil {
-		http.Error(w, "invalid system monitor profile", http.StatusBadRequest)
+		http.Error(w, ui(w, "ui.ee6d2fc89256"), http.StatusBadRequest)
 		return
 	}
 	processCount, err := strconv.Atoi(r.FormValue("process_count"))
 	if err != nil {
-		http.Error(w, "invalid system monitor profile", http.StatusBadRequest)
+		http.Error(w, ui(w, "ui.ee6d2fc89256"), http.StatusBadRequest)
 		return
 	}
 
 	client, ok := a.api.(systemMonitorProfileAPI)
 	if !ok {
-		http.Error(w, "system monitor profile unavailable", http.StatusServiceUnavailable)
+		http.Error(w, ui(w, "ui.73e342052a81"), http.StatusServiceUnavailable)
 		return
 	}
 	profile, err := client.AdminSetSystemMonitorProfile(r.Context(), session, api.SystemMonitorProfile{
@@ -179,17 +179,17 @@ func (a *App) systemMonitorProfileSave(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) systemMonitorIdentity(w http.ResponseWriter, r *http.Request) (string, api.SessionInfo, bool) {
 	if mustChange(r) {
-		http.Error(w, "password change required", http.StatusForbidden)
+		http.Error(w, ui(w, "ui.63bae92440ec"), http.StatusForbidden)
 		return "", api.SessionInfo{}, false
 	}
 	session, ok := sessionFromRequest(r)
 	if !ok {
-		http.Error(w, "authentication required", http.StatusUnauthorized)
+		http.Error(w, ui(w, "ui.cbac8bee7536"), http.StatusUnauthorized)
 		return "", api.SessionInfo{}, false
 	}
 	client, ok := a.api.(sessionIdentityAPI)
 	if !ok {
-		http.Error(w, "session service unavailable", http.StatusServiceUnavailable)
+		http.Error(w, ui(w, "ui.37682d3b2361"), http.StatusServiceUnavailable)
 		return "", api.SessionInfo{}, false
 	}
 	identity, err := client.Session(r.Context(), session)
@@ -200,7 +200,7 @@ func (a *App) systemMonitorIdentity(w http.ResponseWriter, r *http.Request) (str
 	case "administrator", "operator", "viewer":
 		return session, identity, true
 	default:
-		http.Error(w, "system monitor access denied", http.StatusForbidden)
+		http.Error(w, ui(w, "ui.10d0ff1ee2df"), http.StatusForbidden)
 		return "", api.SessionInfo{}, false
 	}
 }
@@ -211,13 +211,13 @@ func (a *App) handleSystemMonitorAPIError(w http.ResponseWriter, r *http.Request
 	}
 	if errors.Is(err, api.ErrUnauthorized) {
 		a.clearSessionCookies(w)
-		http.Error(w, "authentication required", http.StatusUnauthorized)
+		http.Error(w, ui(w, "ui.cbac8bee7536"), http.StatusUnauthorized)
 		return false
 	}
 	if errors.Is(err, api.ErrPasswordChangeRequired) {
-		http.Error(w, "password change required", http.StatusForbidden)
+		http.Error(w, ui(w, "ui.63bae92440ec"), http.StatusForbidden)
 		return false
 	}
-	http.Error(w, "system monitor service unavailable", http.StatusBadGateway)
+	http.Error(w, ui(w, "ui.4e93e7eaa7d5"), http.StatusBadGateway)
 	return false
 }

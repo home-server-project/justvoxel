@@ -6,7 +6,7 @@ import (
 )
 
 func TestSystemPowerHeaderAndDialogUX(t *testing.T) {
-	header, err := assets.ReadFile("templates/header.html")
+	header, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestSystemPowerHeaderAndDialogUX(t *testing.T) {
 		t.Fatal("system actions should use explicit custom tooltips instead of native title bubbles")
 	}
 
-	styles, err := assets.ReadFile("static/app.css")
+	styles, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestSystemPowerHeaderAndDialogUX(t *testing.T) {
 		}
 	}
 
-	script, err := assets.ReadFile("static/app.js")
+	script, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}

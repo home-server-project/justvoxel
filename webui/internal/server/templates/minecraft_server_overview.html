@@ -1,32 +1,32 @@
 {{define "minecraft_server_overview.html"}}{{template "minecraft-servers-page-start" .}}
-<a class="button-link secondary" href="/minecraft/servers">Back to Minecraft Servers</a>
-{{if .Error}}<p class="notice error" role="alert">{{.Error}}</p>{{end}}
+<a class="button-link secondary" href="/minecraft/servers">{{t "ui.5ecbf792c488"}}</a>
+{{if .Error}}<p class="notice error" role="alert">{{ts .Error}}</p>{{end}}
 {{with .Selected}}
 <section class="panel minecraft-selected-workspace minecraft-workspace-shell" aria-labelledby="selected-server-title">
-  <header class="minecraft-workspace-header"><div><p class="eyebrow">Minecraft Server · Overview</p><h1 id="selected-server-title">{{.Name}}</h1></div></header>
+  <header class="minecraft-workspace-header"><div><p class="eyebrow">{{t "ui.b3579956378d"}}</p><h1 id="selected-server-title">{{.Name}}</h1></div></header>
   <div class="minecraft-workspace-body minecraft-workspace-content minecraft-overview-compact">
     {{template "minecraft-server-summary" .}}
-    <div class="action-row"><a class="button-link" href="/?workspace=minecraft&amp;server={{.ContextID}}">Minecraft settings</a><a class="button-link secondary" href="/?workspace=backups&amp;server={{.ContextID}}">Backups</a></div>
+    <div class="action-row"><a class="button-link" href="/?workspace=minecraft&amp;server={{.ContextID}}">{{t "ui.4745d6697ce1"}}</a><a class="button-link secondary" href="/?workspace=backups&amp;server={{.ContextID}}">{{t "ui.3334fee2c77f"}}</a></div>
     {{if .ConfigurationAvailable}}
-    {{if .BootKnown}}<div class="minecraft-overview-grid"><div class="minecraft-overview-card"><span>Start on Boot</span><strong>{{if .StartOnBoot}}Enabled{{else}}Disabled{{end}}</strong></div></div>{{end}}
-    <section class="panel details minecraft-workspace-section"><h2>Welcome message</h2><p>{{.MOTD}}</p></section>
+    {{if .BootKnown}}<div class="minecraft-overview-grid"><div class="minecraft-overview-card"><span>{{t "ui.7f369a5b5b05"}}</span><strong>{{if .StartOnBoot}}{{t "ui.92c1cdfdf4cb"}}{{else}}{{t "ui.75081b593d15"}}{{end}}</strong></div></div>{{end}}
+    <section class="panel details minecraft-workspace-section"><h2>{{t "ui.797389fc28b4"}}</h2><p>{{.MOTD}}</p></section>
     {{end}}
     <section class="panel details minecraft-workspace-section" aria-labelledby="selected-server-lifecycle">
-      <h2 id="selected-server-lifecycle">Lifecycle</h2>
+      <h2 id="selected-server-lifecycle">{{t "ui.46459b1fa919"}}</h2>
       <div class="action-row">
-      {{if .CanStart}}<form method="post" action="{{.URL}}/start"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button type="submit">Start</button></form>{{end}}
-      {{if .CanRestart}}<form method="post" action="{{.URL}}/restart"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button type="submit">Restart</button></form>{{end}}
-      {{if .CanStop}}<form method="post" action="{{.URL}}/stop"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary" type="submit">Stop</button></form>{{end}}
-      {{if not (or .CanStart .CanRestart .CanStop)}}<p class="muted">Lifecycle actions are unavailable in the current server state.</p>{{end}}
+      {{if .CanStart}}<form method="post" action="{{.URL}}/start"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button type="submit">{{t "ui.e4bb9f1ece9a"}}</button></form>{{end}}
+      {{if .CanRestart}}<form method="post" action="{{.URL}}/restart"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button type="submit">{{t "ui.6b983a81e5e8"}}</button></form>{{end}}
+      {{if .CanStop}}<form method="post" action="{{.URL}}/stop"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary" type="submit">{{t "ui.cae7d57bc067"}}</button></form>{{end}}
+      {{if not (or .CanStart .CanRestart .CanStop)}}<p class="muted">{{t "ui.b7ebdce4d223"}}</p>{{end}}
       </div>
     </section>
-    <section class="panel details minecraft-workspace-section"><h2>Server name</h2>
-      <form data-selected-presentation action="/api/minecraft/workspace/rename?server={{.ContextID}}" method="post"><input type="hidden" name="csrf" value="{{$.CSRF}}"><label>Server name<input name="display_name" value="{{.Name}}" maxlength="64" required></label><button type="submit">Rename</button></form>
+    <section class="panel details minecraft-workspace-section"><h2>{{t "ui.21babfed6c38"}}</h2>
+      <form data-selected-presentation action="/api/minecraft/workspace/rename?server={{.ContextID}}" method="post"><input type="hidden" name="csrf" value="{{$.CSRF}}"><label>{{t "ui.21babfed6c38"}}<input name="display_name" value="{{.Name}}" maxlength="64" required></label><button type="submit">{{t "ui.3064d79a295c"}}</button></form>
     </section>
-    <section class="panel details minecraft-workspace-section"><h2>Danger zone</h2><h3>Delete {{.Name}}</h3>
-      <p>Permanently removes this active server and its world data. Existing backup archives are preserved. The server must be stopped first.</p>
-      <p>Backups are preserved as historical archives. Current Restore remains tied to this server identity.</p>
-      <form data-selected-presentation data-delete-name="{{.Name}}" action="/api/minecraft/workspace/delete?server={{.ContextID}}" method="post"><input type="hidden" name="csrf" value="{{$.CSRF}}"><label>Type the current server name<input name="confirm_name" required autocomplete="off"></label><button class="danger" type="submit" disabled>Delete Server</button></form>
+    <section class="panel details minecraft-workspace-section"><h2>{{t "ui.fd8b8dae4421"}}</h2><h3>{{t "ui.e2d0a54968ea"}} {{.Name}}</h3>
+      <p>{{t "ui.85422a9c643b"}}</p>
+      <p>{{t "ui.c99eef172da3"}}</p>
+      <form data-selected-presentation data-delete-name="{{.Name}}" action="/api/minecraft/workspace/delete?server={{.ContextID}}" method="post"><input type="hidden" name="csrf" value="{{$.CSRF}}"><label>{{t "ui.d6d051ae0e15"}}<input name="confirm_name" required autocomplete="off"></label><button class="danger" type="submit" disabled>{{t "ui.056e6a5f6594"}}</button></form>
       <p class="notice" data-selected-action-status role="status"></p>
     </section>
   </div>

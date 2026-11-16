@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
@@ -111,7 +110,7 @@ func TestNetworkConfigurationProxyRequiresAdministratorAndCSRF(t *testing.T) {
 }
 
 func TestNetworkWiFiControlsRemainInsideWiFiTab(t *testing.T) {
-	source, err := assets.ReadFile("static/network-workspace.js")
+	source, err := englishPresentationAsset("static/network-workspace.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +202,7 @@ func TestPlayitRelinkProxyAdministratorAndCSRF(t *testing.T) {
 }
 
 func TestRemoteAccessCardBehavior(t *testing.T) {
-	source, err := assets.ReadFile("static/network-workspace.js")
+	source, err := englishPresentationAsset("static/network-workspace.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,12 +398,12 @@ for (const claim_url of [
 playitSetup = { state: "failed" };
 assert(!render(base).some((n) => n.textContent === "Set up Playit"));
 `
-	cmd := exec.Command("node")
+	cmd := nodeTestCommand()
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("card behavior: %v\n%s", err, output)
 	}
-	css, err := assets.ReadFile("static/network-workspace.css")
+	css, err := englishPresentationAsset("static/network-workspace.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -426,7 +425,7 @@ assert(!render(base).some((n) => n.textContent === "Set up Playit"));
 }
 
 func TestRemoteAccessPollingIsBoundedAndStopsWhenStable(t *testing.T) {
-	source, err := assets.ReadFile("static/network-workspace.js")
+	source, err := englishPresentationAsset("static/network-workspace.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -465,7 +464,7 @@ let refreshRemoteAccess = async () => { polls++; if (polls === 2) remoteProvider
   await pollRemoteAccess(); assert.equal(polls, 1); assert(remoteProviders[0].configured);
 })().catch((error) => { console.error(error); process.exitCode = 1; });
 `
-	cmd := exec.Command("node")
+	cmd := nodeTestCommand()
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("polling behavior: %v\n%s", err, output)
@@ -473,7 +472,7 @@ let refreshRemoteAccess = async () => { polls++; if (polls === 2) remoteProvider
 }
 
 func TestNetworkOverviewCompactCanonicalRows(t *testing.T) {
-	source, err := assets.ReadFile("static/network-workspace.js")
+	source, err := englishPresentationAsset("static/network-workspace.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -515,7 +514,7 @@ const missing = renderOverview({ devices: [] });
 assert.equal(missing.children[1].textContent, "IPv4: Unavailable");
 assert.equal(missing.children[2].textContent, "Ethernet: Unavailable");
 `
-	cmd := exec.Command("node")
+	cmd := nodeTestCommand()
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("overview behavior: %v\n%s", err, output)
@@ -537,7 +536,7 @@ assert.equal(missing.children[2].textContent, "Ethernet: Unavailable");
 }
 
 func TestDrawerRetainsNetworkBlockAndShowsActiveRemoteAccess(t *testing.T) {
-	source, err := assets.ReadFile("static/app.js")
+	source, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -585,12 +584,12 @@ assert.deepEqual(render([{id:"playit",connected:true,tunnels:[{is_disabled:false
 assert.deepEqual(render([{id:"playit",connected:true,tunnels:[{is_disabled:false},{is_disabled:false},{is_disabled:true}]}]), [["Playit","2 tunnels"]]);
 
 `
-	cmd := exec.Command("node")
+	cmd := nodeTestCommand()
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("drawer behavior: %v\n%s", err, output)
 	}
-	header, err := assets.ReadFile("templates/header.html")
+	header, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -620,7 +619,7 @@ func TestReadOnlyRemoteAccessProxyUsesStatusWithoutSetup(t *testing.T) {
 }
 
 func TestNetworkVisibleTabsAndConnectivityPresentation(t *testing.T) {
-	source, err := assets.ReadFile("static/network-workspace.js")
+	source, err := englishPresentationAsset("static/network-workspace.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -664,7 +663,7 @@ for (const [value, expected] of Object.entries({ full: "Internet connected", lim
   assert.equal(connectivitySummary(value), expected);
 }
 `
-	cmd := exec.Command("node")
+	cmd := nodeTestCommand()
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("visible tabs: %v\n%s", err, output)
@@ -675,7 +674,7 @@ for (const [value, expected] of Object.entries({ full: "Internet connected", lim
 }
 
 func TestNetworkTroubleshootInternetStates(t *testing.T) {
-	source, err := assets.ReadFile("static/network-workspace.js")
+	source, err := englishPresentationAsset("static/network-workspace.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -730,19 +729,46 @@ assert(nodes.some((n) => n.textContent === "Condition: Networking is disabled"))
 assert.equal(nodes.find((n) => n.textContent === "Reconnect active profile").disabled, true);
 assert(flatten(renderTroubleshoot({ connectivity: "unknown", devices: [] })).some((n) => n.textContent === "Condition: No Ethernet or Wi-Fi interface is available"));
 `
-	cmd := exec.Command("node")
+	cmd := nodeTestCommand()
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("troubleshoot internet states: %v\n%s", err, output)
 	}
 }
 
+// Model only the popup nodes used by production; textContent escapes markup.
+const popupDOMFixture = `
+const popupElement = (tab, selector) => {
+  const patterns = {
+    "header .brand": /(<span class="brand">)[^<]*(<\/span>)/,
+    "#setup-title": /(<h1 id="setup-title">)[^<]*(<\/h1>)/,
+    "#setup-title + p": /(<h1 id="setup-title">[^<]*<\/h1>\s*<p>)[^<]*(<\/p>)/,
+    ".muted": /(<p class="muted">)[^<]*(<\/p>)/,
+    ".claim-heading": /(<h2 class="claim-heading"><span class="pulse-dot" aria-hidden="true"><\/span>)[^<]*(<\/h2>)/,
+    ".claim-panel p": /(<div class="claim-panel" role="status">[\s\S]*?<p>)[^<]*(<\/p>)/
+  };
+  assert(selector === "header" || selector === ".setup-card" || selector === ".claim-panel" || patterns[selector], "unexpected popup selector: " + selector);
+  const node = {
+    setAttribute(name, value) { assert.equal(selector, "header"); assert.equal(name, "aria-label"); tab.html = tab.html.replace(/(<header aria-label=")[^"]*(")/, (_, a, b) => a + escapePopupText(value) + b); },
+    classList: {toggle(name, enabled) { assert.equal(selector, ".setup-card"); assert.equal(name, "failure"); tab.html = tab.html.replace(/class="setup-card(?: failure)?"/, enabled ? 'class="setup-card failure"' : 'class="setup-card"'); }},
+    set textContent(value) {
+      assert(patterns[selector], "missing text node: " + selector);
+      assert(patterns[selector].test(tab.html), "popup node missing: " + selector);
+      tab.html = tab.html.replace(patterns[selector], (_, a, b) => a + escapePopupText(value) + b);
+    }
+  };
+  node.lastChild = node;
+  return node;
+};
+const escapePopupText = value => String(value).replace(/[&<>"']/g, char => ({"&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"}[char]));
+`
+
 func TestPlayitActivationOpensPopupBeforeSetup(t *testing.T) {
 	source, err := assets.ReadFile("static/network-workspace.js")
 	if err != nil {
 		t.Fatal(err)
 	}
-	stylesheet, err := assets.ReadFile("static/playit-setup.css")
+	stylesheet, err := englishPresentationAsset("static/playit-setup.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -778,7 +804,7 @@ func TestPlayitActivationOpensPopupBeforeSetup(t *testing.T) {
 			t.Fatal("popup HTML must be a complete document")
 		}
 	}
-	program := `
+	program := popupDOMFixture + `
 const assert = require("node:assert/strict");
 let playitPopup = null, playitClaimOpened = false, remoteError = "", playitSetup = { state: "idle" }, remoteBusy = false;
 ` + script[start:end] + `
@@ -793,6 +819,9 @@ const window = { open(url, target) {
     close() { this.closeCalls++; this.closed = true; },
     location: { replace(url) { navigations.push({ popup, url }); } },
     document: {
+      documentElement: {style: {}, setAttribute(name, value) { assert.equal(name, "lang"); assert.equal(value, justVoxelLanguage.locale); popup.lang = value; }},
+      querySelector(selector) { return popupElement(popup, selector); },
+      set title(value) { popup.html = popup.html.replace(/(<title>)[^<]*(<\/title>)/, (_, a, b) => a + escapePopupText(value) + b); },
       open() { events.push("document.open"); popup.html = ""; },
       write(html) { events.push("document.write"); popup.html += html; writes.push(html); },
       close() { events.push("document.close"); }
@@ -808,6 +837,7 @@ const runRemoteAction = (action) => { pending = executeRemoteAction(action); };
 const postForm = (url) => {
   events.push("request"); assert.equal(url, "/api/network/remote-access/playit/setup");
   if (!blocked) {
+    assert.equal(popup.lang, "en");
     assert.match(popup.html, /<h1 id="setup-title">Preparing Playit setup…<\/h1>/);
     assert.equal(popup.opener, null);
   }
@@ -830,6 +860,7 @@ const click = () => {
   resolveSetup({ state: "starting" });
   await pending;
   const loadingHTML = popup.html;
+  const loadingDocument = writes[writes.length - 1];
   assert.match(loadingHTML, /<section class="setup-card" aria-labelledby="setup-title">/);
   assert.match(loadingHTML, /<div class="claim-panel" role="status">/);
   assert.match(loadingHTML, /Claim link/);
@@ -864,6 +895,7 @@ const click = () => {
   rejectSetup(Error("<script>backend-secret</script> https://evil.test/claim/0123abcdef"));
   await pending;
   const failureHTML = popup.html;
+  const failureDocument = writes[writes.length - 1];
   assert.match(failureHTML, /<h1 id="setup-title">Playit setup could not be started\.<\/h1>/);
   assert.match(failureHTML, /Return to JustVoxel and try Activate again\./);
   assert(!failureHTML.includes("Preparing Playit setup"));
@@ -899,11 +931,11 @@ const click = () => {
   rejectSetup(Error("backend-secret")); await pending;
   assert.equal(playitPopup, null); assert.equal(closedPopup.closeCalls, 1);
   assert.equal(writes.length, writesBeforeFailure);
-  assert(writes.every((html) => html === loadingHTML || html === failureHTML));
+  assert(writes.every((html) => html === loadingDocument || html === failureDocument));
   assert(writes.every((html) => !html.includes("backend-secret") && !html.includes("https://") && !html.includes("<script>")));
 })().catch((error) => { console.error(error); process.exitCode = 1; });
 `
-	cmd := exec.Command("node")
+	cmd := nodeTestCommand()
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("Playit activation: %v\n%s", err, output)
@@ -923,7 +955,16 @@ func TestNetBirdActivationOpensCorrectLoginAndRejectsTailscale(t *testing.T) {
 	if validStart < 0 || validEnd <= validStart || clickStart < 0 || clickEnd < 0 {
 		t.Fatal("NetBird login code missing")
 	}
-	program := `
+	popupSource := script[validStart:validEnd]
+	writes := strings.Split(popupSource, "popup.document.write(`")
+	if len(writes) != 2 || strings.Count(popupSource, "popup.document.write(") != 1 {
+		t.Fatal("remote login popup must use one static HTML literal")
+	}
+	popupHTML, _, complete := strings.Cut(writes[1], "`);")
+	if !complete || strings.Contains(popupHTML, "${") || strings.Contains(popupHTML, "`") {
+		t.Fatal("remote login popup HTML must not interpolate or concatenate values")
+	}
+	program := popupDOMFixture + `
 const assert = require("node:assert/strict");
 let remoteBusy = false, netbirdLoginURL = "", pending, loginTab, responseURL, responseError;
 let blocked = false, events = [];
@@ -938,6 +979,8 @@ const window = { open(url, target) {
     location: { replace(url) { loginTab.navigations.push(url); } },
     close() { this.closed = true; },
     document: {
+      documentElement: {setAttribute(name, value) { assert.equal(name, "lang"); assert.equal(value, justVoxelLanguage.locale); loginTab.lang = value; }},
+      querySelector(selector) { return popupElement(loginTab, selector); },
       open() { events.push("document.open"); loginTab.html = ""; },
       write(html) { events.push("document.write"); loginTab.html += html; },
       close() { events.push("document.close"); }
@@ -950,6 +993,7 @@ const postForm = async (path, params) => {
   assert.equal(path, "/api/network/remote-access/netbird");
   assert.deepEqual(params, { action: "activate" });
   if (!blocked) {
+    assert.equal(loginTab.lang, "en");
     assert.match(loginTab.html, /Preparing NetBird login/);
     assert.match(loginTab.html, /Waiting for the authentication link/);
     assert.equal(loginTab.opener, null);
@@ -1012,7 +1056,7 @@ const click = () => {
   assert.equal(netbirdLoginURL, responseURL);
 })().catch((error) => { console.error(error); process.exitCode = 1; });
 `
-	cmd := exec.Command("node")
+	cmd := nodeTestCommand()
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("NetBird browser redirect: %v\n%s", err, output)
@@ -1034,7 +1078,7 @@ func TestTailscaleActivationOpensMachineLink(t *testing.T) {
 	if validStart < 0 || validEnd <= validStart || popupStart < 0 || popupEnd <= popupStart || clickStart < 0 || clickEnd < 0 {
 		t.Fatal("Tailscale login UI path missing")
 	}
-	program := `
+	program := popupDOMFixture + `
 const assert = require("node:assert/strict");
 let remoteBusy = false, tailscaleLoginURL = "", pending;
 let popup, events = [], responseURL = "https://login.tailscale.com/a/0123456789abcdef", responseError = "";
@@ -1047,6 +1091,9 @@ const window = { open(url, target) {
   popup = { closed: false, opener: {}, html: "", location: { replace(url) { events.push(["navigate", url]); } },
     close() { this.closed = true; },
     document: {
+      documentElement: {setAttribute(name, value) { assert.equal(name, "lang"); assert.equal(value, justVoxelLanguage.locale); popup.lang = value; }},
+      querySelector(selector) { return popupElement(popup, selector); },
+      set title(value) { popup.html = popup.html.replace(/(<title>)[^<]*(<\/title>)/, (_, a, b) => a + escapePopupText(value) + b); },
       open() { events.push(["document.open"]); popup.html = ""; },
       write(html) { events.push(["document.write"]); popup.html += html; },
       close() { events.push(["document.close"]); }
@@ -1057,6 +1104,7 @@ const window = { open(url, target) {
 const postForm = async (path, params) => {
   events.push(["request", path]);
   assert.deepEqual(params, { action: "activate" });
+  assert.equal(popup.lang, "en");
   assert.match(popup.html, /Preparing Tailscale login/);
   assert.equal(popup.opener, null);
   if (responseError) throw Error(responseError);
@@ -1098,7 +1146,7 @@ const click = () => {
   assert.equal(popup.closed, true);
 })().catch((error) => { console.error(error); process.exitCode = 1; });
 `
-	cmd := exec.Command("node")
+	cmd := nodeTestCommand()
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("Tailscale browser login: %v\n%s", err, output)
@@ -1106,7 +1154,7 @@ const click = () => {
 }
 
 func TestProviderDashboardWaitsForSuccessfulServiceActivation(t *testing.T) {
-	data, err := assets.ReadFile("static/network-workspace.js")
+	data, err := englishPresentationAsset("static/network-workspace.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1154,7 +1202,7 @@ for (const id of ["tailscale", "netbird"]) {
   assert.match(providerProgress.get(id), /has not completed/);
 }
 `
-	cmd := exec.Command("node")
+	cmd := nodeTestCommand()
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("Provider dashboard flow: %v\n%s", err, output)
@@ -1162,7 +1210,7 @@ for (const id of ["tailscale", "netbird"]) {
 }
 
 func TestRemoteAccessFailuresRenderOnlyInSectionHint(t *testing.T) {
-	source, err := assets.ReadFile("static/network-workspace.js")
+	source, err := englishPresentationAsset("static/network-workspace.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1219,7 +1267,7 @@ const renderNetwork = () => { nodes = flatten(renderRemoteAccess()); };
   assert.equal(state.textContent, "Existing network state");
 })().catch((error) => { console.error(error); process.exitCode = 1; });
 `
-	cmd := exec.Command("node")
+	cmd := nodeTestCommand()
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("remote error rendering: %v\n%s", err, output)
@@ -1227,7 +1275,7 @@ const renderNetwork = () => { nodes = flatten(renderRemoteAccess()); };
 }
 
 func TestPlayitAccountConfirmationAndSharedSetup(t *testing.T) {
-	source, err := assets.ReadFile("static/network-workspace.js")
+	source, err := englishPresentationAsset("static/network-workspace.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1294,7 +1342,7 @@ const flatten = node => [node, ...node.children.flatMap(flatten)];
   showPlayitAccountDialog(); assert.equal(playitAccountDialog, null);
 })().catch(error => { console.error(error); process.exitCode = 1; });
 `
-	cmd := exec.Command("node")
+	cmd := nodeTestCommand()
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("Playit account: %v\n%s", err, output)
@@ -1302,7 +1350,7 @@ const flatten = node => [node, ...node.children.flatMap(flatten)];
 }
 
 func TestNetworkPresentationLayoutContract(t *testing.T) {
-	source, err := assets.ReadFile("static/network-workspace.js")
+	source, err := englishPresentationAsset("static/network-workspace.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1433,7 +1481,7 @@ const repair = find(health, (node) => node.textContent === "Reconnect active pro
 assert(hasClass("network-reconnect-information")(repair.parentElement));
 assert(repair.parentElement.children[0].textContent.startsWith("Reconnect this interface using its current settings."));
 `
-	cmd := exec.Command("node")
+	cmd := nodeTestCommand()
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("network presentation contract: %v\n%s", err, output)
@@ -1442,7 +1490,7 @@ assert(repair.parentElement.children[0].textContent.startsWith("Reconnect this i
 	if strings.Contains(script, "paginateList(list, 4)") || strings.Contains(script, `"Other network…"`) {
 		t.Fatal("Nearby Wi-Fi must use available height and Hidden network wording")
 	}
-	css, err := assets.ReadFile("static/network-workspace.css")
+	css, err := englishPresentationAsset("static/network-workspace.css")
 	if err != nil {
 		t.Fatal(err)
 	}

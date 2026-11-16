@@ -183,12 +183,12 @@ func (a *App) oauthAuthorize(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "POST" {
 		r.Body = http.MaxBytesReader(w, r.Body, oauthMaxBody)
 		if r.ParseForm() != nil || r.URL.RawQuery != "" || !a.oauthValidCSRF(r) {
-			http.Error(w, "Invalid approval request", 403)
+			http.Error(w, ui(w, "ui.779010b9b988"), 403)
 			return
 		}
 		p, ok := oauthParameters(r.PostForm)
 		if !ok || len(p) != 3 || (p["decision"] != "allow" && p["decision"] != "cancel") {
-			http.Error(w, "Invalid approval request", 400)
+			http.Error(w, ui(w, "ui.779010b9b988"), 400)
 			return
 		}
 		requestID = p["request"]
@@ -243,7 +243,7 @@ func (a *App) oauthAuthorize(w http.ResponseWriter, r *http.Request) {
 		Session(context.Context, string) (api.SessionInfo, error)
 	})
 	if !ok {
-		http.Error(w, "Authorization unavailable", 503)
+		http.Error(w, ui(w, "ui.2b4a91c02377"), 503)
 		return
 	}
 	identity, err := identityClient.Session(r.Context(), session)
@@ -253,7 +253,7 @@ func (a *App) oauthAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if identity.Username != "voxel" || identity.Role != "administrator" || (identity.AuthSource != "system" && identity.AuthSource != "separate") {
-		http.Error(w, "Only the primary voxel administrator may approve this connection.", 403)
+		http.Error(w, ui(w, "ui.cb1aab59bcd0"), 403)
 		return
 	}
 	if identity.MustChange || mustChange(r) {
@@ -263,14 +263,14 @@ func (a *App) oauthAuthorize(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "POST" {
 		out, err := a.oauthCall(r, session, "decide", map[string]any{"request_id": requestID, "allow": r.PostForm.Get("decision") == "allow"})
 		if err != nil {
-			http.Error(w, "Authorization request expired or unavailable.", 400)
+			http.Error(w, ui(w, "ui.a082e0fd04f3"), 400)
 			return
 		}
 		var result struct {
 			Redirect string `json:"redirect"`
 		}
 		if json.Unmarshal(out, &result) != nil || result.Redirect == "" {
-			http.Error(w, "Authorization unavailable", 503)
+			http.Error(w, ui(w, "ui.2b4a91c02377"), 503)
 			return
 		}
 		http.Redirect(w, r, result.Redirect, http.StatusSeeOther)
@@ -278,7 +278,7 @@ func (a *App) oauthAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := a.oauthCall(r, session, "inspect", map[string]any{"request_id": requestID})
 	if err != nil {
-		http.Error(w, "Authorization request expired or unavailable.", 400)
+		http.Error(w, ui(w, "ui.a082e0fd04f3"), 400)
 		return
 	}
 	var consent struct {
@@ -294,19 +294,19 @@ func (a *App) oauthAuthorize(w http.ResponseWriter, r *http.Request) {
 		} `json:"connection"`
 	}
 	if json.Unmarshal(out, &consent) != nil {
-		http.Error(w, "Authorization unavailable", 503)
+		http.Error(w, ui(w, "ui.2b4a91c02377"), 503)
 		return
 	}
 	provider := consent.Connection.Purpose
 	if provider == "" {
-		provider = "An app"
+		provider = ui(w, "ui.094f9581aca0")
 	}
-	level := map[int]string{1: "Level 1 — Read Only", 2: "Level 2 — Basic Management", 3: "Level 3 — Full Management", 4: "Level 4 — Full System Control"}[consent.Connection.Level]
-	scope := "All servers"
+	level := map[int]string{1: ui(w, "ui.1e92289bd9c3"), 2: ui(w, "ui.a2c65e3bcfbe"), 3: ui(w, "ui.58e87c126588"), 4: ui(w, "ui.d382211e05c4")}[consent.Connection.Level]
+	scope := ui(w, "ui.3205261a6537")
 	if !consent.Connection.AllInstances {
 		scope = strings.Join(consent.Connection.InstanceIDs, ", ")
 		if scope == "" {
-			scope = "No servers selected"
+			scope = ui(w, "ui.8da895ce9e50")
 		}
 	}
 	data := struct{ Provider, Name, Level, Scope, ClientName, RequestID, CSRF string }{provider, consent.Connection.Name, level, scope, consent.ClientName, requestID, csrfFromRequest(r)}
@@ -314,14 +314,14 @@ func (a *App) oauthAuthorize(w http.ResponseWriter, r *http.Request) {
 	// origin through CSP as well, so browsers can follow the OAuth POST redirect.
 	callback, parseErr := url.Parse(consent.RedirectURI)
 	if parseErr != nil || callback.Host == "" {
-		http.Error(w, "Authorization unavailable", 503)
+		http.Error(w, ui(w, "ui.2b4a91c02377"), 503)
 		return
 	}
 	policy := w.Header().Get("Content-Security-Policy")
 	w.Header().Set("Content-Security-Policy", strings.Replace(policy, "form-action 'self'", "form-action 'self' "+callback.Scheme+"://"+callback.Host, 1))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := a.templates.ExecuteTemplate(w, "oauth-consent.html", data); err != nil {
-		http.Error(w, "Authorization unavailable", 503)
+	if err := a.executeTemplate(w, "oauth-consent.html", data); err != nil {
+		http.Error(w, ui(w, "ui.2b4a91c02377"), 503)
 	}
 }
 func (a *App) oauthResourceMetadata(w http.ResponseWriter, r *http.Request) {

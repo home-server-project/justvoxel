@@ -1,6 +1,6 @@
 // Exercise the actual Players renderer without installing browser dependencies.
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
+const fs = require('./helpers/webui-i18n.cjs');
 const source = fs.readFileSync(`${__dirname}/../webui/internal/server/static/app.js`, 'utf8');
 const block = source.slice(source.indexOf('  const renderPlayers ='), source.indexOf('  const renderLogs ='));
 class Element {

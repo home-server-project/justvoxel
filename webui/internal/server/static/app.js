@@ -37,7 +37,7 @@ const writeWorkspaceWindowState = (id, patch) => {
 const serverWorkspaces = ["minecraft", "version", "plugins", "backups", "migration"];
 const workspaceServerSelections = Object.create(null);
 globalThis.justVoxelSelectionGeneration = Object.fromEntries(serverWorkspaces.map(workspace => [workspace, 0]));
-globalThis.justVoxelStaleSelection = () => Object.assign(new Error("Server selection changed."), { staleSelection: true });
+globalThis.justVoxelStaleSelection = () => Object.assign(new Error(jvT("ui.fcf68c31fea8")), { staleSelection: true });
 const initialServerDestination = new URLSearchParams(globalThis.location?.search || "");
 const initialServerWorkspace = initialServerDestination.get("workspace") || "minecraft";
 const validServerID = (id) => typeof id === "string" && /^jv-[a-z0-9]{6,12}$/.test(id);
@@ -52,7 +52,7 @@ globalThis.justVoxelLoadServerSelections = (refresh = false) => {
     // Never send a saved or URL server ID to the inventory endpoint.
     const response = await fetch("/api/minecraft/workspace/selection?selection=none", {credentials:"same-origin",cache:"no-store"});
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "Server selection is unavailable.");
+    if (!response.ok) throw new Error(data.error || jvT("ui.ca05718b247c"));
     for (const workspace of serverWorkspaces) {
       if (inventoryTickets[workspace] !== globalThis.justVoxelSelectionGeneration[workspace]) continue;
       const previous = workspaceServerSelections[workspace];
@@ -131,7 +131,7 @@ const renderServerSelector = (slot, servers) => {
   details.className = "server-selector";
   details.dataset.selectedServer = "";
   const summary = document.createElement("summary");
-  summary.setAttribute("aria-label", "Selected server");
+  summary.setAttribute("aria-label", jvT("ui.286524914b43"));
   const menu = document.createElement("div");
   menu.className = "server-selector-menu";
   // The top layer keeps the list outside scrolling workspace headers and dialogs.
@@ -182,7 +182,7 @@ const renderServerSelector = (slot, servers) => {
   });
   slot.syncServerSelection = (id) => {
     summary.replaceChildren();
-    appendName(summary, servers.find(server => server.id === id), servers.length ? "Choose server" : "No servers");
+    appendName(summary, servers.find(server => server.id === id), servers.length ? jvT("ui.389e87e83148") : jvT("ui.5659061bb090"));
     options.forEach(option => option.setAttribute("aria-pressed", option.dataset.serverId === id ? "true" : "false"));
   };
   details.addEventListener("keydown", event => {
@@ -210,7 +210,7 @@ const saveRequiredMinecraftIdentity = (csrf) => new Promise((resolve) => {
   const content = document.createElement("div");
   content.className = "system-action-dialog-content";
   const title = document.createElement("h2");
-  title.textContent = "Instance ID could not be generated.";
+  title.textContent = jvT("ui.ff528c379e66");
   const form = document.createElement("form");
   form.className = "instance-id-form";
   const label = document.createElement("label");
@@ -221,13 +221,13 @@ const saveRequiredMinecraftIdentity = (csrf) => new Promise((resolve) => {
   input.maxLength = 12;
   input.pattern = "[A-Za-z0-9]{6,12}";
   input.autocomplete = "off";
-  input.setAttribute("aria-label", "Instance ID suffix");
-  input.title = "Use 6-12 letters and numbers after jv-.";
+  input.setAttribute("aria-label", jvT("ui.54a29a10f39d"));
+  input.title = jvT("ui.9c8cd5e227d7");
   const save = document.createElement("button");
   save.type = "submit";
-  save.textContent = "Save";
+  save.textContent = jvT("ui.1509f561f241");
   const feedback = document.createElement("p");
-  feedback.textContent = "Valid input: 6-12 letters and numbers.";
+  feedback.textContent = jvT("ui.f2163827c1a2");
   feedback.setAttribute("role", "status");
   label.append(input);
   form.append(label, save);
@@ -247,13 +247,13 @@ const saveRequiredMinecraftIdentity = (csrf) => new Promise((resolve) => {
       });
       const result = await response.json();
       if (!response.ok || result.status !== "available" || !result.id) {
-        throw new Error(result.error || "Instance ID was not saved.");
+        throw new Error(result.error || jvT("ui.3dca8c62e971"));
       }
       dialog.close();
       dialog.remove();
       resolve();
     } catch (error) {
-      feedback.textContent = error?.message || "Instance ID could not be saved.";
+      feedback.textContent = error?.message || jvT("ui.62e15a84129f");
       save.disabled = false;
     }
   });
@@ -284,20 +284,20 @@ const enhancePasswordFields = (root = document) => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "password-reveal-button";
-    button.setAttribute("aria-label", "Show password");
+    button.setAttribute("aria-label", jvT("ui.6aeaa6a53d09"));
     button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"></path><circle cx="12" cy="12" r="2.8"></circle><path class="password-reveal-slash" d="M4 4l16 16"></path></svg>';
     button.addEventListener("click", () => {
       const showing = input.type === "text";
       input.type = showing ? "password" : "text";
       button.classList.toggle("is-showing", !showing);
-      button.setAttribute("aria-label", showing ? "Show password" : "Hide password");
+      button.setAttribute("aria-label", showing ? jvT("ui.6aeaa6a53d09") : jvT("ui.a60a56c584b3"));
     });
     shell.appendChild(button);
     if (input.autocomplete === "new-password" && !/confirm/i.test(input.name)) {
       const strength = document.createElement("span");
       strength.className = "password-strength is-unacceptable";
       strength.setAttribute("role", "status");
-      strength.textContent = "Strength: Not acceptable";
+      strength.textContent = jvT("ui.ff964aa9da4d");
       shell.after(strength);
       input.addEventListener("input", () => {
         const value = input.value;
@@ -305,7 +305,7 @@ const enhancePasswordFields = (root = document) => {
         const minimum = Math.max(8, input.minLength > 0 ? input.minLength : 8);
         const level = value.length < minimum || classes < 2 ? "unacceptable" : value.length >= 12 && classes >= 3 ? "strong" : "acceptable";
         strength.className = "password-strength is-" + level;
-        strength.textContent = "Strength: " + (level === "unacceptable" ? "Not acceptable" : level === "strong" ? "Strong" : "Acceptable");
+        strength.textContent = jvT("ui.2d81f08557a7") + (level === "unacceptable" ? jvT("ui.5e08fb869bdf") : level === "strong" ? jvT("ui.30a04fdcb6bb") : jvT("ui.4b9cfa1c7da0"));
       });
     }
   });
@@ -321,20 +321,20 @@ const initDestructiveConfirmations = (root = document) => {
     const toggle = control.querySelector("[data-destructive-toggle]");
     const value = control.querySelector("[data-destructive-value]");
     const button = control.closest("form")?.querySelector("[data-destructive-submit]") || control.parentElement?.querySelector("[data-destructive-submit]");
-    const idleText = control.dataset.destructiveIdle || "Slide to confirm";
+    const idleText = control.dataset.destructiveIdle || jvT("ui.656bae9bfca6");
 
     const sync = () => {
       const progress = Math.max(0, Math.min(100, Number(slider?.value || 0)));
       shell?.style.setProperty("--confirm-progress", String(progress / 100));
       const armed = progress >= 100;
       shell?.classList.toggle("is-armed", armed);
-      if (text) text.textContent = armed ? (control.dataset.destructiveArmed || "Ready to confirm") : idleText;
+      if (text) text.textContent = armed ? (control.dataset.destructiveArmed || jvT("ui.49670aa6ec95")) : idleText;
       if (toggleRow) toggleRow.hidden = !armed;
       if (!armed && toggle) toggle.checked = false;
       const confirmed = armed && Boolean(toggle?.checked);
       if (value) value.value = confirmed ? (control.dataset.confirmValue || "") : "";
       if (button) button.disabled = !confirmed;
-      slider?.setAttribute("aria-valuetext", armed ? "Ready for final confirmation" : progress + " percent");
+      slider?.setAttribute("aria-valuetext", armed ? jvT("ui.f457978a1756") : progress + " percent");
     };
     slider?.addEventListener("input", sync);
     slider?.addEventListener("change", sync);
@@ -469,10 +469,10 @@ if (dashboard) {
   };
 
   const actionProgress = (action) => {
-    if (action === "start") return "Starting…";
-    if (action === "stop") return "Stopping…";
-    if (action === "restart") return "Restarting…";
-    return "Working…";
+    if (action === "start") return jvT("ui.bbe5fc3b9ef3");
+    if (action === "stop") return jvT("ui.bbe8574175ab");
+    if (action === "restart") return jvT("ui.75d0f1469d16");
+    return jvT("ui.5474eef8d0f1");
   };
 
   const setButtons = (status) => {
@@ -533,12 +533,12 @@ if (dashboard) {
     if (!panel) return;
     panel.hidden = !attention;
     if (!attention) return;
-    if (title) title.textContent = attention.title || "Administrator attention required";
-    if (status) status.textContent = attention.status || "";
+    if (title) title.textContent = jvS(attention.title) || jvT("ui.1e1b96ec8fd9");
+    if (status) status.textContent = jvS(attention.status) || "";
     if (action) {
       action.hidden = !attention.action;
       action.href = attention.action || "#";
-      action.textContent = attention.label || "Review";
+      action.textContent = jvS(attention.label) || jvT("ui.aff0766a5290");
     }
   };
 
@@ -701,7 +701,7 @@ if (quickLook && quickLookToggle) {
     if (backupCreate.disabled) return;
     const selection = globalThis.justVoxelSelectionGeneration.minecraft;
     backupCreate.disabled = true;
-    backupCreate.textContent = "Starting…";
+    backupCreate.textContent = jvT("ui.bbe5fc3b9ef3");
     try {
       const response = await fetch(globalThis.justVoxelSelectedURL("/api/backups/manual", "minecraft"), {
         method: "POST",
@@ -717,13 +717,13 @@ if (quickLook && quickLookToggle) {
       if (selection !== globalThis.justVoxelSelectionGeneration.minecraft) return;
       setValue("[data-quick-look-backup]", response.ok && result.ok
         ? result.message
-        : result.error || "Manual backup could not be started.");
+        : result.error || jvT("ui.3c90992a4536"));
     } catch (_) {
       if (selection !== globalThis.justVoxelSelectionGeneration.minecraft) return;
-      setValue("[data-quick-look-backup]", "Manual backup could not be started.");
+      setValue("[data-quick-look-backup]", jvT("ui.3c90992a4536"));
     } finally {
       backupCreate.disabled = false;
-      backupCreate.textContent = "Create backup";
+      backupCreate.textContent = jvT("ui.85fb487f030a");
     }
   });
 
@@ -746,13 +746,13 @@ if (quickLook && quickLookToggle) {
     const system = status.system || {};
     const backup = status.backup || {};
 
-    setValue("[data-quick-look-minecraft]", minecraft.state);
+    setValue("[data-quick-look-minecraft]", jvS(minecraft.state));
     setValue("[data-quick-look-version]", minecraft.version);
     setValue(
       "[data-quick-look-players]",
-      minecraft.configured ? `${players.online ?? 0} / ${players.max ?? minecraft.max_players ?? "—"}` : "Not configured",
+      minecraft.configured ? `${players.online ?? 0} / ${players.max ?? minecraft.max_players ?? "—"}` : jvT("ui.dd1841d29502"),
     );
-    setValue("[data-quick-look-system]", system.health);
+    setValue("[data-quick-look-system]", jvS(system.health));
     setValue("[data-quick-look-ipv4]", system.ipv4);
     const overlays = quickLook.querySelector("[data-quick-look-overlays]");
     if (overlays) {
@@ -779,7 +779,7 @@ if (quickLook && quickLookToggle) {
         overlays.appendChild(line);
       });
     }
-    setValue("[data-quick-look-backup]", backup.enabled ? "Enabled" : "Disabled");
+    setValue("[data-quick-look-backup]", backup.enabled ? jvT("ui.92c1cdfdf4cb") : jvT("ui.75081b593d15"));
     setActionAvailability(status);
   };
 
@@ -1008,22 +1008,22 @@ if (systemPower && systemDialog) {
 
   const actionCopy = {
     reboot: {
-      title: "Reboot JustVoxel?",
-      message: "Minecraft will be stopped safely first when it is running. The server will then reboot.",
-      confirm: "Reboot",
-      working: "Rebooting JustVoxel…",
+      title: jvT("ui.8fc4170e4f2d"),
+      message: jvT("ui.7237ce2bb0a8"),
+      confirm: jvT("ui.fba023ca78eb"),
+      working: jvT("ui.79235042a9f8"),
     },
     poweroff: {
-      title: "Power off JustVoxel?",
-      message: "Minecraft will be stopped safely first when it is running. The server will then power off.",
-      confirm: "Power off",
-      working: "Powering off JustVoxel…",
+      title: jvT("ui.3b667455abd0"),
+      message: jvT("ui.cd21e88bf525"),
+      confirm: jvT("ui.2089aa6cd044"),
+      working: jvT("ui.f3245b2b3c7f"),
     },
     "firmware-reboot": {
-      title: "Reboot to UEFI/BIOS?",
-      message: "Minecraft will be stopped safely first. The server will reboot into the physical machine's UEFI/BIOS setup.",
-      confirm: "Reboot to UEFI/BIOS",
-      working: "Rebooting to UEFI/BIOS…",
+      title: jvT("ui.0fe5d03a5b38"),
+      message: jvT("ui.812c3ecff7ff"),
+      confirm: jvT("ui.b098f557fbb4"),
+      working: jvT("ui.8a5a61e2dfcd"),
     },
   };
 
@@ -1045,7 +1045,7 @@ if (systemPower && systemDialog) {
         if (controlCenter) controlCenter.open = false;
         return false;
       }
-      if (!response.ok) throw new Error("status unavailable");
+      if (!response.ok) throw new Error(jvT("ui.180119be630b"));
       const status = await response.json();
       latestStatus = status;
       const firmwareAvailable =
@@ -1099,12 +1099,12 @@ if (systemPower && systemDialog) {
   const showPlayerConfirmation = (result) => {
     confirmPlayers = true;
     const copy = actionCopy[selectedAction];
-    if (dialogTitle) dialogTitle.textContent = "Players are online";
+    if (dialogTitle) dialogTitle.textContent = jvT("ui.9c9a3156ead1");
     if (dialogMessage) {
       const count = Number(result.online || 0);
       const noun = count === 1 ? "player is" : "players are";
       dialogMessage.textContent =
-        String(count) + " " + noun + " online. Continue with the normal graceful shutdown warning and " + copy.confirm.toLowerCase() + "?";
+        String(count) + " " + noun + jvT("ui.4cb4a59b1780") + copy.confirm.toLowerCase() + "?";
     }
     if (dialogPlayers) {
       dialogPlayers.replaceChildren();
@@ -1117,14 +1117,14 @@ if (systemPower && systemDialog) {
       dialogPlayers.hidden = dialogPlayers.childElementCount === 0;
     }
     if (confirmButton) {
-      confirmButton.textContent = selectedAction === "poweroff" ? "Power off anyway" : "Reboot anyway";
+      confirmButton.textContent = selectedAction === "poweroff" ? jvT("ui.903044546444") : jvT("ui.27015f91e79c");
       confirmButton.disabled = false;
     }
   };
 
   const showActionError = (message) => {
     if (dialogError) {
-      dialogError.textContent = message || "The system action was not accepted.";
+      dialogError.textContent = message || jvT("ui.c68490537f5e");
       dialogError.hidden = false;
     }
     if (cancelButton) cancelButton.hidden = false;
@@ -1136,7 +1136,7 @@ if (systemPower && systemDialog) {
     if (!copy || !csrfInput) return;
     if (confirmButton) {
       confirmButton.disabled = true;
-      confirmButton.textContent = "Working…";
+      confirmButton.textContent = jvT("ui.5474eef8d0f1");
     }
     if (dialogError) dialogError.hidden = true;
 
@@ -1176,7 +1176,7 @@ if (systemPower && systemDialog) {
       }
       if (response.status === 202 && result.accepted) {
         if (dialogTitle) dialogTitle.textContent = copy.working;
-        if (dialogMessage) dialogMessage.textContent = result.message || "JustVoxel accepted the system action.";
+        if (dialogMessage) dialogMessage.textContent = result.message || jvT("ui.279acc4bb281");
         if (dialogPlayers) dialogPlayers.hidden = true;
         if (dialogUpdate) dialogUpdate.hidden = true;
         if (cancelButton) cancelButton.hidden = true;
@@ -1184,9 +1184,9 @@ if (systemPower && systemDialog) {
         return;
       }
 
-      showActionError(result.message || result.reason || "The system action was not accepted.");
+      showActionError(result.message || result.reason || jvT("ui.c68490537f5e"));
     } catch (_) {
-      showActionError("The system action service is unavailable. Nothing was submitted again automatically.");
+      showActionError(jvT("ui.705c81356a5c"));
     }
   };
 
@@ -1278,7 +1278,7 @@ const initSystemUpdateWorkspace = () => {
 
   const deploymentVersion = (deployment, fallback) => {
     if (!deployment) return fallback;
-    return deployment.version || fallback || "Deployment";
+    return deployment.version || fallback || jvT("ui.870a8ffd98f4");
   };
 
   const deploymentDetail = (deployment) => {
@@ -1306,13 +1306,13 @@ const initSystemUpdateWorkspace = () => {
   const updateWarningText = () => {
     if (!warningText) return;
     warningText.textContent = quickToggle && quickToggle.checked
-      ? "Player warning: 10 seconds"
-      : "Player warning: 60 seconds";
+      ? jvT("ui.f3ab88d5b2cc")
+      : jvT("ui.b2d3efa1f961");
   };
 
   const freshUpdateAvailable = () => latestStatus?.check_state === "update_available";
 
-  const baseRebootLabel = () => !latestStatus?.activation_failed && freshUpdateAvailable() ? "Update & reboot" : "Reboot into update";
+  const baseRebootLabel = () => !latestStatus?.activation_failed && freshUpdateAvailable() ? jvT("ui.fea3ff98725c") : jvT("ui.71fb283ae756");
 
   const showRebootPlayers = (result) => {
     if (!rebootPlayers) return;
@@ -1384,7 +1384,7 @@ const initSystemUpdateWorkspace = () => {
       syncActionAvailability();
       if (rebootButton) {
         rebootButton.disabled = false;
-        rebootButton.textContent = "Confirm reboot";
+        rebootButton.textContent = jvT("ui.eef42d5c5b7e");
       }
       return;
     }
@@ -1409,7 +1409,7 @@ const initSystemUpdateWorkspace = () => {
       if (rebootProgress) rebootProgress.hidden = true;
       if (rebootButton) rebootButton.textContent = baseRebootLabel();
       if (error) {
-        error.textContent = result.message || "Reboot was cancelled.";
+        error.textContent = result.message || jvT("ui.f57e85681cfe");
         error.hidden = false;
       }
       syncActionAvailability();
@@ -1421,12 +1421,12 @@ const initSystemUpdateWorkspace = () => {
       hideRebootPlayers();
       syncActionAvailability();
       if (rebootProgress) rebootProgress.hidden = false;
-      if (rebootButton) rebootButton.textContent = "Rebooting…";
+      if (rebootButton) rebootButton.textContent = jvT("ui.568681c5c2b8");
 
       if (result.state === "countdown") {
         if (rebootMessage) {
           const warning = Number(result.warning_seconds || 60);
-          rebootMessage.textContent = "Player warning in progress (" + warning + " seconds).";
+          rebootMessage.textContent = jvT("ui.1ee0168d311b") + warning + " seconds).";
         }
         startVisibleCountdown(result.deadline_unix);
       } else {
@@ -1436,10 +1436,10 @@ const initSystemUpdateWorkspace = () => {
         }
         if (rebootCountdown) rebootCountdown.textContent = "";
         if (rebootMessage) {
-          if (result.state === "queued") rebootMessage.textContent = "Preparing reboot…";
-          if (result.state === "stopping") rebootMessage.textContent = "Stopping Minecraft…";
-          if (result.state === "backup") rebootMessage.textContent = "Creating Minecraft backup…";
-          if (result.state === "rebooting") rebootMessage.textContent = "Rebooting JustVoxel…";
+          if (result.state === "queued") rebootMessage.textContent = jvT("ui.5bc83aba3458");
+          if (result.state === "stopping") rebootMessage.textContent = jvT("ui.00ec00d5b651");
+          if (result.state === "backup") rebootMessage.textContent = jvT("ui.f47aad1860f5");
+          if (result.state === "rebooting") rebootMessage.textContent = jvT("ui.79235042a9f8");
         }
       }
     }
@@ -1447,22 +1447,22 @@ const initSystemUpdateWorkspace = () => {
 
   const renderSystemUpdate = (status) => {
     latestStatus = status;
-    if (runningValue) runningValue.textContent = deploymentVersion(status.running, "Current image");
+    if (runningValue) runningValue.textContent = deploymentVersion(status.running, jvT("ui.e4ffce61e120"));
     if (runningImage) runningImage.textContent = deploymentDetail(status.running);
-    if (stagedValue) stagedValue.textContent = status.staged ? deploymentVersion(status.staged, "Staged image") : "None";
+    if (stagedValue) stagedValue.textContent = status.staged ? deploymentVersion(status.staged, jvT("ui.83c4e2f49cc0")) : jvT("ui.dc937b598926");
     if (stagedImage) stagedImage.textContent = deploymentDetail(status.staged);
 
     if (availableValue) {
       if (!status.checked) {
-        availableValue.textContent = checking ? "Checking…" : "Not checked";
+        availableValue.textContent = checking ? jvT("ui.ec963ffc911b") : jvT("ui.d16948e73a68");
       } else if (status.check_state === "update_available") {
-        availableValue.textContent = deploymentVersion(status.available, "New image available");
+        availableValue.textContent = deploymentVersion(status.available, jvT("ui.d87349fb3b49"));
       } else if (status.check_state === "staged_current") {
-        availableValue.textContent = "Already staged";
+        availableValue.textContent = jvT("ui.0e297fffef8a");
       } else if (status.check_state === "current") {
-        availableValue.textContent = "No newer image";
+        availableValue.textContent = jvT("ui.e67082c9b94f");
       } else {
-        availableValue.textContent = "Unknown";
+        availableValue.textContent = jvT("ui.b764cdc0eab7");
       }
     }
     if (availableImage) {
@@ -1473,21 +1473,21 @@ const initSystemUpdateWorkspace = () => {
 
     if (state) {
       if (status.activation_failed) {
-        state.textContent = status.recovery_message || "The staged image did not activate on the previous reboot. See Update logs.";
+        state.textContent = status.recovery_message || jvT("ui.38176da8c559");
       } else if (status.read_only) {
-        state.textContent = "System updates are unavailable on this read-only deployment.";
+        state.textContent = jvT("ui.5b7ffa3abf12");
       } else if (status.checked) {
-        state.textContent = status.message || "Registry check complete.";
+        state.textContent = status.message || jvT("ui.4217335b2719");
       } else if (status.reboot_required) {
-        state.textContent = "An update is staged. Checking the registry for anything newer…";
+        state.textContent = jvT("ui.05c1ec7b6cd1");
       } else {
-        state.textContent = checking ? "Checking the registry for updates…" : "Ready to check for updates.";
+        state.textContent = checking ? jvT("ui.a8d707f462eb") : jvT("ui.1c97a3febb96");
       }
     }
 
     const showReboot = Boolean(status.reboot_required) || status.check_state === "update_available";
     if (rebootPanel) rebootPanel.hidden = !showReboot;
-    if (rebootTitle) rebootTitle.textContent = freshUpdateAvailable() ? "Update and reboot" : "Reboot to apply staged update";
+    if (rebootTitle) rebootTitle.textContent = freshUpdateAvailable() ? jvT("ui.585fb06e9520") : jvT("ui.f5fd3fb1a07f");
     if (!status.reboot_required && !freshUpdateAvailable()) {
       rebootWorkflowActive = false;
       pendingPlayerConfirmation = false;
@@ -1508,10 +1508,10 @@ const initSystemUpdateWorkspace = () => {
 
   const showSystemUpdateError = (message, preserveState = false) => {
     if (error) {
-      error.textContent = message || "System update information is unavailable.";
+      error.textContent = message || jvT("ui.3eb4a4922fd4");
       error.hidden = false;
     }
-    if (state && !preserveState) state.textContent = "System update unavailable.";
+    if (state && !preserveState) state.textContent = jvT("ui.8aea8af4c3a7");
     syncActionAvailability();
   };
 
@@ -1568,7 +1568,7 @@ const initSystemUpdateWorkspace = () => {
     });
     if (handleAuthResponse(response)) return null;
     const result = await readResponse(response);
-    if (!response.ok) throw new Error(result.error || "System update status is unavailable.");
+    if (!response.ok) throw new Error(result.error || jvT("ui.c87dd5a532c0"));
     renderSystemUpdate(result);
     if (result.reboot_required) await pollRebootStatus();
     return result;
@@ -1578,26 +1578,26 @@ const initSystemUpdateWorkspace = () => {
     const sequence = ++checkSequence;
     checking = true;
     if (error) error.hidden = true;
-    if (availableValue) availableValue.textContent = "Checking…";
+    if (availableValue) availableValue.textContent = jvT("ui.ec963ffc911b");
     if (availableImage) availableImage.textContent = "";
-    if (state) state.textContent = "Checking the registry for updates…";
+    if (state) state.textContent = jvT("ui.a8d707f462eb");
     syncActionAvailability();
 
     try {
       const local = await loadLocalSystemUpdateStatus();
       if (!local || sequence !== checkSequence) return;
       if (local.read_only) {
-        if (availableValue) availableValue.textContent = "Unavailable";
+        if (availableValue) availableValue.textContent = jvT("ui.ca1844969742");
         return;
       }
-      if (!csrfInput) throw new Error("Update check is unavailable.");
+      if (!csrfInput) throw new Error(jvT("ui.a6257738e943"));
 
       if (state) {
         state.textContent = local.activation_failed ? local.recovery_message : local.reboot_required
-          ? "An update is staged. Checking the registry for anything newer…"
-          : "Checking the registry for updates…";
+          ? jvT("ui.05c1ec7b6cd1")
+          : jvT("ui.a8d707f462eb");
       }
-      if (availableValue) availableValue.textContent = "Checking…";
+      if (availableValue) availableValue.textContent = jvT("ui.ec963ffc911b");
 
       const body = new URLSearchParams({ csrf: csrfInput.value });
       const response = await fetch("/api/system-updates/check", {
@@ -1612,20 +1612,20 @@ const initSystemUpdateWorkspace = () => {
       });
       if (handleAuthResponse(response)) return;
       const result = await readResponse(response);
-      if (!response.ok) throw new Error(result.error || "Registry update check failed.");
+      if (!response.ok) throw new Error(result.error || jvT("ui.fded81ded2ed"));
       if (sequence !== checkSequence) return;
       renderSystemUpdate(result);
       if (result.reboot_required) await pollRebootStatus();
     } catch (caught) {
       if (sequence !== checkSequence) return;
-      if (availableValue) availableValue.textContent = "Check failed";
+      if (availableValue) availableValue.textContent = jvT("ui.c8813c1128d5");
       if (availableImage) availableImage.textContent = "";
       if (state) {
         state.textContent = latestStatus?.activation_failed ? latestStatus.recovery_message : latestStatus?.reboot_required
-          ? "Staged update shown. Registry freshness could not be verified."
-          : "Running deployment shown. Registry freshness could not be verified.";
+          ? jvT("ui.91f978bbee4c")
+          : jvT("ui.6809eed29996");
       }
-      showSystemUpdateError(caught?.message || "Could not check the registry for updates.", true);
+      showSystemUpdateError(caught?.message || jvT("ui.62083bd54303"), true);
     } finally {
       if (sequence === checkSequence) {
         checking = false;
@@ -1642,7 +1642,7 @@ const initSystemUpdateWorkspace = () => {
     if (rebootWorkflowActive || updating || checking || !csrfInput || !rebootButton) return;
 
     rebootButton.disabled = true;
-    rebootButton.textContent = "Checking…";
+    rebootButton.textContent = jvT("ui.ec963ffc911b");
     if (error) error.hidden = true;
 
     const body = new URLSearchParams();
@@ -1671,7 +1671,7 @@ const initSystemUpdateWorkspace = () => {
       if (!response.ok) {
         renderRebootStatus(result);
         if (error && error.hidden) {
-          error.textContent = result.message || result.error || "Reboot workflow could not be started.";
+          error.textContent = result.message || result.error || jvT("ui.c6dc8963b640");
           error.hidden = false;
         }
         return;
@@ -1682,7 +1682,7 @@ const initSystemUpdateWorkspace = () => {
       rebootWorkflowActive = false;
       if (rebootButton) rebootButton.textContent = baseRebootLabel();
       if (error) {
-        error.textContent = "Reboot workflow could not be started.";
+        error.textContent = jvT("ui.c6dc8963b640");
         error.hidden = false;
       }
       syncActionAvailability();
@@ -1695,9 +1695,9 @@ const initSystemUpdateWorkspace = () => {
     updateButton.disabled = true;
     updateButton.classList.add("is-busy");
     updateButton.setAttribute("aria-busy", "true");
-    updateButton.textContent = rebootAfter ? "Downloading…" : "Downloading…";
+    updateButton.textContent = rebootAfter ? jvT("ui.a778d3492af2") : jvT("ui.a778d3492af2");
     if (rebootButton) rebootButton.disabled = true;
-    if (state) state.textContent = "Downloading and staging the latest JustVoxel image… Minecraft keeps running.";
+    if (state) state.textContent = jvT("ui.a732f56a855b");
     if (error) error.hidden = true;
     syncActionAvailability();
 
@@ -1715,7 +1715,7 @@ const initSystemUpdateWorkspace = () => {
       if (handleAuthResponse(response)) return;
       const result = await readResponse(response);
       if (!response.ok) {
-        showSystemUpdateError(result.error || "System update failed.");
+        showSystemUpdateError(result.error || jvT("ui.ad183bccc3c3"));
         return;
       }
       renderSystemUpdate(result);
@@ -1728,12 +1728,12 @@ const initSystemUpdateWorkspace = () => {
         }
       }
     } catch (_) {
-      showSystemUpdateError("System update service is unavailable. Nothing was submitted again automatically.");
+      showSystemUpdateError(jvT("ui.31f827ccdce3"));
     } finally {
       updating = false;
       updateButton.classList.remove("is-busy");
       updateButton.removeAttribute("aria-busy");
-      updateButton.textContent = "Download & stage";
+      updateButton.textContent = jvT("ui.2f0480a1438d");
       syncActionAvailability();
     }
   };
@@ -1745,7 +1745,7 @@ const initSystemUpdateWorkspace = () => {
     resetPlayerConfirmation();
     updating = true;
     syncActionAvailability();
-    if (state) state.textContent = "Preparing the staged update for another reboot…";
+    if (state) state.textContent = jvT("ui.273af1640c6a");
     if (error) error.hidden = true;
     try {
       const response = await fetch("/api/system-updates/force", {
@@ -1759,13 +1759,13 @@ const initSystemUpdateWorkspace = () => {
         // The failed command may have changed deployments. Refresh authority
         // before deciding whether recovery can still be offered.
         await loadLocalSystemUpdateStatus();
-        showSystemUpdateError(result.error || "Update recovery failed. See Update logs.", true);
+        showSystemUpdateError(result.error || jvT("ui.d42b64c5b7ff"), true);
         return;
       }
       renderSystemUpdate(result);
     } catch (_) {
       latestStatus = null;
-      showSystemUpdateError("Update recovery status is unavailable. Refresh before continuing.");
+      showSystemUpdateError(jvT("ui.5a7bebeab16a"));
     } finally {
       updating = false;
       syncActionAvailability();
@@ -1983,24 +1983,24 @@ window.JustVoxelLiveConsole = (() => {
   let timer = null;
   let controller = null;
   let reconnecting = false;
-  const labels = { setup: "First-run Setup", minecraft_reset: "Reset Minecraft", factory_reset: "Full Factory Reset" };
+  const labels = { setup: jvT("ui.a2d1b5fba925"), minecraft_reset: jvT("ui.979e2ada0bd5"), factory_reset: jvT("ui.20b6891d2ddb") };
   const stageLabels = {
-    storage_preflight: "Storage", storage_snapshot: "Storage", storage_verified: "Storage",
-    runtime_preflight: "Runtime", runtime_config: "Runtime", minecraft_verify: "Minecraft",
-    final_validation: "Verification", verifying: "Verification", validating: "Validation",
-    runtime_rollback: "Recovery", storage_rollback: "Recovery", runtime_recovery: "Recovery", storage_recovery: "Recovery",
-    resetting: "Removing runtime", resetting_runtime: "Cleaning appliance state", resetting_identity: "Resetting users",
-    safety_backup: "Safety backup",
+    storage_preflight: jvT("ui.a69c4dece144"), storage_snapshot: jvT("ui.a69c4dece144"), storage_verified: jvT("ui.a69c4dece144"),
+    runtime_preflight: jvT("ui.109311589787"), runtime_config: jvT("ui.109311589787"), minecraft_verify: "Minecraft",
+    final_validation: jvT("ui.7140f4f19dec"), verifying: jvT("ui.7140f4f19dec"), validating: jvT("ui.68e1ca575295"),
+    runtime_rollback: jvT("ui.48f6a8d5688b"), storage_rollback: jvT("ui.48f6a8d5688b"), runtime_recovery: jvT("ui.48f6a8d5688b"), storage_recovery: jvT("ui.48f6a8d5688b"),
+    resetting: jvT("ui.a16f0e9fe92d"), resetting_runtime: jvT("ui.35f218878fbc"), resetting_identity: jvT("ui.a647374682e9"),
+    safety_backup: jvT("ui.31d98a860687"),
   };
   const stateLabel = (state) => ({
-    succeeded: "Complete", resolved: "Complete", rolled_back: "Rolled back",
-    needs_attention: "Needs attention", running: "Running", verifying: "Verifying",
-    queued: "Queued", validating: "Validating", rolling_back: "Rolling back",
-  }[state] || "Live");
+    succeeded: jvT("ui.143b270a3260"), resolved: jvT("ui.143b270a3260"), rolled_back: jvT("ui.71592236d852"),
+    needs_attention: jvT("ui.c1ebc7817870"), running: jvT("ui.f4ccae29e1bb"), verifying: jvT("ui.a7d4a9f301ed"),
+    queued: jvT("ui.661ff40a07e0"), validating: jvT("ui.5a1a167e3d90"), rolling_back: jvT("ui.8b9e964b606b"),
+  }[state] || jvT("ui.b64ac05f17e6"));
   const showState = () => {
     const stage = Object.prototype.hasOwnProperty.call(stageLabels, selected.stage) ? stageLabels[selected.stage] : "";
     label.textContent = labels[selected.kind] + (stage ? ` · ${stage}` : "");
-    indicator.textContent = reconnecting ? "Reconnecting…" : stateLabel(selected.state);
+    indicator.textContent = reconnecting ? jvT("ui.27b80374e115") : stateLabel(selected.state);
   };
   const stop = () => {
     generation += 1;
@@ -2028,7 +2028,7 @@ window.JustVoxelLiveConsole = (() => {
     const header = make("header", "system-workspace-header live-console-header");
     header.setAttribute("data-workspace-drag-handle", "");
     const heading = make("div", "");
-    const title = make("h2", "", "Live Console");
+    const title = make("h2", "", jvT("ui.7cac54a8cfc3"));
     title.id = "live-console-title";
     heading.append(make("p", "eyebrow", "JustVoxel"), title);
     const dismiss = make("button", "secondary system-monitor-header-button workspace-header-close");
@@ -2044,7 +2044,7 @@ window.JustVoxelLiveConsole = (() => {
     svg.append(path);
     dismiss.append(svg);
     dismiss.type = "button";
-    dismiss.setAttribute("aria-label", "Close Live Console");
+    dismiss.setAttribute("aria-label", jvT("ui.001c794ce986"));
     dismiss.addEventListener("click", close);
     header.append(heading, dismiss);
     const context = make("div", "live-console-context");
@@ -2054,7 +2054,7 @@ window.JustVoxelLiveConsole = (() => {
     context.append(label, indicator);
     viewer = make("pre", "live-console-transcript", "");
     viewer.tabIndex = 0;
-    viewer.setAttribute("aria-label", "Operation execution trace");
+    viewer.setAttribute("aria-label", jvT("ui.d690a8f6ded8"));
     shell.append(header, context, viewer);
     dialog.append(shell);
     document.body.append(dialog);
@@ -2094,14 +2094,14 @@ window.JustVoxelLiveConsole = (() => {
         }
         const payload = await response.json().catch(() => ({}));
         if (!current()) return;
-        if (String(payload.error || "").toLowerCase().includes("password change")) {
+        if (String(jvC(payload.error || "")).toLowerCase().includes("password change")) {
           close();
           window.location.assign("/password");
           return;
         }
       }
       if (!response.ok || !/^text\/plain(?:;|$)/i.test(response.headers.get("Content-Type") || "")) {
-        throw new Error("Transcript unavailable");
+        throw new Error(jvT("ui.1fb1cbf2b811"));
       }
       const transcript = await response.text();
       if (!current()) return;
@@ -2218,7 +2218,7 @@ if (storageOpen && storageDialog) {
 
   const loadStorage = async (url = "/workspace/storage", request = {}) => {
     const sequence = ++loadSequence;
-    if (state) state.textContent = "Loading storage…";
+    if (state) state.textContent = jvT("ui.dd427d4c1995");
     if (refreshButton) refreshButton.disabled = true;
     try {
       await ensureStorageBrowserAssets();
@@ -2237,13 +2237,13 @@ if (storageOpen && storageDialog) {
         window.location.assign("/login");
         return;
       }
-      if (response.status === 403) throw new Error("Administrator access required.");
-      if (!response.ok) throw new Error("Storage discovery is unavailable.");
+      if (response.status === 403) throw new Error(jvT("ui.2d3d0b30bde9"));
+      if (!response.ok) throw new Error(jvT("ui.6225995eb81b"));
       const markup = await response.text();
       if (sequence !== loadSequence || !content) return;
       content.innerHTML = markup;
       const root = content.querySelector("[data-storage-browser-root]");
-      if (!root || !window.JustVoxelStorageBrowser?.init) throw new Error("Storage browser could not be initialized.");
+      if (!root || !window.JustVoxelStorageBrowser?.init) throw new Error(jvT("ui.ecfe1801cd30"));
       window.JustVoxelStorageBrowser.init(root);
       window.JustVoxelNewBackups?.init(root);
       root.querySelectorAll('form[action^="/workspace/storage/destination/"]').forEach(form => {
@@ -2259,7 +2259,7 @@ if (storageOpen && storageDialog) {
     } catch (error) {
       if (sequence !== loadSequence) return;
       if (content) content.replaceChildren();
-      if (state) state.textContent = error?.message || "Storage discovery is unavailable.";
+      if (state) state.textContent = error?.message || jvT("ui.6225995eb81b");
     } finally {
       if (sequence === loadSequence && refreshButton) refreshButton.disabled = false;
     }
@@ -2340,10 +2340,10 @@ if (backupsOpen && backupsDialog) {
   };
 
   const renderBackupsMarkup = (markup) => {
-    if (!content) throw new Error("Backups workspace is unavailable.");
+    if (!content) throw new Error(jvT("ui.ca1e384883f7"));
     content.innerHTML = markup;
     const root = content.querySelector("[data-backups-workspace-root]");
-    if (!root) throw new Error("Backups response could not be rendered.");
+    if (!root) throw new Error(jvT("ui.bb2b17baf73c"));
 
     const handleSubmit = async (event) => {
       const form = event.target.closest("form");
@@ -2360,7 +2360,7 @@ if (backupsOpen && backupsDialog) {
       if (reviewDialog) reviewDialog.dataset.busy = "true";
       if (reviewClose) reviewClose.disabled = true;
       if (submitter) submitter.disabled = true;
-      if (state) state.textContent = "Working…";
+      if (state) state.textContent = jvT("ui.5474eef8d0f1");
 
       try {
         const body = new URLSearchParams();
@@ -2395,15 +2395,15 @@ if (backupsOpen && backupsDialog) {
         }
         if (response.status === 403) {
           const message = await response.text();
-          if (message.toLowerCase().includes("password change")) {
+          if (jvC(message).toLowerCase().includes("password change")) {
             window.location.assign("/password");
             return;
           }
-          throw new Error("Administrator access required.");
+          throw new Error(jvT("ui.2d3d0b30bde9"));
         }
         if (!response.ok) {
           const message = await response.text();
-          throw new Error(message.trim() || "Backup operation could not be completed.");
+          throw new Error(message.trim() || jvT("ui.90b05e7eb0f5"));
         }
 
         const responseMarkup = await response.text();
@@ -2415,7 +2415,7 @@ if (backupsOpen && backupsDialog) {
         if (reviewDialog) reviewDialog.dataset.busy = "false";
         if (reviewClose) reviewClose.disabled = false;
         if (submitter) submitter.disabled = false;
-        if (state) state.textContent = error?.message || "Backup operation could not be completed.";
+        if (state) state.textContent = error?.message || jvT("ui.90b05e7eb0f5");
       }
     };
 
@@ -2445,7 +2445,7 @@ if (backupsOpen && backupsDialog) {
     if (globalThis.justVoxelSelectionReady) await globalThis.justVoxelSelectionReady;
     const selection = globalThis.justVoxelSelectionGeneration.backups;
     const sequence = ++loadSequence;
-    if (state) state.textContent = "Loading backups…";
+    if (state) state.textContent = jvT("ui.20af4b11362c");
     if (refreshButton) refreshButton.disabled = true;
     try {
       await ensureBackupsAssets();
@@ -2470,13 +2470,13 @@ if (backupsOpen && backupsDialog) {
       }
       if (response.status === 403) {
         const message = await response.text();
-        if (message.toLowerCase().includes("password change")) {
+        if (jvC(message).toLowerCase().includes("password change")) {
           window.location.assign("/password");
           return;
         }
-        throw new Error("Administrator access required.");
+        throw new Error(jvT("ui.2d3d0b30bde9"));
       }
-      if (!response.ok) throw new Error("Backups are unavailable.");
+      if (!response.ok) throw new Error(jvT("ui.1e30d919bf9e"));
 
       const markup = await response.text();
       if (sequence !== loadSequence || selection !== globalThis.justVoxelSelectionGeneration.backups) return;
@@ -2491,7 +2491,7 @@ if (backupsOpen && backupsDialog) {
     } catch (error) {
       if (sequence !== loadSequence || selection !== globalThis.justVoxelSelectionGeneration.backups) return;
       if (content) content.replaceChildren();
-      if (state) state.textContent = error?.message || "Backups are unavailable.";
+      if (state) state.textContent = error?.message || jvT("ui.1e30d919bf9e");
     } finally {
       if ((sequence === loadSequence && selection === globalThis.justVoxelSelectionGeneration.backups) && refreshButton) refreshButton.disabled = false;
     }
@@ -2616,17 +2616,17 @@ if (migrationOpen && migrationDialog) {
   const requestMigrationSMBPassword = (purpose) => new Promise((resolve) => {
     const dialog = document.createElement("dialog");
     dialog.className = "system-action-dialog";
-    dialog.setAttribute("aria-label", "SMB credentials");
+    dialog.setAttribute("aria-label", jvT("ui.c144fd7c3b42"));
     const shell = document.createElement("div");
     shell.className = "system-action-dialog-content";
     const title = document.createElement("h2");
-    title.textContent = "SMB password";
+    title.textContent = jvT("ui.ae34ce1c7e57");
     const copy = document.createElement("p");
     copy.textContent = purpose === "import"
-      ? "Enter the SMB password so JustVoxel can inspect and reopen this Import source."
-      : "Enter the SMB password so JustVoxel can write the reviewed Export.";
+      ? jvT("ui.cbbbd4e8cf9a")
+      : jvT("ui.e07626c4be0b");
     const label = document.createElement("label");
-    label.textContent = "SMB password";
+    label.textContent = jvT("ui.ae34ce1c7e57");
     const input = document.createElement("input");
     input.type = "password";
     input.autocomplete = "off";
@@ -2637,10 +2637,10 @@ if (migrationOpen && migrationDialog) {
     const cancel = document.createElement("button");
     cancel.type = "button";
     cancel.className = "secondary";
-    cancel.textContent = "Cancel";
+    cancel.textContent = jvT("ui.19766ed6ccb2");
     const use = document.createElement("button");
     use.type = "button";
-    use.textContent = "Continue";
+    use.textContent = jvT("ui.31fbef162594");
     actions.append(cancel, use);
     shell.append(title, copy, label, actions);
     dialog.appendChild(shell);
@@ -2750,7 +2750,7 @@ if (migrationOpen && migrationDialog) {
     }
     if (response.status === 403) {
       const message = await response.clone().text();
-      if (message.toLowerCase().includes("password change")) {
+      if (jvC(message).toLowerCase().includes("password change")) {
         window.location.assign("/password");
         return true;
       }
@@ -2767,9 +2767,9 @@ if (migrationOpen && migrationDialog) {
 
   const renderMigrationMarkup = (markup, responseURL, preserveLocation = false) => {
     const selection = globalThis.justVoxelSelectionGeneration.migration;
-    if (!content) throw new Error("Migration workspace is unavailable.");
+    if (!content) throw new Error(jvT("ui.189db47cd63c"));
     const root = extractMigrationRoot(markup);
-    if (!root) throw new Error("Migration response could not be rendered.");
+    if (!root) throw new Error(jvT("ui.e83f2f640a25"));
 
     const renderedURL = new URL(responseURL, window.location.href);
     currentURL = renderedURL.pathname + renderedURL.search;
@@ -2820,20 +2820,20 @@ if (migrationOpen && migrationDialog) {
         const recovery = document.createElement("div");
         recovery.className = "notice warning";
         recovery.dataset.migrationResetRecovery = "true";
-        recovery.innerHTML = "<strong>A previous Full Factory Reset stopped before completion.</strong><br>Keep the current server data, release the blocked operation, and review this migration again.";
+        recovery.innerHTML = `<strong>${jvH("ui.6b24d3da910b")}</strong><br>${jvH("ui.f03112a21ee8")}`;
         const actions = document.createElement("div");
         actions.className = "action-row";
         const button = document.createElement("button");
         button.type = "button";
         button.className = "secondary";
-        button.textContent = "Keep current server and review again";
+        button.textContent = jvT("ui.fa4efc5678a7");
         actions.appendChild(button);
         recovery.appendChild(actions);
         target.insertAdjacentElement("afterend", recovery);
 
         button.addEventListener("click", async () => {
           button.disabled = true;
-          setMigrationBusy("Resolving previous failed Factory Reset…");
+          setMigrationBusy(jvT("ui.5bf7125616a4"));
           const body = new URLSearchParams({
             csrf,
             operation_id: operation.operation_id,
@@ -2852,14 +2852,14 @@ if (migrationOpen && migrationDialog) {
             });
             if (await handleMigrationAuth(response)) return;
             const result = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(result.error || "Failed Factory Reset could not be resolved.");
+            if (!response.ok) throw new Error(result.error || jvT("ui.7cfc47e3f260"));
             if (selection !== globalThis.justVoxelSelectionGeneration.migration) return;
-            setMigrationBusy("Previous failed Factory Reset resolved. Reloading migration…", "info");
+            setMigrationBusy(jvT("ui.ca7e73d1bf34"), "info");
             await loadMigration(tabURLs[currentTab]);
           } catch (error) {
             if (selection !== globalThis.justVoxelSelectionGeneration.migration) return;
             button.disabled = false;
-            setMigrationBusy(error?.message || "Failed Factory Reset could not be resolved.", "error");
+            setMigrationBusy(error?.message || jvT("ui.7cfc47e3f260"), "error");
           }
         });
       } catch (_) {
@@ -2881,7 +2881,7 @@ if (migrationOpen && migrationDialog) {
       const submitter = event.submitter;
       if (submitter) submitter.disabled = true;
       const isReview = action.pathname.endsWith("/review");
-      setMigrationBusy(isReview ? "Inspecting source and building review…" : "Starting reviewed migration…");
+      setMigrationBusy(isReview ? jvT("ui.e0fd374cce36") : jvT("ui.e447c6e994b8"));
 
       try {
         const body = new URLSearchParams();
@@ -2937,13 +2937,13 @@ if (migrationOpen && migrationDialog) {
         const response = await sendMigration();
         if (selection !== globalThis.justVoxelSelectionGeneration.migration) return;
         if (await handleMigrationAuth(response)) return;
-        if (response.status === 403) throw new Error("Administrator access required.");
+        if (response.status === 403) throw new Error(jvT("ui.2d3d0b30bde9"));
 
         const responseMarkup = await response.text();
         if (selection !== globalThis.justVoxelSelectionGeneration.migration) return;
         if (!response.ok && !responseMarkup.includes("data-migration-workspace-root")) {
           const detail = responseMarkup.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-          throw new Error(detail || `Migration request failed (HTTP ${response.status}).`);
+          throw new Error(detail || jvT("ui.23d3fe85833f", {v0: (response.status)}));
         }
         const responseURL = response.url || action.pathname;
         if (action.pathname === "/workspace/migration/recovery/resolve" && new URL(responseURL, window.location.href).pathname === "/workspace/migration") {
@@ -2961,7 +2961,7 @@ if (migrationOpen && migrationDialog) {
       } catch (error) {
         if (error?.name === "AbortError" || selection !== globalThis.justVoxelSelectionGeneration.migration) return;
         if (submitter && submitter.isConnected) submitter.disabled = false;
-        setMigrationBusy(error?.message || "Migration operation could not be completed.", "error");
+        setMigrationBusy(error?.message || jvT("ui.db7aa31acc6c"), "error");
       } finally {
         if (migrationSubmitController === submitController) migrationSubmitController = null;
       }
@@ -3015,7 +3015,7 @@ if (migrationOpen && migrationDialog) {
     migrationLoadController?.abort();
     const loadController = new AbortController();
     migrationLoadController = loadController;
-    setMigrationBusy("Loading migration…");
+    setMigrationBusy(jvT("ui.32b3e138ccff"));
     if (refreshButton) refreshButton.disabled = true;
     try {
       await ensureMigrationAssets();
@@ -3029,8 +3029,8 @@ if (migrationOpen && migrationDialog) {
       });
       if (sequence !== loadSequence || selection !== globalThis.justVoxelSelectionGeneration.migration) return;
       if (await handleMigrationAuth(response)) return;
-      if (response.status === 403) throw new Error("Administrator access required.");
-      if (!response.ok) throw new Error("Migration is unavailable.");
+      if (response.status === 403) throw new Error(jvT("ui.2d3d0b30bde9"));
+      if (!response.ok) throw new Error(jvT("ui.9418a8c7b777"));
 
       const finalURL = new URL(response.url || url, window.location.href);
       if (finalURL.pathname === "/workspace/migration") {
@@ -3044,7 +3044,7 @@ if (migrationOpen && migrationDialog) {
     } catch (error) {
       if (error?.name === "AbortError" || sequence !== loadSequence || selection !== globalThis.justVoxelSelectionGeneration.migration) return;
       if (content) content.replaceChildren();
-      setMigrationBusy(error?.message || "Migration is unavailable.");
+      setMigrationBusy(error?.message || jvT("ui.9418a8c7b777"));
       state?.classList.remove("is-busy");
       migrationDialog.classList.remove("is-busy");
     } finally {
@@ -3061,7 +3061,7 @@ if (migrationOpen && migrationDialog) {
     migrationLoadController?.abort();
     const loadController = new AbortController();
     migrationLoadController = loadController;
-    setMigrationBusy("Loading migration…");
+    setMigrationBusy(jvT("ui.32b3e138ccff"));
     if (refreshButton) refreshButton.disabled = true;
     try {
       await ensureMigrationAssets();
@@ -3075,8 +3075,8 @@ if (migrationOpen && migrationDialog) {
       });
       if (sequence !== loadSequence || selection !== globalThis.justVoxelSelectionGeneration.migration) return;
       if (await handleMigrationAuth(response)) return;
-      if (response.status === 403) throw new Error("Administrator access required.");
-      if (!response.ok) throw new Error("Migration is unavailable.");
+      if (response.status === 403) throw new Error(jvT("ui.2d3d0b30bde9"));
+      if (!response.ok) throw new Error(jvT("ui.9418a8c7b777"));
       const finalURL = new URL(response.url, window.location.href);
       if (sequence !== loadSequence || selection !== globalThis.justVoxelSelectionGeneration.migration) return;
 
@@ -3103,7 +3103,7 @@ if (migrationOpen && migrationDialog) {
     } catch (error) {
       if (error?.name === "AbortError" || sequence !== loadSequence || selection !== globalThis.justVoxelSelectionGeneration.migration) return;
       if (content) content.replaceChildren();
-      setMigrationBusy(error?.message || "Migration is unavailable.");
+      setMigrationBusy(error?.message || jvT("ui.9418a8c7b777"));
       state?.classList.remove("is-busy");
       migrationDialog.classList.remove("is-busy");
     } finally {
@@ -3226,12 +3226,12 @@ if (systemMonitorOpen && systemMonitorDialog) {
         window.location.assign("/login");
         return;
       }
-      if (!response.ok) throw new Error("profile unavailable");
+      if (!response.ok) throw new Error(jvT("ui.97553b499b4d"));
       profile = { ...defaultProfile, ...(await response.json()) };
       if (profileStatus) profileStatus.textContent = "";
     } catch (_) {
       profile = { ...defaultProfile };
-      if (profileStatus) profileStatus.textContent = "Using default profile";
+      if (profileStatus) profileStatus.textContent = jvT("ui.eca5c13b4da8");
     }
     syncProfile();
   };
@@ -3246,7 +3246,7 @@ if (systemMonitorOpen && systemMonitorDialog) {
     body.set("process_count", String(profile.process_count || 10));
 
     saveButton.disabled = true;
-    if (profileStatus) profileStatus.textContent = "Saving…";
+    if (profileStatus) profileStatus.textContent = jvT("ui.23e39291d613");
     try {
       const response = await fetch("/api/system-monitor/profile", {
         method: "POST",
@@ -3258,14 +3258,14 @@ if (systemMonitorOpen && systemMonitorDialog) {
         window.location.assign("/login");
         return;
       }
-      if (!response.ok) throw new Error("save failed");
+      if (!response.ok) throw new Error(jvT("ui.802f2bef7c23"));
       profile = { ...defaultProfile, ...(await response.json()) };
       syncProfile();
       refreshMonitor();
-      if (profileStatus) profileStatus.textContent = "Saved";
+      if (profileStatus) profileStatus.textContent = jvT("ui.b5c120b316c2");
       if (profilePanel) profilePanel.hidden = true;
     } catch (_) {
-      if (profileStatus) profileStatus.textContent = "Could not save";
+      if (profileStatus) profileStatus.textContent = jvT("ui.16efcd21d74f");
     } finally {
       saveButton.disabled = false;
     }
@@ -3318,7 +3318,7 @@ if (systemMonitorOpen && systemMonitorDialog) {
     const table = document.createElement("table");
     const head = document.createElement("thead");
     const headRow = document.createElement("tr");
-    columns.forEach((column) => { const th = document.createElement("th"); th.textContent = column.label; headRow.appendChild(th); });
+    columns.forEach((column) => { const th = document.createElement("th"); th.textContent = jvS(column.label); headRow.appendChild(th); });
     head.appendChild(headRow);
     const body = document.createElement("tbody");
     rows.forEach((row) => {
@@ -3338,25 +3338,25 @@ if (systemMonitorOpen && systemMonitorDialog) {
     const mem = data.mem || {}, swap = data.memswap || {}, load = data.load || {};
     setText("[data-monitor-system-host]", "JustVoxel");
     renderLines("[data-monitor-system-lines]", [
-      ["Hostname", system.hostname],
-      ["Kernel", system.os_version],
-      ["Uptime", typeof uptime === "string" ? uptime : uptime.value],
+      [jvT("ui.2db533557011"), system.hostname],
+      [jvT("ui.8a716159a685"), system.os_version],
+      [jvT("ui.d63ab4711473"), typeof uptime === "string" ? uptime : uptime.value],
     ]);
     setText("[data-monitor-cpu-total]", percent(cpu.total));
-    renderLines("[data-monitor-cpu-lines]", [["Cores", cpu.cpucore], ["User", percent(cpu.user)], ["System", percent(cpu.system)], ["I/O wait", percent(cpu.iowait)], ["Idle", percent(cpu.idle)]]);
+    renderLines("[data-monitor-cpu-lines]", [[jvT("ui.7bff6181add2"), cpu.cpucore], [jvT("ui.b512d97e7cbf"), percent(cpu.user)], [jvT("ui.6725e7bbcd28"), percent(cpu.system)], ["I/O wait", percent(cpu.iowait)], [jvT("ui.ab0171ca0494"), percent(cpu.idle)]]);
     setText("[data-monitor-memory-main]", percent(mem.percent));
-    renderLines("[data-monitor-memory-lines]", [["Used", bytes(mem.used)], ["Available", bytes(mem.available)], ["Total", bytes(mem.total)], ["Swap", swap.total ? bytes(swap.used) + " / " + bytes(swap.total) : "Not used"]]);
+    renderLines("[data-monitor-memory-lines]", [[jvT("ui.ae7d8dfac9ff"), bytes(mem.used)], [jvT("ui.e674447337e8"), bytes(mem.available)], [jvT("ui.c9b3c38247f7"), bytes(mem.total)], [jvT("ui.6ec282d40a8a"), swap.total ? bytes(swap.used) + " / " + bytes(swap.total) : jvT("ui.dccafe55abe3")]]);
     setText("[data-monitor-load-main]", fixed(load.min1) + " / " + fixed(load.min5) + " / " + fixed(load.min15));
     renderLines("[data-monitor-load-lines]", [["1 minute", fixed(load.min1)], ["5 minutes", fixed(load.min5)], ["15 minutes", fixed(load.min15)]]);
     renderTable("[data-monitor-filesystem]", Array.isArray(data.fs) ? data.fs : [], [
-      {label:"Mount", render:(row)=>row.mnt_point || row.mountpoint || row.device_name},
-      {label:"Used", render:(row)=>percent(row.percent)}, {label:"Free", render:(row)=>bytes(row.free)}, {label:"Size", render:(row)=>bytes(row.size)}
+      {label:jvT("ui.d5605821c44b"), render:(row)=>row.mnt_point || row.mountpoint || row.device_name},
+      {label:jvT("ui.ae7d8dfac9ff"), render:(row)=>percent(row.percent)}, {label:jvT("ui.f411a1fb6275"), render:(row)=>bytes(row.free)}, {label:jvT("ui.1af851907331"), render:(row)=>bytes(row.size)}
     ]);
     renderTable("[data-monitor-diskio]", Array.isArray(data.diskio) ? data.diskio : [], [
-      {label:"Disk", render:(row)=>row.disk_name || row.name}, {label:"Read", render:(row)=>rate(row.read_bytes_rate_per_sec)}, {label:"Write", render:(row)=>rate(row.write_bytes_rate_per_sec)}
+      {label:jvT("ui.340e0cf3bfa8"), render:(row)=>row.disk_name || row.name}, {label:jvT("ui.9b9a8d05a7ec"), render:(row)=>rate(row.read_bytes_rate_per_sec)}, {label:jvT("ui.3f00927a7193"), render:(row)=>rate(row.write_bytes_rate_per_sec)}
     ]);
     renderTable("[data-monitor-network]", Array.isArray(data.network) ? data.network : [], [
-      {label:"Interface", render:(row)=>row.interface_name || row.name}, {label:"RX", render:(row)=>rate(row.bytes_recv_rate_per_sec)}, {label:"TX", render:(row)=>rate(row.bytes_sent_rate_per_sec)}
+      {label:jvT("ui.c26b3ed4ce70"), render:(row)=>row.interface_name || row.name}, {label:"RX", render:(row)=>rate(row.bytes_recv_rate_per_sec)}, {label:"TX", render:(row)=>rate(row.bytes_sent_rate_per_sec)}
     ]);
     const processLimit = [5, 10, 15].includes(Number(profile.process_count)) ? Number(profile.process_count) : 10;
     const processesCard = systemMonitorDialog.querySelector('[data-monitor-card="processes"]');
@@ -3364,29 +3364,29 @@ if (systemMonitorOpen && systemMonitorDialog) {
     const processes = (Array.isArray(data.processlist) ? data.processlist : [])
       .slice().sort((a,b)=>Number(b.cpu_percent || 0)-Number(a.cpu_percent || 0));
     renderTable("[data-monitor-processes]", processes.slice(0, processLimit), [
-      {label:"Process", render:(row)=>row.name}, {label:"CPU", render:(row)=>percent(row.cpu_percent)}, {label:"Memory", render:(row)=>percent(row.memory_percent)}
+      {label:jvT("ui.e083bd83e9d3"), render:(row)=>row.name}, {label:"CPU", render:(row)=>percent(row.cpu_percent)}, {label:jvT("ui.c3963aedaac6"), render:(row)=>percent(row.memory_percent)}
     ]);
     renderTable("[data-monitor-containers]", Array.isArray(data.containers) ? data.containers : [], [
-      {label:"Container", render:(row)=>row.name}, {label:"Status", render:(row)=>row.status},
+      {label:jvT("ui.0c7823e8c759"), render:(row)=>row.name}, {label:jvT("ui.920e413c7d41"), render:(row)=>row.status},
       {label:"CPU", render:(row)=>percent(row.cpu_percent ?? (row.cpu && row.cpu.total))},
-      {label:"Memory", render:(row)=>bytes(row.memory_usage ?? (row.memory && row.memory.usage))},
-      {label:"Limit", render:(row)=>bytes(row.memory_limit ?? (row.memory && row.memory.limit))}
+      {label:jvT("ui.c3963aedaac6"), render:(row)=>bytes(row.memory_usage ?? (row.memory && row.memory.usage))},
+      {label:jvT("ui.674b0ed54bf7"), render:(row)=>bytes(row.memory_limit ?? (row.memory && row.memory.limit))}
     ]);
     renderTable("[data-monitor-sensors]", Array.isArray(data.sensors) ? data.sensors : [], [
-      {label:"Sensor", render:(row)=>row.label || row.name},
-      {label:"Value", render:(row)=>row.value === undefined || row.value === null ? "—" : String(row.value) + (row.unit || "")}
+      {label:jvT("ui.162cc64ca1e4"), render:(row)=>row.label || row.name},
+      {label:jvT("ui.8e37953d23da"), render:(row)=>row.value === undefined || row.value === null ? "—" : String(row.value) + (row.unit || "")}
     ]);
     const alerts = (Array.isArray(data.alert) ? data.alert : []).filter((row) => row && (row.end === undefined || row.end === null || Number(row.end) < 0));
     const alertsCard = systemMonitorDialog.querySelector('[data-monitor-card="alerts"]');
     if (alertsCard) alertsCard.hidden = profile.alerts === false || alerts.length === 0;
     if (alerts.length > 0) {
       renderTable("[data-monitor-alerts]", alerts, [
-        {label:"State", render:(row)=>row.state},
-        {label:"Type", render:(row)=>row.type},
-        {label:"Message", render:(row)=>row.global_msg || row.desc || "Active alert"}
+        {label:jvT("ui.a3b50c476732"), render:(row)=>row.state},
+        {label:jvT("ui.baaddf70fb5d"), render:(row)=>row.type},
+        {label:jvT("ui.2f77668a9dfb"), render:(row)=>row.global_msg || row.desc || jvT("ui.c56c69f95ff5")}
       ]);
     }
-    if (state) state.textContent = "Live resources · refresh every 2 seconds";
+    if (state) state.textContent = jvT("ui.9bc551fa1148");
     if (error) error.hidden = true;
   };
   let monitorRequest = 0;
@@ -3395,12 +3395,12 @@ if (systemMonitorOpen && systemMonitorDialog) {
     try {
       const response = await fetch("/api/system-monitor", {method:"GET", credentials:"same-origin", headers:{Accept:"application/json"}, cache:"no-store"});
       if (response.status === 401) { window.location.assign("/login"); return; }
-      if (!response.ok) throw new Error("monitor unavailable");
+      if (!response.ok) throw new Error(jvT("ui.c0988d33f576"));
       const data = await response.json();
       if (request === monitorRequest) { lastMonitorData = data; renderMonitor(data); }
     } catch (_) {
-      if (state) state.textContent = "System Monitor unavailable";
-      if (error) { error.textContent = "Glances is not responding yet."; error.hidden = false; }
+      if (state) state.textContent = jvT("ui.1fb26c33bad7");
+      if (error) { error.textContent = jvT("ui.9b6afc6eb4b3"); error.hidden = false; }
     }
   };
   const stopRefresh = () => { if (refreshTimer) window.clearInterval(refreshTimer); refreshTimer = null; };
@@ -3435,18 +3435,18 @@ if (systemMonitorOpen && systemMonitorDialog) {
   profileInputs.forEach((input) => input.addEventListener("change", () => {
     profile[input.dataset.monitorProfile] = input.checked;
     syncProfile();
-    if (profileStatus) profileStatus.textContent = "Not saved";
+    if (profileStatus) profileStatus.textContent = jvT("ui.22b3467c1ba9");
   }));
   if (processCount) processCount.addEventListener("change", () => {
     profile.process_count = Number(processCount.value);
     if (lastMonitorData) renderMonitor(lastMonitorData);
-    if (profileStatus) profileStatus.textContent = "Not saved";
+    if (profileStatus) profileStatus.textContent = jvT("ui.22b3467c1ba9");
   });
   if (resetButton) resetButton.addEventListener("click", () => {
     profile = { ...defaultProfile };
     syncProfile();
     refreshMonitor();
-    if (profileStatus) profileStatus.textContent = "Not saved";
+    if (profileStatus) profileStatus.textContent = jvT("ui.22b3467c1ba9");
   });
   if (saveButton) saveButton.addEventListener("click", saveProfile);
 
@@ -3478,20 +3478,20 @@ globalThis.justVoxelOpenDeleteServer = ({name, description, csrf, request, isCur
     dialog.setAttribute("aria-labelledby", "minecraft-delete-title");
     dialog.innerHTML = `
       <form class="minecraft-delete-card">
-        <div class="minecraft-delete-heading"><div><p class="eyebrow">Minecraft action</p><h2 id="minecraft-delete-title">Delete server</h2></div><button type="button" class="secondary" data-delete-close aria-label="Close">×</button></div>
+        <div class="minecraft-delete-heading"><div><p class="eyebrow">${jvH("ui.3744cc428389")}</p><h2 id="minecraft-delete-title">${jvH("ui.7e9464a23e43")}</h2></div><button type="button" class="secondary" data-delete-close aria-label="${jvH("ui.7d9eb7acb13e")}">×</button></div>
         <p data-delete-description></p>
-        <div class="minecraft-delete-review"><dl><div><dt>Server</dt><dd data-delete-name></dd></div><div><dt>World data</dt><dd>Deleted</dd></div><div><dt>Backups</dt><dd>Preserved/history</dd></div></dl></div>
+        <div class="minecraft-delete-review"><dl><div><dt>${jvH("ui.aef7de28d529")}</dt><dd data-delete-name></dd></div><div><dt>${jvH("ui.481e2c0e53b9")}</dt><dd>Deleted</dd></div><div><dt>${jvH("ui.3334fee2c77f")}</dt><dd>Preserved/history</dd></div></dl></div>
         <div class="destructive-confirmation" data-destructive-confirmation data-destructive-idle="Slide to confirm destructive action">
-          <p class="minecraft-delete-selected">Selected server:<strong data-delete-selected></strong></p>
+          <p class="minecraft-delete-selected">${jvH("ui.b3bee314c6c2")}<strong data-delete-selected></strong></p>
           <div class="destructive-confirm-slider" data-destructive-slider-shell>
-            <span class="destructive-confirm-slider-text" data-destructive-slider-text>Slide to confirm destructive action</span>
+            <span class="destructive-confirm-slider-text" data-destructive-slider-text>${jvH("ui.7f9334299170")}</span>
             <span class="destructive-confirm-slider-thumb" aria-hidden="true">›</span>
-            <input type="range" min="0" max="100" value="0" data-destructive-slider aria-label="Slide to confirm destructive action">
+            <input type="range" min="0" max="100" value="0" data-destructive-slider aria-label="${jvH("ui.7f9334299170")}">
           </div>
-          <label class="destructive-confirm-toggle-row" data-destructive-toggle-row hidden><span class="destructive-confirm-toggle-callout">Confirm</span><input type="checkbox" class="destructive-confirm-toggle" data-destructive-toggle aria-label="Confirm destructive action"></label>
+          <label class="destructive-confirm-toggle-row" data-destructive-toggle-row hidden><span class="destructive-confirm-toggle-callout">${jvH("ui.eebdd24a77d9")}</span><input type="checkbox" class="destructive-confirm-toggle" data-destructive-toggle aria-label="${jvH("ui.e5d40b67ccca")}"></label>
         </div>
         <p class="notice error" data-delete-error role="status" hidden></p>
-        <div class="action-row"><button type="button" class="secondary" data-delete-cancel>Cancel</button><button type="submit" class="danger" data-destructive-submit disabled>Apply destructive action</button></div>
+        <div class="action-row"><button type="button" class="secondary" data-delete-cancel>${jvH("ui.19766ed6ccb2")}</button><button type="submit" class="danger" data-destructive-submit disabled>${jvH("ui.a6e53d6b90d2")}</button></div>
       </form>`;
     dialog.querySelector("[data-delete-description]").textContent = description;
     dialog.querySelector("[data-delete-name]").textContent = name;
@@ -3579,12 +3579,12 @@ function minecraftCommandGroup(name, pluginNames) {
   // Keep unique plugin commands out of the core player/gameplay groups.
   const pluginNamespace = localName && !["minecraft", "bukkit"].includes(namespace);
   if (!pluginNamespace) {
-    if (["list", "whitelist", "op", "deop", "ban", "ban-ip", "banlist", "pardon", "pardon-ip", "kick", "msg", "tell", "w", "say", "team", "teammsg"].includes(command)) return "Players & permissions";
-    if (["weather", "time", "gamemode", "gamerule", "difficulty", "give", "tp", "teleport", "seed", "summon", "effect", "enchant", "experience", "xp", "setblock", "fill", "fillbiome", "worldborder", "setworldspawn", "spawnpoint", "locate", "loot", "recipe", "advancement", "forceload", "place", "playsound", "stopsound", "particle", "title", "bossbar", "attribute", "damage", "ride", "spreadplayers"].includes(command)) return "World & gameplay";
+    if (["list", "whitelist", "op", "deop", "ban", "ban-ip", "banlist", "pardon", "pardon-ip", "kick", "msg", "tell", "w", "say", "team", "teammsg"].includes(command)) return jvT("ui.ec7d651bf756");
+    if (["weather", "time", "gamemode", "gamerule", "difficulty", "give", "tp", "teleport", "seed", "summon", "effect", "enchant", "experience", "xp", "setblock", "fill", "fillbiome", "worldborder", "setworldspawn", "spawnpoint", "locate", "loot", "recipe", "advancement", "forceload", "place", "playsound", "stopsound", "particle", "title", "bossbar", "attribute", "damage", "ride", "spreadplayers"].includes(command)) return jvT("ui.fabc90d29be4");
   }
-  if (["help", "version", "ver", "about", "plugins", "pl", "reload", "save-all", "save-on", "save-off", "datapack", "tps", "mspt", "timings", "ping", "uptime", "ram", "perf", "jfr", "debug", "restart"].includes(command)) return "Server & performance";
-  if (pluginNamespace || pluginNames.has(command)) return "Plugins";
-  return "Advanced Minecraft";
+  if (["help", "version", "ver", "about", "plugins", "pl", "reload", "save-all", "save-on", "save-off", "datapack", "tps", "mspt", "timings", "ping", "uptime", "ram", "perf", "jfr", "debug", "restart"].includes(command)) return jvT("ui.d45e70e92c95");
+  if (pluginNamespace || pluginNames.has(command)) return jvT("ui.9514b7ff4860");
+  return jvT("ui.b4fbc52a5a15");
 }
 function createMinecraftRconView({model, running, request, isCurrent}) {
   const node = (tag, text, className = "") => {
@@ -3595,21 +3595,21 @@ function createMinecraftRconView({model, running, request, isCurrent}) {
   };
   const root = node("section", undefined, "minecraft-rcon");
   const toolbar = node("div", undefined, "minecraft-rcon-toolbar");
-  const consoleButton = node("button", "Console", "secondary");
-  const commandsButton = node("button", "Commands", "secondary");
+  const consoleButton = node("button", jvT("ui.29a40861bafe"), "secondary");
+  const commandsButton = node("button", jvT("ui.b269dc4e81a5"), "secondary");
   consoleButton.type = commandsButton.type = "button";
   toolbar.append(consoleButton, commandsButton);
-  const status = node("p", running ? "" : "Server is stopped. Start it before using RCON.", "muted compact");
+  const status = node("p", running ? "" : jvT("ui.a58f91e13269"), "muted compact");
   status.setAttribute("role", "status");
   const upper = node("div", undefined, "minecraft-rcon-upper");
   const transcript = node("pre", undefined, "minecraft-rcon-transcript");
-  transcript.setAttribute("aria-label", "Minecraft console transcript");
+  transcript.setAttribute("aria-label", jvT("ui.2ab40dd11bcd"));
   const catalog = node("div", undefined, "minecraft-rcon-commands");
   const controls = node("div", undefined, "minecraft-rcon-toolbar");
   const search = node("input");
-  search.type = "search"; search.placeholder = "Search commands";
-  search.setAttribute("aria-label", "Search commands");
-  const refresh = node("button", "Refresh Commands", "secondary");
+  search.type = "search"; search.placeholder = jvT("ui.00ff7398c308");
+  search.setAttribute("aria-label", jvT("ui.00ff7398c308"));
+  const refresh = node("button", jvT("ui.a3340efc9959"), "secondary");
   refresh.type = "button";
   const discoveryStatus = node("p", "", "muted compact");
   const list = node("div", undefined, "minecraft-rcon-command-list");
@@ -3619,10 +3619,10 @@ function createMinecraftRconView({model, running, request, isCurrent}) {
   const form = node("form", undefined, "minecraft-rcon-lane");
   const input = node("input");
   input.type = "text"; input.maxLength = 1024; input.autocomplete = "off";
-  input.spellcheck = false; input.placeholder = "Enter a Minecraft command";
-  input.setAttribute("aria-label", "Minecraft command");
-  const clear = node("button", "Clear", "secondary"); clear.type = "button";
-  const send = node("button", "Send"); send.type = "submit";
+  input.spellcheck = false; input.placeholder = jvT("ui.36ef4b40d05a");
+  input.setAttribute("aria-label", jvT("ui.d7511e08ef72"));
+  const clear = node("button", jvT("ui.83b12c2216ef"), "secondary"); clear.type = "button";
+  const send = node("button", jvT("ui.f6f4688ff23d")); send.type = "submit";
   form.append(input, clear, send);
   root.append(toolbar, status, upper, form);
   let view = "console", discovering = false;
@@ -3634,7 +3634,7 @@ function createMinecraftRconView({model, running, request, isCurrent}) {
   const paintTranscript = () => {
     transcript.classList.toggle("muted", !model.executed);
     transcript.textContent = model.executed || model.transcriptCleared ? model.transcript.join("\n\n") :
-      "Enter a Minecraft command below. No sudo, podman, container name, rcon-cli, password, or shell syntax is needed. No leading slash is required.\n\n# See who is playing\nlist\n\n# Show whitelisted players\nwhitelist list\n\n# Send a message to everyone\nsay Hello everyone!\n\n# Change weather\nweather clear\n\n# Display server version\nversion";
+      jvT("ui.bd93ed9b920c") + "\n\n# " + jvT("ui.e759ae396ffa") + "\nlist" + "\n\n# " + jvT("ui.781370a8530e") + "\nwhitelist list" + "\n\n# " + jvT("ui.9b6dee597c5c") + "\nsay Hello everyone!" + "\n\n# " + jvT("ui.868dbc92cb93") + "\nweather clear" + "\n\n# " + jvT("ui.d365494c6640") + "\nversion";
     transcript.scrollTop = transcript.scrollHeight;
   };
   const clearTranscript = () => {
@@ -3660,11 +3660,11 @@ function createMinecraftRconView({model, running, request, isCurrent}) {
     if (searching && !needle) groupOpen.clear();
     searching = !!needle;
     const entries = minecraftCommandCatalog(model.commands || []).filter(entry => `${entry.name} ${entry.usage || ""} ${entry.description}`.toLowerCase().includes(needle));
-    for (const group of ["Players & permissions", "World & gameplay", "Server & performance", "Plugins", "Advanced Minecraft"]) {
+    for (const group of [jvT("ui.ec7d651bf756"), jvT("ui.fabc90d29be4"), jvT("ui.d45e70e92c95"), jvT("ui.9514b7ff4860"), jvT("ui.b4fbc52a5a15")]) {
       const members = entries.filter(entry => entry.group === group);
       if (!members.length) continue;
       const section = node("details", undefined, "minecraft-rcon-group");
-      section.open = searching || (groupOpen.get(group) ?? group === "Players & permissions");
+      section.open = searching || (groupOpen.get(group) ?? group === jvT("ui.ec7d651bf756"));
       section.addEventListener("toggle", () => {
         if (!searching && Array.from(list.children).includes(section)) groupOpen.set(group, section.open);
       });
@@ -3686,16 +3686,16 @@ function createMinecraftRconView({model, running, request, isCurrent}) {
         section.append(row);
       }
     }
-    if (!entries.length) list.append(node("p", model.commands?.length ? "No matching commands." : "Command discovery is unavailable. Use the Console to enter a known Minecraft command.", "muted"));
+    if (!entries.length) list.append(node("p", model.commands?.length ? jvT("ui.4ea824450aec") : jvT("ui.86f0defdf40b"), "muted"));
   };
   const discover = async () => {
     if (!running || discovering || model.busy || !isCurrent()) return;
-    discovering = true; updateDisabled(); discoveryStatus.textContent = "Loading commands…";
+    discovering = true; updateDisabled(); discoveryStatus.textContent = jvT("ui.c5970e1e83fb");
     try {
       const result = await request({discover: "yes"});
       if (!isCurrent()) return;
       model.commands = result.commands || []; model.partial = !!result.partial;
-      discoveryStatus.textContent = model.partial ? "Partial command list. Some help pages could not be read." : "Commands exposed by this server.";
+      discoveryStatus.textContent = model.partial ? jvT("ui.38d4ea385790") : jvT("ui.1282c228fe9f");
       paintCommands();
     } catch (error) {
       if (isCurrent() && !error.staleSelection) { discoveryStatus.textContent = error.message; paintCommands(); }
@@ -3706,7 +3706,7 @@ function createMinecraftRconView({model, running, request, isCurrent}) {
     show("commands");
     if (model.commands === null && running) void discover();
     else {
-      discoveryStatus.textContent = model.partial ? "Partial command list. Some help pages could not be read." : model.commands === null ? "" : "Commands exposed by this server.";
+      discoveryStatus.textContent = model.partial ? jvT("ui.38d4ea385790") : model.commands === null ? "" : jvT("ui.1282c228fe9f");
       paintCommands();
     }
   });
@@ -3716,7 +3716,7 @@ function createMinecraftRconView({model, running, request, isCurrent}) {
     event.preventDefault();
     if (!running || model.busy || discovering || !isCurrent() || !input.value.trim()) return;
     const command = input.value.trim();
-    show("console"); model.busy = true; updateDisabled(); status.textContent = "Sending…";
+    show("console"); model.busy = true; updateDisabled(); status.textContent = jvT("ui.b8ed5279e897");
     model.history.push(command);
     if (model.history.length > 100) model.history.shift();
     model.cursor = model.history.length; model.draft = ""; input.value = "";
@@ -3805,12 +3805,12 @@ if (minecraftOpen && minecraftDialog) {
       window.location.assign("/login");
       return null;
     }
-    if (response.status === 403 && String(payload.error || "").toLowerCase().includes("password")) {
+    if (response.status === 403 && String(jvC(payload.error || "")).toLowerCase().includes("password")) {
       window.location.assign("/password");
       return null;
     }
     if (!response.ok) {
-      throw new Error(payload.error || "Minecraft operation could not be completed.");
+      throw new Error(payload.error || jvT("ui.4d5161e70e99"));
     }
     return payload;
   };
@@ -3834,10 +3834,10 @@ if (minecraftOpen && minecraftDialog) {
     const grid = document.createElement("div");
     grid.className = "minecraft-overview-grid";
     [
-      ["Status", minecraft.state || "—"],
-      ["Version", minecraft.version || "—"],
-      ["Players", minecraft.configured ? (players.max ?? minecraft.max_players ?? "—") : "Not configured"],
-      ["Online", minecraft.configured ? (players.online ?? 0) : "—"],
+      [jvT("ui.920e413c7d41"), minecraft.state || "—"],
+      [jvT("ui.dd167905de0d"), minecraft.version || "—"],
+      [jvT("ui.84e12ac655dd"), minecraft.configured ? (players.max ?? minecraft.max_players ?? "—") : jvT("ui.dd1841d29502")],
+      [jvT("ui.0d21bd52022c"), minecraft.configured ? (players.online ?? 0) : "—"],
     ].forEach(([label, value]) => {
       const card = document.createElement("article");
       card.className = "minecraft-overview-card";
@@ -3853,12 +3853,12 @@ if (minecraftOpen && minecraftDialog) {
     playerLine.className = "minecraft-overview-playerline";
     const playerLabel = document.createElement("strong");
     playerLabel.className = "minecraft-summary-label";
-    playerLabel.textContent = "Online";
+    playerLabel.textContent = jvT("ui.0d21bd52022c");
     playerLine.appendChild(playerLabel);
-    if (!minecraft.configured || players.state === "not_configured") playerLine.appendChild(messageNode("Minecraft is not configured yet."));
-    else if (players.state === "stopped") playerLine.appendChild(messageNode("Minecraft is stopped."));
-    else if (players.state === "unavailable") playerLine.appendChild(messageNode(players.error || "Player information is temporarily unavailable."));
-    else if ((players.online ?? 0) === 0) playerLine.appendChild(messageNode("No players online."));
+    if (!minecraft.configured || players.state === "not_configured") playerLine.appendChild(messageNode(jvT("ui.bd7bbac1db61")));
+    else if (players.state === "stopped") playerLine.appendChild(messageNode(jvT("ui.04333b2f80ea")));
+    else if (players.state === "unavailable") playerLine.appendChild(messageNode(players.error || jvT("ui.7dfac59b23ae")));
+    else if ((players.online ?? 0) === 0) playerLine.appendChild(messageNode(jvT("ui.c705f28891e8")));
     else if (Array.isArray(players.names) && players.names.length > 0) {
       const list = document.createElement("div");
       list.className = "player-list";
@@ -3884,19 +3884,19 @@ if (minecraftOpen && minecraftDialog) {
       const settings = payload.minecraft || {};
       const lane = document.createElement("div");
       lane.className = "minecraft-overview-lifecycle";
-      lane.innerHTML = '<label class="minecraft-overview-boot-card"><span>Server running</span><input class="date-time-switch" type="checkbox" role="switch" name="server_running"></label><label class="minecraft-overview-boot-card"><span>Start on Boot</span><input class="date-time-switch" type="checkbox" role="switch" name="start_on_boot"></label>';
+      lane.innerHTML = `<label class="minecraft-overview-boot-card"><span>${jvH("ui.06b0ab106202")}</span><input class="date-time-switch" type="checkbox" role="switch" name="server_running"></label><label class="minecraft-overview-boot-card"><span>${jvH("ui.7f369a5b5b05")}</span><input class="date-time-switch" type="checkbox" role="switch" name="start_on_boot"></label>`;
       const running = lane.querySelector('[name="server_running"]');
       const boot = lane.querySelector('[name="start_on_boot"]');
       const runtimeState = String(minecraft.state || "").toLowerCase();
       running.checked = runtimeState === "running";
       running.disabled = !minecraft.configured || !["running", "stopped"].includes(runtimeState);
       boot.checked = Boolean(settings.network_member || settings.start_on_boot);
-      if (settings.network_member) boot.closest('label').querySelector('span').textContent = 'Start on Boot · Managed by Network';
+      if (settings.network_member) boot.closest('label').querySelector('span').textContent = jvT("ui.be81bb8c89a0");
       boot.disabled = Boolean(settings.network_member) || !payload.configured || !["running", "stopped"].includes(runtimeState);
       const selectedID = context.selected.id;
       const selectedRequest = (path, body) => requestWorkspaceJSON(path + "?" + new URLSearchParams({server: selectedID}), {method: "POST", body});
       const requiresCondition = plan => plan.compatibility_blocked || Object.entries(plan).some(([key, value]) => key.endsWith("_required") && value === true);
-      const refusalReason = plan => plan.error || plan.message || (plan.warnings || []).join(" ") || "This change requires review in Minecraft Settings before it can be applied.";
+      const refusalReason = plan => plan.error || plan.message || (plan.warnings || []).join(" ") || jvT("ui.1952254b901b");
       let pending = false;
       const change = async (control, action) => {
         const requested = control.checked;
@@ -3905,7 +3905,7 @@ if (minecraftOpen && minecraftDialog) {
         const selection = globalThis.justVoxelSelectionGeneration.minecraft;
         pending = true;
         running.disabled = boot.disabled = true;
-        if (state) state.textContent = "Applying…";
+        if (state) state.textContent = jvT("ui.3329a9bb48b9");
         let failure;
         try { await action(requested); }
         catch (error) {
@@ -3923,14 +3923,14 @@ if (minecraftOpen && minecraftDialog) {
       };
       running.addEventListener("change", () => change(running, async requested => {
         const result = await selectedRequest("/api/minecraft/servers/lifecycle", new URLSearchParams({csrf, action: requested ? "start" : "stop"}));
-        if (result && !result.ok) throw new Error(result.error || "Server action was not completed.");
+        if (result && !result.ok) throw new Error(result.error || jvT("ui.bd44764996e3"));
       }));
       boot.addEventListener("change", () => change(boot, async requested => {
         const params = new URLSearchParams({csrf, tab: "overview", start_on_boot: String(requested)});
         const plan = await selectedRequest("/api/minecraft/workspace/settings/plan", params);
         if (!plan || sequence !== loadSequence) return;
         if (requiresCondition(plan)) throw new Error(refusalReason(plan));
-        if (!plan.review) throw new Error("The settings review is unavailable. Refresh Minecraft Settings.");
+        if (!plan.review) throw new Error(jvT("ui.9f99dea1f3c0"));
         params.set("review", plan.review);
         const result = await selectedRequest("/api/minecraft/workspace/settings/apply", params);
         if (result && !result.applied) throw new Error(refusalReason(result));
@@ -3939,7 +3939,7 @@ if (minecraftOpen && minecraftDialog) {
 
       const details = document.createElement("form");
       details.className = "panel details minecraft-workspace-section minecraft-overview-details";
-      details.innerHTML = '<div class="minecraft-native-grid"><label>Server name<input name="display_name" required maxlength="64"></label><label>Server welcome message (MOTD)<input name="motd" required></label></div><div class="minecraft-native-actions"><button type="submit">Save</button></div>';
+      details.innerHTML = `<div class="minecraft-native-grid"><label>${jvH("ui.21babfed6c38")}<input name="display_name" required maxlength="64"></label><label>${jvH("ui.f6f45fa586e5")}<input name="motd" required></label></div><div class="minecraft-native-actions"><button type="submit">${jvH("ui.1509f561f241")}</button></div>`;
       details.elements.display_name.value = name;
       details.elements.motd.value = settings.motd || "";
       details.addEventListener("submit", async (event) => {
@@ -3948,7 +3948,7 @@ if (minecraftOpen && minecraftDialog) {
         const save = details.querySelector("button");
         const proposedName = details.elements.display_name.value;
         const motd = details.elements.motd.value.trim();
-        if (!motd) { if (state) state.textContent = "Server welcome message is required."; return; }
+        if (!motd) { if (state) state.textContent = jvT("ui.0e596941556e"); return; }
         save.disabled = true;
         const reloadAfterError = async (error) => {
           if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration.minecraft) return;
@@ -3996,7 +3996,7 @@ if (minecraftOpen && minecraftDialog) {
               renderSettingsReview(root, result, params, reviewOptions);
               return;
             }
-            if (!result.applied) throw new Error(result.error || "Minecraft settings were not applied.");
+            if (!result.applied) throw new Error(result.error || jvT("ui.59f7401b3446"));
           }
           await finishSave();
         } catch (error) {
@@ -4010,14 +4010,14 @@ if (minecraftOpen && minecraftDialog) {
       const danger = document.createElement("section");
       danger.className = "panel details minecraft-workspace-section minecraft-overview-delete";
       const title = document.createElement("h3");
-      title.textContent = `Delete ${name}`;
-      const description = "Permanently removes this active server and its world data. Existing backup archives are preserved as historical archives.";
+      title.textContent = jvT("ui.3468c78743f0", {v0: (name)});
+      const description = jvT("ui.e9d6a58ae67a");
       const actions = document.createElement("div");
       actions.className = "minecraft-native-actions";
       const remove = document.createElement("button");
       remove.type = "button";
       remove.className = "danger";
-      remove.textContent = "Delete Server";
+      remove.textContent = jvT("ui.056e6a5f6594");
       remove.addEventListener("click", () => openDeleteDialog(name, description, sequence));
       actions.appendChild(remove);
       danger.append(title, messageNode(description), actions);
@@ -4059,24 +4059,24 @@ if (minecraftOpen && minecraftDialog) {
       const maximumMiB = parseMemoryMiB(maxMemory.value);
       memoryStatus.classList.remove("warning", "danger");
       if (!totalMiB) {
-        memoryStatus.textContent = "System memory could not be detected. JustVoxel will validate again before Apply.";
+        memoryStatus.textContent = jvT("ui.51da904725b5");
         memoryStatus.classList.add("warning");
         return;
       }
       if (!maximumMiB) {
-        memoryStatus.textContent = "Enter memory as a size such as 6G or 6144M.";
+        memoryStatus.textContent = jvT("ui.e9efdcb72877");
         memoryStatus.classList.add("warning");
         return;
       }
       const remaining = totalMiB - maximumMiB;
       if (remaining < minimumReserveMiB) {
-        memoryStatus.textContent = `Not enough memory remains outside Minecraft: about ${formatRemainingMemory(remaining)}. Reduce Maximum Minecraft memory before continuing.`;
+        memoryStatus.textContent = jvT("ui.711b8607d515", {v0: (formatRemainingMemory(remaining))});
         memoryStatus.classList.add("danger");
       } else if (remaining < recommendedReserveMiB) {
-        memoryStatus.textContent = `Tight memory configuration: about ${formatRemainingMemory(remaining)} remains outside Minecraft.`;
+        memoryStatus.textContent = jvT("ui.fc59932c53bf", {v0: (formatRemainingMemory(remaining))});
         memoryStatus.classList.add("warning");
       } else {
-        memoryStatus.textContent = `Memory remaining outside Minecraft: about ${formatRemainingMemory(remaining)}.`;
+        memoryStatus.textContent = jvT("ui.e2fd4a3064c9", {v0: (formatRemainingMemory(remaining))});
       }
     };
     const applyPreset = (name) => {
@@ -4123,7 +4123,7 @@ if (minecraftOpen && minecraftDialog) {
     if (message) root.appendChild(noticeNode(message));
 
     if (!payload?.configured) {
-      root.appendChild(noticeNode("Minecraft is not configured yet. Use first-run setup to configure this appliance.", "warning"));
+      root.appendChild(noticeNode(jvT("ui.c1a3fcc4188f"), "warning"));
       return root;
     }
 
@@ -4135,17 +4135,17 @@ if (minecraftOpen && minecraftDialog) {
 
     if (tab === "memory") {
       section.innerHTML = `
-        <div class="section-heading"><div><p class="eyebrow">Memory</p><h2>Minecraft memory</h2></div></div>
-        <p class="muted compact">Choose a starting point or enter exact memory values. JustVoxel validates system headroom before applying.</p>
-        <div class="minecraft-native-presets" role="group" aria-label="Memory starting points">
-          <button type="button" class="secondary" data-minecraft-memory-preset="light">Light</button>
-          <button type="button" class="secondary" data-minecraft-memory-preset="recommended">Recommended</button>
-          <button type="button" class="secondary" data-minecraft-memory-preset="high">High memory</button>
-          <button type="button" class="secondary" data-minecraft-memory-preset="custom">Custom</button>
+        <div class="section-heading"><div><p class="eyebrow">${jvH("ui.c3963aedaac6")}</p><h2>${jvH("ui.5c125b6e770b")}</h2></div></div>
+        <p class="muted compact">${jvH("ui.32a912c94bb1")}</p>
+        <div class="minecraft-native-presets" role="group" aria-label="${jvH("ui.99f64d108845")}">
+          <button type="button" class="secondary" data-minecraft-memory-preset="light">${jvH("ui.dbcd5e7bb7a0")}</button>
+          <button type="button" class="secondary" data-minecraft-memory-preset="recommended">${jvH("ui.d70604e84304")}</button>
+          <button type="button" class="secondary" data-minecraft-memory-preset="high">${jvH("ui.5e644c364e57")}</button>
+          <button type="button" class="secondary" data-minecraft-memory-preset="custom">${jvH("ui.494ca78f7374")}</button>
         </div>
         <div class="minecraft-native-grid">
-          <label>Minecraft game memory<input name="java_memory" required autocomplete="off"><span class="minecraft-native-help">Memory available directly to the Java server, for example 4G or 6144M.</span></label>
-          <label>Maximum Minecraft memory<input name="container_memory" required autocomplete="off"><span class="minecraft-native-help">Maximum for the complete Minecraft process including runtime overhead.</span></label>
+          <label>${jvH("ui.038f7b4cf610")}<input name="java_memory" required autocomplete="off"><span class="minecraft-native-help">${jvH("ui.7e80d90bb21d")}</span></label>
+          <label>${jvH("ui.dfd505296613")}<input name="container_memory" required autocomplete="off"><span class="minecraft-native-help">${jvH("ui.cae92cc1e542")}</span></label>
         </div>
         <div class="minecraft-native-memory-status" data-minecraft-memory-status></div>`;
       section.dataset.maxPlayers = String(minecraft.max_players || defaults.max_players || 10);
@@ -4155,15 +4155,15 @@ if (minecraftOpen && minecraftDialog) {
       initNativeMemoryControls(section, defaults);
     } else if (tab === "gameplay") {
       section.innerHTML = `
-        <div class="section-heading"><div><p class="eyebrow">Server</p><h2>Gameplay</h2></div></div>
+        <div class="section-heading"><div><p class="eyebrow">${jvH("ui.aef7de28d529")}</p><h2>${jvH("ui.31bcb8940fff")}</h2></div></div>
         <div class="minecraft-native-grid">
-          <label>Maximum players<input name="max_players" type="number" min="1" step="1" required></label>
+          <label>${jvH("ui.e1f268f4f175")}<input name="max_players" type="number" min="1" step="1" required></label>
           <input name="motd" type="hidden">
-          <label>Game mode<select name="game_mode" required>
-            <option value="survival">Survival</option>
-            <option value="creative">Creative</option>
-            <option value="adventure">Adventure</option>
-            <option value="spectator">Spectator</option>
+          <label>${jvH("ui.ede76ceab6f1")}<select name="game_mode" required>
+            <option value="survival">${jvH("ui.8302496de0ac")}</option>
+            <option value="creative">${jvH("ui.2c7e63313045")}</option>
+            <option value="adventure">${jvH("ui.9a3c16424750")}</option>
+            <option value="spectator">${jvH("ui.5ccda7f08fd1")}</option>
           </select></label>
         </div>`;
       section.querySelector('[name="max_players"]').value = String(minecraft.max_players || 10);
@@ -4172,35 +4172,35 @@ if (minecraftOpen && minecraftDialog) {
       form.appendChild(section);
     } else if (tab === "crossplay") {
       section.innerHTML = `
-        <div class="section-heading"><div><p class="eyebrow">Network</p><h2>Java & Bedrock</h2></div></div>
+        <div class="section-heading"><div><p class="eyebrow">${jvH("ui.1744b96470b5")}</p><h2>${jvH("ui.d2317470b6b7")}</h2></div></div>
         <div class="minecraft-native-grid">
-          <label>Minecraft Java port<input name="java_port" type="number" min="1" max="65535" required></label>
-          <label>Bedrock TCP/UDP port<input name="bedrock_port" type="number" min="1" max="65535" required></label>
+          <label>${jvH("ui.4d830c2e53c4")}<input name="java_port" type="number" min="1" max="65535" required></label>
+          <label>${jvH("ui.60abc420b980")}<input name="bedrock_port" type="number" min="1" max="65535" required></label>
         </div>
-        <label class="minecraft-native-toggle system-ups-shutdown-switch"><span>Enable Bedrock cross-play</span><input name="bedrock_enabled" type="checkbox"></label>
-        <p class="muted compact">Port and Bedrock changes update the appliance firewall when applied. Review shows whether this server will restart.</p>
-        <div class="minecraft-crossplay-status"><span data-crossplay-compatibility class="muted">Checking Geyser/Floodgate compatibility…</span></div>`;
+        <label class="minecraft-native-toggle system-ups-shutdown-switch"><span>${jvH("ui.dc9b45c28c00")}</span><input name="bedrock_enabled" type="checkbox"></label>
+        <p class="muted compact">${jvH("ui.edb77020bccc")}</p>
+        <div class="minecraft-crossplay-status"><span data-crossplay-compatibility class="muted">${jvH("ui.97a94e9a52fc")}</span></div>`;
       section.querySelector('[name="java_port"]').value = String(minecraft.java_port || 25565);
       section.querySelector('[name="bedrock_port"]').value = String(minecraft.bedrock_port || 19132);
       section.querySelector('[name="bedrock_enabled"]').checked = Boolean(minecraft.bedrock_enabled);
       section.querySelector('[name="bedrock_enabled"]').disabled = !["paper", "purpur", "spigot", "pufferfish", "leaf"].includes(minecraft.server_type);
-      if (!["paper", "purpur", "spigot", "pufferfish", "leaf"].includes(minecraft.server_type)) section.querySelector('[data-crossplay-compatibility]').textContent = "Managed Bedrock cross-play requires supported server software and verified version compatibility.";
+      if (!["paper", "purpur", "spigot", "pufferfish", "leaf"].includes(minecraft.server_type)) section.querySelector('[data-crossplay-compatibility]').textContent = jvT("ui.e01b053efa2e");
       requestWorkspaceJSON("/api/version/workspace/status").then((status) => {
         const node = section.querySelector("[data-crossplay-compatibility]");
         if (!node || !status) return;
-        const installed = status.installed || "Unknown";
+        const installed = status.installed || jvT("ui.b764cdc0eab7");
         const toggle = section.querySelector('[name="bedrock_enabled"]');
         toggle.disabled = !status.managed_crossplay_available;
-        if (!status.managed_crossplay_available) { node.textContent = "Managed Bedrock cross-play requires supported server software and verified version compatibility."; return; }
+        if (!status.managed_crossplay_available) { node.textContent = jvT("ui.e01b053efa2e"); return; }
         const shortcut = document.createElement("span");
         shortcut.className = "minecraft-crossplay-status";
-        shortcut.innerHTML = '<span class="muted">· open</span><button type="button" class="secondary" data-open-version>Version</button>';
+        shortcut.innerHTML = `<span class="muted">· open</span><button type="button" class="secondary" data-open-version>${jvH("ui.dd167905de0d")}</button>`;
         shortcut.querySelector('[data-open-version]').addEventListener("click", () => document.querySelector("[data-version-open]")?.click());
         node.parentElement.appendChild(shortcut);
-        if (!status.crossplay_enabled) node.textContent = `Cross-play disabled · Minecraft ${installed}.`;
-        else if (status.crossplay_compatible) node.textContent = `Cross-play enabled · Minecraft ${installed} · Geyser/Floodgate compatible with ${status.geyser_supported_version}`;
-        else node.textContent = status.reason || "Geyser/Floodgate compatibility is unavailable.";
-      }).catch(() => { const node = section.querySelector("[data-crossplay-compatibility]"); if (node && ["paper", "purpur", "spigot", "pufferfish", "leaf"].includes(minecraft.server_type)) node.textContent = "Geyser/Floodgate compatibility is unavailable."; });
+        if (!status.crossplay_enabled) node.textContent = jvT("ui.02c54115f1e0", {v0: (installed)});
+        else if (status.crossplay_compatible) node.textContent = jvT("ui.5e3c0c33d4bd", {v0: (installed), v1: (status.geyser_supported_version)});
+        else node.textContent = status.reason || jvT("ui.09edf1cbb93f");
+      }).catch(() => { const node = section.querySelector("[data-crossplay-compatibility]"); if (node && ["paper", "purpur", "spigot", "pufferfish", "leaf"].includes(minecraft.server_type)) node.textContent = jvT("ui.09edf1cbb93f"); });
       form.appendChild(section);
     }
 
@@ -4208,10 +4208,10 @@ if (minecraftOpen && minecraftDialog) {
     actions.className = "minecraft-native-actions";
     const reviewButton = document.createElement("button");
     reviewButton.type = "submit";
-    reviewButton.textContent = "Review changes";
+    reviewButton.textContent = jvT("ui.6a47708f4e14");
     const note = document.createElement("span");
     note.className = "muted";
-    note.textContent = "Nothing changes until Review and Apply.";
+    note.textContent = jvT("ui.46ee57962a56");
     actions.append(note, reviewButton);
     form.appendChild(actions);
     root.appendChild(form);
@@ -4232,11 +4232,11 @@ if (minecraftOpen && minecraftDialog) {
       case "yes":
       case "true":
       case "on":
-        return "Enabled";
+        return jvT("ui.92c1cdfdf4cb");
       case "no":
       case "false":
       case "off":
-        return "Disabled";
+        return jvT("ui.75081b593d15");
       default:
         return value;
     }
@@ -4255,15 +4255,15 @@ if (minecraftOpen && minecraftDialog) {
     const headingText = document.createElement("div");
     const eyebrow = document.createElement("p");
     eyebrow.className = "eyebrow";
-    eyebrow.textContent = "Review";
+    eyebrow.textContent = jvT("ui.aff0766a5290");
     const title = document.createElement("h2");
-    title.textContent = "Proposed changes";
+    title.textContent = jvT("ui.486f49f03bf7");
     headingText.append(eyebrow, title);
     heading.appendChild(headingText);
     if (plan.restart_required) {
       const badge = document.createElement("span");
       badge.className = "badge";
-      badge.textContent = "Restart required";
+      badge.textContent = jvT("ui.b46871152667");
       heading.appendChild(badge);
     }
     review.appendChild(heading);
@@ -4272,7 +4272,7 @@ if (minecraftOpen && minecraftDialog) {
 
     const changes = Array.isArray(plan.changes) ? plan.changes : [];
     if (changes.length === 0) {
-      review.appendChild(messageNode("No configuration changes were detected."));
+      review.appendChild(messageNode(jvT("ui.2c4ea6323eaf")));
       root.appendChild(review);
       return;
     }
@@ -4285,9 +4285,9 @@ if (minecraftOpen && minecraftDialog) {
       row.className = "minecraft-native-change-row";
       const label = document.createElement("div");
       const strong = document.createElement("strong");
-      strong.textContent = change.label || change.field || "Setting";
+      strong.textContent = change.label || change.field || jvT("ui.818cd8d91aea");
       label.appendChild(strong);
-      if (change.restart_required) label.appendChild(messageNode("Minecraft restart required.", "muted"));
+      if (change.restart_required) label.appendChild(messageNode(jvT("ui.2ea1a1d35390"), "muted"));
       const values = document.createElement("div");
       const before = document.createElement("span");
       before.className = "minecraft-native-change-value";
@@ -4304,7 +4304,7 @@ if (minecraftOpen && minecraftDialog) {
     review.appendChild(changeList);
 
     if (Number.isFinite(Number(plan.memory_remaining_mib)) && Number(plan.memory_remaining_mib) > 0) {
-      review.appendChild(messageNode(`Memory remaining outside Minecraft after the configured maximum: ${plan.memory_remaining_mib} MiB.`));
+      review.appendChild(messageNode(jvT("ui.72f71ac62c23", {v0: (plan.memory_remaining_mib)})));
     }
 
     let playerConfirmation = null;
@@ -4312,7 +4312,7 @@ if (minecraftOpen && minecraftDialog) {
       const label = document.createElement("label");
       label.className = "minecraft-native-toggle system-ups-shutdown-switch";
       const text = document.createElement("span");
-      text.textContent = `Confirm that you want to restart ${plan.server_name || "Minecraft"} now.`;
+      text.textContent = jvT("ui.1af7241ff4ec", {v0: (plan.server_name || "Minecraft")});
       playerConfirmation = document.createElement("input");
       playerConfirmation.type = "checkbox";
       playerConfirmation.name = "confirm_players";
@@ -4320,9 +4320,9 @@ if (minecraftOpen && minecraftDialog) {
       label.append(text, playerConfirmation);
       review.appendChild(label);
     } else if (!plan.reviewed_settings && plan.memory_restart_required) {
-      review.appendChild(noticeNode("Minecraft will restart automatically for these memory changes after JustVoxel checks for online players.", "warning"));
+      review.appendChild(noticeNode(jvT("ui.6dd251904175"), "warning"));
     } else if (!plan.reviewed_settings && plan.restart_required) {
-      review.appendChild(noticeNode("The new settings will be saved, but Minecraft will not restart automatically for these non-memory changes.", "warning"));
+      review.appendChild(noticeNode(jvT("ui.c4b1864f0f7a"), "warning"));
     }
 
     const actions = document.createElement("div");
@@ -4330,14 +4330,14 @@ if (minecraftOpen && minecraftDialog) {
     const cancel = document.createElement("button");
     cancel.type = "button";
     cancel.className = "secondary";
-    cancel.textContent = "Cancel review";
+    cancel.textContent = jvT("ui.87a8ca7f6bd8");
     cancel.addEventListener("click", () => {
       review.remove();
       if (settingsForm) settingsForm.hidden = false;
     });
     const apply = document.createElement("button");
     apply.type = "button";
-    apply.textContent = "Apply changes";
+    apply.textContent = jvT("ui.85045ccc0567");
     let applying = false;
     const updateApply = () => { apply.disabled = Boolean(applying || plan.apply_blocked || (playerConfirmation && !playerConfirmation.checked)); };
     playerConfirmation?.addEventListener("change", updateApply);
@@ -4346,14 +4346,14 @@ if (minecraftOpen && minecraftDialog) {
       const retry = document.createElement("button");
       retry.type = "button";
       retry.className = "secondary";
-      retry.textContent = "Review again";
+      retry.textContent = jvT("ui.d4ea61c79c9b");
       retry.addEventListener("click", async () => {
         retry.disabled = true;
         try {
           const refreshed = await requestWorkspaceJSON("/api/minecraft/workspace/settings/plan", {method: "POST", body: params});
           if (refreshed) renderSettingsReview(root, refreshed, params, options);
         } catch (error) {
-          if (!error.staleSelection) review.appendChild(noticeNode(error.message || "Review is unavailable. Try again.", "warning"));
+          if (!error.staleSelection) review.appendChild(noticeNode(error.message || jvT("ui.157f117393c0"), "warning"));
         } finally { retry.disabled = false; }
       });
       actions.appendChild(retry);
@@ -4369,7 +4369,7 @@ if (minecraftOpen && minecraftDialog) {
       if (playerConfirmation) playerConfirmation.disabled = true;
       apply.disabled = true;
       cancel.disabled = true;
-      if (state) state.textContent = plan.memory_restart_required ? "Applying and restarting Minecraft…" : "Applying…";
+      if (state) state.textContent = plan.memory_restart_required ? jvT("ui.7938d0e41498") : jvT("ui.3329a9bb48b9");
       try {
         const applyParams = new URLSearchParams(params);
         if (plan.review) applyParams.set("review", plan.review);
@@ -4385,16 +4385,16 @@ if (minecraftOpen && minecraftDialog) {
           renderSettingsReview(root, result, params, options);
           return;
         }
-        if (!result.applied) throw new Error(result.error || "Minecraft settings were not applied.");
+        if (!result.applied) throw new Error(result.error || jvT("ui.59f7401b3446"));
         if (options.onApplied) { await options.onApplied(); return; }
-        let savedMessage = result.message || "Minecraft settings saved.";
-        if (result.restarted) savedMessage = "Minecraft settings saved and Minecraft restarted.";
-        else if (result.restart_deferred) savedMessage = "Minecraft settings saved. Restart remains pending.";
+        let savedMessage = result.message || jvT("ui.ec76c2a9a1e6");
+        if (result.restarted) savedMessage = jvT("ui.3cf07307881b");
+        else if (result.restart_deferred) savedMessage = jvT("ui.e61fb97a16c3");
         await loadCurrentTab(savedMessage);
       } catch (error) {
         if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration.minecraft) return;
         if (options.onError) { await options.onError(error); return; }
-        review.appendChild(noticeNode(error?.message || "Minecraft settings could not be applied.", "warning"));
+        review.appendChild(noticeNode(error?.message || jvT("ui.96736db71e0a"), "warning"));
         if (state) state.textContent = "";
         applying = false;
         if (playerConfirmation) playerConfirmation.disabled = false;
@@ -4415,7 +4415,7 @@ if (minecraftOpen && minecraftDialog) {
       event.preventDefault();
       const submitter = event.submitter;
       if (submitter) submitter.disabled = true;
-      if (state) state.textContent = "Reviewing…";
+      if (state) state.textContent = jvT("ui.fcc53388888f");
       try {
         const params = settingsParams(form);
         const plan = await requestWorkspaceJSON("/api/minecraft/workspace/settings/plan", {
@@ -4428,7 +4428,7 @@ if (minecraftOpen && minecraftDialog) {
         if (state) state.textContent = "";
       } catch (error) {
         if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration.minecraft) return;
-        if (state) state.textContent = error?.message || "Minecraft settings could not be reviewed.";
+        if (state) state.textContent = error?.message || jvT("ui.6081772cc7a8");
       } finally {
         if (submitter) submitter.disabled = false;
       }
@@ -4449,28 +4449,28 @@ if (minecraftOpen && minecraftDialog) {
     const players = snapshot?.players || {};
     const controls = document.createElement("section");
     controls.className = "minecraft-player-controls";
-    controls.appendChild(messageNode(`Online players: ${players.online ?? 0} / ${players.max ?? minecraft.max_players ?? "—"}`));
-    if (!minecraft.configured || players.state === "not_configured") controls.appendChild(messageNode("Minecraft is not configured yet."));
-    else if (players.state === "unavailable") controls.appendChild(messageNode(players.error || "Player information is temporarily unavailable."));
+    controls.appendChild(messageNode(jvT("ui.40c1289fadcd", {v0: (players.online ?? 0), v1: (players.max ?? minecraft.max_players ?? "—")})));
+    if (!minecraft.configured || players.state === "not_configured") controls.appendChild(messageNode(jvT("ui.bd7bbac1db61")));
+    else if (players.state === "unavailable") controls.appendChild(messageNode(players.error || jvT("ui.7dfac59b23ae")));
     const form = document.createElement("form");
     form.className = "minecraft-native-form";
     form.innerHTML = `
       <div class="minecraft-player-add">
-        <label class="minecraft-player-platform">Platform<select name="platform"><option value="java">Java</option><option value="bedrock">Bedrock</option></select></label>
-        <label class="minecraft-player-input">Player name / Xbox gamertag / Floodgate UUID<input name="name" required maxlength="64" autocomplete="off"></label>
-        <button type="submit">Add player</button>
+        <label class="minecraft-player-platform">${jvH("ui.c78ffe195710")}<select name="platform"><option value="java">Java</option><option value="bedrock">Bedrock</option></select></label>
+        <label class="minecraft-player-input">${jvH("ui.69aaf45efe73")}<input name="name" required maxlength="64" autocomplete="off"></label>
+        <button type="submit">${jvH("ui.ef207ba9378a")}</button>
       </div>
-      <p class="muted compact">For Bedrock, use the Xbox gamertag without the leading dot.<br>If Floodgate cannot resolve it, use the player's Floodgate UUID.</p>`;
+      <p class="muted compact">${jvH("ui.087edf48a988")}<br>${jvH("ui.499128c660df")}</p>`;
     controls.appendChild(form);
     root.appendChild(controls);
 
     const section = document.createElement("section");
     section.className = "minecraft-whitelist-section";
-    section.innerHTML = '<div class="section-heading"><h2>Whitelist</h2><div class="minecraft-whitelist-state"></div></div><div class="minecraft-whitelist-list" data-minecraft-native-whitelist></div>';
+    section.innerHTML = `<div class="section-heading"><h2>${jvH("ui.8559afa62d46")}</h2><div class="minecraft-whitelist-state"></div></div><div class="minecraft-whitelist-list" data-minecraft-native-whitelist></div>`;
     const enabled = payload.whitelist_enabled;
     const status = document.createElement("span");
     status.className = "badge";
-    status.textContent = enabled === true ? "Enabled" : enabled === false ? "Disabled" : "Unavailable";
+    status.textContent = enabled === true ? jvT("ui.92c1cdfdf4cb") : enabled === false ? jvT("ui.75081b593d15") : jvT("ui.ca1844969742");
     const header = section.querySelector(".minecraft-whitelist-state");
     header.appendChild(status);
     if (payload.can_toggle && typeof enabled === "boolean") {
@@ -4478,11 +4478,11 @@ if (minecraftOpen && minecraftDialog) {
       toggle.type = "button";
       toggle.className = "minecraft-whitelist-switch";
       toggle.setAttribute("role", "switch");
-      toggle.setAttribute("aria-label", "Whitelist");
+      toggle.setAttribute("aria-label", jvT("ui.8559afa62d46"));
       toggle.setAttribute("aria-checked", String(enabled));
       toggle.addEventListener("click", async () => {
         const selection = globalThis.justVoxelSelectionGeneration.minecraft;
-        if (enabled && !window.confirm("Disable whitelist?\n\nPlayers not on the whitelist will be allowed to join.")) return;
+        if (enabled && !window.confirm(jvT("ui.d7d23ddf450d"))) return;
         toggle.disabled = true;
         try {
           const result = await requestWorkspaceJSON("/api/minecraft/workspace/whitelist/state", {
@@ -4490,10 +4490,10 @@ if (minecraftOpen && minecraftDialog) {
             headers: { "Content-Type": "application/x-www-form-urlencoded" },
             body: new URLSearchParams({ csrf, enabled: String(!enabled) }).toString(),
           });
-          if (result) await loadCurrentTab(result.message || "Whitelist updated.");
+          if (result) await loadCurrentTab(result.message || jvT("ui.f3ac5dffc52f"));
         } catch (error) {
           if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration.minecraft) return;
-          const message = error?.message || "Whitelist change failed.";
+          const message = error?.message || jvT("ui.fa3b35c1d480");
           // Reload authoritative state after recovery; never optimistically flip.
           try { await loadCurrentTab(); } catch (_) { /* Keep the last authoritative state visible. */ }
           if (state) state.textContent = message;
@@ -4507,7 +4507,7 @@ if (minecraftOpen && minecraftDialog) {
     const changeWhitelist = async (params, submitter) => {
       const selection = globalThis.justVoxelSelectionGeneration.minecraft;
       if (submitter) submitter.disabled = true;
-      if (state) state.textContent = "Updating whitelist…";
+      if (state) state.textContent = jvT("ui.6509e178ad5a");
       try {
         params.set("csrf", csrf);
         const result = await requestWorkspaceJSON("/api/minecraft/workspace/whitelist", {
@@ -4516,10 +4516,10 @@ if (minecraftOpen && minecraftDialog) {
           body: params.toString(),
         });
         if (!result) return;
-        await loadCurrentTab(result.message || "Whitelist updated.");
+        await loadCurrentTab(result.message || jvT("ui.f3ac5dffc52f"));
       } catch (error) {
         if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration.minecraft) return;
-        if (state) state.textContent = error?.message || "Whitelist change could not be completed.";
+        if (state) state.textContent = error?.message || jvT("ui.85d6efa05283");
       } finally {
         if (submitter) submitter.disabled = false;
       }
@@ -4527,17 +4527,17 @@ if (minecraftOpen && minecraftDialog) {
 
     const list = section.querySelector("[data-minecraft-native-whitelist]");
     if (!payload.parsed) {
-      list.appendChild(noticeNode("Whitelist information could not be interpreted. Backend output:", "warning"));
+      list.appendChild(noticeNode(jvT("ui.a2379aee5d94"), "warning"));
       const diagnostic = document.createElement("pre");
       diagnostic.className = "log-box";
-      diagnostic.textContent = payload.output || "No whitelist information available.";
+      diagnostic.textContent = payload.output || jvT("ui.49ca2f2698af");
       list.appendChild(diagnostic);
     } else if (!payload.entries?.length) {
-      list.appendChild(messageNode("No whitelisted players."));
+      list.appendChild(messageNode(jvT("ui.00528beb1c2c")));
     } else {
       const table = document.createElement("table");
       table.className = "minecraft-whitelist-table";
-      table.innerHTML = '<thead><tr><th scope="col">Platform</th><th scope="col">Player</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>';
+      table.innerHTML = `<thead><tr><th scope="col">${jvH("ui.c78ffe195710")}</th><th scope="col">${jvH("ui.64aee8c6cbd0")}</th><th scope="col">${jvH("ui.920e413c7d41")}</th><th scope="col">Actions</th></tr></thead>`;
       const body = document.createElement("tbody");
       const onlineIdentities = new Set(Array.isArray(players.names) ? players.names : []);
       payload.entries.forEach((entry) => {
@@ -4547,15 +4547,15 @@ if (minecraftOpen && minecraftDialog) {
         const remove = document.createElement("button");
         remove.type = "button";
         remove.className = "secondary";
-        remove.textContent = "Remove";
-        remove.setAttribute("aria-label", `Remove ${entry.display} (${entry.platform === "bedrock" ? "Bedrock" : "Java"}) from whitelist`);
+        remove.textContent = jvT("ui.c3812fc4acb8");
+        remove.setAttribute("aria-label", jvT("ui.2a972b9c2175", {v0: (entry.display), v1: (entry.platform === "bedrock" ? "Bedrock" : "Java")}));
         remove.addEventListener("click", () => changeWhitelist(new URLSearchParams({
           platform: entry.platform,
           action: "remove",
           name: entry.platform === "bedrock" ? entry.display : entry.identity,
         }), remove));
         [entry.platform === "bedrock" ? "Bedrock" : "Java", entry.display,
-          onlineIdentities.has(entry.identity) ? "Online" : "Offline"].forEach((value) => {
+          onlineIdentities.has(entry.identity) ? jvT("ui.0d21bd52022c") : jvT("ui.a1794783aab7")].forEach((value) => {
           const cell = document.createElement("td");
           cell.textContent = value;
           row.appendChild(cell);
@@ -4592,21 +4592,21 @@ if (minecraftOpen && minecraftDialog) {
     const headingText = document.createElement("div");
     const eyebrow = document.createElement("p");
     eyebrow.className = "eyebrow";
-    eyebrow.textContent = "Diagnostics";
+    eyebrow.textContent = jvT("ui.268f14bbfe11");
     const title = document.createElement("h2");
-    title.textContent = "Recent Minecraft logs";
+    title.textContent = jvT("ui.8397ad9d9848");
     headingText.append(eyebrow, title);
     heading.appendChild(headingText);
     const pre = document.createElement("pre");
     pre.className = "log-box";
-    pre.textContent = Array.isArray(payload.lines) && payload.lines.length ? payload.lines.join("\n") : "No recent log lines available.";
+    pre.textContent = Array.isArray(payload.lines) && payload.lines.length ? payload.lines.join("\n") : jvT("ui.b61eab1c58ef");
     section.append(heading, pre);
     root.appendChild(section);
     content.replaceChildren(root);
   };
 
   const renderRcon = async (sequence) => {
-    if (!document.body.classList.contains("role-administrator")) throw new Error("Administrator access required.");
+    if (!document.body.classList.contains("role-administrator")) throw new Error(jvT("ui.2d3d0b30bde9"));
     const generation = globalThis.justVoxelSelectionGeneration.minecraft;
     const snapshot = await requestWorkspaceJSON("/api/dashboard-status");
     if (!snapshot || sequence !== loadSequence || !content) return;
@@ -4626,7 +4626,7 @@ if (minecraftOpen && minecraftDialog) {
     if (globalThis.justVoxelSelectionReady) await globalThis.justVoxelSelectionReady;
     const selection = globalThis.justVoxelSelectionGeneration.minecraft;
     const sequence = ++loadSequence;
-    if (state) state.textContent = "Loading…";
+    if (state) state.textContent = jvT("ui.ba3bbbe10d8b");
     if (refreshButton) refreshButton.disabled = true;
     if (content) content.replaceChildren();
     try {
@@ -4635,12 +4635,12 @@ if (minecraftOpen && minecraftDialog) {
       else if (currentTab === "logs") await renderLogs(sequence, message);
       else if (currentTab === "rcon") await renderRcon(sequence);
       else await renderOverview(sequence, message);
-      if (sequence === loadSequence && state?.textContent === "Loading…") state.textContent = "";
+      if (sequence === loadSequence && state?.textContent === jvT("ui.ba3bbbe10d8b")) state.textContent = "";
     } catch (error) {
       if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration.minecraft) return;
       if (sequence !== loadSequence) return;
       if (content) content.replaceChildren();
-      if (state) state.textContent = error?.message || "Minecraft workspace is unavailable.";
+      if (state) state.textContent = error?.message || jvT("ui.e0d15c678c4b");
     } finally {
       if (sequence === loadSequence && refreshButton) refreshButton.disabled = false;
     }
@@ -4661,8 +4661,8 @@ if (minecraftOpen && minecraftDialog) {
         !new URLSearchParams(globalThis.location?.search || "").has("server")) {
       currentTab = "overview";
       tabs.forEach((button) => button.setAttribute("aria-selected", button.dataset.minecraftTab === currentTab ? "true" : "false"));
-      content?.appendChild(messageNode("No Minecraft servers are configured. Start setup to add a Minecraft server."));
-      if (state) state.textContent = "Minecraft is ready for first setup.";
+      content?.appendChild(messageNode(jvT("ui.be9166f41a41")));
+      if (state) state.textContent = jvT("ui.3807733d20d3");
       return;
     }
     if (minecraftDialog.open) void loadCurrentTab();
@@ -4734,7 +4734,7 @@ function setupTerminalAppearanceSettings(workspace, settings, terminal) {
         localStorage.removeItem("justvoxel.terminal.appearance");
       }
     } catch {
-      error.textContent = "Appearance settings could not be saved in this browser. Try again.";
+      error.textContent = jvT("ui.2ef05da6deda");
       error.hidden = false;
       return;
     }
@@ -4751,10 +4751,10 @@ function createTerminalWorkspace(dialog, csrf) {
   let generation = 0, pending = Promise.resolve(), touched = false;
   const request = async (action) => {
     const response = await fetch('/api/system/workspace/terminal' + (action ? '/' + action : ''), {
-      method: action ? 'POST' : 'GET', credentials: 'same-origin', cache: 'no-store',
+      method: action ? 'POST' : "GET", credentials: 'same-origin', cache: 'no-store',
       ...(action ? {body: new URLSearchParams({csrf})} : {}),
     });
-    if (!response.ok) throw new Error('Terminal is unavailable. Retry.');
+    if (!response.ok) throw new Error(jvT("ui.f59fd322d314"));
     return response.json();
   };
   const mutate = action => {
@@ -4768,7 +4768,7 @@ function createTerminalWorkspace(dialog, csrf) {
     const ticket = ++generation;
     touched = true;
     clearFrame();
-    state.textContent = 'Starting Terminal…';
+    state.textContent = jvT("ui.d62477f0d7d2");
     retry.hidden = true;
     const current = () => ticket === generation && dialog.open;
     try {
@@ -4783,11 +4783,11 @@ function createTerminalWorkspace(dialog, csrf) {
       const deadline = Date.now() + 30000;
       while (!status.ready) {
         if (!current()) return;
-        if (Date.now() >= deadline) throw new Error('Terminal could not start. Retry.');
+        if (Date.now() >= deadline) throw new Error(jvT("ui.c145a020ecf5"));
         await new Promise(resolve => setTimeout(resolve, 1000));
         if (!current()) return;
         status = await request();
-        if (!status.ready && status.state === 'failed') throw new Error('Terminal could not start. Retry.');
+        if (!status.ready && status.state === 'failed') throw new Error(jvT("ui.c145a020ecf5"));
       }
       if (!current()) return;
       state.textContent = '';
@@ -4805,7 +4805,7 @@ function createTerminalWorkspace(dialog, csrf) {
       clearFrame();
       if (touched) {
         touched = false;
-        void mutate('stop').catch(() => { state.textContent = 'Terminal could not stop. Open Terminal and retry.'; });
+        void mutate('stop').catch(() => { state.textContent = jvT("ui.72318018d103"); });
       }
     },
   };
@@ -4947,12 +4947,12 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       cache: "no-store",
     });
     if (systemHandleAuth(response)) return null;
-    if (!response.ok) throw new Error("Session information is unavailable.");
+    if (!response.ok) throw new Error(jvT("ui.98a9fb5b71d1"));
     const result = await response.json();
     const role = String(result.role || "").toLowerCase();
     const username = String(result.username || "");
     if (!username || !["administrator", "operator", "viewer"].includes(role)) {
-      throw new Error("Session role is unavailable.");
+      throw new Error(jvT("ui.cfbc63955e94"));
     }
     identity = { username, role };
     document.body.classList.remove("role-pending");
@@ -4992,12 +4992,12 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     } catch (_) {
       payload = {};
     }
-    if (response.status === 403 && String(payload.error || "").toLowerCase().includes("password change")) {
+    if (response.status === 403 && String(jvC(payload.error || "")).toLowerCase().includes("password change")) {
       window.location.assign("/password");
       return null;
     }
     if (!response.ok) {
-      throw new Error(payload.error || "System operation could not be completed.");
+      throw new Error(payload.error || jvT("ui.74d3afec7da4"));
     }
     return payload;
   };
@@ -5043,19 +5043,19 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     if (sequence !== loadSequence || !content) return;
     const root = document.createElement("div");
     root.className = "system-health-view";
-    const built = systemPanel("System health", "Health check details");
+    const built = systemPanel(jvT("ui.982649422d26"), jvT("ui.ba6fa824219e"));
     const pre = document.createElement("pre");
     pre.className = "log-box";
-    pre.textContent = "Running system health checks…";
+    pre.textContent = jvT("ui.b8539cb6201c");
     built.panel.appendChild(pre);
     root.appendChild(built.panel);
     content.replaceChildren(root);
     const payload = await systemFetchJSON("/api/system/workspace/health");
     if (!payload || sequence !== loadSequence) return;
     const result = payload.result || {};
-    pre.textContent = cleanSystemHealthOutput(result.output || "No detailed health output was returned.");
+    pre.textContent = cleanSystemHealthOutput(result.output || jvT("ui.55511275fa2f"));
     root.replaceChildren(systemNotice(
-      result.ok ? "System health check passed." : "System health check found problems.",
+      result.ok ? jvT("ui.fff1eb0f6838") : jvT("ui.d438addf7329"),
       result.ok ? "success" : "error"
     ), built.panel);
   };
@@ -5095,12 +5095,12 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     if (message) root.appendChild(systemNotice(message));
 
     if (payload.role === "administrator") {
-      const notificationsPanel = systemPanel("Action required", "Open notifications").panel;
+      const notificationsPanel = systemPanel(jvT("ui.adf69e75cc7d"), jvT("ui.4e2fa50f7e95")).panel;
       const notifications = Array.isArray(payload.notifications) ? payload.notifications : [];
       if (!notifications.length) {
         const empty = document.createElement("p");
         empty.className = "muted";
-        empty.textContent = "Nothing currently requires Administrator action.";
+        empty.textContent = jvT("ui.64d568230a63");
         notificationsPanel.appendChild(empty);
       } else {
         notifications.forEach((item) => {
@@ -5108,7 +5108,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
           row.className = "event-row";
           const info = document.createElement("div");
           const title = document.createElement("strong");
-          title.textContent = item.title || "Notification";
+          title.textContent = item.title || jvT("ui.7d31b8331399");
           const messageNode = document.createElement("span");
           messageNode.textContent = item.message || "";
           const date = document.createElement("span");
@@ -5117,7 +5117,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
           const button = document.createElement("button");
           button.type = "button";
           button.className = "secondary";
-          button.textContent = "Resolve";
+          button.textContent = jvT("ui.c8f193b315c8");
           button.addEventListener("click", async () => {
             button.disabled = true;
             try {
@@ -5127,9 +5127,9 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
                 headers: { "Content-Type": "application/x-www-form-urlencoded" },
                 body: body.toString(),
               });
-              if (result) await renderHistory(++loadSequence, result.message || "Notification resolved.");
+              if (result) await renderHistory(++loadSequence, result.message || jvT("ui.4f376daea4c4"));
             } catch (error) {
-              if (state) state.textContent = error?.message || "Notification could not be resolved.";
+              if (state) state.textContent = error?.message || jvT("ui.a63ba84b3034");
               button.disabled = false;
             }
           });
@@ -5139,12 +5139,12 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       }
       root.appendChild(notificationsPanel);
 
-      const auditPanel = systemPanel("Administrator history", "Detailed history").panel;
+      const auditPanel = systemPanel(jvT("ui.14d104cb8f68"), jvT("ui.e76b1ee02686")).panel;
       const events = Array.isArray(payload.audit) ? payload.audit : [];
       if (!events.length) {
         const empty = document.createElement("p");
         empty.className = "muted";
-        empty.textContent = "No audit events yet.";
+        empty.textContent = jvT("ui.bc542d8b313b");
         auditPanel.appendChild(empty);
       } else {
         const list = document.createElement("div");
@@ -5154,13 +5154,13 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
           row.className = "event-row";
           const info = document.createElement("div");
           const action = document.createElement("strong");
-          action.textContent = event.action || "Action";
+          action.textContent = event.action || jvT("ui.64cff1319d2f");
           const meta = document.createElement("span");
           meta.textContent = [event.occurred_at, event.actor_username, event.actor_role].filter(Boolean).join(" · ");
           info.append(action, meta);
           if (event.target) {
             const target = document.createElement("span");
-            target.textContent = "Target: " + event.target;
+            target.textContent = jvT("ui.30eaddeafeae") + event.target;
             info.appendChild(target);
           }
           if (event.context) {
@@ -5170,14 +5170,14 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
           }
           const badge = document.createElement("span");
           badge.className = "badge";
-          badge.textContent = event.success ? "Success" : "Failed";
+          badge.textContent = event.success ? jvT("ui.c88a0b907419") : jvT("ui.031a8f0f659d");
           row.append(info, badge);
           list.appendChild(row);
         });
         auditPanel.appendChild(list);
       }
       let notificationWidth = 300;
-      const divider = systemSplitter("Resize Open notifications and Detailed history", (delta) => {
+      const divider = systemSplitter(jvT("ui.164de9de6729"), (delta) => {
         notificationWidth += delta;
         setHistoryWidth();
       });
@@ -5195,12 +5195,12 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       });
       historyResizeObserver.observe(root);
     } else {
-      const activityPanel = systemPanel("Activity", "Recent appliance actions").panel;
+      const activityPanel = systemPanel(jvT("ui.38da1505ca83"), jvT("ui.0724c603152c")).panel;
       const events = Array.isArray(payload.events) ? payload.events : [];
       if (!events.length) {
         const empty = document.createElement("p");
         empty.className = "muted";
-        empty.textContent = "No recorded activity yet.";
+        empty.textContent = jvT("ui.ebc026afee98");
         activityPanel.appendChild(empty);
       } else {
         const list = document.createElement("div");
@@ -5210,13 +5210,13 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
           row.className = "event-row";
           const info = document.createElement("div");
           const action = document.createElement("strong");
-          action.textContent = event.action || "Action";
+          action.textContent = event.action || jvT("ui.64cff1319d2f");
           const date = document.createElement("span");
           date.textContent = event.occurred_at || "";
           info.append(action, date);
           const badge = document.createElement("span");
           badge.className = "badge";
-          badge.textContent = event.success ? "Success" : "Failed";
+          badge.textContent = event.success ? jvT("ui.c88a0b907419") : jvT("ui.031a8f0f659d");
           row.append(info, badge);
           list.appendChild(row);
         });
@@ -5240,7 +5240,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
 
   const systemLogDestination = new URLSearchParams(window.location.search);
   let requestedMigrationLog = systemLogDestination.get("workspace") === "system" && systemLogDestination.get("tab") === "logs" && ["migration", "plugins"].includes(systemLogDestination.get("log_group"))
-    ? { group: systemLogDestination.get("log_group") === "plugins" ? "Plugins" : "Migration", id: systemLogDestination.get("log_id") || "" } : null;
+    ? { group: systemLogDestination.get("log_group") === "plugins" ? jvT("ui.9514b7ff4860") : jvT("ui.cc149190687e"), id: systemLogDestination.get("log_id") || "" } : null;
 
   let failedUnitsSelected = false;
   let supportLogsSelected = false;
@@ -5275,11 +5275,11 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     };
     const groupColumn = document.createElement("nav");
     groupColumn.className = "system-logs-groups";
-    groupColumn.setAttribute("aria-label", "Log categories");
-    const fileColumn = makeColumn("Files", "system-logs-files");
+    groupColumn.setAttribute("aria-label", jvT("ui.cdff6afac6a7"));
+    const fileColumn = makeColumn(jvT("ui.abc7e9892806"), "system-logs-files");
     const generateSupport = document.createElement("button");
     generateSupport.type = "button";
-    generateSupport.textContent = "Generate support report";
+    generateSupport.textContent = jvT("ui.d904faacbc97");
     const supportProgress = document.createElement("p");
     supportProgress.className = "muted";
     supportProgress.setAttribute("role", "status");
@@ -5288,20 +5288,20 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     fileList.className = "system-logs-list";
     const generateNetwork = document.createElement("button");
     generateNetwork.type = "button";
-    generateNetwork.textContent = "Generate network report";
+    generateNetwork.textContent = jvT("ui.a82a3e50dee4");
     const networkProgress = document.createElement("p");
     networkProgress.className = "muted";
     networkProgress.setAttribute("role", "status");
     fileColumn.append(generateSupport, supportProgress, generateNetwork, networkProgress, fileList);
-    const reader = makeColumn("Viewer", "system-logs-reader");
+    const reader = makeColumn(jvT("ui.678bfa6af48b"), "system-logs-reader");
     const viewer = document.createElement("div");
     viewer.className = "system-logs-viewer";
     const download = document.createElement("a");
     download.className = "button-link secondary";
-    download.textContent = "Download log";
+    download.textContent = jvT("ui.7b8c8adf4591");
     download.hidden = true;
     const documentText = document.createElement("pre");
-    documentText.textContent = "Select a file to read it here.";
+    documentText.textContent = jvT("ui.9bd8a2a4f30f");
     viewer.append(download, documentText);
     reader.appendChild(viewer);
     let selectedGroup = requestedMigrationLog?.group || (failedUnitsSelected ? "Failed units" : supportLogsSelected ? "Support" : networkLogsSelected ? "Network" : "Setup");
@@ -5319,13 +5319,13 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       fileList.className = selectedGroup === "Network" || selectedGroup === "Support"
         ? "system-logs-list system-diagnostic-report-files" : "system-logs-list";
       supportProgress.hidden = selectedGroup !== "Support" || !supportProgress.textContent;
-      fileColumn.children[0].textContent = live ? "Units" : "Files";
-      documentText.textContent = live ? "Select a unit to read its last 60 current-boot journal lines here." : "Select a file to read it here.";
+      fileColumn.children[0].textContent = live ? "Units" : jvT("ui.abc7e9892806");
+      documentText.textContent = live ? jvT("ui.39e498ec4cfd") : jvT("ui.9bd8a2a4f30f");
       const entries = live ? failedUnits : logs.filter((entry) => entry.category === selectedGroup.toLowerCase());
       if (!entries.length) {
         const empty = document.createElement("p");
         empty.className = "muted";
-        empty.textContent = live ? (payload.failed_units_error ? "Failed systemd units are unavailable." : "No failed systemd units.") : selectedGroup === "Support" ? "No support reports generated." : "No " + selectedGroup.toLowerCase() + " logs available.";
+        empty.textContent = live ? (payload.failed_units_error ? jvT("ui.138f547a3261") : jvT("ui.d0789dca609b")) : selectedGroup === "Support" ? jvT("ui.a5e44902bd11") : jvT("ui.05f8bb36f881") + selectedGroup.toLowerCase() + " logs available.";
         fileList.appendChild(empty);
         return;
       }
@@ -5345,12 +5345,12 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
           const clickedGroup = selectedGroup;
           fileList.querySelectorAll("button").forEach((item) => item.setAttribute("aria-pressed", item === button ? "true" : "false"));
           const url = live ? "/api/system/workspace/logs/failed/" + encodeURIComponent(entry.unit) : "/api/system/workspace/logs/" + encodeURIComponent(entry.category) + "/" + encodeURIComponent(entry.log_id);
-          documentText.textContent = "Loading log…";
+          documentText.textContent = jvT("ui.2de3b91747f9");
           download.hidden = true;
           try {
             const response = await fetch(url, { credentials: "same-origin", cache: "no-store", headers: { Accept: "text/plain" } });
             if (systemHandleAuth(response)) return;
-            if (!response.ok) throw new Error(live ? "Failed unit journal is unavailable." : "Diagnostic log is unavailable.");
+            if (!response.ok) throw new Error(live ? jvT("ui.c651952bfc8b") : jvT("ui.bde5c83597fc"));
             const data = await response.text();
             if (sequence !== loadSequence || selectedFile !== identity || selectedGroup !== clickedGroup) return;
             documentText.textContent = data;
@@ -5358,7 +5358,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
             download.hidden = false;
           } catch (error) {
             if (sequence !== loadSequence || selectedFile !== identity || selectedGroup !== clickedGroup) return;
-            documentText.textContent = live ? "Failed unit journal is unavailable." : error?.message || "Diagnostic log is unavailable.";
+            documentText.textContent = live ? jvT("ui.c651952bfc8b") : error?.message || jvT("ui.bde5c83597fc");
           }
         });
         fileList.appendChild(button);
@@ -5370,19 +5370,19 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     };
     generateNetwork.addEventListener("click", async () => {
       generateNetwork.disabled = true;
-      networkProgress.textContent = "Generating network report…";
+      networkProgress.textContent = jvT("ui.ad2465a85a74");
       networkProgress.hidden = false;
       try {
         const result = await systemPostForm("/api/system/workspace/logs/network");
-        if (!result?.ok || result.log?.category !== "network") throw new Error("Network report unavailable.");
+        if (!result?.ok || result.log?.category !== "network") throw new Error(jvT("ui.e7e942073afa"));
         if (sequence !== loadSequence || !root.isConnected) return;
         logs.unshift(result.log);
         requestedEntry = result.log;
-        networkProgress.textContent = "Network report generated.";
+        networkProgress.textContent = jvT("ui.1c7a3e62d4a0");
         if (selectedGroup === "Network") renderFiles();
       } catch (_) {
         if (sequence !== loadSequence || !root.isConnected) return;
-        networkProgress.textContent = "Network report could not be generated. Try again.";
+        networkProgress.textContent = jvT("ui.c661ccd39e59");
       } finally {
         generateNetwork.disabled = false;
         networkProgress.hidden = selectedGroup !== "Network";
@@ -5390,19 +5390,19 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     });
     generateSupport.addEventListener("click", async () => {
       generateSupport.disabled = true;
-      supportProgress.textContent = "Generating support report…";
+      supportProgress.textContent = jvT("ui.967fc5f02f43");
       supportProgress.hidden = false;
       try {
         const result = await systemPostForm("/api/system/workspace/logs/support");
-        if (!result?.ok || !result.log || result.log.category !== "support") throw new Error("Support report could not be generated.");
+        if (!result?.ok || !result.log || result.log.category !== "support") throw new Error(jvT("ui.1354a3af863e"));
         if (sequence !== loadSequence || !root.isConnected) return;
         logs.unshift(result.log);
         requestedEntry = result.log;
-        supportProgress.textContent = "Support report generated.";
+        supportProgress.textContent = jvT("ui.9cb9fb4ec5fd");
         if (selectedGroup === "Support") renderFiles();
       } catch {
         if (sequence !== loadSequence || !root.isConnected) return;
-        supportProgress.textContent = "Support report could not be generated. Try again.";
+        supportProgress.textContent = jvT("ui.5d986f471fad");
       } finally {
         generateSupport.disabled = false;
         supportProgress.hidden = selectedGroup !== "Support";
@@ -5412,7 +5412,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "system-log-group secondary";
-      button.textContent = group;
+      button.textContent = jvS(group);
       button.setAttribute("aria-pressed", group === selectedGroup ? "true" : "false");
       button.addEventListener("click", () => {
         selectedGroup = group;
@@ -5425,7 +5425,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       });
       groupColumn.appendChild(button);
     });
-    const handle = systemSplitter("Resize Files and Viewer", (delta) => {
+    const handle = systemSplitter(jvT("ui.738167cda6d8"), (delta) => {
       fileWidth += delta;
       setWidths();
       try { localStorage.setItem("justvoxel.system.logs.columns", JSON.stringify({ files: fileWidth })); } catch {}
@@ -5455,22 +5455,22 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     root.className = "system-users-view";
     if (message) root.appendChild(systemNotice(message));
 
-    const primary = systemPanel("Primary administrator", payload.primary_administrator || "voxel").panel;
+    const primary = systemPanel(jvT("ui.41d555d7fceb"), payload.primary_administrator || "voxel").panel;
     const primaryText = document.createElement("p");
     primaryText.className = "muted compact";
-    primaryText.textContent = "Permanent system administrator. This account cannot be deleted, disabled, or demoted here.";
+    primaryText.textContent = jvT("ui.7a55b26e98f0");
     primary.appendChild(primaryText);
     root.appendChild(primary);
 
-    const create = systemPanel("New WebUI account", "Create user").panel;
+    const create = systemPanel(jvT("ui.ca0b591569ff"), jvT("ui.f06da128c342")).panel;
     const createForm = document.createElement("form");
     createForm.className = "admin-form-grid";
     createForm.innerHTML =
-      '<label>Username<input name="username" required maxlength="64" autocomplete="off"></label>' +
-      '<label>Role<select name="role" required><option value="operator">Operator</option><option value="viewer">Viewer</option></select></label>' +
-      '<label>Password<input type="password" name="password" required autocomplete="new-password"></label>' +
-      '<label>Confirm password<input type="password" name="confirm_password" required autocomplete="new-password"></label>' +
-      '<div class="form-actions"><button type="submit">Create user</button></div>';
+      `<label>${jvH("ui.e3b89e9d33f8")}<input name="username" required maxlength="64" autocomplete="off"></label>` +
+      `<label>Role<select name="role" required><option value="operator">Operator</option><option value="viewer">${jvH("ui.678bfa6af48b")}</option></select></label>` +
+      `<label>${jvH("ui.e7cf3ef4f17c")}<input type="password" name="password" required autocomplete="new-password"></label>` +
+      `<label>${jvH("ui.5ac265f396a2")}<input type="password" name="confirm_password" required autocomplete="new-password"></label>` +
+      `<div class="form-actions"><button type="submit">${jvH("ui.f06da128c342")}</button></div>`;
     createForm.querySelectorAll('input[type="password"]').forEach((input) => {
       input.minLength = Number(payload.minimum_password_len || 8);
     });
@@ -5481,21 +5481,21 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       const data = Object.fromEntries(new FormData(createForm).entries());
       try {
         const result = await systemPostForm("/api/system/workspace/users/create", data);
-        if (result) await renderUsers(++loadSequence, result.message || "WebUI user created.");
+        if (result) await renderUsers(++loadSequence, result.message || jvT("ui.8b71b6651c39"));
       } catch (error) {
-        if (state) state.textContent = error?.message || "Could not create WebUI user.";
+        if (state) state.textContent = error?.message || jvT("ui.969cadf867fb");
         if (submit) submit.disabled = false;
       }
     });
     create.appendChild(createForm);
     root.appendChild(create);
 
-    const listPanel = systemPanel("WebUI identities", "Operators and Viewers").panel;
+    const listPanel = systemPanel(jvT("ui.e6d207fbe7a8"), jvT("ui.5583497579f3")).panel;
     const users = Array.isArray(payload.users) ? payload.users : [];
     if (!users.length) {
       const empty = document.createElement("p");
       empty.className = "muted compact";
-      empty.textContent = "No Operator or Viewer accounts exist yet.";
+      empty.textContent = jvT("ui.a1b459a55030");
       listPanel.appendChild(empty);
     } else {
       const list = document.createElement("div");
@@ -5503,13 +5503,13 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       const table = document.createElement("table");
       table.className = "system-users-table";
       const head = document.createElement("thead");
-      head.innerHTML = "<tr><th scope=\"col\">Username</th><th scope=\"col\">Role</th><th scope=\"col\">Status</th><th scope=\"col\">Restart</th><th scope=\"col\">Backup</th><th scope=\"col\">Actions</th></tr>";
+      head.innerHTML = `<tr><th scope="col">${jvH("ui.e3b89e9d33f8")}</th><th scope="col">Role</th><th scope="col">${jvH("ui.920e413c7d41")}</th><th scope="col">${jvH("ui.6b983a81e5e8")}</th><th scope="col">${jvH("ui.838557924a5c")}</th><th scope="col">Actions</th></tr>`;
       const rows = document.createElement("tbody");
       table.append(head, rows);
       list.appendChild(table);
       users.forEach((user, index) => {
         const row = document.createElement("tr");
-        for (const value of [user.username || "User", user.role === "operator" ? "Operator" : "Viewer", user.enabled ? "Enabled" : "Disabled",
+        for (const value of [user.username || jvT("ui.b512d97e7cbf"), user.role === "operator" ? "Operator" : jvT("ui.678bfa6af48b"), user.enabled ? jvT("ui.92c1cdfdf4cb") : jvT("ui.75081b593d15"),
           `${user.restart_used ?? 0} / ${user.restart_limit ?? 0}`, `${user.backup_used ?? 0} / ${user.backup_limit ?? 0}`]) {
           const cell = document.createElement("td");
           cell.textContent = value;
@@ -5519,8 +5519,8 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
         const menu = document.createElement("details");
         menu.className = "storage-action-menu system-user-menu";
         const trigger = document.createElement("summary");
-        trigger.textContent = "Manage";
-        trigger.setAttribute("aria-label", "Manage " + user.username);
+        trigger.textContent = jvT("ui.5a23444828db");
+        trigger.setAttribute("aria-label", jvT("ui.d1f3b7c8d7b5") + user.username);
         const choices = document.createElement("div");
         choices.className = "storage-action-menu-popover";
         // Use the browser top layer so the compact scrolling table cannot clip the menu.
@@ -5563,7 +5563,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
           const cancel = document.createElement("button");
           cancel.type = "button";
           cancel.className = "secondary";
-          cancel.textContent = "Cancel";
+          cancel.textContent = jvT("ui.19766ed6ccb2");
           cancel.addEventListener("click", () => dialog.close());
           const submit = document.createElement("button");
           submit.type = "submit";
@@ -5575,7 +5575,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
             const confirmation = document.createElement("div");
             confirmation.className = "destructive-confirmation";
             confirmation.dataset.destructiveConfirmation = "";
-            confirmation.innerHTML = '<div class="destructive-confirm-slider" data-destructive-slider-shell><span class="destructive-confirm-slider-text" data-destructive-slider-text>Slide to confirm</span><span class="destructive-confirm-slider-thumb" aria-hidden="true">&gt;</span><input type="range" min="0" max="100" step="1" value="0" data-destructive-slider aria-label="Slide to confirm account action"></div><label class="destructive-confirm-toggle-row" data-destructive-toggle-row hidden><span class="destructive-confirm-toggle-callout">Confirm &gt;</span><input class="destructive-confirm-toggle" type="checkbox" data-destructive-toggle aria-label="Confirm account action"></label>';
+            confirmation.innerHTML = `<div class="destructive-confirm-slider" data-destructive-slider-shell><span class="destructive-confirm-slider-text" data-destructive-slider-text>${jvH("ui.656bae9bfca6")}</span><span class="destructive-confirm-slider-thumb" aria-hidden="true">&gt;</span><input type="range" min="0" max="100" step="1" value="0" data-destructive-slider aria-label="${jvH("ui.958924d8ce3a")}"></div><label class="destructive-confirm-toggle-row" data-destructive-toggle-row hidden><span class="destructive-confirm-toggle-callout">${jvH("ui.8ba7a99174e0")}</span><input class="destructive-confirm-toggle" type="checkbox" data-destructive-toggle aria-label="${jvH("ui.0114e3d64460")}"></label>`;
             form.appendChild(confirmation);
           }
           actions.append(cancel, submit);
@@ -5592,10 +5592,10 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
               const result = await systemPostForm("/api/system/workspace/users/" + user.id + "/" + action, fields);
               if (result) {
                 dialog.close();
-                await renderUsers(++loadSequence, result.message || "WebUI user updated.");
+                await renderUsers(++loadSequence, result.message || jvT("ui.6107d3a04c7b"));
               }
             } catch (failure) {
-              error.textContent = failure?.message || "Could not update WebUI user.";
+              error.textContent = failure?.message || jvT("ui.09d234f0346f");
               error.hidden = false;
             } finally {
               cancel.disabled = false;
@@ -5620,12 +5620,12 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
           button.addEventListener("click", () => openAction(title, fields, action, submitText, dangerous));
           choices.appendChild(button);
         };
-        addAction("Change role", '<label>Role<select name="role"><option value="operator"' + (user.role === "operator" ? ' selected' : '') + '>Operator</option><option value="viewer"' + (user.role !== "operator" ? ' selected' : '') + '>Viewer</option></select></label>', "role", "Save role");
-        addAction("Reset restart allowance", '<p>Reset the used restart allowance for this account.</p>', "restart-allowance/reset", "Reset allowance", false, Number(user.restart_used || 0) === 0);
-        addAction("Reset backup allowance", '<p>Reset the used backup allowance for this account.</p>', "backup-allowance/reset", "Reset allowance", false, Number(user.backup_used || 0) === 0);
-        addAction(user.enabled ? "Disable account" : "Enable account", '<input type="hidden" name="enabled" value="' + String(!user.enabled) + '"><p>' + (user.enabled ? 'This account will no longer be able to sign in.' : 'Allow this account to sign in again.') + '</p>', "enabled", user.enabled ? "Disable account" : "Enable account", Boolean(user.enabled));
-        addAction("Change password", '<label>New password<input type="password" name="password" required autocomplete="new-password"></label><label>Confirm password<input type="password" name="confirm_password" required autocomplete="new-password"></label>', "password", "Change password");
-        addAction("Delete account", '<p>Deleting this WebUI identity also removes its saved Operator quota history.</p>', "delete", "Delete account", true);
+        addAction(jvT("ui.a43a8d8cfd29"), '<label>Role<select name="role"><option value="operator"' + (user.role === "operator" ? ' selected' : '') + '>Operator</option><option value="viewer"' + (user.role !== "operator" ? ' selected' : '') + '>Viewer</option></select></label>', "role", jvT("ui.c7523b152e8b"));
+        addAction(jvT("ui.a683c212b7ef"), `<p>${jvH("ui.6bf4d1978e20")}</p>`, "restart-allowance/reset", jvT("ui.37769ec42cac"), false, Number(user.restart_used || 0) === 0);
+        addAction(jvT("ui.3ad28e785fb3"), `<p>${jvH("ui.2abbefb55ee4")}</p>`, "backup-allowance/reset", jvT("ui.37769ec42cac"), false, Number(user.backup_used || 0) === 0);
+        addAction(user.enabled ? jvT("ui.9f024ada2282") : jvT("ui.1965185f3488"), '<input type="hidden" name="enabled" value="' + String(!user.enabled) + '"><p>' + (user.enabled ? jvT("ui.29ee543445e6") : jvT("ui.67022675441b")) + '</p>', "enabled", user.enabled ? jvT("ui.9f024ada2282") : jvT("ui.1965185f3488"), Boolean(user.enabled));
+        addAction(jvT("ui.3f9c991f63a9"), `<label>${jvH("ui.3dd9df4441fb")}<input type="password" name="password" required autocomplete="new-password"></label><label>${jvH("ui.5ac265f396a2")}<input type="password" name="confirm_password" required autocomplete="new-password"></label>`, "password", jvT("ui.3f9c991f63a9"));
+        addAction(jvT("ui.a2e20a335700"), `<p>${jvH("ui.0eb640efdff4")}</p>`, "delete", jvT("ui.a2e20a335700"), true);
         menu.append(trigger, choices);
         cell.appendChild(menu);
         row.appendChild(cell);
@@ -5651,7 +5651,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       const button = document.createElement("button");
       button.type = "button";
       button.dataset.systemSecurityChoice = kind;
-      button.textContent = kind === "authentication" ? "Authentication" : "Password";
+      button.textContent = kind === "authentication" ? jvT("ui.66880d2d8216") : jvT("ui.e7cf3ef4f17c");
       button.setAttribute("aria-selected", securityPane === kind ? "true" : "false");
       switcher.appendChild(button);
     });
@@ -5659,9 +5659,9 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     securityHeading.className = "system-security-heading";
     const securityLabel = document.createElement("p");
     securityLabel.className = "eyebrow";
-    securityLabel.textContent = "Account security";
+    securityLabel.textContent = jvT("ui.1d85c11e1444");
     const securityTitle = document.createElement("h2");
-    securityTitle.textContent = "Security";
+    securityTitle.textContent = jvT("ui.8f6fb4eb7f42");
     securityHeading.append(securityLabel, securityTitle, switcher);
     root.appendChild(securityHeading);
 
@@ -5671,22 +5671,22 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     const authHeading = document.createElement("div");
     authHeading.className = "system-security-pane-heading";
     const authTitle = document.createElement("h3");
-    authTitle.textContent = "Authentication";
+    authTitle.textContent = jvT("ui.66880d2d8216");
     const authDescription = document.createElement("p");
     authDescription.className = "muted compact";
-    authDescription.textContent = "Choose the password WebUI uses to sign in.";
+    authDescription.textContent = jvT("ui.d9daa98b51f6");
     const authLabel = document.createElement("p");
     authLabel.className = "eyebrow";
-    authLabel.textContent = "Sign-in method";
+    authLabel.textContent = jvT("ui.2bb30a7e4603");
     authHeading.append(authLabel, authTitle, authDescription);
     authPane.appendChild(authHeading);
 
     const authStatus = document.createElement("div");
     authStatus.className = "system-security-status";
     const admin = document.createElement("span");
-    admin.textContent = "Administrator: " + (payload.username || "voxel");
+    admin.textContent = jvT("ui.7cd369e12222") + (payload.username || "voxel");
     const mode = document.createElement("span");
-    mode.textContent = "Mode: " + (payload.mode === "system" ? "System account" : "Separate WebUI password");
+    mode.textContent = jvT("ui.6d155e134de0") + (payload.mode === "system" ? jvT("ui.a87b81d3be0d") : jvT("ui.1df936df289f"));
     authStatus.append(admin, mode);
     authPane.appendChild(authStatus);
 
@@ -5695,20 +5695,20 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     if (payload.mode === "system") {
       authForm.innerHTML =
         '<input type="hidden" name="mode" value="separate">' +
-        '<label>Current system password<input type="password" name="system_password" autocomplete="current-password" required></label>' +
-        '<label>New WebUI password<input type="password" name="new_web_password" autocomplete="new-password" required></label>' +
-        '<label>Confirm WebUI password<input type="password" name="confirm_web_password" autocomplete="new-password" required></label>' +
-        '<p class="muted compact">The new browser password will be separate from Linux, SSH, and the local console.</p>' +
-        '<button type="submit">Switch to Separate WebUI password</button>';
+        `<label>${jvH("ui.a99e117fb426")}<input type="password" name="system_password" autocomplete="current-password" required></label>` +
+        `<label>${jvH("ui.344ad9fcdb09")}<input type="password" name="new_web_password" autocomplete="new-password" required></label>` +
+        `<label>${jvH("ui.1db54d10c829")}<input type="password" name="confirm_web_password" autocomplete="new-password" required></label>` +
+        `<p class="muted compact">${jvH("ui.9b90a0542675")}</p>` +
+        `<button type="submit">${jvH("ui.9036a3beaa8e")}</button>`;
       authForm.querySelectorAll('input[name="new_web_password"],input[name="confirm_web_password"]').forEach((input) => {
         input.minLength = Number(payload.minimum_password_len || 8);
       });
     } else {
       authForm.innerHTML =
         '<input type="hidden" name="mode" value="system">' +
-        '<label>System password<input type="password" name="system_password" autocomplete="current-password" required></label>' +
-        '<p class="muted compact">After switching, the real voxel system password will sign in to WebUI.</p>' +
-        '<button type="submit">Switch to System account</button>';
+        `<label>${jvH("ui.b88e3dc0276e")}<input type="password" name="system_password" autocomplete="current-password" required></label>` +
+        `<p class="muted compact">${jvH("ui.eaf5cde5b815")}</p>` +
+        `<button type="submit">${jvH("ui.95bb800209fc")}</button>`;
     }
     authForm.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -5722,9 +5722,9 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
           window.location.assign("/login?message=auth-mode-changed");
           return;
         }
-        await renderSecurity(++loadSequence, result.message || "Authentication mode changed.");
+        await renderSecurity(++loadSequence, result.message || jvT("ui.db5611ae62d9"));
       } catch (error) {
-        if (state) state.textContent = error?.message || "Authentication mode change was rejected.";
+        if (state) state.textContent = error?.message || jvT("ui.f5adad2c4d22");
         if (submit) submit.disabled = false;
       }
     });
@@ -5737,24 +5737,24 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     const passwordHeading = document.createElement("div");
     passwordHeading.className = "system-security-pane-heading";
     const passwordTitle = document.createElement("h3");
-    passwordTitle.textContent = "Password";
+    passwordTitle.textContent = jvT("ui.e7cf3ef4f17c");
     const passwordDescription = document.createElement("p");
     passwordDescription.className = "muted compact";
-    passwordDescription.textContent = "Change the password for the current sign-in mode.";
+    passwordDescription.textContent = jvT("ui.f954e2d8e432");
     const passwordLabel = document.createElement("p");
     passwordLabel.className = "eyebrow";
-    passwordLabel.textContent = "Account password";
+    passwordLabel.textContent = jvT("ui.7da69e0ebd60");
     passwordHeading.append(passwordLabel, passwordTitle, passwordDescription);
     passwordPane.appendChild(passwordHeading);
 
     const passwordForm = document.createElement("form");
     passwordForm.className = "system-security-form";
     passwordForm.innerHTML =
-      '<label>Current password<input type="password" name="current_password" autocomplete="current-password" required></label>' +
-      '<label>New password<input type="password" name="new_password" autocomplete="new-password" required></label>' +
-      '<label>Confirm new password<input type="password" name="confirm_password" autocomplete="new-password" required></label>' +
-      '<p class="muted compact">Use at least ' + String(payload.minimum_password_len || 8) + ' characters and follow the host password policy.</p>' +
-      '<button type="submit">Change password</button>';
+      `<label>${jvH("ui.72ed2bd767ce")}<input type="password" name="current_password" autocomplete="current-password" required></label>` +
+      `<label>${jvH("ui.3dd9df4441fb")}<input type="password" name="new_password" autocomplete="new-password" required></label>` +
+      `<label>${jvH("ui.bf000421aeb3")}<input type="password" name="confirm_password" autocomplete="new-password" required></label>` +
+      `<p class="muted compact">${jvH("ui.0d33e45397d7")}` + String(payload.minimum_password_len || 8) + ' characters and follow the host password policy.</p>' +
+      `<button type="submit">${jvH("ui.3f9c991f63a9")}</button>`;
     passwordForm.querySelectorAll('input[name="new_password"],input[name="confirm_password"]').forEach((input) => {
       input.minLength = Number(payload.minimum_password_len || 8);
     });
@@ -5771,7 +5771,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
           return;
         }
       } catch (error) {
-        if (state) state.textContent = error?.message || "Password change was rejected.";
+        if (state) state.textContent = error?.message || jvT("ui.c1683634fe84");
         if (submit) submit.disabled = false;
       }
     });
@@ -5815,16 +5815,16 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   };
 
   const systemResetOperationLabel = (operation) => {
-    if (!operation) return "Working";
-    if (operation.state === "queued") return "Queued";
-    if (operation.state === "validating") return "Validating";
-    if (operation.state === "running") return "Resetting";
-    if (operation.state === "verifying") return "Verifying";
-    if (operation.state === "succeeded") return "Complete";
-    if (operation.state === "needs_attention") return "Needs attention";
-    if (operation.state === "resolved") return "Resolved";
-    if (operation.state === "rolled_back") return "Rolled back";
-    return "Working";
+    if (!operation) return jvT("ui.a92f0449a9f7");
+    if (operation.state === "queued") return jvT("ui.661ff40a07e0");
+    if (operation.state === "validating") return jvT("ui.5a1a167e3d90");
+    if (operation.state === "running") return jvT("ui.2740f15dd768");
+    if (operation.state === "verifying") return jvT("ui.a7d4a9f301ed");
+    if (operation.state === "succeeded") return jvT("ui.143b270a3260");
+    if (operation.state === "needs_attention") return jvT("ui.c1ebc7817870");
+    if (operation.state === "resolved") return jvT("ui.5be3c2c8354e");
+    if (operation.state === "rolled_back") return jvT("ui.71592236d852");
+    return jvT("ui.a92f0449a9f7");
   };
 
   const renderResetOperation = (operation) => {
@@ -5871,7 +5871,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     root.className = "system-reset-view";
 
     const built = systemPanel(
-      operation.operation_type === "factory_reset" ? "Full Factory Reset" : "Reset Minecraft",
+      operation.operation_type === "factory_reset" ? jvT("ui.20b6891d2ddb") : jvT("ui.979e2ada0bd5"),
       systemResetOperationLabel(operation)
     );
     built.panel.classList.add("system-reset-progress");
@@ -5882,7 +5882,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
 
     const status = document.createElement("p");
     status.className = "system-reset-progress-status";
-    status.textContent = operation.status || "Reset operation is running.";
+    status.textContent = operation.status || jvT("ui.7cd4cd6b5a1f");
     const stage = document.createElement("p");
     stage.className = "muted compact";
     stage.textContent = "Stage: " + String(operation.stage || "working").replaceAll("_", " ");
@@ -5890,7 +5890,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     const liveConsole = document.createElement("button");
     liveConsole.type = "button";
     liveConsole.className = "secondary";
-    liveConsole.textContent = "Live Console";
+    liveConsole.textContent = jvT("ui.7cac54a8cfc3");
     liveConsole.addEventListener("click", () => window.JustVoxelLiveConsole.open({
       kind: operation.operation_type,
       operationID: operation.operation_id,
@@ -5902,7 +5902,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     if (operation.operation_type === "factory_reset") {
       const note = document.createElement("div");
       note.className = "notice warning";
-      note.textContent = "When Full Factory Reset completes, this WebUI session will be signed out. Sign in with voxel / voxel, then choose a new administrator password before normal administration is available.";
+      note.textContent = jvT("ui.be18d8f28f2d");
       built.panel.appendChild(note);
       const consoleActions = document.createElement("div");
       consoleActions.className = "action-row";
@@ -5911,7 +5911,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       if (operation.state === "needs_attention") {
         const recovery = document.createElement("div");
         recovery.className = "notice warning";
-        recovery.innerHTML = "<strong>Factory Reset stopped before completion.</strong><br>You can keep the server exactly as it is now and release the blocked Restore/Migration operations, or review and retry the destructive reset.";
+        recovery.innerHTML = `<strong>${jvH("ui.86a736100f8c")}</strong><br>${jvH("ui.07bf9377a4c7")}`;
         built.panel.appendChild(recovery);
 
         const actions = document.createElement("div");
@@ -5919,12 +5919,12 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
         const keep = document.createElement("button");
         keep.type = "button";
         keep.className = "secondary";
-        keep.textContent = "Keep current server";
+        keep.textContent = jvT("ui.bf52e7deba92");
         keep.addEventListener("click", async () => {
-          if (!window.confirm("Keep the current server state and release the failed Factory Reset lock? This does not delete data or retry the reset.")) return;
+          if (!window.confirm(jvT("ui.6d795dedffb9"))) return;
           keep.disabled = true;
           retry.disabled = true;
-          if (state) state.textContent = "Resolving failed Factory Reset…";
+          if (state) state.textContent = jvT("ui.71be1fccb60a");
           try {
             const result = await systemPostForm("/api/system/workspace/reset/factory/resolve", {
               operation_id: operation.operation_id,
@@ -5933,7 +5933,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
             if (result?.operation) renderResetOperation(result.operation);
             else await renderReset(++loadSequence);
           } catch (error) {
-            if (state) state.textContent = error?.message || "Failed Factory Reset could not be resolved.";
+            if (state) state.textContent = error?.message || jvT("ui.7cfc47e3f260");
             keep.disabled = false;
             retry.disabled = false;
           }
@@ -5942,7 +5942,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
         const retry = document.createElement("button");
         retry.type = "button";
         retry.className = "danger";
-        retry.textContent = "Review and retry Factory Reset";
+        retry.textContent = jvT("ui.adc684dd72fc");
         retry.addEventListener("click", () => planReset("factory"));
         actions.append(keep, retry);
         built.panel.appendChild(actions);
@@ -5951,8 +5951,8 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       const recovery = document.createElement("div");
       recovery.className = "notice warning";
       recovery.innerHTML = operation.instance_id
-        ? "<strong>Minecraft Reset stopped before completion.</strong><br>Review the reset impact and retry the same persistent operation."
-        : "<strong>Minecraft removal stopped before completion.</strong><br>Continue removal to finish removing the remaining servers.";
+        ? `<strong>${jvH("ui.b17d34c8a367")}</strong><br>${jvH("ui.17474bcfbcd2")}`
+        : `<strong>${jvH("ui.4034dd9654dc")}</strong><br>${jvH("ui.a1800c07f600")}`;
       built.panel.appendChild(recovery);
 
       const actions = document.createElement("div");
@@ -5960,7 +5960,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       const retry = document.createElement("button");
       retry.type = "button";
       retry.className = "danger";
-      retry.textContent = operation.instance_id ? "Retry Reset Minecraft" : "Continue removal";
+      retry.textContent = operation.instance_id ? jvT("ui.6f93a2571e2c") : jvT("ui.658afd0803c0");
       retry.addEventListener("click", () => planReset("minecraft", true));
       actions.appendChild(retry);
       built.panel.appendChild(actions);
@@ -5983,7 +5983,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
           operation.operation_type === "factory_reset" ? operation.operation_id : "");
         if (payload?.operation) renderResetOperation(payload.operation);
       } catch (error) {
-        if (state) state.textContent = error?.message || "Reset progress is temporarily unavailable.";
+        if (state) state.textContent = error?.message || jvT("ui.1823a62fdb5c");
         resetPollTimer = window.setTimeout(() => renderReset(++loadSequence), 2500);
       }
     }, 1800);
@@ -6001,38 +6001,38 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     const keep = [];
 
     if (mode === "minecraft" && plan.instance_id) {
-      remove.push("Current Minecraft container and runtime configuration.");
-      if (plan.data_action === "delete") remove.push("Minecraft world/data on appliance-owned internal storage.");
-      else keep.push("Minecraft data outside appliance-owned internal storage.");
-      if (plan.plugins_action === "remove_managed_jars" || plan.plugins_action === "delete_with_internal_data") remove.push("Plugins-managed JARs installed through JustVoxel.");
-      if (plan.data_action === "preserve") keep.push("Plugin configuration/data folders and manual plugins.");
-      keep.push("All backup archives.");
-      keep.push("Current login password and WebUI accounts.");
-      keep.push("Storage partitions, filesystems, mounts, and host configuration.");
-      keep.push("USB, external, NFS, and SMB data.");
+      remove.push(jvT("ui.07f376ec2908"));
+      if (plan.data_action === "delete") remove.push(jvT("ui.abf24b64455b"));
+      else keep.push(jvT("ui.3a8217bf821e"));
+      if (plan.plugins_action === "remove_managed_jars" || plan.plugins_action === "delete_with_internal_data") remove.push(jvT("ui.24315f4740a8"));
+      if (plan.data_action === "preserve") keep.push(jvT("ui.b107008010b1"));
+      keep.push(jvT("ui.d25e93ba058d"));
+      keep.push(jvT("ui.c2e406c7e1cf"));
+      keep.push(jvT("ui.44fa8600908d"));
+      keep.push(jvT("ui.27f9efecdccc"));
     } else if (mode === "minecraft") {
-      remove.push("ALL configured Minecraft server definitions, running or stopped.");
-      remove.push("Minecraft containers/runtime units and exact owned firewall/runtime state.");
-      remove.push("JustVoxel-owned INTERNAL Minecraft data, including managed plugins/runtime content.");
-      keep.push("All backup archives and archive metadata.");
-      keep.push("Login/password, authentication mode, and WebUI users.");
-      keep.push("Storage layout, mounts, partitions, filesystems, and storage ownership records.");
-      keep.push("SMB credentials and unrelated host configuration.");
-      keep.push("External, USB, NFS, and SMB data are never erased.");
+      remove.push(jvT("ui.e5094f800296"));
+      remove.push(jvT("ui.7aab4edb3e3c"));
+      remove.push(jvT("ui.b66192cbf9e0"));
+      keep.push(jvT("ui.f60cea039966"));
+      keep.push(jvT("ui.76ad39a83c43"));
+      keep.push(jvT("ui.1616c5a17af3"));
+      keep.push(jvT("ui.5e9ae5e6318e"));
+      keep.push(jvT("ui.81bbea99d4fa"));
     } else {
-      remove.push("Current Minecraft container and runtime configuration.");
-      if (plan.data_action === "delete") remove.push("Minecraft world/data on appliance-owned internal storage.");
-      else if (plan.data_action === "preserve") keep.push("Minecraft data outside appliance-owned internal storage.");
-      if (plan.backup_action === "delete") remove.push("Backup archives on appliance-owned internal storage.");
-      else if (plan.backup_action === "preserve") keep.push("Backup archives on USB, external, or network storage.");
-      remove.push("Local JustVoxel configuration backups.");
-      remove.push("Additional WebUI users, notifications, history, and local authentication state.");
-      remove.push("All AI/API connections and credentials, including OAuth bindings and allowances. The external gateway is disabled before cleanup, even if Factory Reset later needs attention.");
-      remove.push("Current WebUI sessions; the voxel system password returns to voxel / voxel and must be replaced immediately after sign-in.");
-      keep.push("USB, external, NFS, and SMB data.");
-      remove.push("JustVoxel-managed mounts and /etc/fstab entries are reset; storage data is not erased by removing these entries.");
-      keep.push("Storage partitions, filesystems, and unrelated administrator /etc/fstab entries.");
-      keep.push("Network configuration, SSH configuration, and the JustVoxel OS image.");
+      remove.push(jvT("ui.07f376ec2908"));
+      if (plan.data_action === "delete") remove.push(jvT("ui.abf24b64455b"));
+      else if (plan.data_action === "preserve") keep.push(jvT("ui.3a8217bf821e"));
+      if (plan.backup_action === "delete") remove.push(jvT("ui.6c50abe6706e"));
+      else if (plan.backup_action === "preserve") keep.push(jvT("ui.fdbf31f6f3fe"));
+      remove.push(jvT("ui.31cdff1c5446"));
+      remove.push(jvT("ui.b4d4c139dc36"));
+      remove.push(jvT("ui.6c0e6c6ade8d"));
+      remove.push(jvT("ui.c416ea72b8a6"));
+      keep.push(jvT("ui.27f9efecdccc"));
+      remove.push(jvT("ui.37f46b894b6b"));
+      keep.push(jvT("ui.ce7188063e70"));
+      keep.push(jvT("ui.d26be76b1f69"));
     }
     return { remove, keep };
   };
@@ -6042,29 +6042,29 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     if (!content) return;
     const root = document.createElement("div");
     root.className = "system-reset-view";
-    const title = mode === "factory" ? "Full Factory Reset" : "Reset Minecraft";
-    const built = systemPanel("Review reset", title);
+    const title = mode === "factory" ? jvT("ui.20b6891d2ddb") : jvT("ui.979e2ada0bd5");
+    const built = systemPanel(jvT("ui.0dcd15832c6f"), title);
     built.panel.classList.add("system-reset-review");
 
     const description = document.createElement("p");
     description.className = "muted compact";
     description.textContent = mode === "factory"
-      ? "This resets JustVoxel-owned local state. External and network storage are never erased."
-      : plan.instance_id ? "This removes the current Minecraft installation while preserving backups, accounts, and storage layout."
-      : "Remove ALL existing Minecraft servers, running or stopped, and JustVoxel-owned internal Minecraft data. External, USB, NFS, and SMB data are never erased.";
+      ? jvT("ui.abaa34fb73a4")
+      : plan.instance_id ? jvT("ui.c2633366024a")
+      : jvT("ui.4f77c4766406");
     built.panel.appendChild(description);
 
     if (mode === "minecraft" && Array.isArray(plan.participants)) {
-      built.panel.appendChild(systemResetList("Servers to remove: " + plan.participants.length,
+      built.panel.appendChild(systemResetList(jvT("ui.e48ae12029e2") + plan.participants.length,
         plan.participants.map((participant) => participant.display_name + " — " +
-          ({ running: "Running", stopped: "Stopped", failed: "Failed", retiring: "Removing" }[participant.state] || participant.state))));
+          ({ running: jvT("ui.f4ccae29e1bb"), stopped: jvT("ui.1a4f630ac1b6"), failed: jvT("ui.031a8f0f659d"), retiring: jvT("ui.9f2c59a113db") }[participant.state] || participant.state))));
     }
     const impact = resetImpactFromPlan(mode, plan);
     const impactGrid = document.createElement("div");
     impactGrid.className = "system-reset-impact-grid";
     impactGrid.append(
-      systemResetList("Will remove", impact.remove, "danger"),
-      systemResetList("Will keep", impact.keep, "safe")
+      systemResetList(jvT("ui.620c483f98f8"), impact.remove, "danger"),
+      systemResetList(jvT("ui.6dfb4a89d46b"), impact.keep, "safe")
     );
     built.panel.appendChild(impactGrid);
 
@@ -6089,7 +6089,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       playersConfirm = document.createElement("input");
       playersConfirm.type = "checkbox";
       const copy = document.createElement("span");
-      copy.textContent = "I understand the online players will be disconnected.";
+      copy.textContent = jvT("ui.6ec1430cca33");
       playerLabel.append(playersConfirm, copy);
       built.panel.appendChild(playerLabel);
     }
@@ -6098,7 +6098,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     if (mode === "factory" && requireSystemPassword) {
       const passwordLabel = document.createElement("label");
       passwordLabel.className = "system-reset-password";
-      passwordLabel.textContent = "Current voxel system password";
+      passwordLabel.textContent = jvT("ui.b46bd6419d35");
       password = document.createElement("input");
       password.type = "password";
       password.autocomplete = "current-password";
@@ -6106,7 +6106,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       passwordLabel.appendChild(password);
       const help = document.createElement("small");
       help.className = "muted";
-      help.textContent = "Required because WebUI is using a separate browser password.";
+      help.textContent = jvT("ui.1c3074505e65");
       passwordLabel.appendChild(help);
       built.panel.appendChild(passwordLabel);
     }
@@ -6117,18 +6117,18 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     sliderShell.className = "destructive-confirm-slider";
     const armedText = document.createElement("span");
     armedText.className = "destructive-confirm-slider-text";
-    armedText.textContent = "Slide to confirm reset";
+    armedText.textContent = jvT("ui.68184139e694");
     const thumb = document.createElement("span");
     thumb.className = "destructive-confirm-slider-thumb";
     thumb.setAttribute("aria-hidden", "true");
-    thumb.textContent = ">";
+    thumb.textContent = jvT("ui.62b67e1f685b");
     const slider = document.createElement("input");
     slider.type = "range";
     slider.min = "0";
     slider.max = "100";
     slider.step = "1";
     slider.value = "0";
-    slider.setAttribute("aria-label", "Slide to confirm reset");
+    slider.setAttribute("aria-label", jvT("ui.68184139e694"));
     sliderShell.append(armedText, thumb, slider);
 
     const finalLabel = document.createElement("label");
@@ -6136,7 +6136,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     finalLabel.hidden = true;
     const finalCopy = document.createElement("span");
     finalCopy.className = "destructive-confirm-toggle-callout";
-    finalCopy.textContent = "Confirm >";
+    finalCopy.textContent = jvT("ui.8ba7a99174e0");
     const finalConfirm = document.createElement("input");
     finalConfirm.className = "destructive-confirm-toggle";
     finalConfirm.type = "checkbox";
@@ -6149,11 +6149,11 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     const cancel = document.createElement("button");
     cancel.type = "button";
     cancel.className = "secondary";
-    cancel.textContent = "Cancel";
+    cancel.textContent = jvT("ui.19766ed6ccb2");
     const apply = document.createElement("button");
     apply.type = "button";
     apply.className = "danger";
-    apply.textContent = mode === "factory" ? "Full Factory Reset" : "Reset Minecraft";
+    apply.textContent = mode === "factory" ? jvT("ui.20b6891d2ddb") : jvT("ui.979e2ada0bd5");
     apply.disabled = true;
     actions.append(cancel, apply);
     built.panel.appendChild(actions);
@@ -6163,7 +6163,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       sliderShell.style.setProperty("--confirm-progress", String(progress / 100));
       const armed = progress >= 100;
       sliderShell.classList.toggle("is-armed", armed);
-      armedText.textContent = armed ? "Reset armed" : "Slide to confirm reset";
+      armedText.textContent = armed ? jvT("ui.4b9e808b8a8f") : jvT("ui.68184139e694");
       finalLabel.hidden = !armed;
       if (!armed) finalConfirm.checked = false;
       const playersOK = !playersConfirm || playersConfirm.checked;
@@ -6184,7 +6184,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       finalConfirm.disabled = true;
       if (playersConfirm) playersConfirm.disabled = true;
       if (password) password.disabled = true;
-      if (state) state.textContent = "Starting reset…";
+      if (state) state.textContent = jvT("ui.0dbd144fff0f");
       try {
         const fields = {
           plan_fingerprint: plan.plan_fingerprint,
@@ -6196,11 +6196,11 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
           : "/api/system/workspace/reset/minecraft/apply";
         const result = await systemPostForm(endpoint, fields);
         if (password) password.value = "";
-        if (!result?.operation) throw new Error("Reset operation did not start.");
+        if (!result?.operation) throw new Error(jvT("ui.91e689223f70"));
         renderResetOperation(result.operation);
       } catch (error) {
         if (password) password.value = "";
-        if (state) state.textContent = error?.message || "Reset could not start.";
+        if (state) state.textContent = error?.message || jvT("ui.31c5cbfa01f2");
         cancel.disabled = false;
         slider.disabled = false;
         if (playersConfirm) playersConfirm.disabled = false;
@@ -6215,7 +6215,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   };
 
   const planReset = async (mode, retry = false) => {
-    if (state) state.textContent = "Checking current reset impact…";
+    if (state) state.textContent = jvT("ui.80c65200649f");
     try {
       if (mode === "minecraft" && !retry) {
         const current = await systemFetchJSON("/api/system/workspace/reset/minecraft/current");
@@ -6239,7 +6239,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       renderResetPlan(mode, plan, requireSystemPassword);
       if (state) state.textContent = "";
     } catch (error) {
-      if (state) state.textContent = error?.message || "Reset could not be planned.";
+      if (state) state.textContent = error?.message || jvT("ui.fc7fc36b9b26");
     }
   };
 
@@ -6253,10 +6253,10 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     const intro = document.createElement("div");
     intro.className = "system-reset-intro";
     const title = document.createElement("h3");
-    title.textContent = "Start over safely";
+    title.textContent = jvT("ui.6b9e567376a6");
     const copy = document.createElement("p");
     copy.className = "muted compact";
-    copy.textContent = "Choose how much JustVoxel should reset. External, USB, NFS, and SMB storage are never erased by Full Factory Reset.";
+    copy.textContent = jvT("ui.c1378564b9e6");
     intro.append(title, copy);
     root.appendChild(intro);
 
@@ -6267,8 +6267,8 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     minecraft.type = "button";
     minecraft.className = "system-reset-choice";
     minecraft.innerHTML =
-      '<strong>Reset Minecraft</strong>' +
-      '<span>Remove ALL existing Minecraft servers, running or stopped, and JustVoxel-owned internal Minecraft data.</span>' +
+      `<strong>${jvH("ui.979e2ada0bd5")}</strong>` +
+      `<span>${jvH("ui.201aef0a5b69")}</span>` +
       '<small>Keeps backups, login/password, WebUI users, and storage layout.</small>';
     minecraft.addEventListener("click", () => planReset("minecraft"));
 
@@ -6276,8 +6276,8 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     factory.type = "button";
     factory.className = "system-reset-choice danger";
     factory.innerHTML =
-      '<strong>Full Factory Reset</strong>' +
-      '<span>Return JustVoxel-owned local state to first-use condition.</span>' +
+      `<strong>${jvH("ui.20b6891d2ddb")}</strong>` +
+      `<span>${jvH("ui.c4e157eca063")}</span>` +
       '<small>Deletes local Minecraft, local backups, WebUI users/history, and resets authentication. External/network storage stays untouched.</small>';
     factory.addEventListener("click", () => planReset("factory"));
 
@@ -6304,14 +6304,14 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     root.className = "system-about-view";
     const variant = String(payload.variant || "").trim().toLowerCase();
     const variantName = ({ vm: "VM", hws: "HWS", "justvoxel-vm": "VM", "justvoxel-hws": "HWS" })[variant];
-    const built = systemPanel("Installed appliance", variantName ? `JustVoxel ${variantName}` : "JustVoxel");
+    const built = systemPanel(jvT("ui.bc75ba011e41"), variantName ? jvT("ui.446778e3c2f4", {v0: (variantName)}) : "JustVoxel");
     const list = document.createElement("dl");
     [
       ["JustVoxel", payload.justvoxel || "—"],
       ["WebUI", payload.webui || "—"],
-      ["Management API", payload.management_api || "—"],
-      ["Source", payload.commit || "—"],
-      ["Signed in as", (payload.username || "—") + " (" + (payload.role || "—") + ")"],
+      [jvT("ui.60e425d8c33f"), payload.management_api || "—"],
+      [jvT("ui.0e570ca6fabe"), payload.commit || "—"],
+      [jvT("ui.abc50e334be4"), (payload.username || "—") + " (" + (payload.role || "—") + ")"],
     ].forEach(([label, value]) => {
       const row = document.createElement("div");
       const dt = document.createElement("dt");
@@ -6333,12 +6333,12 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     const project = document.createElement("div");
     project.className = "about-project";
     const projectHeading = document.createElement("h3");
-    projectHeading.textContent = "Project";
+    projectHeading.textContent = jvT("ui.985959785319");
     const projectList = document.createElement("dl");
     [
-      ["Repository", "JustVoxel on GitHub", "https://github.com/home-server-project/justvoxel"],
-      ["Organization", "Home Server Project", "https://github.com/home-server-project"],
-      ["Support / Bugs", "Report an issue", "https://github.com/home-server-project/justvoxel/issues"],
+      [jvT("ui.13d6ff07b8a5"), jvT("ui.0e5efa875595"), "https://github.com/home-server-project/justvoxel"],
+      [jvT("ui.d764d42592fc"), jvT("ui.299150b6bf15"), "https://github.com/home-server-project"],
+      [jvT("ui.103ba8ff257f"), jvT("ui.635ae219ad13"), "https://github.com/home-server-project/justvoxel/issues"],
     ].forEach(([label, text, url]) => {
       const row = document.createElement("div");
       const dt = document.createElement("dt");
@@ -6371,47 +6371,47 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       section.append(heading, links);
       built.panel.appendChild(section);
     };
-    appendLinkSection("Third-party software", [
+    appendLinkSection(jvT("ui.e1ec9dbb6512"), [
       ["CLI", [
         ["btop", "https://github.com/aristocratos/btop"],
         ["Superfile", "https://github.com/yorukot/superfile"],
         ["just", "https://github.com/casey/just"],
         ["gum", "https://github.com/charmbracelet/gum"],
         ["fzf", "https://github.com/junegunn/fzf"],
-        ["ujust / ugum inspiration", "https://github.com/ublue-os/packages/tree/main/packages/ublue-os-just"],
+        [jvT("ui.63f1711dd65a"), "https://github.com/ublue-os/packages/tree/main/packages/ublue-os-just"],
       ]],
       ["WebUI", [
         ["ttyd", "https://github.com/tsl0922/ttyd"],
-        ["File Browser", "https://github.com/gtsteffaniak/filebrowser"],
+        [jvT("ui.33b8a7901c02"), "https://github.com/gtsteffaniak/filebrowser"],
         ["Glances", "https://github.com/nicolargo/glances"],
       ]],
     ]);
-    appendLinkSection("Remote access", [
+    appendLinkSection(jvT("ui.66354a1d3225"), [
       ["VPN / Mesh", [
         ["Tailscale", "https://tailscale.com/"],
         ["NetBird", "https://netbird.io/"],
-        ["NordVPN Meshnet", "https://nordvpn.com/meshnet/"],
+        [jvT("ui.efbb9e0df755"), "https://nordvpn.com/meshnet/"],
       ]],
-      ["Public game access", [
+      [jvT("ui.2d55598fd54b"), [
         ["Playit.gg", "https://playit.gg/"],
       ]],
     ]);
     const disclaimer = document.createElement("p");
     disclaimer.className = "disclaimer";
-    disclaimer.textContent = "NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.";
+    disclaimer.textContent = jvT("ui.fffb0ebaa589");
     root.append(built.panel, disclaimer);
     content.replaceChildren(root);
   };
 
   const systemUPSStateLabel = (value) => {
     const labels = {
-      online: "Online",
-      on_battery: "On battery",
-      low_battery: "Low battery",
-      bypass: "Bypass",
-      unknown: "Unknown",
+      online: jvT("ui.0d21bd52022c"),
+      on_battery: jvT("ui.51d530448a96"),
+      low_battery: jvT("ui.a894de3c08a2"),
+      bypass: jvT("ui.bf26c2ac087d"),
+      unknown: jvT("ui.b764cdc0eab7"),
     };
-    return labels[value] || "Unknown";
+    return labels[value] || jvT("ui.b764cdc0eab7");
   };
 
   const systemUPSNumber = (value, suffix = "") => {
@@ -6445,11 +6445,11 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     if (!snapshot.available) return;
     const dialog = document.createElement("dialog");
     dialog.className = "system-action-dialog";
-    dialog.setAttribute("aria-label", "UPS options");
+    dialog.setAttribute("aria-label", jvT("ui.37cdc3330e3e"));
     const shell = document.createElement("div");
     shell.className = "system-action-dialog-content";
     const title = document.createElement("h2");
-    title.textContent = "UPS options";
+    title.textContent = jvT("ui.37cdc3330e3e");
     const settingField = (label, name, type, value) => {
       const field = document.createElement("label");
       field.textContent = label;
@@ -6464,49 +6464,49 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     const shutdownSection = document.createElement("section");
     shutdownSection.className = "system-ups-option-section";
     const shutdownTitle = document.createElement("h3");
-    shutdownTitle.textContent = "Automatic shutdown";
-    const shutdownToggle = settingField("Shut down after UPS has been on battery", "enabled", "checkbox", "");
+    shutdownTitle.textContent = jvT("ui.82ea48e89c88");
+    const shutdownToggle = settingField(jvT("ui.5f94bd70e4d9"), "enabled", "checkbox", "");
     shutdownToggle.field.classList.add("system-ups-shutdown-switch");
     shutdownToggle.input.setAttribute("role", "switch");
     shutdownToggle.input.checked = Boolean(snapshot.protection_enabled);
-    const delay = settingField("Shutdown delay (seconds)", "delay_seconds", "number", String(snapshot.shutdown_delay_seconds || 120));
+    const delay = settingField(jvT("ui.edcf437d2614"), "delay_seconds", "number", String(snapshot.shutdown_delay_seconds || 120));
     delay.input.min = "1";
     delay.input.max = "86400";
-    const monitorUser = settingField("Monitor username", "monitor_username", "text", "");
-    const monitorPassword = settingField("Monitor password", "monitor_password", "password", "");
+    const monitorUser = settingField(jvT("ui.3367ff7ddea7"), "monitor_username", "text", "");
+    const monitorPassword = settingField(jvT("ui.ffd8e01ef6b3"), "monitor_password", "password", "");
     const shutdownNote = document.createElement("p");
-    shutdownNote.textContent = snapshot.monitor_credentials_configured ? "Credentials configured. Enter username and password again to update." : "Enter username and password to enable.";
+    shutdownNote.textContent = snapshot.monitor_credentials_configured ? jvT("ui.8c04e3286a8e") : jvT("ui.97c480300d14");
     const shutdownState = document.createElement("p");
-    shutdownState.textContent = "Monitor service: " + (snapshot.monitor_service_active ? "active" : "inactive") + " · NUT mode: " + (snapshot.nut_mode || "none");
+    shutdownState.textContent = jvT("ui.9051c4ee2df8") + (snapshot.monitor_service_active ? "active" : "inactive") + " · NUT mode: " + (snapshot.nut_mode || "none");
     const shutdownSave = document.createElement("button");
     shutdownSave.type = "button";
     shutdownSave.className = "secondary";
-    shutdownSave.textContent = "Save shutdown settings";
+    shutdownSave.textContent = jvT("ui.b0617f4f2c48");
     shutdownSection.append(shutdownTitle, shutdownToggle.field, delay.field, monitorUser.field, monitorPassword.field, shutdownNote, shutdownState, shutdownSave);
 
     const sharingSection = document.createElement("section");
     sharingSection.className = "system-ups-option-section";
     const sharingAvailable = selectedMode === "local";
     const sharingTitle = document.createElement("h3");
-    sharingTitle.textContent = "Network sharing";
-    const sharingToggle = settingField("Share this UPS over the network", "enabled", "checkbox", "");
+    sharingTitle.textContent = jvT("ui.30fbb1558130");
+    const sharingToggle = settingField(jvT("ui.99a40b9820c7"), "enabled", "checkbox", "");
     sharingToggle.field.classList.add("system-ups-shutdown-switch");
     sharingToggle.input.setAttribute("role", "switch");
     sharingToggle.input.checked = Boolean(snapshot.sharing_enabled);
-    const listenAddress = settingField("Listen address", "listen_address", "text", snapshot.sharing_listen_address);
-    const listenPort = settingField("Port", "listen_port", "number", String(snapshot.sharing_listen_port || 3493));
+    const listenAddress = settingField(jvT("ui.edc8737a7436"), "listen_address", "text", snapshot.sharing_listen_address);
+    const listenPort = settingField(jvT("ui.72e9a59f5a1d"), "listen_port", "number", String(snapshot.sharing_listen_port || 3493));
     listenPort.input.min = "1";
     listenPort.input.max = "65535";
-    const clientUser = settingField("Client username", "client_username", "text", "");
-    const clientPassword = settingField("Client password", "client_password", "password", "");
+    const clientUser = settingField(jvT("ui.bfdba669e35c"), "client_username", "text", "");
+    const clientPassword = settingField(jvT("ui.bfd9632986e9"), "client_password", "password", "");
     const sharingNote = document.createElement("p");
-    sharingNote.textContent = snapshot.sharing_credentials_configured ? "Credentials configured. Enter username and password again to update." : "Enter username and password to enable.";
+    sharingNote.textContent = snapshot.sharing_credentials_configured ? jvT("ui.8c04e3286a8e") : jvT("ui.97c480300d14");
     const sharingState = document.createElement("p");
-    sharingState.textContent = "Server service: " + (snapshot.server_service_active ? "active" : "inactive") + " · Driver service: " + (snapshot.driver_service_active ? "active" : "inactive");
+    sharingState.textContent = jvT("ui.41adb152a3da") + (snapshot.server_service_active ? "active" : "inactive") + " · Driver service: " + (snapshot.driver_service_active ? "active" : "inactive");
     const sharingSave = document.createElement("button");
     sharingSave.type = "button";
     sharingSave.className = "secondary";
-    sharingSave.textContent = "Save sharing settings";
+    sharingSave.textContent = jvT("ui.8b48365fe420");
     sharingSection.append(sharingTitle, sharingToggle.field, listenAddress.field, listenPort.field, clientUser.field, clientPassword.field, sharingNote, sharingState, sharingSave);
     if (!sharingAvailable) {
       sharingToggle.input.disabled = true;
@@ -6522,9 +6522,9 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     syncOptionFields(sharingToggle, [listenAddress, listenPort, clientUser, clientPassword]);
 
     const section = document.createElement("h3");
-    section.textContent = "Saved UPS source";
+    section.textContent = jvT("ui.d5b59156cd37");
     const copy = document.createElement("p");
-    copy.textContent = "Remove this saved UPS connection and return to a UPS connected directly to this machine.";
+    copy.textContent = jvT("ui.4b7b5eec1fa3");
     const error = document.createElement("p");
     error.className = "system-action-dialog-error";
     error.hidden = true;
@@ -6533,11 +6533,11 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     const cancel = document.createElement("button");
     cancel.type = "button";
     cancel.className = "secondary";
-    cancel.textContent = "Cancel";
+    cancel.textContent = jvT("ui.19766ed6ccb2");
     const forget = document.createElement("button");
     forget.type = "button";
     forget.className = "danger";
-    forget.textContent = "Remove saved source";
+    forget.textContent = jvT("ui.e48602c3b6ec");
     actions.append(cancel, forget);
     const optionColumns = document.createElement("div");
     optionColumns.className = "system-ups-option-columns";
@@ -6576,8 +6576,8 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
         button.disabled = false;
       }
     };
-    shutdownSave.addEventListener("click", () => saveOptions("/api/ups/shutdown", shutdownToggle, [delay, monitorUser, monitorPassword], shutdownSave, "Shutdown settings could not be saved."));
-    sharingSave.addEventListener("click", () => saveOptions("/api/ups/sharing", sharingToggle, [listenAddress, listenPort, clientUser, clientPassword], sharingSave, "Sharing settings could not be saved."));
+    shutdownSave.addEventListener("click", () => saveOptions("/api/ups/shutdown", shutdownToggle, [delay, monitorUser, monitorPassword], shutdownSave, jvT("ui.8b744d028a63")));
+    sharingSave.addEventListener("click", () => saveOptions("/api/ups/sharing", sharingToggle, [listenAddress, listenPort, clientUser, clientPassword], sharingSave, jvT("ui.ea29e8a14d06")));
     cancel.addEventListener("click", close);
     dialog.addEventListener("cancel", (event) => {
       event.preventDefault();
@@ -6587,9 +6587,9 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     forget.addEventListener("click", async () => {
       if (!confirmed) {
         confirmed = true;
-        title.textContent = "Remove saved source?";
-        copy.textContent = "Remove the saved UPS source and return to local monitoring?";
-        forget.textContent = "Confirm removal";
+        title.textContent = jvT("ui.49e234b02d72");
+        copy.textContent = jvT("ui.bcd73e408099");
+        forget.textContent = jvT("ui.bb0f9ad6dc33");
         forget.focus();
         return;
       }
@@ -6605,14 +6605,14 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
         });
         if (!response) return;
         const result = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(result.error || "UPS source could not be forgotten.");
+        if (!response.ok) throw new Error(result.error || jvT("ui.58c4983a2560"));
         close();
         upsAvailable = Boolean(result.available);
         if (upsTabButton) upsTabButton.hidden = !upsAvailable;
         renderUPSMarkup(result, await loadIdentity());
         if (state) state.textContent = "";
       } catch (failure) {
-        error.textContent = failure?.message || "UPS source could not be forgotten.";
+        error.textContent = failure?.message || jvT("ui.58c4983a2560");
         error.hidden = false;
       } finally {
         forget.disabled = false;
@@ -6630,11 +6630,11 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     const sourceBar = document.createElement("div");
     sourceBar.className = "system-ups-source";
     const sourceLabel = document.createElement("span");
-    sourceLabel.textContent = "Source";
+    sourceLabel.textContent = jvT("ui.0e570ca6fabe");
     const sourceValue = document.createElement("strong");
     sourceValue.textContent = snapshot.source?.mode === "remote"
       ? (snapshot.source.host + ":" + snapshot.source.port)
-      : "This machine";
+      : jvT("ui.1b8548de762c");
     sourceBar.append(sourceLabel, sourceValue);
     root.appendChild(sourceBar);
 
@@ -6668,15 +6668,15 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
         const metrics = document.createElement("div");
         metrics.className = "system-ups-metrics";
         metrics.append(
-          systemUPSMetric("Battery", systemUPSNumber(device.battery_charge, "%")),
-          systemUPSMetric("Runtime", systemUPSRuntime(device.battery_runtime_seconds)),
-          systemUPSMetric("Load", systemUPSNumber(device.load_percent, "%")),
-          systemUPSMetric("Input", systemUPSNumber(device.input_voltage, " V")),
-          systemUPSMetric("Output", systemUPSNumber(device.output_voltage, " V")),
-          systemUPSMetric("Input frequency", systemUPSNumber(device.input_frequency, " Hz")),
-          systemUPSMetric("Output frequency", systemUPSNumber(device.output_frequency, " Hz")),
-          systemUPSMetric("Battery voltage", systemUPSNumber(device.battery_voltage, " V")),
-          systemUPSMetric("Temperature", systemUPSNumber(device.temperature, " °C"))
+          systemUPSMetric(jvT("ui.dfcb7c1619d5"), systemUPSNumber(device.battery_charge, "%")),
+          systemUPSMetric(jvT("ui.109311589787"), systemUPSRuntime(device.battery_runtime_seconds)),
+          systemUPSMetric(jvT("ui.8a6bdb6b18da"), systemUPSNumber(device.load_percent, "%")),
+          systemUPSMetric(jvT("ui.36ecb4f86691"), systemUPSNumber(device.input_voltage, " V")),
+          systemUPSMetric(jvT("ui.b2439bcb8dee"), systemUPSNumber(device.output_voltage, " V")),
+          systemUPSMetric(jvT("ui.2c8fcd20a5e2"), systemUPSNumber(device.input_frequency, " Hz")),
+          systemUPSMetric(jvT("ui.1f6efbfdd9ce"), systemUPSNumber(device.output_frequency, " Hz")),
+          systemUPSMetric(jvT("ui.39d6c91b57ce"), systemUPSNumber(device.battery_voltage, " V")),
+          systemUPSMetric(jvT("ui.b958ce8b871a"), systemUPSNumber(device.temperature, " °C"))
         );
         card.append(heading, metrics);
         grid.appendChild(card);
@@ -6688,9 +6688,9 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       const panel = document.createElement("section");
       panel.className = "system-ups-source-panel";
       const heading = document.createElement("h3");
-      heading.textContent = "Monitoring source";
+      heading.textContent = jvT("ui.eac87dc0ea26");
       const help = document.createElement("p");
-      help.textContent = "Read a UPS connected to this HWS machine, or monitor a NUT server on another machine.";
+      help.textContent = jvT("ui.1e9fd473e150");
 
       const form = document.createElement("form");
       form.method = "post";
@@ -6703,31 +6703,31 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       csrf.value = upsCSRF?.value || "";
 
       const modeLabel = document.createElement("label");
-      modeLabel.textContent = "Source";
+      modeLabel.textContent = jvT("ui.0e570ca6fabe");
       const mode = document.createElement("select");
       mode.name = "mode";
       const localOption = document.createElement("option");
       localOption.value = "local";
-      localOption.textContent = "UPS connected to this machine";
+      localOption.textContent = jvT("ui.7db10d4467d7");
       const remoteOption = document.createElement("option");
       remoteOption.value = "remote";
-      remoteOption.textContent = "UPS on another machine";
+      remoteOption.textContent = jvT("ui.77b3d2250b31");
       mode.append(localOption, remoteOption);
       mode.value = snapshot.source?.mode === "remote" ? "remote" : "local";
       modeLabel.appendChild(mode);
 
       const hostLabel = document.createElement("label");
-      hostLabel.textContent = "Host / IP";
+      hostLabel.textContent = jvT("ui.87cfa1ecec4b");
       const host = document.createElement("input");
       host.name = "host";
       host.type = "text";
       host.autocomplete = "off";
-      host.placeholder = "Hostname or IP address";
+      host.placeholder = jvT("ui.8137545135e4");
       host.value = snapshot.source?.host || "";
       hostLabel.appendChild(host);
 
       const portLabel = document.createElement("label");
-      portLabel.textContent = "Port";
+      portLabel.textContent = jvT("ui.72e9a59f5a1d");
       const port = document.createElement("input");
       port.name = "port";
       port.type = "number";
@@ -6737,7 +6737,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       portLabel.appendChild(port);
 
       const nameLabel = document.createElement("label");
-      nameLabel.textContent = "UPS name";
+      nameLabel.textContent = jvT("ui.107e7b866610");
       const name = document.createElement("input");
       name.name = "ups_name";
       name.type = "text";
@@ -6746,7 +6746,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       nameLabel.appendChild(name);
 
       const driverLabel = document.createElement("label");
-      driverLabel.textContent = "NUT driver";
+      driverLabel.textContent = jvT("ui.fa59b1e09a98");
       const driver = document.createElement("input");
       driver.name = "driver";
       driver.type = "text";
@@ -6755,7 +6755,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       driverLabel.appendChild(driver);
 
       const deviceLabel = document.createElement("label");
-      deviceLabel.textContent = "Device port";
+      deviceLabel.textContent = jvT("ui.64ee297b558e");
       const device = document.createElement("input");
       device.name = "device_port";
       device.type = "text";
@@ -6766,14 +6766,14 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       const save = document.createElement("button");
       save.type = "submit";
       save.className = "button primary";
-      save.textContent = "Save and verify";
+      save.textContent = jvT("ui.4b75a25f8609");
 
       const actions = document.createElement("div");
       actions.className = "system-ups-source-actions";
       const options = document.createElement("button");
       options.type = "button";
       options.className = "secondary";
-      options.textContent = "Options";
+      options.textContent = jvT("ui.d0db8b5e364b");
       options.addEventListener("click", () => openUPSOptions(snapshot, mode.value));
       actions.append(options, save);
       const finalRow = document.createElement("div");
@@ -6811,7 +6811,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       cache: "no-store",
     });
     if (systemHandleAuth(response)) return null;
-    if (!response.ok) throw new Error("UPS monitoring is unavailable.");
+    if (!response.ok) throw new Error(jvT("ui.c262d0b07856"));
     return response.json();
   };
 
@@ -6832,7 +6832,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     if (!snapshot || sequence !== loadSequence) return;
     upsAvailable = Boolean(snapshot.available);
     if (upsTabButton) upsTabButton.hidden = !upsAvailable;
-    if (!upsAvailable) throw new Error("UPS monitoring is unavailable on this JustVoxel variant.");
+    if (!upsAvailable) throw new Error(jvT("ui.f30c7422f23e"));
     renderUPSMarkup(snapshot, await loadIdentity());
   };
 
@@ -6841,7 +6841,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     new FormData(form).forEach((value, key) => body.append(key, String(value)));
     const submitter = form.querySelector('button[type="submit"]');
     if (submitter) submitter.disabled = true;
-    if (state) state.textContent = "Verifying NUT source…";
+    if (state) state.textContent = jvT("ui.6c5d7ea5a0a6");
     try {
       const response = await systemFetchPage("/api/ups/source", {
         method: "POST",
@@ -6853,13 +6853,13 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       });
       if (!response) return;
       const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error || "UPS source could not be saved.");
+      if (!response.ok) throw new Error(result.error || jvT("ui.8d6f6ead6906"));
       upsAvailable = Boolean(result.available);
       if (upsTabButton) upsTabButton.hidden = !upsAvailable;
       renderUPSMarkup(result, await loadIdentity());
       if (state) state.textContent = "";
     } catch (error) {
-      if (state) state.textContent = error?.message || "UPS source could not be saved.";
+      if (state) state.textContent = error?.message || jvT("ui.8d6f6ead6906");
     } finally {
       if (submitter && submitter.isConnected) submitter.disabled = false;
     }
@@ -6879,7 +6879,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     window.JustVoxelWallpaper?.leave();
     parkSettingsPanels();
     const sequence = ++loadSequence;
-    if (state) state.textContent = "Loading…";
+    if (state) state.textContent = jvT("ui.ba3bbbe10d8b");
     if (refreshButton) refreshButton.disabled = true;
     if (content) content.replaceChildren();
 
@@ -6911,7 +6911,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     } catch (error) {
       if (sequence !== loadSequence) return;
       if (content) content.replaceChildren();
-      if (state) state.textContent = error?.message || "System workspace is unavailable.";
+      if (state) state.textContent = error?.message || jvT("ui.6b27df281793");
     } finally {
       if (sequence === loadSequence && refreshButton) refreshButton.disabled = false;
     }
@@ -6957,7 +6957,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
         }
         loadCurrentSystemTab();
       } catch (error) {
-        if (state) state.textContent = error?.message || "System workspace is unavailable.";
+        if (state) state.textContent = error?.message || jvT("ui.6b27df281793");
       }
     },
   });
@@ -6965,7 +6965,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   window.JustVoxelSystem = {
     openPluginLogs: async (id) => {
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id)) return;
-      requestedMigrationLog = { group: "Plugins", id };
+      requestedMigrationLog = { group: jvT("ui.9514b7ff4860"), id };
       await window.JustVoxelSystem.openTab("logs");
     },
     openTab: async (tab) => {
@@ -7017,7 +7017,7 @@ if (pluginsDialog && pluginsOpen) {
   let pageLimit = 8, capacityTimer = null;
   const firstCursor = () => ({ modrinth_offset: 0, hangar_offset: 0, curseforge_offset: 0, provider_turn: 0, hangar_first: false });
   let pageCursors = [firstCursor()], pageIndex = 0;
-  const resetCursors = () => { pageCursors = [firstCursor()]; pageIndex = 0; cursor = firstCursor(); nextCursor = null; totalPages = 1; pageLabel.textContent = "Page 1 of 1"; };
+  const resetCursors = () => { pageCursors = [firstCursor()]; pageIndex = 0; cursor = firstCursor(); nextCursor = null; totalPages = 1; pageLabel.textContent = jvT("ui.d6e19ce6ca28"); };
   let tab = "discover", cursor = firstCursor(), nextCursor = null, generation = 0, controller = null;
   const text = (tag, value, className = "") => {
     const node = document.createElement(tag);
@@ -7026,7 +7026,7 @@ if (pluginsDialog && pluginsOpen) {
     return node;
   };
   const pluginBadge = (value, semanticClass = "") => text("span", value, `plugins-badge ${semanticClass}`.trim());
-  const installedStatus = () => pluginBadge("Installed", "plugins-badge-installed plugins-overlay-installed");
+  const installedStatus = () => pluginBadge(jvT("ui.f8b32f4e92bd"), "plugins-badge-installed plugins-overlay-installed");
   const identityTile = (name, projectID, iconURL, source = "Modrinth") => {
     const tile = text("span", Array.from(name || "?").slice(0, 2).join("").toUpperCase(), "plugins-icon-tile");
     tile.setAttribute("aria-hidden", "true");
@@ -7093,7 +7093,7 @@ if (pluginsDialog && pluginsOpen) {
   const interactiveCard = (card, name, activate, projectID, iconURL, source = "Modrinth") => {
     card.tabIndex = 0;
     card.setAttribute("role", "button");
-    card.setAttribute("aria-label", `Open ${name}`);
+    card.setAttribute("aria-label", jvT("ui.863533cb89d4", {v0: (name)}));
     card.setAttribute("aria-haspopup", "dialog");
     card.setAttribute("aria-controls", "plugins-overlay");
     card.setAttribute("aria-pressed", "false");
@@ -7126,10 +7126,10 @@ if (pluginsDialog && pluginsOpen) {
   const addInfo = (card, name, renderInfo, projectID, iconURL, source = "Modrinth") => {
     interactiveCard(card, name, () => {
       stopPolling();
-      showPanel(`Info for ${name}`, true);
+      showPanel(jvT("ui.86d2b0959a05", {v0: (name)}), true);
       const infoActions = renderInfo();
       const actions = Array.isArray(infoActions) ? infoActions : [];
-      overlayActions(...actions, panelAction("Close", closePanel));
+      overlayActions(...actions, panelAction(jvT("ui.7d9eb7acb13e"), closePanel));
     }, projectID, iconURL, source);
   };
   const infoRows = (container) => {
@@ -7141,7 +7141,7 @@ if (pluginsDialog && pluginsOpen) {
       row.className = "plugins-info-row";
       row.append(text("dt", label));
       const cell = document.createElement("dd");
-      if (["Project ID", "Release ID"].includes(label)) cell.className = "plugins-identity-metadata";
+      if ([jvT("ui.e511470b21a9"), jvT("ui.6e7fdd059d0f")].includes(label)) cell.className = "plugins-identity-metadata";
       if (typeof value === "string") cell.textContent = value;
       else cell.append(value);
       row.append(cell);
@@ -7151,20 +7151,20 @@ if (pluginsDialog && pluginsOpen) {
   const dependencyGroups = (dependencies) => {
     const groups = document.createElement("div");
     groups.className = "plugins-dependency-groups";
-    for (const [type, label] of [["required", "Required"], ["optional", "Optional"], ["incompatible", "Incompatible"], ["other", "Embedded / other"]]) {
+    for (const [type, label] of [["required", jvT("ui.4850b174b713")], ["optional", jvT("ui.59be71333c96")], ["incompatible", jvT("ui.8777e3a9e3ec")], ["other", jvT("ui.3b115742f0d2")]]) {
       const entries = dependencies.filter((dependency) => type === "other" ? !["required", "optional", "incompatible"].includes(dependency.dependency_type) : dependency.dependency_type === type);
       if (!entries.length) continue;
       const row = document.createElement("p");
       row.className = "plugins-publisher-dependency-row";
       row.append(text("strong", `${label} publisher dependencies`));
       const values = entries.map((dependency) => {
-        const identity = dependency.name || dependency.title || dependency.file_name || dependency.project_id || "Unspecified";
+        const identity = dependency.name || dependency.title || dependency.file_name || dependency.project_id || jvT("ui.5b8aa0bf3c59");
         return dependency.version_id ? `${identity} (release ${dependency.version_id})` : identity;
       });
       row.append(text("span", values.join(" / "), "plugins-dependency-ids"));
       groups.append(row);
     }
-    if (!dependencies.length) groups.append(text("span", "None listed"));
+    if (!dependencies.length) groups.append(text("span", jvT("ui.177fe76745f5")));
     return groups;
   };
   const renderProject = (project, server) => {
@@ -7175,13 +7175,13 @@ if (pluginsDialog && pluginsOpen) {
     const badges = document.createElement("div");
     badges.className = "plugins-card-badges";
     const platform = server.server_software || server.server_type;
-    const installedState = project.installed_state === "installed" ? "Present" : project.installed_state === "enabled" ? "Enabled" : project.installed_state === "disabled" ? "Disabled" : "Needs attention";
+    const installedState = project.installed_state === "installed" ? "Present" : project.installed_state === "enabled" ? jvT("ui.92c1cdfdf4cb") : project.installed_state === "disabled" ? jvT("ui.75081b593d15") : jvT("ui.c1ebc7817870");
     const identityBadges = [[version?.version_number, "plugins-badge-version"], [platform, "plugins-badge-server"], [server.minecraft_version && `MC ${server.minecraft_version}`, "plugins-badge-minecraft"]];
     if (project.installed) {
-      identityBadges.push(["Installed", "plugins-badge-installed"], [installedState, ["enabled", "installed"].includes(project.installed_state) ? "plugins-badge-enabled" : project.installed_state === "disabled" ? "plugins-badge-disabled" : "plugins-badge-attention"]);
+      identityBadges.push([jvT("ui.f8b32f4e92bd"), "plugins-badge-installed"], [installedState, ["enabled", "installed"].includes(project.installed_state) ? "plugins-badge-enabled" : project.installed_state === "disabled" ? "plugins-badge-disabled" : "plugins-badge-attention"]);
     }
     identityBadges.filter(([value]) => value).forEach((badge) => badges.append(pluginBadge(...badge)));
-    if (!version || project.metadata_error) card.append(text("p", "Release metadata unavailable", "plugins-card-meta"));
+    if (!version || project.metadata_error) card.append(text("p", jvT("ui.8ca66b8237f6"), "plugins-card-meta"));
     card.append(badges);
     const dependencies = version?.dependencies || [];
     if (dependencies.length) {
@@ -7194,47 +7194,47 @@ if (pluginsDialog && pluginsOpen) {
     }
     const renderInfo = () => {
       overlayHeader(project.title, project.description, identityBadges, iconProjectID, project.installed && !managed ? installedStatus() : null, project.icon_url || "", project.source);
-      const about = infoRows(overlaySection("About this version"));
-      about("Release", version?.version_number || "Unavailable");
-      about(project.source === "Hangar" ? "Channel" : "Release type", version?.version_type || "Not provided");
-      about("Published", version?.date_published || "Not provided");
-      about("Source", project.source);
-      about("Project ID", project.project_id);
-      about("Release ID", version?.id || "Unavailable");
-      const compatibility = infoRows(overlaySection("Compatibility"));
-      compatibility("Result", project.compatibility);
-      compatibility("Server software", platform || "Unknown");
-      compatibility("Active Minecraft version", server.minecraft_version || "Unknown");
-      compatibility("Supported platforms", (version?.loaders || []).join(" / ") || "Not provided");
+      const about = infoRows(overlaySection(jvT("ui.63e615c21158")));
+      about(jvT("ui.e020e3c67bd0"), version?.version_number || jvT("ui.ca1844969742"));
+      about(project.source === "Hangar" ? "Channel" : jvT("ui.0f9bdaf90d25"), version?.version_type || jvT("ui.d83b9ff3c07a"));
+      about(jvT("ui.2ef42ec21d93"), version?.date_published || jvT("ui.d83b9ff3c07a"));
+      about(jvT("ui.0e570ca6fabe"), project.source);
+      about(jvT("ui.e511470b21a9"), project.project_id);
+      about(jvT("ui.6e7fdd059d0f"), version?.id || jvT("ui.ca1844969742"));
+      const compatibility = infoRows(overlaySection(jvT("ui.b37ddf1f6e0f")));
+      compatibility(jvT("ui.6e7d50e84f47"), project.compatibility);
+      compatibility(jvT("ui.8b8ee2755acb"), platform || jvT("ui.b764cdc0eab7"));
+      compatibility(jvT("ui.de8921369774"), server.minecraft_version || jvT("ui.b764cdc0eab7"));
+      compatibility(jvT("ui.67635dab0dde"), (version?.loaders || []).join(" / ") || jvT("ui.d83b9ff3c07a"));
       const versions = [...new Set(version?.game_versions || [])];
-      compatibility("Supported versions", versions.join(" / ") || "Not provided");
-      overlaySection("Dependencies").append(dependencyGroups(dependencies));
+      compatibility(jvT("ui.aeb9d7cea04c"), versions.join(" / ") || jvT("ui.d83b9ff3c07a"));
+      overlaySection(jvT("ui.2e41b118eb20")).append(dependencyGroups(dependencies));
       if (project.installed) {
-        const management = infoRows(overlaySection("Management"));
-        management("Ownership", "Managed by Plugins");
-        management("State", installedState);
-        overlaySection("Update status").append(text("p", "Updates are not available yet"));
+        const management = infoRows(overlaySection(jvT("ui.e51248773b9a")));
+        management(jvT("ui.c7d3acc826a8"), jvT("ui.272e549bca6c"));
+        management(jvT("ui.a3b50c476732"), installedState);
+        overlaySection(jvT("ui.1e6bf669df09")).append(text("p", jvT("ui.3ac22f0a39de")));
       }
-      if (project.metadata_error || !version) panelBody.append(text("p", project.metadata_error || "Release metadata unavailable.", "plugins-card-meta"));
+      if (project.metadata_error || !version) panelBody.append(text("p", project.metadata_error || jvT("ui.5d5a17c6fcee"), "plugins-card-meta"));
     };
     const iconProjectID = ["Modrinth", "Hangar", "CurseForge"].includes(project.source) ? project.project_id : undefined;
     const managed = project.source === "Modrinth" && ["geyser", "floodgate", "viaversion"].includes(project.slug);
-    if (managed) badges.append(text("span", "JustVoxel managed", "plugins-badge"));
+    if (managed) badges.append(text("span", jvT("ui.9c83434eb959"), "plugins-badge"));
     const installable = ["Modrinth", "Hangar", "CurseForge"].includes(project.source) && !managed && !project.installed && (project.install_available || server.content_kind === "mods" && project.review_available) && project.compatible && server.supported && server.minecraft_version && version?.id;
     let reviewRejection = "";
     const readOnlyReview = (reason) => {
       reviewRejection = reason;
       showPanel(project.title, true);
       renderInfo();
-      if (reason) overlaySection("Installation").append(text("p", reason));
-      overlayActions(panelAction("Close", closePanel));
+      if (reason) overlaySection(jvT("ui.c3fc54aa5390")).append(text("p", reason));
+      overlayActions(panelAction(jvT("ui.7d9eb7acb13e"), closePanel));
     };
     if (installable) {
       interactiveCard(card, project.title, () => reviewRejection ? readOnlyReview(reviewRejection) : reviewPlugin(project.project_id, version.id, project, readOnlyReview), iconProjectID, project.icon_url || "", project.source);
     } else {
       addInfo(card, project.title, () => {
         renderInfo();
-        if (managed) infoRows(overlaySection("Management"))("Status", "JustVoxel managed");
+        if (managed) infoRows(overlaySection(jvT("ui.e51248773b9a")))(jvT("ui.920e413c7d41"), jvT("ui.9c83434eb959"));
       }, iconProjectID, project.icon_url || "", project.source);
     }
     // Publisher data uses textContent; artifact URLs never reach this browser.
@@ -7245,42 +7245,42 @@ if (pluginsDialog && pluginsOpen) {
     card.className = "plugins-result-card";
     const name = plugin.name || plugin.filename;
     const projectID = plugin.project_id || plugin.icon_project_id || undefined;
-    const management = plugin.management === "justvoxel" ? "JustVoxel managed" : plugin.management === "plugins" ? "Managed by Plugins" : "Manual / unmanaged";
-    card.append(text("h3", name), text("p", `Version: ${plugin.version || "Unknown"}`, "plugins-card-release"));
+    const management = plugin.management === "justvoxel" ? jvT("ui.9c83434eb959") : plugin.management === "plugins" ? jvT("ui.272e549bca6c") : jvT("ui.c5e24354b2e8");
+    card.append(text("h3", name), text("p", jvT("ui.6c75fb0f78f7", {v0: (plugin.version || jvT("ui.b764cdc0eab7"))}), "plugins-card-release"));
     const badges = document.createElement("div");
     badges.className = "plugins-card-badges";
     badges.append(text("span", management, "plugins-badge plugins-management"));
     const managed = acceptedServer?.content_kind === "plugins" && plugin.management === "plugins" && ["enabled", "disabled"].includes(plugin.state);
     const managedMod = acceptedServer?.content_kind === "mods" && plugin.management === "plugins" && plugin.state === "installed";
-    const stateLabel = managed ? (plugin.state === "disabled" ? "Disabled" : "Enabled") : "";
+    const stateLabel = managed ? (plugin.state === "disabled" ? jvT("ui.75081b593d15") : jvT("ui.92c1cdfdf4cb")) : "";
     const stateClass = plugin.state === "disabled" ? "plugins-badge-disabled" : "plugins-badge-enabled";
-    if (plugin.management === "plugins") badges.append(pluginBadge("Installed", "plugins-badge-installed"));
+    if (plugin.management === "plugins") badges.append(pluginBadge(jvT("ui.f8b32f4e92bd"), "plugins-badge-installed"));
     if (stateLabel) badges.append(pluginBadge(stateLabel, `plugins-state ${stateClass}`));
     card.append(badges);
     const attention = plugin.update_status?.startsWith("Attention:");
-    if (attention) badges.append(pluginBadge("Needs attention", "plugins-badge-attention"));
-    const updateAvailable = plugin.update_status?.startsWith("Update available");
-    const updateStatus = updateAvailable ? plugin.update_status : attention ? plugin.update_status.replace(/; manual \/ unmanaged$/, "") : plugin.management === "justvoxel" ? "Via server updates" : plugin.management === "plugins" ? "Updates are not available yet" : "Unknown";
+    if (attention) badges.append(pluginBadge(jvT("ui.c1ebc7817870"), "plugins-badge-attention"));
+    const updateAvailable = plugin.update_status?.startsWith(jvT("ui.ff8b555d818f"));
+    const updateStatus = updateAvailable ? plugin.update_status : attention ? plugin.update_status.replace(/; manual \/ unmanaged$/, "") : plugin.management === "justvoxel" ? jvT("ui.6e074e25be46") : plugin.management === "plugins" ? jvT("ui.3ac22f0a39de") : jvT("ui.b764cdc0eab7");
     addInfo(card, name, () => {
-      overlayHeader(name, "", [[plugin.version || "Version unknown", "plugins-badge-version"], management, [plugin.management === "plugins" && "Installed", "plugins-badge-installed"], [stateLabel, stateClass], [attention && "Needs attention", "plugins-badge-attention"]], projectID, plugin.management === "plugins" ? installedStatus() : null, undefined, plugin.source || "Modrinth");
+      overlayHeader(name, "", [[plugin.version || jvT("ui.e83ee049ebbd"), "plugins-badge-version"], management, [plugin.management === "plugins" && jvT("ui.f8b32f4e92bd"), "plugins-badge-installed"], [stateLabel, stateClass], [attention && jvT("ui.c1ebc7817870"), "plugins-badge-attention"]], projectID, plugin.management === "plugins" ? installedStatus() : null, undefined, plugin.source || "Modrinth");
       overlaySection("JAR").append(text("p", plugin.filename));
-      overlaySection("Metadata").append(text("p", plugin.metadata_status || "Unknown"));
-      overlaySection("Management").append(text("p", managedMod ? "Remove verifies the exact recorded mod JAR. Configuration and data are preserved." : acceptedServer?.content_kind === "mods" ? "Lifecycle actions are not available yet." : plugin.management === "justvoxel" ? "Generic Install is unavailable for this component." : plugin.management === "plugins" ? "Lifecycle actions verify the exact recorded JAR. Plugin configuration and data are preserved." : "Plugins will not adopt or overwrite this JAR."));
-      overlaySection("Update status").append(text("p", updateStatus));
+      overlaySection(jvT("ui.9eddf573cb50")).append(text("p", plugin.metadata_status || jvT("ui.b764cdc0eab7")));
+      overlaySection(jvT("ui.e51248773b9a")).append(text("p", managedMod ? jvT("ui.ab11c60f3925") : acceptedServer?.content_kind === "mods" ? jvT("ui.28a63e5e85a9") : plugin.management === "justvoxel" ? jvT("ui.95dba138f6de") : plugin.management === "plugins" ? jvT("ui.2bbacb1b5b49") : jvT("ui.f2218e03ac7c")));
+      overlaySection(jvT("ui.1e6bf669df09")).append(text("p", updateStatus));
       if (plugin.project_id || plugin.version_id) {
-        const identity = infoRows(overlaySection("Version details"));
-        if (plugin.project_id) identity("Project ID", plugin.project_id);
-        if (plugin.version_id) identity("Release ID", plugin.version_id);
+        const identity = infoRows(overlaySection(jvT("ui.c05702e16b20")));
+        if (plugin.project_id) identity(jvT("ui.e511470b21a9"), plugin.project_id);
+        if (plugin.version_id) identity(jvT("ui.6e7fdd059d0f"), plugin.version_id);
       }
-      if (managedMod && !attention) return [pluginAction("Remove", () => reviewManagedPlugin(plugin, "remove"), "plugins-remove-action")];
+      if (managedMod && !attention) return [pluginAction(jvT("ui.c3812fc4acb8"), () => reviewManagedPlugin(plugin, "remove"), "plugins-remove-action")];
       if (managed && !attention) {
         const action = plugin.state === "disabled" ? "enable" : "disable";
-        return [pluginAction(action === "enable" ? "Enable" : "Disable", () => reviewManagedPlugin(plugin, action), "plugins-state-action"), pluginAction("Remove", () => reviewManagedPlugin(plugin, "remove"), "plugins-remove-action")];
+        return [pluginAction(action === "enable" ? "Enable" : jvT("ui.b7e3e4aa4257"), () => reviewManagedPlugin(plugin, action), "plugins-state-action"), pluginAction(jvT("ui.c3812fc4acb8"), () => reviewManagedPlugin(plugin, "remove"), "plugins-remove-action")];
       }
     }, projectID, undefined, plugin.source || "Modrinth");
-    let summary = plugin.metadata_status === "Metadata read" ? "Descriptor available" : "Metadata unavailable";
+    let summary = plugin.metadata_status === "Metadata read" ? jvT("ui.c6cae98c2564") : jvT("ui.602e4ec87412");
     if (updateAvailable) summary = plugin.update_status;
-    if (attention) summary = "Needs attention";
+    if (attention) summary = jvT("ui.c1ebc7817870");
     const status = text("p", summary, "plugins-inventory-status");
     if (attention) status.classList.add("is-attention");
     card.append(status);
@@ -7385,9 +7385,9 @@ if (pluginsDialog && pluginsOpen) {
     if (!wasConfigured && curseForgeConfigured && providerServerKey && acceptedServer?.providers?.curseforge) curseForgeSwitch.checked = true;
     if (!curseForgeConfigured) curseForgeSwitch.checked = false;
     else dismissCurseForgeNotice();
-    pluginsDialog.querySelector("[data-curseforge-status]").textContent = curseForgeConfigured ? "Configured" : "Not configured";
+    pluginsDialog.querySelector("[data-curseforge-status]").textContent = curseForgeConfigured ? jvT("ui.84aebc69a1bf") : jvT("ui.dd1841d29502");
     pluginsDialog.querySelector("[data-curseforge-mask]").hidden = !curseForgeConfigured;
-    curseForgeSave.textContent = curseForgeConfigured ? "Replace API key" : "Save API key";
+    curseForgeSave.textContent = curseForgeConfigured ? jvT("ui.f97925f1e14b") : jvT("ui.826590b6b7b2");
     curseForgeRemove.hidden = !curseForgeConfigured;
     syncCurseForgeInfo();
   };
@@ -7400,7 +7400,7 @@ if (pluginsDialog && pluginsOpen) {
     const response = await fetch("/api/plugins/workspace/curseforge-api", options);
     const payload = await response.json();
     if (response.status === 401) window.location.assign("/login");
-    if (!response.ok) throw new Error("CurseForge API configuration is unavailable. Retry.");
+    if (!response.ok) throw new Error(jvT("ui.ba6d194b5702"));
     return payload;
   };
   const refreshCurseForgeStatus = async () => {
@@ -7408,8 +7408,8 @@ if (pluginsDialog && pluginsOpen) {
     curseForgeSwitch.disabled = true;
     pluginsDialog.querySelector("[data-curseforge-mask]").hidden = true;
     curseForgeRemove.hidden = true;
-    curseForgeSave.textContent = "Save API key";
-    pluginsDialog.querySelector("[data-curseforge-status]").textContent = "Checking configuration…";
+    curseForgeSave.textContent = jvT("ui.826590b6b7b2");
+    pluginsDialog.querySelector("[data-curseforge-status]").textContent = jvT("ui.2b0ed71bd135");
     try {
       const status = await curseForgeRequest();
       if (revision === curseForgeRevision) applyCurseForgeStatus(status);
@@ -7418,7 +7418,7 @@ if (pluginsDialog && pluginsOpen) {
       curseForgeConfigured = false;
       curseForgeSwitch.checked = false;
       syncCurseForgeInfo();
-      pluginsDialog.querySelector("[data-curseforge-status]").textContent = "Configuration status is unavailable. You can still save or replace the API key.";
+      pluginsDialog.querySelector("[data-curseforge-status]").textContent = jvT("ui.0f2a38aac6eb");
     }
   };
   curseForgeSwitch.addEventListener("change", () => {
@@ -7445,7 +7445,7 @@ if (pluginsDialog && pluginsOpen) {
     event.preventDefault();
     if (curseForgeSave.disabled) return;
     if (!curseForgeKey.value.trim() || /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u.test(curseForgeKey.value)) {
-      curseForgeFeedback.textContent = "Enter a complete API key without line breaks or control characters.";
+      curseForgeFeedback.textContent = jvT("ui.f4a7b374e3e2");
       return;
     }
     const request = curseForgeRequest("PUT", curseForgeKey.value);
@@ -7456,7 +7456,7 @@ if (pluginsDialog && pluginsOpen) {
       applyCurseForgeStatus(await request);
       curseForgeFeedback.textContent = "";
     } catch {
-      curseForgeFeedback.textContent = "API key could not be saved. Enter the complete key and retry.";
+      curseForgeFeedback.textContent = jvT("ui.bca0219e87f0");
     } finally { curseForgeSave.disabled = false; }
   });
   pluginsDialog.querySelector("[data-curseforge-notice-configure]").addEventListener("click", () => {
@@ -7465,12 +7465,12 @@ if (pluginsDialog && pluginsOpen) {
     curseForgeKey.focus();
   });
   curseForgeRemove.addEventListener("click", () => {
-    showPanel("Remove API key", true);
+    showPanel(jvT("ui.ccec3fcd8c6d"), true);
     panel.classList.add("plugins-curseforge-panel");
-    panelBody.append(text("h3", "Remove API key"), text("p", "Remove the configured CurseForge API key?"));
+    panelBody.append(text("h3", jvT("ui.ccec3fcd8c6d")), text("p", jvT("ui.95c2e5967153")));
     const error = text("p", ""); error.setAttribute("role", "status"); panelBody.append(error);
-    const cancel = panelAction("Cancel", closePanel, true);
-    const remove = panelAction("Remove API key", async () => {
+    const cancel = panelAction(jvT("ui.19766ed6ccb2"), closePanel, true);
+    const remove = panelAction(jvT("ui.ccec3fcd8c6d"), async () => {
       remove.disabled = true; cancel.disabled = true; panel.dataset.curseforgeBusy = "true";
       ++curseForgeRevision;
       try {
@@ -7478,7 +7478,7 @@ if (pluginsDialog && pluginsOpen) {
         curseForgeKey.value = "";
         curseForgeFeedback.textContent = "";
         dismissCurseForgeNotice(); delete panel.dataset.curseforgeBusy; closePanel();
-      } catch { error.textContent = "API key could not be removed. Retry."; }
+      } catch { error.textContent = jvT("ui.df4e22b98312"); }
       finally { delete panel.dataset.curseforgeBusy; remove.disabled = false; cancel.disabled = false; }
     });
     overlayActions(cancel, remove);
@@ -7492,28 +7492,28 @@ if (pluginsDialog && pluginsOpen) {
     stopPolling();
     const current = installGeneration;
     installController = new AbortController();
-    showPanel("Review plugin action", true);
-    panelBody.append(text("p", "Preparing the exact managed plugin action…"));
+    showPanel(jvT("ui.620e222fa349"), true);
+    panelBody.append(text("p", jvT("ui.a0bef54806de")));
     try {
       if (await blockPluginInstall(current)) return;
       const plan = await pluginRequest("manage/plan", { source: plugin.source || "Modrinth", action, project_id: plugin.project_id }, installController.signal);
       if (current !== installGeneration) return;
-      showPanel("Review plugin action", true);
-      const label = action === "enable" ? "Enable" : action === "disable" ? "Disable" : "Remove";
-      overlayHeader(identity.name, "", [[plugin.version, "plugins-badge-version"], [acceptedServer?.content_kind === "mods" ? "Installed" : plan.state === "disabled" ? "Disabled" : "Enabled", acceptedServer?.content_kind === "mods" ? "plugins-badge-installed" : plan.state === "disabled" ? "plugins-badge-disabled" : "plugins-badge-enabled"]], identity.project_id || identity.icon_project_id, null, undefined, identity.source);
+      showPanel(jvT("ui.620e222fa349"), true);
+      const label = action === "enable" ? "Enable" : action === "disable" ? "Disable" : jvT("ui.c3812fc4acb8");
+      overlayHeader(identity.name, "", [[plugin.version, "plugins-badge-version"], [acceptedServer?.content_kind === "mods" ? jvT("ui.f8b32f4e92bd") : plan.state === "disabled" ? jvT("ui.75081b593d15") : jvT("ui.92c1cdfdf4cb"), acceptedServer?.content_kind === "mods" ? "plugins-badge-installed" : plan.state === "disabled" ? "plugins-badge-disabled" : "plugins-badge-enabled"]], identity.project_id || identity.icon_project_id, null, undefined, identity.source);
       const explanation = action === "enable"
-        ? "The same verified stored JAR returns to /plugins. Plugin configuration/data is preserved. Minecraft restart and active-plugin verification follow."
+        ? jvT("ui.92ab4ccbdd01")
         : action === "disable"
-          ? "The plugin JAR will leave the active /plugins set. Plugin configuration/data is preserved. Minecraft restart is required when currently running; startup verification also runs when stopped."
+          ? jvT("ui.158bd02f4ba0")
           : acceptedServer?.content_kind === "mods"
-            ? "The exact managed mod JAR will be removed. Configuration/data will remain. Dependencies are not automatically removed. Minecraft will restart for verification; an originally stopped server returns to stopped afterward."
-          : "The exact managed JAR will be removed. Plugin configuration/data will remain. Dependencies are not automatically removed. Active plugin removal requires Minecraft restart; stopped-server verification may also start Minecraft temporarily.";
+            ? jvT("ui.866d80ff46f1")
+          : jvT("ui.bb5f5497d78e");
       panelBody.append(text("p", explanation));
       let players = null;
       if (plan.confirmation_required) {
         const row = text("label", "", "plugins-player-confirm");
         players = document.createElement("input"); players.type = "checkbox";
-        row.append(players, text("span", "I understand online players will be disconnected."));
+        row.append(players, text("span", jvT("ui.380785e65c6d")));
         panelBody.append(text("p", `${plan.online} player(s) are online${Array.isArray(plan.players) && plan.players.length ? ` (${plan.players.join(", ")})` : ""}. This action will disconnect them.`));
         panelBody.append(row);
       }
@@ -7531,20 +7531,20 @@ if (pluginsDialog && pluginsOpen) {
       if (action === "remove") {
         const arm = text("div", "", "destructive-confirmation");
         const shell = text("div", "", "destructive-confirm-slider");
-        const armedText = text("span", "Slide to confirm removal", "destructive-confirm-slider-text");
-        const thumb = text("span", ">", "destructive-confirm-slider-thumb"); thumb.setAttribute("aria-hidden", "true");
-        slider = document.createElement("input"); slider.type = "range"; slider.min = "0"; slider.max = "100"; slider.step = "1"; slider.value = "0"; slider.setAttribute("aria-label", "Slide to confirm removal");
+        const armedText = text("span", jvT("ui.8df1bfa87a15"), "destructive-confirm-slider-text");
+        const thumb = text("span", jvT("ui.62b67e1f685b"), "destructive-confirm-slider-thumb"); thumb.setAttribute("aria-hidden", "true");
+        slider = document.createElement("input"); slider.type = "range"; slider.min = "0"; slider.max = "100"; slider.step = "1"; slider.value = "0"; slider.setAttribute("aria-label", jvT("ui.8df1bfa87a15"));
         shell.append(armedText, thumb, slider);
         const finalLabel = text("label", "", "destructive-confirm-toggle-row"); finalLabel.hidden = true;
         finalConfirm = document.createElement("input"); finalConfirm.type = "checkbox"; finalConfirm.className = "destructive-confirm-toggle";
-        finalLabel.append(text("span", "Confirm >", "destructive-confirm-toggle-callout"), finalConfirm);
+        finalLabel.append(text("span", jvT("ui.8ba7a99174e0"), "destructive-confirm-toggle-callout"), finalConfirm);
         arm.append(shell, finalLabel); panelBody.append(arm);
         slider.addEventListener("input", () => {
           const progress = Math.max(0, Math.min(100, Number(slider.value || 0)));
           shell.style.setProperty("--confirm-progress", String(progress / 100));
           shell.classList.toggle("is-armed", progress >= 100);
           finalLabel.hidden = progress < 100;
-          armedText.textContent = progress >= 100 ? "Removal armed" : "Slide to confirm removal";
+          armedText.textContent = progress >= 100 ? jvT("ui.24d5a6a37cb4") : jvT("ui.8df1bfa87a15");
           if (progress < 100) finalConfirm.checked = false;
           sync();
         });
@@ -7553,7 +7553,7 @@ if (pluginsDialog && pluginsOpen) {
       const sync = () => { apply.disabled = Boolean(players && !players.checked) || Boolean(slider && (Number(slider.value) !== 100 || !finalConfirm.checked)); };
       players?.addEventListener("change", sync);
       sync();
-      overlayActions(panelAction("Cancel", returnToInstalled, true), apply);
+      overlayActions(panelAction(jvT("ui.19766ed6ccb2"), returnToInstalled, true), apply);
     } catch (error) { if (error.staleSelection) return; if (current === installGeneration && error.name !== "AbortError") panelError(error, identity); }
   };
   const pluginRequest = async (route, body, signal) => {
@@ -7570,10 +7570,10 @@ if (pluginsDialog && pluginsOpen) {
       const response = await fetch(boundURL || globalThis.justVoxelSelectedURL(`/api/plugins/workspace/${route}`, "plugins"), options);
       const payload = await response.json();
       if (selection !== globalThis.justVoxelSelectionGeneration.plugins) throw globalThis.justVoxelStaleSelection();
-      if (response.status === 401) { window.location.assign("/login"); throw new Error("Sign in again."); }
-      if (response.status === 403 && String(payload.error || "").toLowerCase().includes("password")) { window.location.assign("/password"); throw new Error("Change your password first."); }
+      if (response.status === 401) { window.location.assign("/login"); throw new Error(jvT("ui.e30c2ec3ce01")); }
+      if (response.status === 403 && String(jvC(payload.error || "")).toLowerCase().includes("password")) { window.location.assign("/password"); throw new Error(jvT("ui.fa29ee25267e")); }
       if (!response.ok) {
-        const error = new Error(payload.error || payload.message || "Plugin installation is unavailable; review again.");
+        const error = new Error(payload.error || payload.message || jvT("ui.13bd544e594d"));
         if (/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(payload.diagnostic_id || "")) error.diagnosticID = payload.diagnostic_id;
         throw error;
       }
@@ -7586,7 +7586,7 @@ if (pluginsDialog && pluginsOpen) {
   const pluginDiagnosticLink = (id) => {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id || "")) return;
     const row = text("p", "See System -> Logs -> Plugins for diagnostic details. ", "plugins-diagnostic-link");
-    if (window.JustVoxelSystem?.openPluginLogs) row.append(panelAction("Open Plugins logs", () => {
+    if (window.JustVoxelSystem?.openPluginLogs) row.append(panelAction(jvT("ui.2d4f452b773b"), () => {
       window.JustVoxelSystem.openPluginLogs(id);
     }, true));
     panelBody.append(row);
@@ -7594,17 +7594,17 @@ if (pluginsDialog && pluginsOpen) {
   const panelError = (error, identity = null) => {
     showPanel();
     if (identity) overlayHeader(identity.name, "", [[identity.version, "plugins-badge-version"]], identity.project_id || identity.icon_project_id, null, identity.icon_url, identity.source);
-    panelBody.append(text("p", "Plugin operation could not continue"), text("p", error.message || "Status is unavailable. Reopen Plugins to check the persistent operation."));
+    panelBody.append(text("p", jvT("ui.95e14e786910")), text("p", error.message || jvT("ui.e062b46f3b50")));
     pluginDiagnosticLink(error.diagnosticID);
-    overlayActions(panelAction("Done", closePanel, true));
+    overlayActions(panelAction(jvT("ui.11a6767d5674"), closePanel, true));
   };
   const showAddonOperation = (operation) => {
     const terminal = ["succeeded", "rolled_back", "needs_attention", "resolved"].includes(operation.state);
-    showPanel("Add-ons installation", false);
-    panelBody.append(text("h3", "Add-ons installation"), text("p", operation.status, "plugins-operation-status"));
+    showPanel(jvT("ui.a5184d8cab4c"), false);
+    panelBody.append(text("h3", jvT("ui.a5184d8cab4c")), text("p", operation.status, "plugins-operation-status"));
     if (operation.state === "needs_attention") {
-      const feedback = text("p", "Retry recovery verifies the preserved file and Minecraft state.");
-      const retry = panelAction("Retry recovery", async () => {
+      const feedback = text("p", jvT("ui.6a47d4640c27"));
+      const retry = panelAction(jvT("ui.f37b055f32a8"), async () => {
         retry.disabled = true;
         try {
           const payload = await pluginRequest("addons/recover", { operation_id: operation.operation_id }, installController?.signal);
@@ -7613,27 +7613,27 @@ if (pluginsDialog && pluginsOpen) {
         } catch (error) { if (error.staleSelection) return; feedback.textContent = error.message; retry.disabled = false; }
       });
       panelBody.append(feedback);
-      overlayActions(retry, panelAction("Close", closePanel, true));
-    } else overlayActions(panelAction(terminal ? "Done" : "Close", () => { closePanel(); load(); }, true));
+      overlayActions(retry, panelAction(jvT("ui.7d9eb7acb13e"), closePanel, true));
+    } else overlayActions(panelAction(terminal ? "Done" : jvT("ui.7d9eb7acb13e"), () => { closePanel(); load(); }, true));
     return terminal;
   };
   const showOperation = (operation) => {
     if (operation.operation_type === "plugin_addon_install") return showAddonOperation(operation);
     const sameOperation = !panel.hidden && operationViewID === operation.operation_id;
        const lifecycle = operation.operation_type !== "plugin_install";
-    showPanel(lifecycle ? "Plugin management" : `${contentSingular() === "mod" ? "Mod" : "Plugin"} installation`, false, sameOperation);
+    showPanel(lifecycle ? jvT("ui.c4f77e15e818") : `${contentSingular() === "mod" ? "Mod" : "Plugin"} installation`, false, sameOperation);
     const success = operation.state === "succeeded";
     const attention = operation.state === "needs_attention";
     const terminal = ["succeeded", "rolled_back", "needs_attention", "resolved"].includes(operation.state);
     const identity = operationIdentity?.operation_id === operation.operation_id ? operationIdentity : null;
-    const heading = lifecycle ? (success ? "Plugin action verified" : attention ? "Administrator attention required" : operation.state === "rolled_back" ? "Plugin action did not complete" : operation.state === "resolved" ? "Plugin state verified" : "Changing managed plugin") : success ? (acceptedServer?.content_kind === "mods" ? "Mods installed" : "Plugins installed") : attention ? "Administrator attention required" : operation.state === "rolled_back" ? "Installation did not complete" : operation.state === "resolved" ? "Plugin state verified" : contentSingular() === "mod" ? "Installing mod" : "Installing plugin";
+    const heading = lifecycle ? (success ? jvT("ui.95826073d886") : attention ? jvT("ui.1e1b96ec8fd9") : operation.state === "rolled_back" ? jvT("ui.e5a5d82830bf") : operation.state === "resolved" ? jvT("ui.af7b87da8dba") : jvT("ui.90af090b1f0d")) : success ? (acceptedServer?.content_kind === "mods" ? jvT("ui.59cafc8e425d") : jvT("ui.1cfe133ba69b")) : attention ? jvT("ui.1e1b96ec8fd9") : operation.state === "rolled_back" ? jvT("ui.b80934d9f58a") : operation.state === "resolved" ? jvT("ui.af7b87da8dba") : contentSingular() === "mod" ? jvT("ui.24e2a1bc9146") : jvT("ui.11447ae67993");
     if (!sameOperation) {
       overlayHeader(identity?.name || heading, "", [[identity?.version, "plugins-badge-version"]], identity?.project_id || identity?.icon_project_id, null, identity?.icon_url, identity?.source);
       operationViewID = operation.operation_id;
     } else if (!identity) panelBody.querySelector(".plugins-overlay-identity h3").textContent = heading;
     if (identity) panelBody.append(text("h3", heading));
     if (!terminal) {
-      const stages = lifecycle ? ["Prepare", "Backup", "Change", "Restart", "Verify"] : ["Prepare", "Backup", "Install", "Restart", "Verify"];
+      const stages = lifecycle ? [jvT("ui.ee820467e916"), jvT("ui.838557924a5c"), jvT("ui.c0bf75bd78bf"), jvT("ui.6b983a81e5e8"), jvT("ui.eea2745e2867")] : [jvT("ui.ee820467e916"), jvT("ui.838557924a5c"), jvT("ui.569ca49f4aaf"), jvT("ui.6b983a81e5e8"), jvT("ui.eea2745e2867")];
       const index = ({ queued: 0, validating: 0, downloading: 0, player_check: 0, backup: 1, installing: 2, changing: 2, restarting: 3, verifying: 4 })[operation.stage];
       const sequence = document.createElement("ol");
       sequence.className = "plugins-install-stages";
@@ -7653,36 +7653,36 @@ if (pluginsDialog && pluginsOpen) {
       pluginDiagnosticLink(operation.operation_id);
     }
     if (success) {
-      const actions = overlayActions(panelAction("View in Installed", () => {
+      const actions = overlayActions(panelAction(jvT("ui.46f0bdc90838"), () => {
         closePanel();
         pluginsDialog.querySelector('[data-plugins-tab="installed"]').click();
-      }, true), panelAction("Done", () => { closePanel(); load(); }));
+      }, true), panelAction(jvT("ui.11a6767d5674"), () => { closePanel(); load(); }));
       if (lifecycle) actions.lastElementChild.classList.add("plugins-done-action");
     }
     if (attention) {
-      panelBody.append(text("p", "Recovery remains available through Re-check recovery. Maintenance remains reserved until verification succeeds.", "plugins-install-warning"));
+      panelBody.append(text("p", jvT("ui.90d9a00b7a84"), "plugins-install-warning"));
       const feedback = text("p", "", "plugins-operation-feedback");
-      const recheck = panelAction("Re-check recovery", async () => {
+      const recheck = panelAction(jvT("ui.137a11a338a1"), async () => {
         recheck.disabled = true;
-        feedback.textContent = "Re-checking plugin and Minecraft state…";
+        feedback.textContent = jvT("ui.76811ca2ebdb");
         const current = installGeneration;
         try {
           const payload = await pluginRequest(lifecycle ? "manage/acknowledge" : "install/acknowledge", { operation_id: operation.operation_id }, installController?.signal);
           if (current !== installGeneration) return;
-          if (!payload.operation || payload.operation.state !== "resolved") throw new Error("Plugin state could not be resolved.");
+          if (!payload.operation || payload.operation.state !== "resolved") throw new Error(jvT("ui.1f3344e99b38"));
           showOperation(payload.operation);
           load();
         } catch (error) { if (error.staleSelection) return;
           if (current === installGeneration && error.name !== "AbortError") {
-            feedback.textContent = error.message || "Re-check failed. Evidence and maintenance exclusion were preserved.";
+            feedback.textContent = error.message || jvT("ui.ead88024e125");
             recheck.disabled = false;
           }
         }
       });
-      overlayActions(recheck, panelAction("Close", closePanel, true));
+      overlayActions(recheck, panelAction(jvT("ui.7d9eb7acb13e"), closePanel, true));
       panelBody.append(feedback);
-    } else if (terminal && !success) overlayActions(panelAction("Done", () => { closePanel(); load(); }, true));
-    else if (!terminal) overlayActions(panelAction("Close", closePanel, true));
+    } else if (terminal && !success) overlayActions(panelAction(jvT("ui.11a6767d5674"), () => { closePanel(); load(); }, true));
+    else if (!terminal) overlayActions(panelAction(jvT("ui.7d9eb7acb13e"), closePanel, true));
     return terminal;
   };
   const pollOperation = async (id, current) => {
@@ -7690,7 +7690,7 @@ if (pluginsDialog && pluginsOpen) {
     try {
       const payload = await pluginRequest(`operation?id=${encodeURIComponent(id)}`, null, installController?.signal);
       if (current !== installGeneration) return;
-      if (!payload.operation) throw new Error("Installation status is unavailable.");
+      if (!payload.operation) throw new Error(jvT("ui.6dcd7c9766b2"));
       if (!showOperation(payload.operation)) pollTimer = setTimeout(() => pollOperation(id, current), 1500);
     } catch (error) { if (error.staleSelection) return; if (current === installGeneration && error.name !== "AbortError") panelError(error, operationIdentity?.operation_id === id ? operationIdentity : null); }
   };
@@ -7713,7 +7713,7 @@ if (pluginsDialog && pluginsOpen) {
     installController = new AbortController();
     showPanel();
     overlayHeader(identity.name, "", [[identity.version, "plugins-badge-version"]], identity.project_id || identity.icon_project_id, null, identity.icon_url, identity.source);
-    panelBody.append(text("h3", "Submitting reviewed installation…"));
+    panelBody.append(text("h3", jvT("ui.6acfdc74eadf")));
     try {
       if (await blockPluginInstall(current)) return;
       const payload = await pluginRequest("install", {
@@ -7721,13 +7721,13 @@ if (pluginsDialog && pluginsOpen) {
         confirm_players: String(plan.confirmation_required === true),
       }, installController.signal);
       if (current !== installGeneration) return;
-      if (!payload.operation) throw new Error("Installation did not start. Review again.");
+      if (!payload.operation) throw new Error(jvT("ui.3f04bc49d05a"));
       if (operationIdentity?.operation_id !== payload.operation.operation_id) operationIdentity = { ...identity, operation_id: payload.operation.operation_id };
       if (!showOperation(payload.operation)) pollTimer = setTimeout(() => pollOperation(payload.operation.operation_id, current), 1000);
     } catch (error) { if (error.staleSelection) return; if (current === installGeneration && error.name !== "AbortError") panelError(error, identity); }
   };
   const readableSize = (size) => {
-    if (!Number.isFinite(size) || size < 0) return "Size unavailable";
+    if (!Number.isFinite(size) || size < 0) return jvT("ui.d7d557fa439a");
     if (size < 1024) return `${size} B`;
     const unit = size >= 1048576 ? "MiB" : "KiB";
     const value = size / (unit === "MiB" ? 1048576 : 1024);
@@ -7739,44 +7739,44 @@ if (pluginsDialog && pluginsOpen) {
     const current = installGeneration;
     installController = new AbortController();
     showPanel(`${contentSingular() === "mod" ? "Mod" : "Plugin"} installation`, true);
-    panelBody.append(text("h3", "Preparing installation review…"));
-    overlayActions(panelAction("Close", closePanel, true));
+    panelBody.append(text("h3", jvT("ui.c6724b687a62")));
+    overlayActions(panelAction(jvT("ui.7d9eb7acb13e"), closePanel, true));
     try {
       if (await blockPluginInstall(current)) return;
       const plan = await pluginRequest("install/plan", { source: project?.source || "Modrinth", project_id: projectID, version_id: versionID }, installController.signal);
       if (current !== installGeneration) return;
       if (plan.install_available === false) { readOnlyReview?.(plan.compatibility); return; }
       showPanel(`${contentSingular() === "mod" ? "Mod" : "Plugin"} installation`, true);
-      overlayHeader(plan.project_name, plan.description || project?.description, [[plan.version_number, "plugins-badge-version"], [plan.server.server_software || plan.server.server_type, "plugins-badge-server"], [plan.server.minecraft_version && `MC ${plan.server.minecraft_version}`, "plugins-badge-minecraft"]], plan.project_id, panelAction("Install", () => applyPlugin(plan, project)), project?.project_id === plan.project_id && project?.source === plan.source ? project.icon_url || "" : undefined, plan.source);
+      overlayHeader(plan.project_name, plan.description || project?.description, [[plan.version_number, "plugins-badge-version"], [plan.server.server_software || plan.server.server_type, "plugins-badge-server"], [plan.server.minecraft_version && `MC ${plan.server.minecraft_version}`, "plugins-badge-minecraft"]], plan.project_id, panelAction(jvT("ui.569ca49f4aaf"), () => applyPlugin(plan, project)), project?.project_id === plan.project_id && project?.source === plan.source ? project.icon_url || "" : undefined, plan.source);
       const selectedVersion = project?.version?.id === plan.version_id ? project.version : null;
-      const about = infoRows(overlaySection("About this version"));
-      about("Release", plan.version_number);
-      about(plan.source === "Hangar" ? "Channel" : "Release type", selectedVersion?.version_type || "Not provided");
-      about("Published", selectedVersion?.date_published || "Not provided");
-      about("Source", plan.source);
-      about("Project ID", plan.project_id);
-      about("Release ID", plan.version_id);
-      const compatibility = infoRows(overlaySection("Compatibility"));
-      compatibility("Result", plan.compatibility);
-      compatibility("Server software", plan.server.server_software);
-      compatibility("Active Minecraft version", plan.server.minecraft_version);
-      compatibility("Supported platforms", (selectedVersion?.loaders || []).join(" / ") || "Not provided");
+      const about = infoRows(overlaySection(jvT("ui.63e615c21158")));
+      about(jvT("ui.e020e3c67bd0"), plan.version_number);
+      about(plan.source === "Hangar" ? "Channel" : jvT("ui.0f9bdaf90d25"), selectedVersion?.version_type || jvT("ui.d83b9ff3c07a"));
+      about(jvT("ui.2ef42ec21d93"), selectedVersion?.date_published || jvT("ui.d83b9ff3c07a"));
+      about(jvT("ui.0e570ca6fabe"), plan.source);
+      about(jvT("ui.e511470b21a9"), plan.project_id);
+      about(jvT("ui.6e7fdd059d0f"), plan.version_id);
+      const compatibility = infoRows(overlaySection(jvT("ui.b37ddf1f6e0f")));
+      compatibility(jvT("ui.6e7d50e84f47"), plan.compatibility);
+      compatibility(jvT("ui.8b8ee2755acb"), plan.server.server_software);
+      compatibility(jvT("ui.de8921369774"), plan.server.minecraft_version);
+      compatibility(jvT("ui.67635dab0dde"), (selectedVersion?.loaders || []).join(" / ") || jvT("ui.d83b9ff3c07a"));
       const versions = [...new Set(selectedVersion?.game_versions || [])];
-      compatibility("Supported versions", versions.join(" / ") || "Not provided");
-      const dependencies = overlaySection("Dependencies");
+      compatibility(jvT("ui.aeb9d7cea04c"), versions.join(" / ") || jvT("ui.d83b9ff3c07a"));
+      const dependencies = overlaySection(jvT("ui.2e41b118eb20"));
       const required = plan.artifacts.filter((artifact) => !artifact.requested);
       const dependencyList = document.createElement("ul");
       dependencyList.className = "plugins-overlay-list";
       required.forEach((artifact) => {
         const item = text("li", `${artifact.project_name} · ${artifact.version_number}`);
-        item.append(text("span", artifact.satisfied === "Already provided by the server / JustVoxel runtime" ? artifact.satisfied : artifact.satisfied ? "Already satisfied" : "Will be installed", "plugins-list-secondary"));
+        item.append(text("span", artifact.satisfied === "Already provided by the server / JustVoxel runtime" ? artifact.satisfied : artifact.satisfied ? jvT("ui.509ad4b7bd9b") : jvT("ui.3992f514b366"), "plugins-list-secondary"));
         item.className = "plugins-file-row";
         dependencyList.append(item);
       });
       dependencies.append(dependencyList);
       const informational = plan.display_dependencies || [];
       if (informational.length) dependencies.append(dependencyGroups(informational));
-      if (!required.length && !informational.length) dependencies.append(text("p", "No required dependencies."));
+      if (!required.length && !informational.length) dependencies.append(text("p", jvT("ui.3d6eb94111f6")));
       const files = document.createElement("ul");
       files.className = "plugins-overlay-list";
       plan.artifacts.filter((artifact) => !artifact.satisfied).forEach((artifact) => {
@@ -7784,25 +7784,25 @@ if (pluginsDialog && pluginsOpen) {
         item.append(text("span", readableSize(artifact.size), "plugins-list-secondary"));
         files.append(item);
       });
-      overlaySection("Files to install").append(files);
-      const installation = infoRows(overlaySection("Installation"));
-      installation("Target content directory", plan.installation_location);
-      installation("Changes", "Verified cold backup before changes; then install the listed files.");
-      const restart = infoRows(overlaySection("Restart"));
-      restart("Required", plan.restart_required ? "Yes" : "No");
-      restart("Verification", acceptedServer?.content_kind === "mods" ? "Artifact/provider/loader compatibility validated; Minecraft restarts and runtime health is verified. Mod functionality is not proven." : "Minecraft starts/restarts to load and verify plugins");
-      restart("Original stopped state", "Returns to stopped after verification");
+      overlaySection(jvT("ui.448167b72151")).append(files);
+      const installation = infoRows(overlaySection(jvT("ui.c3fc54aa5390")));
+      installation(jvT("ui.3f70f2563600"), plan.installation_location);
+      installation(jvT("ui.bbd4b6a86bc6"), jvT("ui.5c385efbd5ad"));
+      const restart = infoRows(overlaySection(jvT("ui.6b983a81e5e8")));
+      restart(jvT("ui.4850b174b713"), plan.restart_required ? jvT("ui.85a39ab345d6") : jvT("ui.1ea442a134b2"));
+      restart(jvT("ui.7140f4f19dec"), acceptedServer?.content_kind === "mods" ? jvT("ui.0a7912f3c03c") : jvT("ui.e8940d0956bd"));
+      restart(jvT("ui.943026a9371d"), jvT("ui.cca6ca9c651d"));
       if (plan.confirmation_required) {
-        const section = overlaySection("Players");
+        const section = overlaySection(jvT("ui.84e12ac655dd"));
         const players = infoRows(section);
-        players("Online", String(plan.online));
-        if (plan.players?.length) players("Names", plan.players.join(", "));
-        players("Install", "Confirms the player-aware shutdown and restart.");
+        players(jvT("ui.0d21bd52022c"), String(plan.online));
+        if (plan.players?.length) players(jvT("ui.c3b29e6eef2c"), plan.players.join(", "));
+        players(jvT("ui.569ca49f4aaf"), jvT("ui.32e10a4d5759"));
       }
       panelBody.querySelector("button")?.focus();
     } catch (error) { if (error.staleSelection) return;
       if (current !== installGeneration || error.name === "AbortError") return;
-      if (error.message === "This release is not a direct Paper/Bukkit plugin and cannot be installed into the plugins directory." && readOnlyReview) readOnlyReview("The publisher lists Paper support, but this JAR is not a direct Paper/Bukkit plugin. It may require an external loader or a different installation path, so JustVoxel will not place it in the plugins directory.");
+      if (error.message === "This release is not a direct Paper/Bukkit plugin and cannot be installed into the plugins directory." && readOnlyReview) readOnlyReview(jvT("ui.1be43675b9e0"));
       else if (error.message === "BlueMap native add-on belongs in Plugins -> Add-ons -> BlueMap Add-ons. Select its local file there." && readOnlyReview) readOnlyReview(error.message);
       else if (error.message === "This loader mod cannot be installed into a plugin server. Select a compatible mod-loader server." && readOnlyReview) readOnlyReview(error.message);
       else panelError(error, project ? { name: project.title, source: project.source, project_id: project.project_id, icon_project_id: project.icon_project_id, icon_url: project.icon_url } : null);
@@ -7817,7 +7817,7 @@ if (pluginsDialog && pluginsOpen) {
       installController = new AbortController();
       const current = installGeneration;
       if (!showOperation(payload.operation)) pollTimer = setTimeout(() => pollOperation(payload.operation.operation_id, current), 1000);
-    } catch (error) { if (error.staleSelection) return; state.textContent = error.message || "Plugin installation status is unavailable."; }
+    } catch (error) { if (error.staleSelection) return; state.textContent = error.message || jvT("ui.729215ea003e"); }
   };
   panel.addEventListener("click", (event) => {
     if (event.target === panel && overlayDismissible) closePanel();
@@ -7842,7 +7842,7 @@ if (pluginsDialog && pluginsOpen) {
       if (pluginInventorySafe(payload.operation)) { load(); return; }
     } catch (error) { if (error.staleSelection) return;
       if (current !== generation || error.name === "AbortError") return;
-      state.textContent = error.message || "Plugin installation status is unavailable.";
+      state.textContent = error.message || jvT("ui.729215ea003e");
     }
     inventoryTimer = setTimeout(() => recheckBlockedInventory(current), 1500);
   };
@@ -7853,7 +7853,7 @@ if (pluginsDialog && pluginsOpen) {
     const initialize = providerServerKey !== key;
     acceptedServer = server;
     discoverServerKey = key;
-    form.elements.q.placeholder = server.content_kind === "mods" ? "Search mods" : server.content_kind === "plugins" ? "Search plugins" : "Search plugins or mods";
+    form.elements.q.placeholder = server.content_kind === "mods" ? jvT("ui.b186b72af3a9") : server.content_kind === "plugins" ? jvT("ui.df08b7498d9a") : jvT("ui.2d3a28cab149");
     form.elements.q.setAttribute("aria-label", form.elements.q.placeholder);
     for (const name of ["modrinth", "hangar", "curseforge"]) {
       const control = form.elements[name];
@@ -7884,8 +7884,8 @@ if (pluginsDialog && pluginsOpen) {
       });
       const payload = await response.json();
       if (selection !== globalThis.justVoxelSelectionGeneration.plugins) throw globalThis.justVoxelStaleSelection();
-      if (response.status === 401) { window.location.assign("/login"); throw new Error("Sign in again."); }
-      if (!response.ok) throw new Error(payload.error || "Add-ons upload could not continue; review again.");
+      if (response.status === 401) { window.location.assign("/login"); throw new Error(jvT("ui.e30c2ec3ce01")); }
+      if (!response.ok) throw new Error(payload.error || jvT("ui.792e51bdfbba"));
       return payload;
     } catch (error) {
       if (selection !== globalThis.justVoxelSelectionGeneration.plugins) throw globalThis.justVoxelStaleSelection();
@@ -7896,42 +7896,42 @@ if (pluginsDialog && pluginsOpen) {
     stopPolling();
     const current = installGeneration;
     installController = new AbortController();
-    showPanel("Review Add-ons installation", true);
-    panelBody.append(text("p", "Checking the selected file and its host…"));
+    showPanel(jvT("ui.c6cb217ab502"), true);
+    panelBody.append(text("p", jvT("ui.0b8d6f6cbd46")));
     try {
       if (await blockPluginInstall(current)) return;
       const plan = await addonRequest("plan", section.kind, file);
       if (current !== installGeneration) return;
-      showPanel("Review Add-ons installation", true);
+      showPanel(jvT("ui.c6cb217ab502"), true);
       overlayHeader(plan.display_name || plan.filename, plan.validation, [[section.name, ""]]);
-      const rows = infoRows(overlaySection("Installation"));
-      rows("Type", section.name);
-      rows("File", plan.filename);
-      rows("Size", readableSize(plan.size));
-      rows("Destination", plan.destination);
-      rows("Restart required", plan.restart_required ? "Yes — verified cold backup, restart and Minecraft health check" : "No — passive schematic content");
-      if (plan.restart_required) rows("Originally stopped", "Minecraft returns to stopped after health verification");
+      const rows = infoRows(overlaySection(jvT("ui.c3fc54aa5390")));
+      rows(jvT("ui.baaddf70fb5d"), section.name);
+      rows(jvT("ui.50009ce1da4d"), plan.filename);
+      rows(jvT("ui.1af851907331"), readableSize(plan.size));
+      rows(jvT("ui.293d404a500f"), plan.destination);
+      rows(jvT("ui.b46871152667"), plan.restart_required ? jvT("ui.4c44901d7781") : jvT("ui.d8177815c19a"));
+      if (plan.restart_required) rows(jvT("ui.19d74ce378ee"), jvT("ui.ac7aae0a4bea"));
       let players = null;
       if (plan.confirmation_required) {
         const label = document.createElement("label");
         players = document.createElement("input");
         players.type = "checkbox";
-        label.append(players, document.createTextNode(` Confirm restart with ${plan.online} player(s) online${plan.players?.length ? ": " + plan.players.join(", ") : ""}.`));
-        overlaySection("Players").append(label);
+        label.append(players, document.createTextNode(jvT("ui.d90364e2ca98", {v0: (plan.online), v1: (plan.players?.length ? ": " + plan.players.join(", ") : "")})));
+        overlaySection(jvT("ui.84e12ac655dd")).append(label);
       }
-      const apply = panelAction("Install", async () => {
+      const apply = panelAction(jvT("ui.569ca49f4aaf"), async () => {
         apply.disabled = true;
         try {
           // The exact selected File is sent again; the Agent revalidates everything.
           const payload = await addonRequest("install", section.kind, file, plan, Boolean(players?.checked));
           if (current !== installGeneration) return;
-          if (!payload.operation) throw new Error("Add-ons installation did not start.");
+          if (!payload.operation) throw new Error(jvT("ui.011bf983e35e"));
           if (!showOperation(payload.operation)) pollTimer = setTimeout(() => pollOperation(payload.operation.operation_id, current), 1000);
         } catch (error) { if (error.staleSelection) return; if (current === installGeneration && error.name !== "AbortError") panelError(error); }
       });
       apply.disabled = Boolean(players && !players.checked);
       players?.addEventListener("change", () => { apply.disabled = !players.checked; });
-      overlayActions(panelAction("Cancel", closePanel, true), apply);
+      overlayActions(panelAction(jvT("ui.19766ed6ccb2"), closePanel, true), apply);
     } catch (error) { if (error.staleSelection) return; if (current === installGeneration && error.name !== "AbortError") panelError(error); }
   };
   const renderAddonSection = (section) => {
@@ -7940,7 +7940,7 @@ if (pluginsDialog && pluginsOpen) {
     card.append(text("h3", section.name));
     const badges = document.createElement("div");
     badges.className = "plugins-card-badges";
-    badges.append(pluginBadge(section.host.available ? "Host installed" : section.host.status === "disabled" ? "Host disabled" : "Host unavailable", section.host.available ? "plugins-badge-installed" : section.host.status === "disabled" ? "plugins-badge-disabled" : "plugins-badge-attention"));
+    badges.append(pluginBadge(section.host.available ? jvT("ui.a943e849a946") : section.host.status === "disabled" ? jvT("ui.b05fd9b8ff81") : jvT("ui.0d27c1cf319c"), section.host.available ? "plugins-badge-installed" : section.host.status === "disabled" ? "plugins-badge-disabled" : "plugins-badge-attention"));
     card.append(badges, text("p", section.host.message, "plugins-card-description"), text("p", section.destination, "plugins-card-release"));
     for (const item of section.files) {
       const content = document.createElement("section");
@@ -7948,18 +7948,18 @@ if (pluginsDialog && pluginsOpen) {
       content.append(text("h4", item.display_name || item.filename), text("p", item.filename));
       const managed = document.createElement("div");
       managed.className = "plugins-card-badges";
-      managed.append(pluginBadge(section.name), pluginBadge(item.state === "installed" ? "Installed" : "Needs attention", item.state === "installed" ? "plugins-badge-installed" : "plugins-badge-attention"), pluginBadge("Managed by Add-ons"));
-      content.append(managed, text("p", item.target_relative_path), text("p", "Updates are not available yet"));
+      managed.append(pluginBadge(section.name), pluginBadge(item.state === "installed" ? jvT("ui.f8b32f4e92bd") : jvT("ui.c1ebc7817870"), item.state === "installed" ? "plugins-badge-installed" : "plugins-badge-attention"), pluginBadge(jvT("ui.e015cb247578")));
+      content.append(managed, text("p", item.target_relative_path), text("p", jvT("ui.3ac22f0a39de")));
       card.append(content);
     }
     const picker = document.createElement("input");
     picker.type = "file";
     picker.accept = section.accept;
-    picker.setAttribute("aria-label", `Choose file for ${section.name}`);
+    picker.setAttribute("aria-label", jvT("ui.23eff7e5c6f5", {v0: (section.name)}));
     picker.disabled = !section.host.available;
     const choose = document.createElement("label");
-    choose.append(document.createTextNode("Choose file"), picker);
-    const review = panelAction("Review / Install", () => { if (picker.files?.length === 1) reviewAddon(section, picker.files[0]); });
+    choose.append(document.createTextNode(jvT("ui.b09c73d9d3f8")), picker);
+    const review = panelAction(jvT("ui.db401d9a4366"), () => { if (picker.files?.length === 1) reviewAddon(section, picker.files[0]); });
     review.disabled = true;
     picker.addEventListener("change", () => { review.disabled = !section.host.available || picker.files?.length !== 1; });
     card.append(choose, review);
@@ -7981,7 +7981,7 @@ if (pluginsDialog && pluginsOpen) {
     const current = ++generation;
     controller?.abort();
     controller = new AbortController();
-    state.textContent = `Loading ${contentPlural()}…`;
+    state.textContent = jvT("ui.e1d147ffcc21", {v0: (contentPlural())});
     results.replaceChildren();
     results.classList.toggle("plugins-addon-results", tab === "addons");
     pagination.hidden = tab !== "discover";
@@ -7995,7 +7995,7 @@ if (pluginsDialog && pluginsOpen) {
         if (current !== generation) return;
         if (!pluginInventorySafe(installation.operation)) {
           resumeActiveOperation(installation.operation, installGeneration);
-          state.textContent = "Managed content operation is still being verified or recovered. Installed inventory will be available after the operation reaches a verified final state.";
+          state.textContent = jvT("ui.59c503a7dc50");
           inventoryTimer = setTimeout(() => recheckBlockedInventory(current), 1500);
           return;
         }
@@ -8004,8 +8004,8 @@ if (pluginsDialog && pluginsOpen) {
       const payload = await response.json();
       if (current !== generation) return;
       if (response.status === 401) { window.location.assign("/login"); return; }
-      if (response.status === 403 && String(payload.error || "").toLowerCase().includes("password")) { window.location.assign("/password"); return; }
-      if (!response.ok) throw new Error(payload.error || "Managed content information is unavailable.");
+      if (response.status === 403 && String(jvC(payload.error || "")).toLowerCase().includes("password")) { window.location.assign("/password"); return; }
+      if (!response.ok) throw new Error(payload.error || jvT("ui.3e588ca3f342"));
       const server = payload.server;
       const contextReady = acceptDiscoverContext(server);
       form.querySelectorAll("input,button").forEach((control) => { if (control === curseForgeSwitch || curseForgeNotice.contains(control)) return; control.disabled = !server.supported; });
@@ -8013,14 +8013,14 @@ if (pluginsDialog && pluginsOpen) {
       acceptDiscoverContext(server);
       if (tab === "discover" && !contextReady) { load(); return; }
       if (tab === "addons") {
-        if (server.content_kind !== "plugins") { state.textContent = "Add-ons require a Bukkit plugin host and are unavailable for loader mods."; return true; }
+        if (server.content_kind !== "plugins") { state.textContent = jvT("ui.75db37c5b1a1"); return true; }
         payload.sections.forEach((section) => results.append(renderAddonSection(section)));
-        state.textContent = "Select a local file. Host plugins perform runtime loading; updates and removal are not available yet.";
+        state.textContent = jvT("ui.5c6bda48718f");
         return true;
       }
       const items = tab === "discover" ? payload.projects : payload.plugins;
       items.forEach((item) => results.append(tab === "discover" ? renderProject(item, server) : renderInstalled(item)));
-      state.textContent = tab === "discover" && !payload.modrinth && !payload.hangar && !payload.curseforge ? `Enable a catalog provider to browse ${contentPlural()}.` : server.message || (items.length ? "" : tab === "discover" ? `No ${contentPlural()} match these filters on this page.` : `No installed ${contentSingular()} JARs found.`);
+      state.textContent = tab === "discover" && !payload.modrinth && !payload.hangar && !payload.curseforge ? jvT("ui.8298decb59a3", {v0: (contentPlural())}) : server.message || (items.length ? "" : tab === "discover" ? jvT("ui.6f1468c7d9be", {v0: (contentPlural())}) : jvT("ui.71bcf5ac0f29", {v0: (contentSingular())}));
       if (tab === "discover") {
         cursor = payload.cursor;
         nextCursor = payload.next_cursor;
@@ -8032,11 +8032,11 @@ if (pluginsDialog && pluginsOpen) {
         if (nextCursor) pageCursors[pageIndex + 1] = nextCursor;
         else pageCursors.length = pageIndex + 1;
         next.disabled = !nextCursor;
-        pageLabel.textContent = `Page ${currentPage} of ${totalPages}`;
+        pageLabel.textContent = jvT("ui.477c22095a63", {v0: (currentPage), v1: (totalPages)});
       }
       return true;
     } catch (error) { if (error.staleSelection) return;
-      if (current === generation && error.name !== "AbortError") state.textContent = error.message || "Managed content information is unavailable.";
+      if (current === generation && error.name !== "AbortError") state.textContent = error.message || jvT("ui.3e588ca3f342");
     } finally {
       if (current === generation) {
         if (tab === "discover") {
@@ -8153,10 +8153,10 @@ if (minecraftServersDialog && minecraftServersOpen) {
     const destination = new URLSearchParams(window.location.search);
     for (const key of ["created", "deleted"]) if (destination.get(key) === "yes") query.set(key, "yes");
     actionsSlot.replaceChildren();
-    state.textContent = "Loading Minecraft Servers…";
+    state.textContent = jvT("ui.70cede2476a8");
     try {
       const response = await fetch("/workspace/minecraft-servers?" + query, {credentials:"same-origin", cache:"no-store"});
-      if (!response.ok || response.redirected) throw new Error("Minecraft Servers could not be loaded.");
+      if (!response.ok || response.redirected) throw new Error(jvT("ui.c3ba26d72a06"));
       const html = await response.text();
       if (current !== sequence) return;
       const range = document.createRange();
@@ -8214,11 +8214,11 @@ if (minecraftNetworkDialog) {
   };
   const stateBadge = (value) => {
     const states = {
-      running: ["Running", "good"], stopped: ["Stopped", "danger"],
-      failed: ["Failed", "danger"], starting: ["Starting", "warning"],
-      stopping: ["Stopping", "warning"],
+      running: [jvT("ui.f4ccae29e1bb"), "good"], stopped: [jvT("ui.1a4f630ac1b6"), "danger"],
+      failed: [jvT("ui.031a8f0f659d"), "danger"], starting: [jvT("ui.aeed4d26bb5f"), "warning"],
+      stopping: [jvT("ui.a71ee1d4ac5c"), "warning"],
     };
-    return Object.hasOwn(states, value) ? states[value] : ["Unavailable", "muted"];
+    return Object.hasOwn(states, value) ? states[value] : [jvT("ui.ca1844969742"), "muted"];
   };
   const scheduleRuntimePolling = () => {
     if (!minecraftNetworkDialog.open || !minecraftNetworkDialog.isConnected) return;
@@ -8240,7 +8240,7 @@ if (minecraftNetworkDialog) {
       const response = await fetch("/workspace/minecraft-network?runtime_only=true", {
         credentials: "same-origin", cache: "no-store", signal: request.signal,
       });
-      if (!response.ok || response.redirected) throw new Error("status unavailable");
+      if (!response.ok || response.redirected) throw new Error(jvT("ui.180119be630b"));
       const status = await response.json();
       if (generation !== runtimeGeneration || current !== sequence || saving || !minecraftNetworkDialog.open || !minecraftNetworkDialog.isConnected) return;
       const states = new Map((status.servers || []).map(server => [server.id, server.state]));
@@ -8255,7 +8255,7 @@ if (minecraftNetworkDialog) {
       // A failed poll cannot establish that a previously running server is stopped.
       if (generation === runtimeGeneration && current === sequence && !saving) {
         for (const badge of content.querySelectorAll("[data-network-server-state]")) {
-          badge.textContent = "Unavailable";
+          badge.textContent = jvT("ui.ca1844969742");
           badge.className = "badge minecraft-network-state muted";
         }
       }
@@ -8284,8 +8284,8 @@ if (minecraftNetworkDialog) {
     if (!configureForm) return;
     const enforced = configureForm.elements.namedItem("whitelist_enforced").value === "true";
     content.querySelector("[data-network-whitelist-switch]").setAttribute("aria-checked", String(enforced));
-    content.querySelector("[data-network-whitelist-badge]").textContent = enforced ? "Enabled" : "Disabled";
-    content.querySelector("[data-network-whitelist-heading]").textContent = enforced ? "Network Whitelist: Enforced" : "Network Whitelist";
+    content.querySelector("[data-network-whitelist-badge]").textContent = enforced ? jvT("ui.92c1cdfdf4cb") : jvT("ui.75081b593d15");
+    content.querySelector("[data-network-whitelist-heading]").textContent = enforced ? "Network Whitelist: Enforced" : jvT("ui.388e35b34211");
     const dirty = isDirty();
     configureForm.querySelector("[data-minecraft-network-cancel]").disabled = !dirty;
     configureForm.querySelector('[value="configure"]').disabled = !dirty || configureForm.dataset.recoveryRequired === "true";
@@ -8327,7 +8327,7 @@ if (minecraftNetworkDialog) {
     state.classList.toggle("notice", saving);
     state.classList.toggle("warning", saving);
     if (saving) content.querySelectorAll(".notice.success").forEach(notice => notice.remove());
-    state.textContent = saving ? "Updating Minecraft Network…" : "Loading Minecraft Network…";
+    state.textContent = saving ? jvT("ui.b702684f4c43") : jvT("ui.2e3ea2889ba4");
     try {
       // POST returns freshly read authoritative status, including recovery state.
       const response = await fetch("/workspace/minecraft-network", {
@@ -8335,7 +8335,7 @@ if (minecraftNetworkDialog) {
         credentials: "same-origin", cache: "no-store",
         ...(body === null ? {} : { body }),
       });
-      if (!response.ok || response.redirected) throw new Error("Minecraft Network could not be loaded. Refresh to try again.");
+      if (!response.ok || response.redirected) throw new Error(jvT("ui.384ca342d9ed"));
       const html = await response.text();
       if (current !== sequence) return;
       const range = document.createRange();
@@ -8466,7 +8466,7 @@ document.querySelectorAll("[data-selected-presentation]").forEach((form)=>{
  if(input)input.addEventListener("input",()=>{button.disabled=input.value!==form.dataset.deleteName;});
  form.addEventListener("submit",async(event)=>{event.preventDefault();if(input && input.value!==form.dataset.deleteName)return;button.disabled=true;
  const status=document.querySelector("[data-selected-action-status]");
- try{const response=await fetch(form.action,{method:"POST",credentials:"same-origin",body:new URLSearchParams(new FormData(form))});const result=await response.json();if(!response.ok || !result.ok)throw new Error(result.error || "Server action did not complete. Retry this action.");if(input)window.location.assign(result.redirect);else window.location.reload();}
+ try{const response=await fetch(form.action,{method:"POST",credentials:"same-origin",body:new URLSearchParams(new FormData(form))});const result=await response.json();if(!response.ok || !result.ok)throw new Error(result.error || jvT("ui.a3416dd07623"));if(input)window.location.assign(result.redirect);else window.location.reload();}
  catch(error){if(status)status.textContent=error.message;button.disabled=input ? input.value!==form.dataset.deleteName : false;}
  });
 });
@@ -8489,7 +8489,7 @@ if (filesDialog) {
       method: action ? "POST" : "GET", credentials: "same-origin", cache: "no-store",
       ...(action ? { body: new URLSearchParams({ csrf: filesDialog.querySelector("[data-files-csrf]").value, availability: availability || "" }) } : {}),
     });
-    if (!response.ok) throw new Error("File Browser is unavailable. Retry.");
+    if (!response.ok) throw new Error(jvT("ui.32541cb0a6d8"));
     return response.json();
   };
   // Serialize lifecycle and setting requests, including rapid close/reopen.
@@ -8515,7 +8515,7 @@ if (filesDialog) {
     frame.hidden = true;
     frame.removeAttribute("src");
     retry.hidden = true;
-    state.textContent = refresh ? "Refreshing File Browser…" : "Starting File Browser…";
+    state.textContent = refresh ? jvT("ui.cad62bc53b77") : jvT("ui.1fcebcdd5073");
     try {
       await pending;
       if (ticket !== generation || !filesDialog.open) return;
@@ -8529,11 +8529,11 @@ if (filesDialog) {
       const deadline = Date.now() + 180000;
       while (!status.ready) {
         if (ticket !== generation || !filesDialog.open) return;
-        if (Date.now() >= deadline) throw new Error("File Browser could not start. Retry.");
+        if (Date.now() >= deadline) throw new Error(jvT("ui.6df217d4f82f"));
         await new Promise(resolve => setTimeout(resolve, 2000));
         if (ticket !== generation || !filesDialog.open) return;
         status = await request();
-        if (!status.ready && status.state === "failed") throw new Error("File Browser could not start. Retry.");
+        if (!status.ready && status.state === "failed") throw new Error(jvT("ui.6df217d4f82f"));
       }
       if (ticket !== generation || !filesDialog.open) return;
       state.textContent = "";
@@ -8552,7 +8552,7 @@ if (filesDialog) {
       // Agent rereads the authoritative mode. It stops only in on-demand mode,
       // even if another Administrator changed availability in another tab.
       void mutate("stop").catch(() => {
-        state.textContent = "File Browser could not stop. Open Files and close it to retry.";
+        state.textContent = jvT("ui.2ba753608707");
         settingsStatus.textContent = state.textContent;
       });
     },
@@ -8582,16 +8582,16 @@ if (filesDialog) {
     const previous = mode;
     selectMode(input.value);
     modes.forEach(control => { control.disabled = true; });
-    settingsStatus.textContent = "Saving…";
+    settingsStatus.textContent = jvT("ui.23e39291d613");
     try {
       await mutate("availability", input.value);
-      settingsStatus.textContent = "Saved.";
+      settingsStatus.textContent = jvT("ui.fca046ccd586");
     } catch (error) {
       // A systemd failure may follow a durable setting save. Read it back
       // instead of inventing a second local authoritative preference.
       try { selectMode((await request()).availability); }
       catch { selectMode(previous); }
-      settingsStatus.textContent = "Availability could not be applied. Select the mode again to retry.";
+      settingsStatus.textContent = jvT("ui.6e507aba2cd0");
     } finally { modes.forEach(control => { control.disabled = false; }); }
   }));
   // A selected radio remains active; clicking it again safely reapplies a

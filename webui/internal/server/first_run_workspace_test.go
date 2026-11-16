@@ -27,7 +27,7 @@ func TestWorkspaceWindowStateIsScopedToAuthenticatedUser(t *testing.T) {
 		t.Fatal("dashboard must expose the authenticated username for workspace persistence")
 	}
 
-	source, err := assets.ReadFile("static/app.js")
+	source, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestWorkspaceWindowStateIsScopedToAuthenticatedUser(t *testing.T) {
 }
 
 func TestCredentialPagesIgnorePersistedWorkspaceOpenState(t *testing.T) {
-	source, err := assets.ReadFile("static/app.js")
+	source, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestCredentialPagesIgnorePersistedWorkspaceOpenState(t *testing.T) {
 }
 
 func TestFirstRunConfiguredStateOverridesExploreInvitation(t *testing.T) {
-	scriptSource, err := assets.ReadFile("static/first-run.js")
+	scriptSource, err := englishPresentationAsset("static/first-run.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestFirstRunConfiguredStateOverridesExploreInvitation(t *testing.T) {
 		}
 	}
 
-	templateSource, err := assets.ReadFile("templates/dashboard.html")
+	templateSource, err := englishPresentationAsset("templates/dashboard.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestFirstRunConfiguredStateOverridesExploreInvitation(t *testing.T) {
 }
 
 func TestFirstRunWorkspaceChoiceIsNonBlockingAndConfigurationDriven(t *testing.T) {
-	templateSource, err := assets.ReadFile("templates/dashboard.html")
+	templateSource, err := englishPresentationAsset("templates/dashboard.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestFirstRunWorkspaceChoiceIsNonBlockingAndConfigurationDriven(t *testing.T
 		}
 	}
 
-	scriptSource, err := assets.ReadFile("static/first-run.js")
+	scriptSource, err := englishPresentationAsset("static/first-run.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestFirstRunWorkspaceChoiceIsNonBlockingAndConfigurationDriven(t *testing.T
 		}
 	}
 
-	styleSource, err := assets.ReadFile("static/app.css")
+	styleSource, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestFirstRunWorkspaceChoiceIsNonBlockingAndConfigurationDriven(t *testing.T
 }
 
 func TestMinecraftResetReopensExistingFirstRunChoice(t *testing.T) {
-	appSource, err := assets.ReadFile("static/app.js")
+	appSource, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestMinecraftResetReopensExistingFirstRunChoice(t *testing.T) {
 		t.Fatal("Minecraft Reset must refresh the dashboard without waiting for its poll")
 	}
 
-	firstRunSource, err := assets.ReadFile("static/first-run.js")
+	firstRunSource, err := englishPresentationAsset("static/first-run.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +240,7 @@ func TestMinecraftResetReopensExistingFirstRunChoice(t *testing.T) {
 		!strings.Contains(firstRun, "if (configured) resetWelcome = false;") {
 		t.Fatal("Minecraft Reset must show Welcome immediately, discard stale status, and later reconcile")
 	}
-	styleSource, err := assets.ReadFile("static/app.css")
+	styleSource, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}

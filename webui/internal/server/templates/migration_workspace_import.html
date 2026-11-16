@@ -1,64 +1,64 @@
 {{define "migration_workspace_import.html"}}<div class="migration-workspace-content" data-migration-workspace-root data-server-id="{{.ServerID}}">
-<p class="migration-workspace-helper"><strong>Choose a source. JustVoxel discovers the server, reviews the destination and runs a validated Import with rollback protection.</strong></p>
-  {{if .Error}}<div class="notice error"><strong>Server Import cannot continue as submitted.</strong><br>{{.Error}}</div>{{end}}
+<p class="migration-workspace-helper"><strong>{{t "ui.83aa4f6fbddc"}}</strong></p>
+  {{if .Error}}<div class="notice error"><strong>{{t "ui.e25be8476521"}}</strong><br>{{ts .Error}}</div>{{end}}
 
   <form method="post" action="/workspace/migration/import/review?server={{.ServerID}}" autocomplete="off" data-server-import-form>
     <input type="hidden" name="csrf" value="{{.CSRF}}">
     <section class="panel">
-      <p class="eyebrow">Import source</p>
-      <label for="server-import-source-kind"><strong>Where is the server to import?</strong></label>
+      <p class="eyebrow">{{t "ui.dbff5bdee4bd"}}</p>
+      <label for="server-import-source-kind"><strong>{{t "ui.af95c1735a65"}}</strong></label>
       <select id="server-import-source-kind" name="source_kind" data-server-import-source-kind required>
-        <option value="">Choose a source</option>
-        {{if .Local}}<option value="local">Local / server path</option>{{end}}
-        {{if .Backup}}<option value="backup">Configured JustVoxel backup storage</option>{{end}}
-        {{if .Device}}<option value="device">Attached disk / partition / USB media</option>{{end}}
-        {{if .NFS}}<option value="nfs">Temporary NFS</option>{{end}}
-        {{if .SMB}}<option value="smb">Temporary SMB / CIFS</option>{{end}}
+        <option value="">{{t "ui.de8133e1a512"}}</option>
+        {{if .Local}}<option value="local">{{t "ui.261438ebbbc6"}}</option>{{end}}
+        {{if .Backup}}<option value="backup">{{t "ui.9ede27667e41"}}</option>{{end}}
+        {{if .Device}}<option value="device">{{t "ui.7828115c04c4"}}</option>{{end}}
+        {{if .NFS}}<option value="nfs">{{t "ui.0941a3da80c1"}}</option>{{end}}
+        {{if .SMB}}<option value="smb">{{t "ui.890fac976cd4"}}</option>{{end}}
       </select>
 
       <div data-server-import-source="local" hidden>
-        <label for="server-import-local-path"><strong>Absolute archive or server-directory path</strong></label>
+        <label for="server-import-local-path"><strong>{{t "ui.cafd99308d3f"}}</strong></label>
         <input id="server-import-local-path" name="local_path" placeholder="/var/mnt/storage/server-export.tar.gz" autocomplete="off">
       </div>
 
       <div data-server-import-source="backup" hidden>
-        <p class="muted">JustVoxel will discover importable archives and server directories from configured backup storage.</p>
+        <p class="muted">{{t "ui.70c137bb2ed9"}}</p>
       </div>
 
       <div data-server-import-source="device" hidden>
-        <label for="server-import-device"><strong>Attached source</strong></label>
+        <label for="server-import-device"><strong>{{t "ui.9cec53b9a895"}}</strong></label>
         <select id="server-import-device" name="source_device">
-          <option value="">Choose a JustVoxel-discovered disk, partition, or removable source</option>
-          {{range .SourceDevices}}<option value="{{.Device.Path}}">{{.Device.Path}} · {{.Size}}{{if .Device.Model}} · {{.Device.Model}}{{end}}{{if .Device.Filesystem}} · {{.Device.Filesystem}}{{end}}{{if .Device.Removable}} · removable{{end}}</option>{{end}}
+          <option value="">{{t "ui.b1323b16da78"}}</option>
+          {{range .SourceDevices}}<option value="{{.Device.Path}}">{{.Device.Path}} · {{.Size}}{{if .Device.Model}} · {{.Device.Model}}{{end}}{{if .Device.Filesystem}} · {{.Device.Filesystem}}{{end}}{{if .Device.Removable}} {{t "ui.be97019d985f"}}{{end}}</option>{{end}}
         </select>
-        <p class="muted">JustVoxel will discover importable entries after safely mounting the selected media.</p>
+        <p class="muted">{{t "ui.850348349201"}}</p>
       </div>
 
       <div data-server-import-source="nfs" hidden>
-        <label for="server-import-nfs-source"><strong>Temporary NFS source</strong></label>
+        <label for="server-import-nfs-source"><strong>{{t "ui.081a907435d1"}}</strong></label>
         <input id="server-import-nfs-source" name="source_remote" placeholder="nas:/exports/migrations" autocomplete="off">
-        <p class="muted">JustVoxel will discover importable entries from the temporary NFS mount.</p>
+        <p class="muted">{{t "ui.6fd616325a39"}}</p>
       </div>
 
       <div data-server-import-source="smb" hidden>
-        <label for="server-import-smb-source"><strong>Network folder</strong></label>
+        <label for="server-import-smb-source"><strong>{{t "ui.5b9469b3c984"}}</strong></label>
         <input id="server-import-smb-source" name="source_remote" placeholder="//server/share or //server/share/folder" autocomplete="off">
-        <p class="muted">Paste the network folder you would normally use. JustVoxel handles the SMB share and any folder below it automatically.</p>
-        <div class="migration-smb-fields"><div><label for="server-import-smb-user"><strong>SMB username</strong></label><input id="server-import-smb-user" name="source_username" autocomplete="off"></div>
-        <div><label for="server-import-smb-domain">SMB domain <span class="muted">optional</span></label><input id="server-import-smb-domain" name="source_domain" autocomplete="off"></div></div>
-        <div class="notice migration-workspace-helper">SMB password is requested during inspection. It stays in this open browser workspace and is excluded from the plan, URL and operation journal.</div>
+        <p class="muted">{{t "ui.76a923c7ec9e"}}</p>
+        <div class="migration-smb-fields"><div><label for="server-import-smb-user"><strong>{{t "ui.060a1c1c03cc"}}</strong></label><input id="server-import-smb-user" name="source_username" autocomplete="off"></div>
+        <div><label for="server-import-smb-domain">{{t "ui.d04285ab70e2"}} <span class="muted">{{t "ui.ec91fdd9256c"}}</span></label><input id="server-import-smb-domain" name="source_domain" autocomplete="off"></div></div>
+        <div class="notice migration-workspace-helper">{{t "ui.f5a3d6d0c647"}}</div>
       </div>
 
     </section>
 
 
     <section class="panel migration-destination-helper">
-      <p class="eyebrow">Destination</p>
-      <h2>Replace the configured JustVoxel server</h2>
-      <p>Current storage, memory, timezone, backups and ports stay destination specific. JustVoxel reviews and protects the running server before replacement.</p>
+      <p class="eyebrow">{{t "ui.293d404a500f"}}</p>
+      <h2>{{t "ui.b694590a22c2"}}</h2>
+      <p>{{t "ui.993324f98cba"}}</p>
     </section>
 
 
-    <div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;server={{.ServerID}}">Cancel</a><button type="submit">Inspect and review Server Import</button></div>
+    <div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;server={{.ServerID}}">{{t "ui.19766ed6ccb2"}}</a><button type="submit">{{t "ui.88d6fb78a6f2"}}</button></div>
   </form>
 </div>{{end}}

@@ -21,7 +21,7 @@ func (a *App) sessionInfo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	if err := json.NewEncoder(w).Encode(identity); err != nil {
-		http.Error(w, "could not encode session", http.StatusInternalServerError)
+		http.Error(w, ui(w, "ui.d08b96cb2adf"), http.StatusInternalServerError)
 	}
 }
 
@@ -40,14 +40,14 @@ func (a *App) quickLookManualBackup(w http.ResponseWriter, r *http.Request) {
 	}
 	client, ok := a.api.(selectedBackupsAPI)
 	if !ok {
-		writeMinecraftWorkspaceError(w, 503, "Backup management is unavailable.")
+		writeMinecraftWorkspaceError(w, 503, ui(w, "ui.6ebddf892354"))
 		return
 	}
 	if _, err := client.MinecraftInstanceBackups(r.Context(), session, selected.ID, "now", struct{}{}); err != nil {
-		a.writeMinecraftWorkspaceAPIError(w, err, "Backup could not start.")
+		a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.8d2d72a33769"))
 		return
 	}
-	writeMinecraftWorkspaceJSON(w, 200, map[string]any{"ok": true, "message": "Backup started. It will appear in the library when the backup service finishes."})
+	writeMinecraftWorkspaceJSON(w, 200, map[string]any{"ok": true, "message": ui(w, "ui.c05a5abd8eea")})
 }
 
 func (a *App) rolePageRequest(w http.ResponseWriter, r *http.Request) (string, sessionIdentityAPI, api.SessionInfo, bool) {
@@ -58,7 +58,7 @@ func (a *App) rolePageRequest(w http.ResponseWriter, r *http.Request) (string, s
 	}
 	client, ok := a.api.(sessionIdentityAPI)
 	if !ok {
-		http.Error(w, "role-aware controls are unavailable", http.StatusServiceUnavailable)
+		http.Error(w, ui(w, "ui.db238a1fe47d"), http.StatusServiceUnavailable)
 		return "", nil, api.SessionInfo{}, false
 	}
 	identity, err := client.Session(r.Context(), session)
@@ -77,8 +77,8 @@ func (a *App) handleRolePageError(w http.ResponseWriter, r *http.Request, err er
 	}
 	var responseErr *api.ResponseError
 	if errors.As(err, &responseErr) && responseErr.StatusCode == http.StatusForbidden {
-		http.Error(w, "Access denied", http.StatusForbidden)
+		http.Error(w, ui(w, "ui.cc11d415d932"), http.StatusForbidden)
 		return
 	}
-	http.Error(w, "management service unavailable", http.StatusBadGateway)
+	http.Error(w, ui(w, "ui.0b8e73a792bb"), http.StatusBadGateway)
 }

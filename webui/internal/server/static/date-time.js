@@ -28,7 +28,7 @@ if (dateTimePanel) {
   const read = async () => {
     const response = await fetch("/api/system/workspace/date-time", { credentials: "same-origin", cache: "no-store" });
     const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "Date and time are unavailable.");
+    if (!response.ok) throw new Error(payload.error || jvT("ui.769917efafc7"));
     timeFormat.value = payload.time_format;
     dateFormat.value = payload.date_format;
     window.JustVoxelClockDisplay?.update(payload);
@@ -39,7 +39,7 @@ if (dateTimePanel) {
     time.value = payload.local_time;
     loadedDate = date.value;
     loadedTime = time.value;
-    state.textContent = payload.automatic ? (payload.synchronized ? "Automatic time is synchronized." : "Automatic time is on; synchronization is pending.") : "Automatic time is off.";
+    state.textContent = payload.automatic ? (payload.synchronized ? jvT("ui.823ae10d7247") : jvT("ui.f8a80ce3c3d7")) : jvT("ui.dc57813e64ad");
     options.replaceChildren(...(payload.timezones || []).map((zone) => {
       const item = document.createElement("span");
       item.dataset.timezoneValue = zone;
@@ -66,7 +66,7 @@ if (dateTimePanel) {
   } else startRead();
   const refresh = async () => {
     error.hidden = true;
-    state.textContent = "Loading date and time…";
+    state.textContent = jvT("ui.d5598e5eb17c");
     try { await read(); } catch (failure) { state.textContent = ""; error.textContent = failure.message; error.hidden = false; }
   };
   window.JustVoxelDateTime = { refresh };
@@ -78,7 +78,7 @@ if (dateTimePanel) {
     event.preventDefault();
     error.hidden = true;
     if (!Array.from(options.children).some((item) => item.dataset.timezoneValue === timezone.value)) {
-      error.textContent = "Choose a timezone from the city search results.";
+      error.textContent = jvT("ui.83c2e34e5c0a");
       error.hidden = false;
       return;
     }
@@ -89,7 +89,7 @@ if (dateTimePanel) {
     try {
       const response = await fetch("/api/system/workspace/date-time", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Date and time could not be changed.");
+      if (!response.ok) throw new Error(payload.error || jvT("ui.a0c3e9ba6183"));
       window.JustVoxelClockDisplay?.update(payload);
       updateClockZone(payload.timezone, payload.local_date, payload.local_time);
       await read();

@@ -68,8 +68,8 @@
 .control-quick-actions{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
 .control-power-actions{display:flex;align-items:center;gap:.45rem;flex-wrap:wrap}
 body.role-administrator .control-power-actions.nav-admin-only{display:flex!important}
-.control-power-actions button,.control-session .nav-logout button,.login-panel>form[action="/login"]>button[type=submit]{min-height:34px;padding:.45rem .65rem;font-size:.8rem}
-.login-panel>form[action="/login"]>button[type=submit]{display:block;margin-left:auto}
+.control-power-actions button,.control-session .nav-logout button,.login-panel>form[action="/login"]>.login-actions>button[type=submit]{min-height:34px;padding:.45rem .65rem;font-size:.8rem}
+.login-panel>form[action="/login"]>.login-actions>button[type=submit]{display:block;margin-left:auto}
 .control-power-actions .system-power-danger{background:#3a2420;color:#ffc0a4;border:1px solid #75483f}
 .control-power-actions .system-power-error{flex-basis:100%;max-width:none;margin:.2rem 0 0;color:#d9a19a!important}
 .control-session .nav-logout{margin-left:auto}
@@ -1869,6 +1869,19 @@ body:not(.primary-administrator) .nav-admin-only[data-primary-admin-only]{displa
 .minecraft-rcon-command span{flex:1;min-width:0}
 .minecraft-rcon-toolbar button[aria-pressed]{border:1px solid transparent}
 .minecraft-rcon-toolbar button[aria-pressed="true"]{background:#25382e;border-color:#4f8b69;color:#c8f2d7}
+
+/* Language controls occupy only the approved login and Session & power lanes. */
+.login-actions{display:flex;align-items:center;justify-content:flex-end;gap:.5rem}
+.login-panel>form[action="/login"]>.login-actions>button[type=submit]{margin-left:0}
+.login-actions .language-button{width:34px;height:34px;min-height:34px!important;border-radius:8px}
+.control-session-actions{display:flex;align-items:center;gap:.45rem;margin-left:auto}
+.control-session .control-session-actions .nav-logout{margin-left:0}
+.language-control{margin:0}
+.control-session .language-control button{min-height:34px;border:1px solid #35414b;transition:transform .16s ease,background-color .16s ease,border-color .16s ease;font-size:1.05rem}
+.language-control button:hover{background:#313c46;border-color:#4a5965}
+.language-control button:focus-visible{outline:2px solid #78c99d;outline-offset:2px}
+@media(prefers-color-scheme:light){.language-control button:hover{background:#dce4e8;border-color:#aab8c1}}
+.language-dialog form{display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:1rem}
 
 /* Compact Minecraft Network presentation; shared Players rules stay unchanged. */
 .minecraft-network{display:grid;gap:.65rem;min-width:0}

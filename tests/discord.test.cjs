@@ -1,7 +1,7 @@
 'use strict';
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const {readFileSync} = require('node:fs');
+const {readFileSync} = require('./helpers/webui-i18n.cjs');
 const vm = require('node:vm');
 const source = readFileSync(`${__dirname}/../webui/internal/server/static/discord.js`, 'utf8');
 const header = readFileSync(`${__dirname}/../webui/internal/server/templates/header.html`, 'utf8');

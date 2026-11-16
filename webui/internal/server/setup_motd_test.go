@@ -6,7 +6,6 @@ import (
 	"html"
 	"net/http"
 	"net/url"
-	"os/exec"
 	"reflect"
 	"strconv"
 	"strings"
@@ -164,7 +163,7 @@ func TestAdvancedSetupMOTDStateSurvivesSoftwareAndVersionChanges(t *testing.T) {
 }
 
 func TestSetupMOTDPlaceholderAndExplicitCustomState(t *testing.T) {
-	source, err := assets.ReadFile("static/setup-motd.js")
+	source, err := englishPresentationAsset("static/setup-motd.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +211,7 @@ for (const custom of ['', '  Our §a server  ', 'JustVoxel Paper Minecraft 26.3 
   }
 }
 `
-	if output, err := exec.Command("node", "-e", script).CombinedOutput(); err != nil {
+	if output, err := nodeTestCommand("-e", script).CombinedOutput(); err != nil {
 		t.Fatalf("MOTD input behavior: %v\n%s", err, output)
 	}
 }

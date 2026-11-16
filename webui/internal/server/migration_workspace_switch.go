@@ -32,8 +32,8 @@ func (a *App) migrationSwitchPage(w http.ResponseWriter, r *http.Request) {
 		Name    string
 		Choices []setupSoftwareChoice
 	}{
-		{"Plugins / Paper family", simpleSoftware("plugins")},
-		{"Mod loaders", simpleSoftware("mods")},
+		{ui(w, "ui.53e5b3cbd2f4"), simpleSoftware("plugins")},
+		{ui(w, "ui.2e43190a6798"), simpleSoftware("mods")},
 		{"Original", simpleSoftware("original")},
 	}
 	a.renderMigrationWorkspace(w, "migration_workspace_switch.html", 200, struct {
@@ -53,7 +53,7 @@ func (a *App) migrationSwitchAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	client, ok := a.api.(migrationSwitchAPI)
 	if !ok {
-		writeMinecraftWorkspaceError(w, 503, "Switch is unavailable.")
+		writeMinecraftWorkspaceError(w, 503, ui(w, "ui.1eb6b959b7ce"))
 		return
 	}
 	action := r.PathValue("action")
@@ -61,11 +61,11 @@ func (a *App) migrationSwitchAPI(w http.ResponseWriter, r *http.Request) {
 		if action == "plan" {
 			plan, err := client.MinecraftInstanceSwitchPlan(r.Context(), session, selected.ID, r.URL.Query().Get("target"))
 			if err != nil {
-				a.writeMinecraftWorkspaceAPIError(w, err, "Switch compatibility could not be verified.")
+				a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.a99ea29239db"))
 				return
 			}
 			if plan.InstanceID != selected.ID {
-				writeMinecraftWorkspaceError(w, 503, "Switch server identity could not be verified.")
+				writeMinecraftWorkspaceError(w, 503, ui(w, "ui.f6a40c5c6742"))
 				return
 			}
 			writeMinecraftWorkspaceJSON(w, 200, plan)
@@ -74,38 +74,38 @@ func (a *App) migrationSwitchAPI(w http.ResponseWriter, r *http.Request) {
 		if action == "operation" {
 			operation, err := client.MinecraftInstanceSwitchOperation(r.Context(), session, selected.ID, r.URL.Query().Get("operation_id"))
 			if err != nil {
-				a.writeMinecraftWorkspaceAPIError(w, err, "Switch progress is unavailable.")
+				a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.711570b7f679"))
 				return
 			}
 			if operation.Operation != nil && (operation.Operation.InstanceID != selected.ID || operation.Operation.OperationType != "minecraft_switch") {
-				writeMinecraftWorkspaceError(w, 503, "Switch server identity could not be verified.")
+				writeMinecraftWorkspaceError(w, 503, ui(w, "ui.f6a40c5c6742"))
 				return
 			}
 			writeMinecraftWorkspaceJSON(w, 200, operation)
 			return
 		}
-		writeMinecraftWorkspaceError(w, 404, "Switch action not found.")
+		writeMinecraftWorkspaceError(w, 404, ui(w, "ui.097074c74d5b"))
 		return
 	}
 	for key, values := range r.URL.Query() {
 		if key != "server" || len(values) != 1 {
-			writeMinecraftWorkspaceError(w, 400, "Invalid Switch request.")
+			writeMinecraftWorkspaceError(w, 400, ui(w, "ui.35e44579c835"))
 			return
 		}
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 4096)
 	if r.ParseForm() != nil || !a.validCSRF(r) {
-		writeMinecraftWorkspaceError(w, 403, "Invalid Switch confirmation.")
+		writeMinecraftWorkspaceError(w, 403, ui(w, "ui.ebdf0875cf9f"))
 		return
 	}
 	for key, values := range r.PostForm {
 		if !slices.Contains([]string{"csrf", "target", "action", "plan_fingerprint", "confirm", "operation_id"}, key) || len(values) != 1 {
-			writeMinecraftWorkspaceError(w, 400, "Invalid Switch request.")
+			writeMinecraftWorkspaceError(w, 400, ui(w, "ui.35e44579c835"))
 			return
 		}
 	}
 	if r.FormValue("confirm") != "yes" {
-		writeMinecraftWorkspaceError(w, 400, "Confirm Switch first.")
+		writeMinecraftWorkspaceError(w, 400, ui(w, "ui.51514d844584"))
 		return
 	}
 	var operation api.MinecraftSwitchOperation
@@ -116,15 +116,15 @@ func (a *App) migrationSwitchAPI(w http.ResponseWriter, r *http.Request) {
 	case "recover":
 		operation, err = client.MinecraftInstanceSwitchRecover(r.Context(), session, selected.ID, r.FormValue("operation_id"))
 	default:
-		writeMinecraftWorkspaceError(w, 404, "Switch action not found.")
+		writeMinecraftWorkspaceError(w, 404, ui(w, "ui.097074c74d5b"))
 		return
 	}
 	if err != nil {
-		a.writeMinecraftWorkspaceAPIError(w, err, "Switch could not complete. Refresh to reconnect to its operation.")
+		a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.93325fefd879"))
 		return
 	}
 	if operation.Operation == nil || operation.Operation.InstanceID != selected.ID || operation.Operation.OperationType != "minecraft_switch" {
-		writeMinecraftWorkspaceError(w, 503, "Switch operation identity could not be verified.")
+		writeMinecraftWorkspaceError(w, 503, ui(w, "ui.438b4085ebd4"))
 		return
 	}
 	writeMinecraftWorkspaceJSON(w, 202, operation)

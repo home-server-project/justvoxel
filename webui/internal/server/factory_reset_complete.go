@@ -10,7 +10,7 @@ func (a *App) factoryResetCompletePage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
-	a.render(w, "factory_reset_complete.html", pageData{Title: "Full Factory Reset complete"})
+	a.render(w, "factory_reset_complete.html", pageData{Title: ui(w, "ui.0a8a81495c44")})
 }
 
 func (a *App) clearFactoryResetCompleteCookie(w http.ResponseWriter) {

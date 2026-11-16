@@ -46,7 +46,7 @@ func (a *App) selectedBackupsWorkspace(w http.ResponseWriter, r *http.Request) b
 		return true
 	}
 	if r.Method != http.MethodGet && !a.validCSRF(r) {
-		writeMinecraftWorkspaceError(w, 403, "Invalid CSRF token.")
+		writeMinecraftWorkspaceError(w, 403, ui(w, "ui.74bccc44f472"))
 		return true
 	}
 	selected, ok := a.selectedMinecraft(w, r, session)
@@ -55,44 +55,44 @@ func (a *App) selectedBackupsWorkspace(w http.ResponseWriter, r *http.Request) b
 	}
 	client, ok := a.api.(selectedBackupsAPI)
 	if !ok {
-		writeMinecraftWorkspaceError(w, 503, "Server backups are unavailable.")
+		writeMinecraftWorkspaceError(w, 503, ui(w, "ui.b12b0e686878"))
 		return true
 	}
 	identityClient, ok := a.api.(sessionIdentityAPI)
 	if !ok {
-		writeMinecraftWorkspaceError(w, 503, "Session unavailable.")
+		writeMinecraftWorkspaceError(w, 503, ui(w, "ui.c5306e266aa5"))
 		return true
 	}
 	identity, err := identityClient.Session(r.Context(), session)
 	if err != nil {
-		a.writeMinecraftWorkspaceAPIError(w, err, "Session unavailable.")
+		a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.c5306e266aa5"))
 		return true
 	}
-	data := backupsWorkspaceData{CSRF: csrfFromRequest(r), Identity: identity, SelectedServer: selected.ID, SelectedName: selected.Name, RestoreScope: "Restore this backup to the same server identity only. The complete server data is replaced.", RestoreModeTitle: "Restore full Minecraft data"}
+	data := backupsWorkspaceData{CSRF: csrfFromRequest(r), Identity: identity, SelectedServer: selected.ID, SelectedName: selected.Name, RestoreScope: ui(w, "ui.984fe20477cb"), RestoreModeTitle: ui(w, "ui.c797d4d8982e")}
 	destinationClient, hasDestination := a.api.(selectedBackupDestinationAPI)
 	if hasDestination {
 		destination, err := a.storageDestinationData(r, session, identity, data.CSRF, nil, nil)
 		if err != nil {
-			data.Error = apiMessage(err, "Backup destination is unavailable.")
+			data.Error = apiMessage(err, ui(w, "ui.9b481e923a7c"))
 		} else {
 			data = destination
 			data.SelectedServer, data.SelectedName = selected.ID, selected.Name
-			data.RestoreScope = "Restore this backup to the same server identity only. The complete server data is replaced."
-			data.RestoreModeTitle = "Restore full Minecraft data"
+			data.RestoreScope = ui(w, "ui.984fe20477cb")
+			data.RestoreModeTitle = ui(w, "ui.c797d4d8982e")
 		}
 		data.DestinationWorkspace = "/workspace/backups"
 	}
 	if r.URL.Query().Get("result") == "destination" {
-		data.Message = "Backup destination updated. New manual and automatic backups will use it."
+		data.Message = ui(w, "ui.d972c62939f4")
 	}
 	call := func(action string, request any, target any) bool {
 		raw, e := client.MinecraftInstanceBackups(r.Context(), session, selected.ID, action, request)
 		if e != nil {
-			data.Error = apiMessage(e, "Selected server backup operation did not complete.")
+			data.Error = apiMessage(e, ui(w, "ui.4ec620f98e1a"))
 			return false
 		}
 		if target != nil && json.Unmarshal(raw, target) != nil {
-			data.Error = "Selected server backup response is unavailable."
+			data.Error = ui(w, "ui.26e5f7a588d1")
 			return false
 		}
 		return true
@@ -102,7 +102,7 @@ func (a *App) selectedBackupsWorkspace(w http.ResponseWriter, r *http.Request) b
 		switch path {
 		case "/workspace/backups/destination/plan", "/workspace/backups/destination/apply":
 			if !hasDestination {
-				data.Error = "This operation is unavailable for the selected server."
+				data.Error = ui(w, "ui.b82d33f56e34")
 				break
 			}
 			apply := strings.HasSuffix(path, "/apply")
@@ -119,7 +119,7 @@ func (a *App) selectedBackupsWorkspace(w http.ResponseWriter, r *http.Request) b
 				result, err = destinationClient.AdminBackupStoragePlan(r.Context(), session, request)
 			}
 			if err != nil {
-				data.Error = apiMessage(err, "Backup destination could not be updated.")
+				data.Error = apiMessage(err, ui(w, "ui.241f98a9f9e6"))
 				break
 			}
 			if apply && result.Applied {
@@ -134,12 +134,12 @@ func (a *App) selectedBackupsWorkspace(w http.ResponseWriter, r *http.Request) b
 			data.ProposedDestinationAvailable = backupsWorkspaceFormatOptionalBytes(result.Proposed.AvailableBytes)
 			data.ProposedDestinationSize = backupsWorkspaceFormatOptionalBytes(result.Proposed.FilesystemBytes)
 			if apply {
-				data.Error = "Backup destination was not applied."
+				data.Error = ui(w, "ui.08c30ba25266")
 			}
 
 		case "/workspace/backups/backup":
 			if call("now", struct{}{}, nil) {
-				data.Message = "Backup requested for this server."
+				data.Message = ui(w, "ui.0cd9df837d54")
 			}
 		case "/workspace/backups/automatic/plan", "/workspace/backups/automatic/apply":
 			form, e := parseBackupsWorkspaceAutomaticForm(r)
@@ -150,7 +150,7 @@ func (a *App) selectedBackupsWorkspace(w http.ResponseWriter, r *http.Request) b
 			data.Automatic = form
 			if strings.HasSuffix(path, "/apply") {
 				if call("configure", api.InstanceBackupSettings{Enabled: form.Enabled, Time: form.DailyTime, Retention: form.Keep}, nil) {
-					data.Message = "Automatic backup settings saved."
+					data.Message = ui(w, "ui.093c109f2a79")
 				}
 			} else {
 				data.AutomaticPlan = &api.AdminConfigurationChangeResponse{OK: true, Changes: []api.AdminConfigurationChange{{Field: "backup"}}}
@@ -160,34 +160,34 @@ func (a *App) selectedBackupsWorkspace(w http.ResponseWriter, r *http.Request) b
 			archive := r.FormValue("backup_id")
 			if call("restore/plan", map[string]any{"archive": archive}, &plan) {
 				if plan.Metadata.ID != selected.ID || plan.Metadata.Archive != archive || plan.Integrity != "verified" {
-					data.Error = "Backup identity or integrity could not be verified."
+					data.Error = ui(w, "ui.5937bf51d420")
 					break
 				}
 				data.RestoreRequest = backupsRestoreRequest{BackupID: archive, Mode: "full"}
-				data.RestorePlan = &backupsRestorePlan{OK: true, PlanFingerprint: plan.PlanID, Normalized: &backupsRestoreNormalized{BackupID: archive, CreatedAt: plan.Metadata.Created, Current: backupsRestoreCurrent{Version: plan.CurrentVersion}, VersionRelation: "Same server identity and compatible version verified"}, Requirements: &backupsRestoreRequirements{DestructiveConfirmationRequired: true, PlayersConfirmationRequired: plan.PlayersConfirmationRequired, Online: plan.Players.Online}}
+				data.RestorePlan = &backupsRestorePlan{OK: true, PlanFingerprint: plan.PlanID, Normalized: &backupsRestoreNormalized{BackupID: archive, CreatedAt: plan.Metadata.Created, Current: backupsRestoreCurrent{Version: plan.CurrentVersion}, VersionRelation: ui(w, "ui.2facc6b9b206")}, Requirements: &backupsRestoreRequirements{DestructiveConfirmationRequired: true, PlayersConfirmationRequired: plan.PlayersConfirmationRequired, Online: plan.Players.Online}}
 			}
 		case "/workspace/backups/restore/apply":
 			if r.FormValue("confirmation") != "RESTORE" {
-				data.Error = "Confirm Restore before applying."
+				data.Error = ui(w, "ui.983972bd982d")
 				break
 			}
 			if call("restore/apply", map[string]any{"archive": r.FormValue("backup_id"), "plan_id": r.FormValue("plan_fingerprint"), "confirm_destructive": true, "confirm_players": r.FormValue("players_confirmed") == "yes"}, nil) {
-				data.Message = "Restore accepted. Progress will update automatically."
+				data.Message = ui(w, "ui.4f73405f1c2f")
 				progress := presentSelectedRestore(selectedRestoreProgress{ID: selected.ID, State: "validating"})
 				data.SelectedRestoreProgress = &progress
 			}
 		case "/workspace/backups/restore/recover":
 			if r.FormValue("confirm_players") != "yes" {
-				data.Error = "Confirm safe recovery interruption first."
+				data.Error = ui(w, "ui.2685eb20bcaf")
 				break
 			}
 			if call("restore/recover", map[string]any{"confirm_players": true}, nil) {
-				data.Message = "Restore Recovery accepted. Progress will update automatically."
+				data.Message = ui(w, "ui.52e5331f961e")
 				progress := presentSelectedRestore(selectedRestoreProgress{ID: selected.ID, State: "recovering"})
 				data.SelectedRestoreProgress = &progress
 			}
 		default:
-			data.Error = "This operation is unavailable for the selected server."
+			data.Error = ui(w, "ui.b82d33f56e34")
 		}
 	}
 	var settings api.InstanceBackupSettings
@@ -200,12 +200,12 @@ func (a *App) selectedBackupsWorkspace(w http.ResponseWriter, r *http.Request) b
 	}
 	if call("inventory", nil, &inventory) {
 		if inventory.ID != selected.ID {
-			data.Error = "Backup identity could not be verified."
+			data.Error = ui(w, "ui.133b3cbf299e")
 		} else {
 			var total uint64
 			for _, item := range inventory.Backups {
 				if item.ID != selected.ID || item.Size < 0 {
-					data.Error = "Backup identity could not be verified."
+					data.Error = ui(w, "ui.133b3cbf299e")
 					data.Backups = nil
 					break
 				}
@@ -225,7 +225,7 @@ func (a *App) selectedBackupsWorkspace(w http.ResponseWriter, r *http.Request) b
 		data.SelectedBackupStatus = status.State
 	}
 	if progress, err := readSelectedRestore(r.Context(), client, session, selected.ID); err != nil {
-		data.Error = "Restore status or identity could not be verified."
+		data.Error = ui(w, "ui.afadfb0b5986")
 	} else {
 		data.SelectedRestoreStatus = progress.StateLabel
 		data.SelectedRestoreRecovery = progress.State != "idle" && progress.RecoveryRequired
@@ -235,8 +235,8 @@ func (a *App) selectedBackupsWorkspace(w http.ResponseWriter, r *http.Request) b
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	if err := a.templates.ExecuteTemplate(w, "backups_workspace.html", data); err != nil {
-		http.Error(w, fmt.Sprint("Backups could not be rendered."), 500)
+	if err := a.executeTemplate(w, "backups_workspace.html", data); err != nil {
+		http.Error(w, fmt.Sprint(ui(w, "ui.f6010c89978c")), 500)
 	}
 	return true
 }

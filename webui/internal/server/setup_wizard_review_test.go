@@ -300,7 +300,7 @@ func TestSetupReviewKeepsTechnicalValuesInDownloadAndUsesPlanWarnings(t *testing
 func TestFirstRunTemplatesUseUserFacingWording(t *testing.T) {
 	for _, name := range []string{"setup_wizard.html", "setup_review.html", "setup_progress.html"} {
 		t.Run(name, func(t *testing.T) {
-			markup, err := assets.ReadFile("templates/" + name)
+			markup, err := englishPresentationAsset("templates/" + name)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -347,7 +347,7 @@ func TestRecommendedAndAdvancedPlanRequestsDifferOnlyInMountedOnly(t *testing.T)
 	if recommendedRequest != advancedRequest {
 		t.Fatalf("setup mode changed authoritative Agent plan request:\nrecommended=%#v\nadvanced=%#v", recommendedRequest, advancedRequest)
 	}
-	reviewSource, err := assets.ReadFile("templates/setup_review.html")
+	reviewSource, err := englishPresentationAsset("templates/setup_review.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -425,7 +425,7 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 		t.Fatal("review must show one Configure button without a readiness message")
 	}
 
-	css, err := assets.ReadFile("static/setup-review.css")
+	css, err := englishPresentationAsset("static/setup-review.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -449,7 +449,7 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 		t.Fatal("review content and actions must remain separate")
 	}
 
-	setupCSS, err := assets.ReadFile("static/setup.css")
+	setupCSS, err := englishPresentationAsset("static/setup.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -472,7 +472,7 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 	if strings.Contains(setupStyles, ".setup-body .setup-operation-panel{height:") {
 		t.Fatal("operation and result pages must remain content-sized")
 	}
-	appCSS, err := assets.ReadFile("static/app.css")
+	appCSS, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -480,7 +480,7 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 		t.Fatal("setup footer must share the configured desktop width and gutter")
 	}
 	for _, name := range []string{"setup_wizard.html", "setup_review.html", "setup_progress.html"} {
-		markup, err := assets.ReadFile("templates/" + name)
+		markup, err := englishPresentationAsset("templates/" + name)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -491,7 +491,7 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 			t.Fatalf("%s must render the shared footer once immediately after </main>, outside the setup shell", name)
 		}
 	}
-	wizard, err := assets.ReadFile("templates/setup_wizard.html")
+	wizard, err := englishPresentationAsset("templates/setup_wizard.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -503,7 +503,7 @@ func TestSetupReviewUsesCompactNavigationAndResponsiveLayout(t *testing.T) {
 			t.Fatalf("wizard structure missing %q", want)
 		}
 	}
-	progress, err := assets.ReadFile("templates/setup_progress.html")
+	progress, err := englishPresentationAsset("templates/setup_progress.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -537,7 +537,7 @@ func TestSetupReviewConfigureButtonDisabledForInvalidPlan(t *testing.T) {
 	if strings.Contains(body, `form="setup-apply-form" data-setup-configure`) || strings.Contains(body, `id="setup-apply-form"`) || strings.Count(body, ">Configure JustVoxel</button>") != 1 {
 		t.Fatal("invalid review must not expose a working Configure action")
 	}
-	css, err := assets.ReadFile("static/setup-review.css")
+	css, err := englishPresentationAsset("static/setup-review.css")
 	if err != nil {
 		t.Fatal(err)
 	}

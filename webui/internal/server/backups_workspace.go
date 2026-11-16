@@ -95,7 +95,7 @@ func (a *App) registerBackupsWorkspaceRoutes(mux *http.ServeMux) {
 
 func (a *App) backupsWorkspaceRequest(w http.ResponseWriter, r *http.Request, requireCSRF bool) (string, backupsWorkspaceAPI, api.SessionInfo, bool) {
 	if mustChange(r) {
-		http.Error(w, "Password change required.", http.StatusForbidden)
+		http.Error(w, ui(w, "ui.fe5ad66e02ea"), http.StatusForbidden)
 		return "", nil, api.SessionInfo{}, false
 	}
 	if requireCSRF && !a.validCSRF(r) {
@@ -109,7 +109,7 @@ func (a *App) backupsWorkspaceRequest(w http.ResponseWriter, r *http.Request, re
 	}
 	client, ok := a.api.(backupsWorkspaceAPI)
 	if !ok {
-		http.Error(w, "Backup management is unavailable", http.StatusServiceUnavailable)
+		http.Error(w, ui(w, "ui.e151226cccf3"), http.StatusServiceUnavailable)
 		return "", nil, api.SessionInfo{}, false
 	}
 	identity, err := client.Session(r.Context(), session)
@@ -118,7 +118,7 @@ func (a *App) backupsWorkspaceRequest(w http.ResponseWriter, r *http.Request, re
 		return "", nil, api.SessionInfo{}, false
 	}
 	if identity.Role != "administrator" {
-		http.Error(w, "Administrator access required", http.StatusForbidden)
+		http.Error(w, ui(w, "ui.031cc7a3ec82"), http.StatusForbidden)
 		return "", nil, api.SessionInfo{}, false
 	}
 	return session, client, identity, true
@@ -161,16 +161,16 @@ func (a *App) backupsWorkspaceRestoreApply(w http.ResponseWriter, r *http.Reques
 func parseBackupsWorkspaceAutomaticForm(r *http.Request) (backupsWorkspaceAutomaticForm, error) {
 	var form backupsWorkspaceAutomaticForm
 	if err := r.ParseForm(); err != nil {
-		return form, errors.New("Could not read automatic backup settings.")
+		return form, errors.New(uiText("ui.b76081cac01a"))
 	}
 	form.Enabled = r.FormValue("automatic_enabled") == "on"
 	form.DailyTime = strings.TrimSpace(r.FormValue("daily_time"))
 	form.Keep, _ = strconv.Atoi(strings.TrimSpace(r.FormValue("backup_keep")))
 	if form.Keep <= 0 {
-		return form, errors.New("Keep last backups must be a positive number.")
+		return form, errors.New(uiText("ui.4060f8d382a9"))
 	}
 	if _, err := time.Parse("15:04", form.DailyTime); err != nil {
-		return form, errors.New("Daily backup time must be a valid 24-hour time.")
+		return form, errors.New(uiText("ui.eddcab5fe7fa"))
 	}
 	return form, nil
 }
@@ -178,7 +178,7 @@ func parseBackupsWorkspaceAutomaticForm(r *http.Request) (backupsWorkspaceAutoma
 func parseBackupsWorkspaceStorageForm(r *http.Request, includePassword bool) (api.AdminBackupStorageRequest, error) {
 	var out api.AdminBackupStorageRequest
 	if err := r.ParseForm(); err != nil {
-		return out, errors.New("Could not read the backup storage form.")
+		return out, errors.New(uiText("ui.215a8205bfef"))
 	}
 	out.Type = strings.TrimSpace(r.FormValue("type"))
 	out.Path = strings.TrimSpace(r.FormValue("path"))
@@ -191,7 +191,7 @@ func parseBackupsWorkspaceStorageForm(r *http.Request, includePassword bool) (ap
 		out.Password = r.FormValue("password")
 	}
 	if out.Type == "" || out.Path == "" {
-		return out, errors.New("Choose a backup destination type and backup directory.")
+		return out, errors.New(uiText("ui.a5dd0537770c"))
 	}
 	return out, nil
 }
@@ -247,7 +247,7 @@ func backupsWorkspaceSafePartitions(storage api.AdminStorageDiscovery) []backups
 
 func backupsWorkspaceFormatOptionalBytes(value uint64) string {
 	if value == 0 {
-		return "Unknown"
+		return uiText("ui.b764cdc0eab7")
 	}
 	return humanBytes(value)
 }
@@ -259,13 +259,13 @@ func (a *App) handleBackupsWorkspaceError(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if errors.Is(err, api.ErrPasswordChangeRequired) {
-		http.Error(w, "Password change required.", http.StatusForbidden)
+		http.Error(w, ui(w, "ui.fe5ad66e02ea"), http.StatusForbidden)
 		return
 	}
 	var responseErr *api.ResponseError
 	if errors.As(err, &responseErr) && responseErr.StatusCode == http.StatusForbidden {
-		http.Error(w, "Administrator access required", http.StatusForbidden)
+		http.Error(w, ui(w, "ui.031cc7a3ec82"), http.StatusForbidden)
 		return
 	}
-	http.Error(w, "backup management service unavailable", http.StatusBadGateway)
+	http.Error(w, ui(w, "ui.9829d799550b"), http.StatusBadGateway)
 }

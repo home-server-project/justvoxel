@@ -131,46 +131,50 @@ func (a *App) setupWizardReviewConfiguration(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Content-Disposition", "attachment; filename=\"justvoxel-setup.txt\"")
 	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write([]byte(setupConfigurationSnapshot(state.Plan)))
+	_, _ = w.Write([]byte(setupConfigurationSnapshot(state.Plan, requestLocale(r))))
 }
 
-func setupConfigurationSnapshot(plan api.AdminSetupPlanResponse) string {
+func setupConfigurationSnapshot(plan api.AdminSetupPlanResponse, locales ...string) string {
+	text := uiText
+	if len(locales) > 0 && supportedLocale(locales[0]) {
+		text = func(key string, args ...any) string { return translate(locales[0], key, args...) }
+	}
 	var b strings.Builder
-	b.WriteString("JustVoxel setup configuration\n")
-	b.WriteString("Validated plan: " + shortSetupPlanReference(plan.PlanFingerprint) + "\n\n")
+	b.WriteString(text("ui.c50f9c821dea"))
+	b.WriteString(text("ui.85e3e51739ba") + shortSetupPlanReference(plan.PlanFingerprint) + "\n\n")
 
 	b.WriteString("Server\n")
 	if plan.Normalized.Server.DisplayName != "" {
-		b.WriteString("Server name: " + plan.Normalized.Server.DisplayName + "\n")
+		b.WriteString(text("ui.485ab5092843") + plan.Normalized.Server.DisplayName + "\n")
 	}
-	b.WriteString("Welcome message: " + plan.Normalized.Server.MOTD + "\n")
-	b.WriteString("Maximum players: " + strconv.Itoa(plan.Normalized.Server.MaxPlayers) + "\n")
+	b.WriteString(text("ui.a2c01d240982") + plan.Normalized.Server.MOTD + "\n")
+	b.WriteString(text("ui.b46f2b34ae1a") + strconv.Itoa(plan.Normalized.Server.MaxPlayers) + "\n")
 	if plan.Normalized.Minecraft.ServerType == "bedrock" {
-		b.WriteString("Native Bedrock connection\n")
+		b.WriteString(text("ui.e22fdb4f6ff4"))
 	} else if plan.Normalized.Server.BedrockEnabled {
-		b.WriteString("Bedrock cross-play: Enabled\n")
+		b.WriteString(text("ui.3a5399d89a9c"))
 	} else {
-		b.WriteString("Bedrock cross-play: Disabled\n")
+		b.WriteString(text("ui.9d0d9670a493"))
 	}
 
 	b.WriteString("Minecraft\n")
-	b.WriteString("Server software: " + setupServerTypeLabel(plan.Normalized.Minecraft.ServerType) + "\n")
-	b.WriteString("Game mode: " + setupGameModeLabel(plan.Normalized.Minecraft.GameMode) + "\n")
+	b.WriteString(text("ui.dd18be3fa497") + setupServerTypeLabel(plan.Normalized.Minecraft.ServerType) + "\n")
+	b.WriteString(text("ui.cceff78a0388") + setupGameModeLabel(plan.Normalized.Minecraft.GameMode) + "\n")
 	if plan.Normalized.Minecraft.ServerType == "bedrock" {
-		b.WriteString(fmt.Sprintf("TCP signaling port: %d\nUDP gameplay range: %d-%d\nMaximum memory: %s\n", plan.Normalized.Minecraft.BedrockTCPPort, plan.Normalized.Minecraft.BedrockUDPStart, plan.Normalized.Minecraft.BedrockUDPEnd, plan.Normalized.Minecraft.ContainerMemory))
+		b.WriteString(fmt.Sprintf(text("ui.e2f15a94687a"), plan.Normalized.Minecraft.BedrockTCPPort, plan.Normalized.Minecraft.BedrockUDPStart, plan.Normalized.Minecraft.BedrockUDPEnd, plan.Normalized.Minecraft.ContainerMemory))
 	} else {
-		b.WriteString("Game memory: " + plan.Normalized.Minecraft.JavaMemory + "\n")
-		b.WriteString("Maximum memory: " + plan.Normalized.Minecraft.ContainerMemory + "\n")
-		b.WriteString("Java port: " + strconv.Itoa(plan.Normalized.Minecraft.JavaPort) + "/TCP\n")
+		b.WriteString(text("ui.1e07f7664304") + plan.Normalized.Minecraft.JavaMemory + "\n")
+		b.WriteString(text("ui.4d28004ccd28") + plan.Normalized.Minecraft.ContainerMemory + "\n")
+		b.WriteString(text("ui.b48beae6f5b7") + strconv.Itoa(plan.Normalized.Minecraft.JavaPort) + "/TCP\n")
 		if plan.Normalized.Server.BedrockEnabled {
-			b.WriteString("Bedrock port: " + strconv.Itoa(plan.Normalized.Minecraft.BedrockPort) + "/TCP/UDP\n")
+			b.WriteString(text("ui.d64e113696b5") + strconv.Itoa(plan.Normalized.Minecraft.BedrockPort) + "/TCP/UDP\n")
 		}
-		b.WriteString("Container tag: " + plan.Normalized.Minecraft.ImageTag + "\n")
+		b.WriteString(text("ui.de2fe7222dea") + plan.Normalized.Minecraft.ImageTag + "\n")
 	}
-	b.WriteString("Minecraft version: " + plan.Normalized.Minecraft.Version + "\n\n")
+	b.WriteString(text("ui.a1feb8978a3e") + plan.Normalized.Minecraft.Version + "\n\n")
 
-	b.WriteString("Storage\n")
-	b.WriteString("Minecraft data: " + plan.Normalized.Storage.Path + "\n")
+	b.WriteString(text("ui.d6cdbb62fee6"))
+	b.WriteString(text("ui.9bfe22f3c187") + plan.Normalized.Storage.Path + "\n")
 	if plan.Normalized.Storage.Device != "" {
 		b.WriteString("Device: " + plan.Normalized.Storage.Device + "\n")
 	}
@@ -181,17 +185,17 @@ func setupConfigurationSnapshot(plan api.AdminSetupPlanResponse) string {
 		b.WriteString("UUID: " + plan.Normalized.Storage.UUID + "\n")
 	}
 	if plan.Normalized.Storage.MountPoint != "" {
-		b.WriteString("Mount point: " + plan.Normalized.Storage.MountPoint + "\n")
+		b.WriteString(text("ui.411db0c42e81") + plan.Normalized.Storage.MountPoint + "\n")
 	}
-	b.WriteString("\nBackups\n")
+	b.WriteString(text("ui.532372475397"))
 	if plan.Normalized.Backups.Automatic {
-		b.WriteString("Automatic backups: Enabled\n")
-		b.WriteString("Daily time: " + plan.Normalized.Backups.DailyTime + "\n")
+		b.WriteString(text("ui.c53faa906bb1"))
+		b.WriteString(text("ui.ec536ddebc55") + plan.Normalized.Backups.DailyTime + "\n")
 	} else {
-		b.WriteString("Automatic backups: Disabled\n")
+		b.WriteString(text("ui.b0092fa23991"))
 	}
-	b.WriteString("Backups to keep: " + strconv.Itoa(plan.Normalized.Backups.Keep) + "\n")
-	b.WriteString("Backup directory: " + plan.Normalized.Backups.Path + "\n")
+	b.WriteString(text("ui.83ca4e01db58") + strconv.Itoa(plan.Normalized.Backups.Keep) + "\n")
+	b.WriteString(text("ui.2d7b920015ab") + plan.Normalized.Backups.Path + "\n")
 	if plan.Normalized.Backups.Device != "" {
 		b.WriteString("Device: " + plan.Normalized.Backups.Device + "\n")
 	}
@@ -202,10 +206,10 @@ func setupConfigurationSnapshot(plan api.AdminSetupPlanResponse) string {
 		b.WriteString("UUID: " + plan.Normalized.Backups.UUID + "\n")
 	}
 	if plan.Normalized.Backups.Source != "" {
-		b.WriteString("Network source: " + plan.Normalized.Backups.Source + "\n")
+		b.WriteString(text("ui.5e05d1545763") + plan.Normalized.Backups.Source + "\n")
 	}
 	if plan.Normalized.Backups.MountPoint != "" {
-		b.WriteString("Mount point: " + plan.Normalized.Backups.MountPoint + "\n")
+		b.WriteString(text("ui.411db0c42e81") + plan.Normalized.Backups.MountPoint + "\n")
 	}
 	if len(plan.Warnings) > 0 {
 		b.WriteString("\nWarnings\n")
@@ -213,7 +217,7 @@ func setupConfigurationSnapshot(plan api.AdminSetupPlanResponse) string {
 			b.WriteString("- " + warning.Message + "\n")
 		}
 	}
-	b.WriteString("\nThis snapshot contains configuration values only. Passwords and other secrets are never included.\n")
+	b.WriteString(text("ui.12c638e1d2f5"))
 	return b.String()
 }
 func (a *App) setupWizardReviewEULA(w http.ResponseWriter, r *http.Request) {
@@ -243,14 +247,14 @@ func (a *App) setupWizardReviewEULA(w http.ResponseWriter, r *http.Request) {
 		state.EULAAccepted = false
 		setupReviews.save(a, session, state)
 		w.WriteHeader(http.StatusConflict)
-		a.renderSetupReview(w, identity, state, csrfFromRequest(r), "Setup changed since it was reviewed. Review the updated configuration before continuing.")
+		a.renderSetupReview(w, identity, state, csrfFromRequest(r), ui(w, "ui.9d942c10f2b5"))
 		return
 	}
 	if r.FormValue("eula_accepted") != "on" {
 		state.EULAAccepted = false
 		setupReviews.save(a, session, state)
 		w.WriteHeader(http.StatusBadRequest)
-		a.renderSetupReview(w, identity, state, csrfFromRequest(r), "Accept the Minecraft End User License Agreement before this setup can be marked ready.")
+		a.renderSetupReview(w, identity, state, csrfFromRequest(r), ui(w, "ui.59895b0148d2"))
 		return
 	}
 	state.EULAAccepted = true
@@ -345,19 +349,19 @@ func setupPlanRequestFromDraft(draft setupDraft) (api.AdminSetupPlanRequest, err
 	draft.Minecraft = effectiveSetupMinecraft(draft.Minecraft)
 	maxPlayers, err := strconv.Atoi(draft.Server.MaxPlayers)
 	if err != nil || maxPlayers < 1 {
-		return api.AdminSetupPlanRequest{}, errors.New("Maximum players must be a positive number.")
+		return api.AdminSetupPlanRequest{}, errors.New(uiText("ui.781dc8534fc6"))
 	}
 	javaPort, err := strconv.Atoi(draft.Minecraft.JavaPort)
 	if err != nil {
-		return api.AdminSetupPlanRequest{}, errors.New("Minecraft Java port is invalid.")
+		return api.AdminSetupPlanRequest{}, errors.New(uiText("ui.00ed659686cd"))
 	}
 	bedrockPort, err := strconv.Atoi(draft.Minecraft.BedrockPort)
 	if err != nil {
-		return api.AdminSetupPlanRequest{}, errors.New("Bedrock TCP/UDP port is invalid.")
+		return api.AdminSetupPlanRequest{}, errors.New(uiText("ui.28b17d10f4c4"))
 	}
 	backupKeep, err := strconv.Atoi(draft.Backups.Keep)
 	if err != nil || backupKeep < 1 {
-		return api.AdminSetupPlanRequest{}, errors.New("Backup retention must be a positive number.")
+		return api.AdminSetupPlanRequest{}, errors.New(uiText("ui.a7d2c45bfca1"))
 	}
 	return api.AdminSetupPlanRequest{
 		AddServer: draft.AddServer, StartOnBoot: draft.StartOnBoot, StartAfterSetup: draft.StartAfterSetup, MountedOnly: draft.Mode == "recommended", DiagnosticSessionID: draft.DiagnosticSessionID,
@@ -384,13 +388,13 @@ func setupPlanRequestFromDraft(draft setupDraft) (api.AdminSetupPlanRequest, err
 
 func setupReviewErrorMessage(err error) string {
 	if err == nil {
-		return "Setup validation is temporarily unavailable."
+		return uiText("ui.9fabd6a957c3")
 	}
 	if message, ok := api.ErrorMessage(err); ok {
 		return message
 	}
 	if err.Error() == "setup planning is unavailable" || err.Error() == "setup planning did not return a valid plan identity" {
-		return "Setup validation is temporarily unavailable."
+		return uiText("ui.9fabd6a957c3")
 	}
 	return err.Error()
 }
@@ -404,7 +408,7 @@ func (a *App) renderSetupReview(w http.ResponseWriter, identity api.SessionInfo,
 	data := setupReviewPageData{
 		AddServer: state.AddServer, BasePath: basePath, DisplayName: state.DisplayName,
 		StartOnBoot: state.StartOnBoot, StartAfterSetup: state.StartAfterSetup, CreationBlocked: state.CreationBlocked,
-		Title: "Review setup", SetupMode: state.SetupMode, ServerTypeLabel: setupServerTypeLabel(plan.Normalized.Minecraft.ServerType),
+		Title: ui(w, "ui.5a16e3d43a6a"), SetupMode: state.SetupMode, ServerTypeLabel: setupServerTypeLabel(plan.Normalized.Minecraft.ServerType),
 		Version: a.config.Version, ManagementAPI: a.config.ManagementAPI,
 		CSRF: csrf, Identity: identity, Plan: plan, Error: errorMessage,
 		EULAAccepted: state.EULAAccepted, EULAURL: minecraftEULAURL,
@@ -416,7 +420,7 @@ func (a *App) renderSetupReview(w http.ResponseWriter, identity api.SessionInfo,
 		GameModeLabel:      setupGameModeLabel(plan.Normalized.Minecraft.GameMode),
 	}
 	if validSetupServerType(plan.Normalized.Minecraft.ServerType) && setupNeedsExactRuntime(plan.Normalized.Minecraft.ServerType) {
-		data.ImageChannelLabel = "Automatic"
+		data.ImageChannelLabel = ui(w, "ui.d461a493a375")
 	}
 	if plan.Normalized.Storage.SizeBytes > 0 {
 		data.StorageSize = humanBytes(plan.Normalized.Storage.SizeBytes)
@@ -435,13 +439,13 @@ func (a *App) renderSetupReview(w http.ResponseWriter, identity api.SessionInfo,
 func setupGameModeLabel(mode string) string {
 	switch mode {
 	case "survival":
-		return "Survival"
+		return uiText("ui.8302496de0ac")
 	case "creative":
-		return "Creative"
+		return uiText("ui.2c7e63313045")
 	case "adventure":
-		return "Adventure"
+		return uiText("ui.9a3c16424750")
 	case "spectator":
-		return "Spectator"
+		return uiText("ui.5ccda7f08fd1")
 	}
 	return mode
 }
@@ -476,12 +480,12 @@ func setupServerTypeLabel(value string) string {
 func setupStorageTypeLabel(value, transport string) string {
 	switch value {
 	case "system":
-		return "System storage"
+		return uiText("ui.78157120c120")
 	case "partition":
 		if strings.EqualFold(strings.TrimSpace(transport), "usb") {
-			return "External storage"
+			return uiText("ui.7c7ddfe3f00a")
 		}
-		return "Local storage"
+		return uiText("ui.d62f03d8ff00")
 	default:
 		return value
 	}
@@ -490,16 +494,16 @@ func setupStorageTypeLabel(value, transport string) string {
 func setupBackupTypeLabel(value, transport string) string {
 	switch value {
 	case "system":
-		return "System storage"
+		return uiText("ui.78157120c120")
 	case "partition":
 		if strings.EqualFold(strings.TrimSpace(transport), "usb") {
-			return "External storage"
+			return uiText("ui.7c7ddfe3f00a")
 		}
-		return "Local storage"
+		return uiText("ui.d62f03d8ff00")
 	case "nfs":
 		return "NFS share"
 	case "smb":
-		return "SMB / CIFS share"
+		return uiText("ui.d9e817cf067e")
 	default:
 		return value
 	}
@@ -521,11 +525,11 @@ func setupVersionPolicyLabel(value string) string {
 func setupImageChannelLabel(tag string) string {
 	switch tag {
 	case "stable":
-		return "Stable"
+		return uiText("ui.90ee305714d7")
 	case "latest":
-		return "Latest"
+		return uiText("ui.8730d3c2022a")
 	default:
-		return "Custom"
+		return uiText("ui.494ca78f7374")
 	}
 }
 

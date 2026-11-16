@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os/exec"
 	"strings"
 	"testing"
 
@@ -176,7 +175,7 @@ func TestNordTokenLoginAllowsOnlySafeManagementErrors(t *testing.T) {
 }
 
 func TestNordApprovedDialogsAndResponsiveProviderLayout(t *testing.T) {
-	source, err := assets.ReadFile("static/network-workspace.js")
+	source, err := englishPresentationAsset("static/network-workspace.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +225,7 @@ func TestNordApprovedDialogsAndResponsiveProviderLayout(t *testing.T) {
 	if strings.Contains(script, "provider.dashboard_url") || strings.Contains(script, "result.referral") {
 		t.Fatal("caller controlled destination")
 	}
-	css, err := assets.ReadFile("static/network-workspace.css")
+	css, err := englishPresentationAsset("static/network-workspace.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +234,7 @@ func TestNordApprovedDialogsAndResponsiveProviderLayout(t *testing.T) {
 			t.Fatal("responsive layout or geometry", want)
 		}
 	}
-	app, err := assets.ReadFile("static/app.js")
+	app, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +303,7 @@ func TestNordLifecycleErrorsPassThroughSafely(t *testing.T) {
 }
 
 func TestNordBrowserTokenValidationAndPrivacy(t *testing.T) {
-	source, err := assets.ReadFile("static/network-workspace.js")
+	source, err := englishPresentationAsset("static/network-workspace.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -528,7 +527,7 @@ const refreshRemoteAccess = async () => { refreshed++; };
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });
 `
-	cmd := exec.Command("node")
+	cmd := nodeTestCommand()
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("browser token validation/privacy: %v: %s", err, output)

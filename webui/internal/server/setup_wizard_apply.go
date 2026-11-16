@@ -51,12 +51,12 @@ func (a *App) setupWizardRecover(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.FormValue("operation_id")
 	if !setupOperationIDPattern.MatchString(id) {
-		http.Error(w, "invalid setup operation", http.StatusBadRequest)
+		http.Error(w, ui(w, "ui.ef3ac7723f8b"), http.StatusBadRequest)
 		return
 	}
 	executor, ok := client.(setupExecutionAPI)
 	if !ok {
-		http.Error(w, "setup recovery is unavailable", http.StatusServiceUnavailable)
+		http.Error(w, ui(w, "ui.2d6672812c29"), http.StatusServiceUnavailable)
 		return
 	}
 	current, err := executor.AdminCurrentSetupOperation(r.Context(), session)
@@ -69,7 +69,7 @@ func (a *App) setupWizardRecover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if current.Operation == nil || current.Operation.OperationID != id || current.Operation.State != "needs_attention" || (current.Operation.Stage != "storage_rollback" && current.Operation.Stage != "runtime_rollback") {
-		http.Error(w, "setup recovery is unavailable in the current state", http.StatusConflict)
+		http.Error(w, ui(w, "ui.46188cd99cd8"), http.StatusConflict)
 		return
 	}
 	if _, err := executor.AdminSetupRecover(r.Context(), session, id); err != nil {
@@ -124,13 +124,13 @@ func (a *App) setupWizardReviewApply(w http.ResponseWriter, r *http.Request) {
 		state.EULAAccepted = false
 		setupReviews.save(a, session, state)
 		w.WriteHeader(http.StatusConflict)
-		a.renderSetupReview(w, identity, state, csrfFromRequest(r), "Setup changed since it was reviewed. Review the updated configuration before continuing.")
+		a.renderSetupReview(w, identity, state, csrfFromRequest(r), ui(w, "ui.9d942c10f2b5"))
 		return
 	}
 	if !state.EULAAccepted {
 		if r.FormValue("eula_accepted") != "on" {
 			w.WriteHeader(http.StatusBadRequest)
-			a.renderSetupReview(w, identity, state, csrfFromRequest(r), "Accept the Minecraft End User License Agreement before configuring JustVoxel.")
+			a.renderSetupReview(w, identity, state, csrfFromRequest(r), ui(w, "ui.326b89b81e87"))
 			return
 		}
 		state.EULAAccepted = true
@@ -142,23 +142,23 @@ func (a *App) setupWizardReviewApply(w http.ResponseWriter, r *http.Request) {
 	if state.Plan.Requirements.SMBPasswordRequired {
 		if smbPassword == "" {
 			w.WriteHeader(http.StatusBadRequest)
-			a.renderSetupReview(w, identity, state, csrfFromRequest(r), "Enter the SMB password before configuring JustVoxel.")
+			a.renderSetupReview(w, identity, state, csrfFromRequest(r), ui(w, "ui.28fa1746cf27"))
 			return
 		}
 		if len(smbPassword) > 4096 || strings.ContainsAny(smbPassword, "\r\n") {
 			w.WriteHeader(http.StatusBadRequest)
-			a.renderSetupReview(w, identity, state, csrfFromRequest(r), "The SMB password is not valid.")
+			a.renderSetupReview(w, identity, state, csrfFromRequest(r), ui(w, "ui.872f0a8ebe92"))
 			return
 		}
 	} else if smbPassword != "" {
 		w.WriteHeader(http.StatusBadRequest)
-		a.renderSetupReview(w, identity, state, csrfFromRequest(r), "An SMB password is not required for this reviewed setup.")
+		a.renderSetupReview(w, identity, state, csrfFromRequest(r), ui(w, "ui.59759c6a1313"))
 		return
 	}
 
 	executor, ok := client.(setupExecutionAPI)
 	if !ok {
-		http.Error(w, "setup execution is unavailable", http.StatusServiceUnavailable)
+		http.Error(w, ui(w, "ui.c1a05fda85ef"), http.StatusServiceUnavailable)
 		return
 	}
 	if draft.AddServer {
@@ -206,7 +206,7 @@ func (a *App) setupWizardReviewApply(w http.ResponseWriter, r *http.Request) {
 			state.DraftUpdatedAt = draft.UpdatedAt
 			setupReviews.save(a, session, state)
 		}
-		message := "Could not start JustVoxel setup."
+		message := ui(w, "ui.c9fe16a9a74c")
 		if apiMessage, ok := api.ErrorMessage(err); ok {
 			message = apiMessage
 		}
@@ -216,7 +216,7 @@ func (a *App) setupWizardReviewApply(w http.ResponseWriter, r *http.Request) {
 	}
 	if !result.OK || result.Operation == nil || !setupOperationIDPattern.MatchString(result.Operation.OperationID) {
 		w.WriteHeader(http.StatusBadGateway)
-		a.renderSetupReview(w, identity, state, csrfFromRequest(r), "Setup execution did not return a valid operation.")
+		a.renderSetupReview(w, identity, state, csrfFromRequest(r), ui(w, "ui.d666024a1448"))
 		return
 	}
 	http.Redirect(w, r, "/setup/progress/"+result.Operation.OperationID, http.StatusSeeOther)
@@ -229,12 +229,12 @@ func (a *App) setupWizardProgressPage(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	if !setupOperationIDPattern.MatchString(id) {
-		http.Error(w, "invalid setup operation", http.StatusBadRequest)
+		http.Error(w, ui(w, "ui.ef3ac7723f8b"), http.StatusBadRequest)
 		return
 	}
 	executor, ok := client.(setupExecutionAPI)
 	if !ok {
-		http.Error(w, "setup operation tracking is unavailable", http.StatusServiceUnavailable)
+		http.Error(w, ui(w, "ui.467af854f1ee"), http.StatusServiceUnavailable)
 		return
 	}
 	response, err := executor.AdminOperation(r.Context(), session, id)
@@ -243,7 +243,7 @@ func (a *App) setupWizardProgressPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if response.Operation == nil {
-		http.Error(w, "setup operation not found", http.StatusNotFound)
+		http.Error(w, ui(w, "ui.83c14a02803b"), http.StatusNotFound)
 		return
 	}
 	switch response.Operation.State {
@@ -254,7 +254,7 @@ func (a *App) setupWizardProgressPage(w http.ResponseWriter, r *http.Request) {
 		setupReviews.delete(a, session)
 	}
 	a.renderAdminDiscovery(w, "setup_progress.html", setupProgressPageData{
-		Title: "Configuring JustVoxel", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI,
+		Title: ui(w, "ui.34fa7ac3627f"), Version: a.config.Version, ManagementAPI: a.config.ManagementAPI,
 		CSRF: csrfFromRequest(r), Identity: identity, Operation: *response.Operation,
 		StateLabel: setupOperationStateLabel(response.Operation.State),
 		StageLabel: setupOperationStageLabel(response.Operation.Stage),
@@ -264,40 +264,40 @@ func (a *App) setupWizardProgressPage(w http.ResponseWriter, r *http.Request) {
 func (a *App) setupWizardProgressStatus(w http.ResponseWriter, r *http.Request) {
 	session, ok := sessionFromRequest(r)
 	if !ok {
-		http.Error(w, "authentication required", http.StatusUnauthorized)
+		http.Error(w, ui(w, "ui.cbac8bee7536"), http.StatusUnauthorized)
 		return
 	}
 	client, ok := a.api.(adminDiscoveryAPI)
 	if !ok {
-		http.Error(w, "setup operation tracking is unavailable", http.StatusServiceUnavailable)
+		http.Error(w, ui(w, "ui.467af854f1ee"), http.StatusServiceUnavailable)
 		return
 	}
 	identity, err := client.Session(r.Context(), session)
 	if err != nil {
 		if errors.Is(err, api.ErrUnauthorized) {
 			a.clearSessionCookies(w)
-			http.Error(w, "authentication required", http.StatusUnauthorized)
+			http.Error(w, ui(w, "ui.cbac8bee7536"), http.StatusUnauthorized)
 			return
 		}
 		if errors.Is(err, api.ErrPasswordChangeRequired) {
-			http.Error(w, "password change required", http.StatusForbidden)
+			http.Error(w, ui(w, "ui.63bae92440ec"), http.StatusForbidden)
 			return
 		}
-		http.Error(w, "management service unavailable", http.StatusBadGateway)
+		http.Error(w, ui(w, "ui.0b8e73a792bb"), http.StatusBadGateway)
 		return
 	}
 	if identity.Role != "administrator" {
-		http.Error(w, "Administrator access required", http.StatusForbidden)
+		http.Error(w, ui(w, "ui.031cc7a3ec82"), http.StatusForbidden)
 		return
 	}
 	id := r.PathValue("id")
 	if !setupOperationIDPattern.MatchString(id) {
-		http.Error(w, "invalid setup operation", http.StatusBadRequest)
+		http.Error(w, ui(w, "ui.ef3ac7723f8b"), http.StatusBadRequest)
 		return
 	}
 	executor, ok := client.(setupExecutionAPI)
 	if !ok {
-		http.Error(w, "setup operation tracking is unavailable", http.StatusServiceUnavailable)
+		http.Error(w, ui(w, "ui.467af854f1ee"), http.StatusServiceUnavailable)
 		return
 	}
 	response, err := executor.AdminOperation(r.Context(), session, id)
@@ -306,7 +306,7 @@ func (a *App) setupWizardProgressStatus(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if response.Operation == nil {
-		http.Error(w, "setup operation not found", http.StatusNotFound)
+		http.Error(w, ui(w, "ui.83c14a02803b"), http.StatusNotFound)
 		return
 	}
 	switch response.Operation.State {
@@ -319,14 +319,14 @@ func (a *App) setupWizardProgressStatus(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		http.Error(w, "could not encode setup operation", http.StatusInternalServerError)
+		http.Error(w, ui(w, "ui.e58b486ebd31"), http.StatusInternalServerError)
 	}
 }
 
 func setupOperationStateLabel(state string) string {
 	switch state {
 	case "queued":
-		return "Queued"
+		return uiText("ui.661ff40a07e0")
 	case "validating":
 		return "Validating"
 	case "running":
@@ -336,11 +336,11 @@ func setupOperationStateLabel(state string) string {
 	case "failed":
 		return "Recovering"
 	case "rolling_back":
-		return "Rolling back"
+		return uiText("ui.8b9e964b606b")
 	case "rolled_back":
-		return "Rolled back"
+		return uiText("ui.71592236d852")
 	case "needs_attention":
-		return "Needs attention"
+		return uiText("ui.c1ebc7817870")
 	case "succeeded":
 		return "Complete"
 	default:
@@ -351,35 +351,35 @@ func setupOperationStateLabel(state string) string {
 func setupOperationStageLabel(stage string) string {
 	switch stage {
 	case "queued":
-		return "Waiting to start"
+		return uiText("ui.f5e5f81fd256")
 	case "storage_preflight":
-		return "Checking storage"
+		return uiText("ui.b5deea41f994")
 	case "storage_snapshot":
-		return "Preparing storage changes"
+		return uiText("ui.a4177ad95738")
 	case "storage_verified":
-		return "Storage ready"
+		return uiText("ui.53e417e293d7")
 	case "runtime_preflight":
-		return "Checking Minecraft configuration"
+		return uiText("ui.87e72934b376")
 	case "runtime_config":
-		return "Writing Minecraft configuration"
+		return uiText("ui.d01ed84b6ec2")
 	case "minecraft_verify":
-		return "Starting Minecraft"
+		return uiText("ui.eb7466fbf37e")
 	case "final_validation":
-		return "Final validation"
+		return uiText("ui.3fa519aa4bf7")
 	case "completed":
 		return "Complete"
 	case "setup_failed":
-		return "Preparing recovery"
+		return uiText("ui.b62ffd61bf8c")
 	case "runtime_rollback":
-		return "Restoring Minecraft configuration"
+		return uiText("ui.d353e569c4b7")
 	case "storage_rollback":
-		return "Restoring storage changes"
+		return uiText("ui.ae7cbca04533")
 	case "runtime_recovery":
-		return "Retrying Minecraft recovery"
+		return uiText("ui.20da9d1e8eb0")
 	case "storage_recovery":
-		return "Retrying storage recovery"
+		return uiText("ui.c79560178cdb")
 	case "setup_rolled_back":
-		return "Rolled back"
+		return uiText("ui.71592236d852")
 	case "interrupted":
 		return "Interrupted"
 	default:
@@ -394,26 +394,26 @@ func (a *App) handleSetupProgressError(w http.ResponseWriter, r *http.Request, e
 	}
 	var responseErr *api.ResponseError
 	if errors.As(err, &responseErr) && responseErr.StatusCode == http.StatusNotFound {
-		http.Error(w, "setup operation not found", http.StatusNotFound)
+		http.Error(w, ui(w, "ui.83c14a02803b"), http.StatusNotFound)
 		return
 	}
-	http.Error(w, "setup operation status is unavailable", http.StatusBadGateway)
+	http.Error(w, ui(w, "ui.835932d2c57f"), http.StatusBadGateway)
 }
 
 func (a *App) handleSetupProgressAPIError(w http.ResponseWriter, err error) {
 	if errors.Is(err, api.ErrUnauthorized) {
 		a.clearSessionCookies(w)
-		http.Error(w, "authentication required", http.StatusUnauthorized)
+		http.Error(w, ui(w, "ui.cbac8bee7536"), http.StatusUnauthorized)
 		return
 	}
 	if errors.Is(err, api.ErrPasswordChangeRequired) {
-		http.Error(w, "password change required", http.StatusForbidden)
+		http.Error(w, ui(w, "ui.63bae92440ec"), http.StatusForbidden)
 		return
 	}
 	var responseErr *api.ResponseError
 	if errors.As(err, &responseErr) && responseErr.StatusCode == http.StatusNotFound {
-		http.Error(w, "setup operation not found", http.StatusNotFound)
+		http.Error(w, ui(w, "ui.83c14a02803b"), http.StatusNotFound)
 		return
 	}
-	http.Error(w, "setup operation status is unavailable", http.StatusBadGateway)
+	http.Error(w, ui(w, "ui.835932d2c57f"), http.StatusBadGateway)
 }

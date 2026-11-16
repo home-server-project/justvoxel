@@ -25,12 +25,12 @@ func (a *App) systemWorkspaceDateTime(w http.ResponseWriter, r *http.Request) {
 	}
 	client, ok := a.api.(systemDateTimeAPI)
 	if !ok {
-		writeSystemWorkspaceError(w, http.StatusServiceUnavailable, "Date and time controls are unavailable.")
+		writeSystemWorkspaceError(w, http.StatusServiceUnavailable, ui(w, "ui.4b6d3cc37930"))
 		return
 	}
 	state, err := client.AdminDateTime(r.Context(), session)
 	if err != nil {
-		a.writeSystemWorkspaceAPIError(w, err, "Date and time are unavailable.")
+		a.writeSystemWorkspaceAPIError(w, err, ui(w, "ui.769917efafc7"))
 		return
 	}
 	writeSystemWorkspaceJSON(w, http.StatusOK, struct {
@@ -41,7 +41,7 @@ func (a *App) systemWorkspaceDateTime(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) systemWorkspaceDateTimeApply(w http.ResponseWriter, r *http.Request) {
 	if !a.validCSRF(r) {
-		writeSystemWorkspaceError(w, http.StatusForbidden, "Invalid CSRF token.")
+		writeSystemWorkspaceError(w, http.StatusForbidden, ui(w, "ui.74bccc44f472"))
 		return
 	}
 	session, _, ok := a.systemWorkspaceIdentity(w, r, "administrator")
@@ -50,11 +50,11 @@ func (a *App) systemWorkspaceDateTimeApply(w http.ResponseWriter, r *http.Reques
 	}
 	client, ok := a.api.(systemDateTimeAPI)
 	if !ok {
-		writeSystemWorkspaceError(w, http.StatusServiceUnavailable, "Date and time controls are unavailable.")
+		writeSystemWorkspaceError(w, http.StatusServiceUnavailable, ui(w, "ui.4b6d3cc37930"))
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		writeSystemWorkspaceError(w, http.StatusBadRequest, "Could not read date and time settings.")
+		writeSystemWorkspaceError(w, http.StatusBadRequest, ui(w, "ui.eb6cdc43d396"))
 		return
 	}
 	request := api.AdminDateTimeChange{TimeFormat: r.FormValue("time_format"), DateFormat: r.FormValue("date_format"), Timezone: strings.TrimSpace(r.FormValue("timezone")), Automatic: r.FormValue("automatic") == "on"}
@@ -63,7 +63,7 @@ func (a *App) systemWorkspaceDateTimeApply(w http.ResponseWriter, r *http.Reques
 	}
 	state, err := client.AdminDateTimeApply(r.Context(), session, request)
 	if err != nil {
-		a.writeSystemWorkspaceAPIError(w, err, "Date and time could not be changed.")
+		a.writeSystemWorkspaceAPIError(w, err, ui(w, "ui.a0c3e9ba6183"))
 		return
 	}
 	writeSystemWorkspaceJSON(w, http.StatusOK, state)

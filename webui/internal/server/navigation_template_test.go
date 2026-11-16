@@ -10,7 +10,7 @@ import (
 )
 
 func TestControlCenterNavigationUX(t *testing.T) {
-	header, err := assets.ReadFile("templates/header.html")
+	header, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestControlCenterNavigationUX(t *testing.T) {
 }
 
 func TestMinecraftWorkspaceMigrationContract(t *testing.T) {
-	header, err := assets.ReadFile("templates/header.html")
+	header, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestMinecraftWorkspaceMigrationContract(t *testing.T) {
 		t.Fatal("Minecraft workspace still contains the stale whitelist tab")
 	}
 
-	script, err := assets.ReadFile("static/app.js")
+	script, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestMinecraftWorkspaceMigrationContract(t *testing.T) {
 }
 
 func TestSystemWorkspaceMigrationContract(t *testing.T) {
-	header, err := assets.ReadFile("templates/header.html")
+	header, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +196,7 @@ func TestSystemWorkspaceMigrationContract(t *testing.T) {
 		}
 	}
 
-	script, err := assets.ReadFile("static/app.js")
+	script, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +247,7 @@ func TestSystemWorkspaceMigrationContract(t *testing.T) {
 			t.Fatalf("System workspace behavior missing %q", want)
 		}
 	}
-	upsCSS, err := assets.ReadFile("static/app.css")
+	upsCSS, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +288,7 @@ func TestSystemWorkspaceMigrationContract(t *testing.T) {
 }
 
 func TestWorkspaceCleanupLayoutContract(t *testing.T) {
-	header, err := assets.ReadFile("templates/header.html")
+	header, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +302,7 @@ func TestWorkspaceCleanupLayoutContract(t *testing.T) {
 	if strings.Contains(markup, `data-workspace-resize-handle`) {
 		t.Fatal("workspaces must use native corner resizing")
 	}
-	styles, err := assets.ReadFile("static/app.css")
+	styles, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +314,7 @@ func TestWorkspaceCleanupLayoutContract(t *testing.T) {
 }
 
 func TestQuickLookNetworkFitsSingleTileWithoutTruncatingAddresses(t *testing.T) {
-	styles, err := assets.ReadFile("static/app.css")
+	styles, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +337,7 @@ func TestQuickLookNetworkFitsSingleTileWithoutTruncatingAddresses(t *testing.T) 
 }
 
 func TestBackupsLibraryLeadsWorkspaceAndOwnsActions(t *testing.T) {
-	content, err := assets.ReadFile("templates/backups_workspace.html")
+	content, err := englishPresentationAsset("templates/backups_workspace.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -353,7 +353,7 @@ func TestBackupsLibraryLeadsWorkspaceAndOwnsActions(t *testing.T) {
 	if command < library || (files >= 0 && command < files) || command > destination {
 		t.Fatal("Backup controls must live inside Backup library below the backup files")
 	}
-	styles, err := assets.ReadFile("static/new-backups.css")
+	styles, err := englishPresentationAsset("static/new-backups.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,7 +372,7 @@ func TestBackupsLibraryLeadsWorkspaceAndOwnsActions(t *testing.T) {
 			t.Fatalf("Backups standard action markup missing %q", want)
 		}
 	}
-	baseStyles, err := assets.ReadFile("static/app.css")
+	baseStyles, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,7 +398,7 @@ func TestBackupsLibraryLeadsWorkspaceAndOwnsActions(t *testing.T) {
 }
 
 func TestMigrationWorkspaceUsesIndependentWorkspaceRoutes(t *testing.T) {
-	header, err := assets.ReadFile("templates/header.html")
+	header, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -415,7 +415,7 @@ func TestMigrationWorkspaceUsesIndependentWorkspaceRoutes(t *testing.T) {
 		}
 	}
 
-	script, err := assets.ReadFile("static/app.js")
+	script, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -464,7 +464,7 @@ func TestMigrationWorkspaceUsesIndependentWorkspaceRoutes(t *testing.T) {
 		"migration_workspace_recovery_review.html",
 		"migration_workspace_progress.html",
 	} {
-		templateBytes, err := assets.ReadFile("templates/" + name)
+		templateBytes, err := englishPresentationAsset("templates/" + name)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -487,7 +487,7 @@ func TestAuthenticatedTemplatesUseSharedHeader(t *testing.T) {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".html") {
 			continue
 		}
-		content, err := assets.ReadFile("templates/" + entry.Name())
+		content, err := englishPresentationAsset("templates/" + entry.Name())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -509,7 +509,7 @@ func TestAuthenticatedTemplatesUseSharedHeader(t *testing.T) {
 		"dashboard.html",
 		"storage_browser.html",
 	} {
-		content, err := assets.ReadFile("templates/" + name)
+		content, err := englishPresentationAsset("templates/" + name)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -521,7 +521,7 @@ func TestAuthenticatedTemplatesUseSharedHeader(t *testing.T) {
 			t.Fatalf("%s does not load shared navigation behavior", name)
 		}
 	}
-	password, err := assets.ReadFile("templates/password.html")
+	password, err := englishPresentationAsset("templates/password.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -553,28 +553,28 @@ func TestStandaloneOperationsUIRetired(t *testing.T) {
 			}
 		})
 	}
-	script, err := assets.ReadFile("static/app.js")
+	script, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(script), `path === "/operations"`) {
 		t.Fatal("navigation retains the retired Operations branch")
 	}
-	header, err := assets.ReadFile("templates/header.html")
+	header, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(header), `href="/operations`) || strings.Contains(string(header), `href='/operations`) {
 		t.Fatal("header links to retired Operations UI")
 	}
-	if _, err := assets.ReadFile("templates/operations.html"); err == nil {
+	if _, err := englishPresentationAsset("templates/operations.html"); err == nil {
 		t.Fatal("retired Operations template remains embedded")
 	}
 }
 
 func TestSetupTemplatesUseThinTopbar(t *testing.T) {
 	for _, name := range []string{"setup_wizard.html", "setup_review.html", "setup_progress.html"} {
-		content, err := assets.ReadFile("templates/" + name)
+		content, err := englishPresentationAsset("templates/" + name)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -595,7 +595,7 @@ func TestSetupTemplatesUseThinTopbar(t *testing.T) {
 }
 
 func TestDashboardCompactResponsiveLayout(t *testing.T) {
-	content, err := assets.ReadFile("templates/dashboard.html")
+	content, err := englishPresentationAsset("templates/dashboard.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -615,7 +615,7 @@ func TestDashboardCompactResponsiveLayout(t *testing.T) {
 		t.Fatal("dashboard contains oversized Appliance panel")
 	}
 
-	css, err := assets.ReadFile("static/app.css")
+	css, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -655,7 +655,7 @@ func TestDashboardCompactResponsiveLayout(t *testing.T) {
 	if !strings.Contains(markup, `<img class="dashboard-wallpaper" data-dashboard-wallpaper hidden alt="" aria-hidden="true">`) {
 		t.Fatal("dashboard must leave wallpaper hidden and unset for preference restoration")
 	}
-	if _, err := assets.ReadFile("static/justvoxel-default-wallpaper.jpg"); err == nil {
+	if _, err := englishPresentationAsset("static/justvoxel-default-wallpaper.jpg"); err == nil {
 		t.Fatal("Old JPG must not remain embedded")
 	}
 	if strings.Contains(styles, "conic-gradient(") {
@@ -666,7 +666,7 @@ func TestDashboardCompactResponsiveLayout(t *testing.T) {
 			t.Fatalf("dashboard wallpaper behavior missing %q", want)
 		}
 	}
-	appJS, err := assets.ReadFile("static/app.js")
+	appJS, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -692,7 +692,7 @@ func TestDashboardCompactResponsiveLayout(t *testing.T) {
 }
 
 func TestWallpaperSettingsUX(t *testing.T) {
-	content, err := assets.ReadFile("templates/project_footer.html")
+	content, err := englishPresentationAsset("templates/project_footer.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -728,7 +728,7 @@ func TestWallpaperSettingsUX(t *testing.T) {
 		}
 	}
 
-	content, err = assets.ReadFile("static/app.css")
+	content, err = englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -750,7 +750,7 @@ func TestWallpaperSettingsUX(t *testing.T) {
 		t.Fatal("wallpaper dialog must not retain the old internal scrolling layout")
 	}
 
-	content, err = assets.ReadFile("static/wallpaper.js")
+	content, err = englishPresentationAsset("static/wallpaper.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -791,7 +791,7 @@ func TestWallpaperSettingsUX(t *testing.T) {
 }
 
 func TestStorageBrowserInteractionContract(t *testing.T) {
-	templateContent, err := assets.ReadFile("templates/storage_browser.html")
+	templateContent, err := englishPresentationAsset("templates/storage_browser.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -811,7 +811,7 @@ func TestStorageBrowserInteractionContract(t *testing.T) {
 		}
 	}
 
-	scriptContent, err := assets.ReadFile("static/storage-browser.js")
+	scriptContent, err := englishPresentationAsset("static/storage-browser.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -837,7 +837,7 @@ func TestStorageBrowserInteractionContract(t *testing.T) {
 }
 
 func TestStorageBrowserResponsiveStyling(t *testing.T) {
-	content, err := assets.ReadFile("static/storage-browser.css")
+	content, err := englishPresentationAsset("static/storage-browser.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -857,7 +857,7 @@ func TestStorageBrowserResponsiveStyling(t *testing.T) {
 }
 
 func TestStorageBrowserReviewedActionFlow(t *testing.T) {
-	templateContent, err := assets.ReadFile("templates/storage_browser.html")
+	templateContent, err := englishPresentationAsset("templates/storage_browser.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -883,7 +883,7 @@ func TestStorageBrowserReviewedActionFlow(t *testing.T) {
 		}
 	}
 
-	scriptContent, err := assets.ReadFile("static/storage-browser.js")
+	scriptContent, err := englishPresentationAsset("static/storage-browser.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -902,7 +902,7 @@ func TestStorageBrowserReviewedActionFlow(t *testing.T) {
 		}
 	}
 
-	cssContent, err := assets.ReadFile("static/storage-browser.css")
+	cssContent, err := englishPresentationAsset("static/storage-browser.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -919,7 +919,7 @@ func TestStorageBrowserReviewedActionFlow(t *testing.T) {
 }
 
 func TestStorageBrowserMinecraftMigrationHandoff(t *testing.T) {
-	templateContent, err := assets.ReadFile("templates/storage_browser.html")
+	templateContent, err := englishPresentationAsset("templates/storage_browser.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -940,7 +940,7 @@ func TestStorageBrowserMinecraftMigrationHandoff(t *testing.T) {
 		t.Fatal("New Storage still posts Minecraft migration to the legacy Data Migration page")
 	}
 
-	scriptContent, err := assets.ReadFile("static/storage-browser.js")
+	scriptContent, err := englishPresentationAsset("static/storage-browser.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -965,12 +965,12 @@ func TestStorageBrowserMinecraftMigrationHandoff(t *testing.T) {
 }
 
 func TestBackupsWorkspaceCompactLibraryLayout(t *testing.T) {
-	templateContent, err := assets.ReadFile("templates/backups_workspace.html")
+	templateContent, err := englishPresentationAsset("templates/backups_workspace.html")
 	if err != nil {
 		t.Fatal(err)
 	}
 	markup := string(templateContent)
-	loaderContent, err := assets.ReadFile("static/app.js")
+	loaderContent, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1002,7 +1002,7 @@ func TestBackupsWorkspaceCompactLibraryLayout(t *testing.T) {
 		}
 	}
 
-	cssContent, err := assets.ReadFile("static/new-backups.css")
+	cssContent, err := englishPresentationAsset("static/new-backups.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1017,7 +1017,7 @@ func TestBackupsWorkspaceCompactLibraryLayout(t *testing.T) {
 		}
 	}
 
-	baseContent, err := assets.ReadFile("static/app.css")
+	baseContent, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1051,7 +1051,7 @@ func TestBackupsWorkspaceCompactLibraryLayout(t *testing.T) {
 }
 
 func TestNewBackupsMobileLibraryStaysSingleColumn(t *testing.T) {
-	content, err := assets.ReadFile("static/new-backups.css")
+	content, err := englishPresentationAsset("static/new-backups.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1069,12 +1069,12 @@ func TestNewBackupsMobileLibraryStaysSingleColumn(t *testing.T) {
 }
 
 func TestBackupsWorkspaceReviewedMultiDeleteFlow(t *testing.T) {
-	templateContent, err := assets.ReadFile("templates/backups_workspace.html")
+	templateContent, err := englishPresentationAsset("templates/backups_workspace.html")
 	if err != nil {
 		t.Fatal(err)
 	}
 	markup := string(templateContent)
-	loaderContent, err := assets.ReadFile("static/app.js")
+	loaderContent, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1103,7 +1103,7 @@ func TestBackupsWorkspaceReviewedMultiDeleteFlow(t *testing.T) {
 		t.Fatal("New Backups delete UI still contains the retired typed-confirmation flow")
 	}
 
-	scriptContent, err := assets.ReadFile("static/new-backups.js")
+	scriptContent, err := englishPresentationAsset("static/new-backups.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1134,7 +1134,7 @@ func TestBackupsWorkspaceReviewedMultiDeleteFlow(t *testing.T) {
 		}
 	}
 
-	cssContent, err := assets.ReadFile("static/new-backups.css")
+	cssContent, err := englishPresentationAsset("static/new-backups.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1151,7 +1151,7 @@ func TestBackupsWorkspaceReviewedMultiDeleteFlow(t *testing.T) {
 }
 
 func TestNewBackupsAutomaticPolicyControls(t *testing.T) {
-	templateContent, err := assets.ReadFile("templates/backups_workspace.html")
+	templateContent, err := englishPresentationAsset("templates/backups_workspace.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1177,7 +1177,7 @@ func TestNewBackupsAutomaticPolicyControls(t *testing.T) {
 		}
 	}
 
-	cssContent, err := assets.ReadFile("static/new-backups.css")
+	cssContent, err := englishPresentationAsset("static/new-backups.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1194,7 +1194,7 @@ func TestNewBackupsAutomaticPolicyControls(t *testing.T) {
 }
 
 func TestNewBackupsAutomaticPolicyResponsiveLayout(t *testing.T) {
-	content, err := assets.ReadFile("static/new-backups.css")
+	content, err := englishPresentationAsset("static/new-backups.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1212,11 +1212,11 @@ func TestNewBackupsAutomaticPolicyResponsiveLayout(t *testing.T) {
 }
 
 func TestCompactUsersAndFiveRowMonitorContract(t *testing.T) {
-	script, err := assets.ReadFile("static/app.js")
+	script, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
-	styles, err := assets.ReadFile("static/app.css")
+	styles, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1248,7 +1248,7 @@ func TestCompactUsersAndFiveRowMonitorContract(t *testing.T) {
 }
 
 func TestQuickLookMinecraftSharedSelectorPlacement(t *testing.T) {
-	content, err := assets.ReadFile("templates/header.html")
+	content, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1269,15 +1269,15 @@ func TestQuickLookMinecraftSharedSelectorPlacement(t *testing.T) {
 }
 
 func TestApprovedControlCenterLayout(t *testing.T) {
-	header, err := assets.ReadFile("templates/header.html")
+	header, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
-	css, err := assets.ReadFile("static/app.css")
+	css, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
-	script, err := assets.ReadFile("static/app.js")
+	script, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1380,7 +1380,7 @@ func TestApprovedControlCenterLayout(t *testing.T) {
 	if !strings.Contains(markup, `<script src="/static/discord.js" defer></script>`) || strings.Contains(markup, `data-workspace-window="discord"`) || strings.Contains(markup, `data-discord-open`) {
 		t.Fatal("Discord must load inside the existing AI & API Connections workspace")
 	}
-	gatewayScript, err := assets.ReadFile("static/agent-gateway.js")
+	gatewayScript, err := englishPresentationAsset("static/agent-gateway.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1390,7 +1390,7 @@ func TestApprovedControlCenterLayout(t *testing.T) {
 		}
 	}
 
-	telegramScript, err := assets.ReadFile("static/telegram.js")
+	telegramScript, err := englishPresentationAsset("static/telegram.js")
 	if err != nil {
 		t.Fatal(err)
 	}

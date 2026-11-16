@@ -231,7 +231,7 @@ func TestDashboardInstanceReadsAndPolling(t *testing.T) {
 		t.Fatal(f.actions)
 	}
 	requireNoDashboardLegacy(t, f)
-	source, _ := assets.ReadFile("static/app.js")
+	source, _ := englishPresentationAsset("static/app.js")
 	js := string(source)
 	if strings.Count(js, `const statusURL = "/api/dashboard-status";`) != 2 {
 		t.Fatal("Dashboard and Quick Look must both resolve the selected server at polling time")

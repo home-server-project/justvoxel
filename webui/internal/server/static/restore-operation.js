@@ -20,12 +20,12 @@
           headers: { Accept: "application/json" }, cache: "no-store",
         });
         if (response.status === 401) { window.location.assign("/login"); return; }
-        if (!response.ok) throw new Error("Restore status unavailable");
+        if (!response.ok) throw new Error(jvT("ui.1a1bf76dad25"));
         const progress = await response.json();
         // Never render another server's status or enable its recovery controls.
-        if (progress.id !== selectedID) throw new Error("Restore identity mismatch");
+        if (progress.id !== selectedID) throw new Error(jvT("ui.473ccc33842e"));
         for (const field of ["state_label", "stage_label", "status"]) {
-          if (typeof progress[field] !== "string") throw new Error("Restore status unavailable");
+          if (typeof progress[field] !== "string") throw new Error(jvT("ui.1a1bf76dad25"));
         }
         failures = 0;
         node("reconnect").hidden = true;

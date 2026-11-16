@@ -17,12 +17,12 @@ func (a *App) providerLoginPage(w http.ResponseWriter, r *http.Request) {
 	message := ""
 	switch r.URL.Query().Get("message") {
 	case "password-changed":
-		message = "Password changed. Please sign in again."
+		message = ui(w, "ui.49cd9108c32c")
 	case "auth-mode-changed":
-		message = "Authentication mode changed. Please sign in again."
+		message = ui(w, "ui.e707330bcc43")
 	}
 	a.render(w, "login.html", pageData{
-		Title:         "Sign in",
+		Title:         ui(w, "ui.bfd402b2f6f3"),
 		Version:       a.config.Version,
 		ManagementAPI: a.config.ManagementAPI,
 		Message:       message,

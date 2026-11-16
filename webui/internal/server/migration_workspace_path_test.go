@@ -101,7 +101,7 @@ func TestMigrationWorkspaceExportPreservesSMBFolderAcrossReviewApply(t *testing.
 }
 
 func TestMigrationWorkspaceStatusAndChoiceStyling(t *testing.T) {
-	styles, err := assets.ReadFile("static/app.css")
+	styles, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestMigrationWorkspaceStatusAndChoiceStyling(t *testing.T) {
 		}
 	}
 
-	script, err := assets.ReadFile("static/app.js")
+	script, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestMigrationWorkspaceStatusAndChoiceStyling(t *testing.T) {
 	if !strings.Contains(js, `setMigrationBusy(error?.message || "Migration operation could not be completed.", "error")`) {
 		t.Fatal("migration errors are not rendered through the framed error state")
 	}
-	operationScript, err := assets.ReadFile("static/server-migration-operation.js")
+	operationScript, err := englishPresentationAsset("static/server-migration-operation.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestMigrationWorkspaceStatusAndChoiceStyling(t *testing.T) {
 }
 
 func TestMigrationWorkspaceOffersDirectFailedResetRecovery(t *testing.T) {
-	script, err := assets.ReadFile("static/app.js")
+	script, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}

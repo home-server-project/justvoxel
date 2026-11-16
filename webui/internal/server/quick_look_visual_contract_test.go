@@ -1,14 +1,13 @@
 package server
 
 import (
-	"os/exec"
 	"strings"
 	"testing"
 )
 
 func TestQuickLookConcealmentAndAlignment(t *testing.T) {
 	read := func(name string) string {
-		data, err := assets.ReadFile(name)
+		data, err := englishPresentationAsset(name)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -126,7 +125,7 @@ setOpen(true, false);
 assert.equal(panel.inert, false);
 assert.equal(stored.get(stateKey("test")), "closed");
 `
-	cmd := exec.Command("node")
+	cmd := nodeTestCommand()
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("drawer concealment and alignment: %v\n%s", err, output)

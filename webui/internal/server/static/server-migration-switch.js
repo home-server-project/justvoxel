@@ -17,15 +17,15 @@
       let busy = false;
       let polling = false;
       const request = async (action, params = {}, post = false) => {
-        if (!current()) throw new Error("Selected server changed. Refresh Switch.");
+        if (!current()) throw new Error(jvT("ui.bed53cc46da9"));
         const query = new URLSearchParams({ server, ...(post ? {} : params) });
         const response = await fetch(`/api/migration/switch/${action}?${query}`, {
           method: post ? "POST" : "GET", credentials: "same-origin", cache: "no-store",
           ...(post ? { headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ csrf, ...params }) } : {}),
         });
         const result = await response.json();
-        if (!current()) throw new Error("Selected server changed. Refresh Switch.");
-        if (!response.ok) throw new Error(result.error || "Switch is unavailable.");
+        if (!current()) throw new Error(jvT("ui.bed53cc46da9"));
+        if (!response.ok) throw new Error(result.error || jvT("ui.1eb6b959b7ce"));
         return result;
       };
       const paragraph = (text, className = "") => {
@@ -38,8 +38,8 @@
         node.classList.toggle("is-available", available);
         node.classList.toggle("is-unsupported", !active && !available);
         node.disabled = active || !available || busy;
-        node.querySelector("[data-switch-sticker]").textContent = active ? "Current" : available ? "Available" : "Not Supported";
-        node.title = plan.reason || (active ? "Current server software" : `Available for Minecraft ${plan.version}`);
+        node.querySelector("[data-switch-sticker]").textContent = active ? "Current" : available ? jvT("ui.e674447337e8") : jvT("ui.120d1307d24e");
+        node.title = plan.reason || (active ? jvT("ui.7d4f12e4405b") : jvT("ui.a195a363286b", {v0: (plan.version)}));
         const reason = node.querySelector("[data-switch-reason]");
         if (reason) { reason.textContent = plan.reason || ""; reason.hidden = active || available || !plan.reason; }
       };
@@ -48,17 +48,17 @@
         operation = result.operation || null;
         busy = Boolean(operation && !["succeeded", "resolved"].includes(operation.state));
         if (!operation) { progress.replaceChildren(); return; }
-        progress.replaceChildren(paragraph(operation.status || "Switch is in progress.", "notice"));
+        progress.replaceChildren(paragraph(operation.status || jvT("ui.934767ef0bcc"), "notice"));
         if (operation.state === "succeeded" && result.clone_id) {
-          progress.appendChild(paragraph("Clone created and verified. The new server is stopped and can be renamed normally."));
+          progress.appendChild(paragraph(jvT("ui.b62c04b44caf")));
           const link = document.createElement("a"); link.className = "button-link";
-          link.href = `/?server=${encodeURIComponent(result.clone_id)}`; link.textContent = "Open cloned server"; progress.appendChild(link);
+          link.href = `/?server=${encodeURIComponent(result.clone_id)}`; link.textContent = jvT("ui.10c040af618e"); progress.appendChild(link);
         }
         if (["needs_attention", "failed"].includes(operation.state)) {
           const label = document.createElement("label"); label.className = "minecraft-native-toggle";
           const consent = document.createElement("input"); consent.type = "checkbox"; consent.setAttribute("role", "switch");
-          label.append(paragraph("Allow recovery to restore the original server’s previous state and clean up a failed clone when present."), consent);
-          const recover = document.createElement("button"); recover.type = "button"; recover.textContent = "Recover Switch"; recover.disabled = true;
+          label.append(paragraph(jvT("ui.75ea388b9a14")), consent);
+          const recover = document.createElement("button"); recover.type = "button"; recover.textContent = jvT("ui.b8e7e9e5f031"); recover.disabled = true;
           consent.addEventListener("change", () => { recover.disabled = !consent.checked; });
           recover.addEventListener("click", async () => {
             if (!current() || !consent.checked || recover.disabled) return;
@@ -75,7 +75,7 @@
             polling = false;
             if (!current()) return;
             try { await reconnect(operation.operation_id); if (terminal.has(operation.state)) await load(operation.operation_id); }
-            catch (failure) { if (current()) state.textContent = `${failure.message} Refresh Switch to reconnect. No conversion was retried.`; }
+            catch (failure) { if (current()) state.textContent = jvT("ui.796b21621486", {v0: (failure.message)}); }
           }, 2000);
         }
       };
@@ -83,7 +83,7 @@
         if (busy) return;
         const ticket = ++sequence;
         review.hidden = true;
-        state.textContent = "Inspecting current server compatibility…";
+        state.textContent = jvT("ui.3eb2c3b4c279");
         try {
           // Selection always re-reads authoritative inventory, even if a prior
           // catalogue response had made this card available.
@@ -92,31 +92,31 @@
           showCard(cards.find((node) => node.dataset.switchTarget === target), plan);
           cards.forEach((node) => node.classList.toggle("is-selected", node.dataset.switchTarget === target));
           review.replaceChildren();
-          review.append(paragraph(`Current software: ${plan.current}`), paragraph(`Target software: ${plan.target}`), paragraph(`Minecraft version: ${plan.version || "Unverified"}`),
-            paragraph(`Convert existing server: ${plan.convert ? "Available" : "Unavailable"}`), paragraph(`Clone and convert: ${plan.clone ? "Available" : "Unavailable"}`));
+          review.append(paragraph(jvT("ui.3101457ed8e3", {v0: (plan.current)})), paragraph(jvT("ui.740cb666e20a", {v0: (plan.target)})), paragraph(jvT("ui.6a5ef5b0f8c1", {v0: (plan.version || jvT("ui.33c8e8de41c3"))})),
+            paragraph(jvT("ui.9ccd64d18f1e", {v0: (plan.convert ? "Available" : jvT("ui.ca1844969742"))})), paragraph(jvT("ui.b985dbadc276", {v0: (plan.clone ? "Available" : jvT("ui.ca1844969742"))})));
           if (plan.reason) review.appendChild(paragraph(plan.reason, "notice warning"));
           for (const item of plan.content || []) {
-            const label = { verified: "Verified compatible", incompatible: "Incompatible", unknown: "Unknown / unverified" }[item.compatibility] || "Unknown / unverified";
-            review.appendChild(paragraph(`${item.name} (${item.filename}): ${label}. ${item.reason}`, item.compatibility === "verified" ? "muted" : "notice warning"));
+            const label = { verified: jvT("ui.630d4989d81c"), incompatible: jvT("ui.8777e3a9e3ec"), unknown: jvT("ui.1a31290e493f") }[item.compatibility] || jvT("ui.1a31290e493f");
+            review.appendChild(paragraph(jvT("ui.31d29868e4e3", {v0: (item.name), v1: (item.filename), v2: (label), v3: (item.reason)}), item.compatibility === "verified" ? "muted" : "notice warning"));
           }
           for (const warning of plan.warnings || []) review.appendChild(paragraph(warning, "notice warning"));
           const plugins = document.createElement("a"); plugins.href = `/?workspace=plugins&server=${encodeURIComponent(server)}`; plugins.className = "button-link secondary"; plugins.textContent = "Open Plugins & Mods"; review.appendChild(plugins);
           if (plan.convert || plan.clone) {
-            review.appendChild(paragraph("Online players receive the normal shutdown countdown. JustVoxel makes a cold backup/copy and verifies the exact target runtime. Switch keeps this Minecraft version fixed. A clone uses separate storage and new ports automatically; the original is preserved.", "notice"));
+            review.appendChild(paragraph(jvT("ui.6b2df59bf4f2"), "notice"));
             const label = document.createElement("label"); label.className = "minecraft-native-toggle system-ups-shutdown-switch";
             const consent = document.createElement("input"); consent.type = "checkbox"; consent.setAttribute("role", "switch");
-            label.append(paragraph("Confirm reviewed conversion and any player interruption."), consent); review.appendChild(label);
+            label.append(paragraph(jvT("ui.1ee40e71974c")), consent); review.appendChild(label);
             const actions = document.createElement("div"); actions.className = "action-row";
-            for (const [action, text, allowed] of [["convert", "Convert existing server", plan.convert], ["clone", "Clone and convert", plan.clone]]) {
+            for (const [action, text, allowed] of [["convert", jvT("ui.5abb6e80374e"), plan.convert], ["clone", jvT("ui.90b908765b19"), plan.clone]]) {
               const button = document.createElement("button"); button.type = "button"; button.textContent = text; button.disabled = true;
-              if (!allowed) button.title = plan.reason || "Compatibility cannot be verified.";
+              if (!allowed) button.title = plan.reason || jvT("ui.f4239cda81ee");
               consent.addEventListener("change", () => { button.disabled = !allowed || !consent.checked || busy; });
               button.addEventListener("click", async () => {
                 if (!current() || !allowed || !consent.checked || busy || button.disabled) return;
                 busy = true; actions.querySelectorAll("button").forEach((item) => { item.disabled = true; }); cards.forEach((item) => { item.disabled = true; });
                 try {
                   const result = await request("apply", { target, action, plan_fingerprint: plan.plan_fingerprint, confirm: "yes" }, true);
-                  if (!result.operation?.operation_id) throw new Error("Switch tracking is unavailable.");
+                  if (!result.operation?.operation_id) throw new Error(jvT("ui.d8bcc288b463"));
                   review.hidden = true; await reconnect(result.operation.operation_id);
                 } catch (failure) {
                   if (!current()) return;
@@ -124,7 +124,7 @@
                   // A lost Apply response may have started work. Reconnect
                   // before enabling another review or action.
                   try { await reconnect(); if (!operation) { busy = false; await load(); state.textContent = failure.message; } }
-                  catch (_) { state.textContent = `${failure.message} Refresh Switch to reconnect before trying again.`; }
+                  catch (_) { state.textContent = jvT("ui.683b73665685", {v0: (failure.message)}); }
                 }
               });
               actions.appendChild(button);
@@ -138,7 +138,7 @@
         const ticket = ++sequence;
         review.hidden = true;
         cards.forEach((node) => { node.disabled = true; node.classList.toggle("is-selected", false); });
-        state.textContent = "Checking the selected server…";
+        state.textContent = jvT("ui.e29d2712155f");
         try {
           await reconnect(id);
           const results = await Promise.allSettled(cards.map(async (node) => ({ node, plan: await request("plan", { target: node.dataset.switchTarget }) })));
@@ -148,7 +148,7 @@
             if (result.status === "fulfilled") showCard(result.value.node, result.value.plan);
             else failed = true;
           });
-          state.textContent = failed ? "Some compatibility information is unavailable. Refresh Switch to check again." : "";
+          state.textContent = failed ? jvT("ui.f2d442c804c0") : "";
         } catch (failure) { if (current() && ticket === sequence) state.textContent = failure.message; }
       };
       cards.forEach((node) => node.addEventListener("click", () => { if (!node.disabled) void select(node.dataset.switchTarget); }));

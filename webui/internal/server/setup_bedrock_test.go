@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os/exec"
 	"regexp"
 	"strings"
 	"testing"
@@ -129,7 +128,7 @@ func TestAdvancedNativeBedrockSixStepsAndValidation(t *testing.T) {
 // Exercise the shared controller with no Java input and compare its maximum
 // presets and reserve/status behavior against Java mode over the same totals.
 func TestNativeBedrockContainerMemoryController(t *testing.T) {
-	script, err := assets.ReadFile("static/settings.js")
+	script, err := englishPresentationAsset("static/settings.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +186,7 @@ for (const [total, other, max, severity, text] of [
   assert.equal(severity ? native.classes.has(severity) : native.classes.size === 0, true);
 }
 `
-	cmd := exec.Command("node")
+	cmd := nodeTestCommand()
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("native Bedrock memory controller: %v\n%s", err, output)

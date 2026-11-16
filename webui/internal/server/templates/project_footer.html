@@ -1,64 +1,64 @@
 {{define "project-footer"}}
 <footer class="project-footer">
-  <nav class="project-links" aria-label="Project links">
-    <a href="https://github.com/home-server-project/justvoxel" target="_blank" rel="noopener noreferrer">JustVoxel on GitHub</a>
+  <nav class="project-links" aria-label="{{t "ui.31ce404ab7d8"}}">
+    <a href="https://github.com/home-server-project/justvoxel" target="_blank" rel="noopener noreferrer">{{t "ui.0e5efa875595"}}</a>
     <span aria-hidden="true">·</span>
-    <a href="https://github.com/home-server-project" target="_blank" rel="noopener noreferrer">Home Server Project</a>
+    <a href="https://github.com/home-server-project" target="_blank" rel="noopener noreferrer">{{t "ui.299150b6bf15"}}</a>
     <span aria-hidden="true">·</span>
-    <a href="https://github.com/home-server-project/justvoxel/issues" target="_blank" rel="noopener noreferrer">Report an issue</a>
+    <a href="https://github.com/home-server-project/justvoxel/issues" target="_blank" rel="noopener noreferrer">{{t "ui.635ae219ad13"}}</a>
     <span aria-hidden="true">·</span>
-    <button class="project-wallpaper-button" type="button" data-wallpaper-open>Wallpaper</button>
+    <button class="project-wallpaper-button" type="button" data-wallpaper-open>{{t "ui.a7f173cdaae4"}}</button>
   </nav>
-  <p class="disclaimer">NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.</p>
+  <p class="disclaimer">{{t "ui.fffb0ebaa589"}}</p>
 </footer>
-<section class="panel wallpaper-panel" data-system-settings-panel="wallpaper" data-wallpaper-panel aria-label="Wallpaper" hidden>
+<section class="panel wallpaper-panel" data-system-settings-panel="wallpaper" data-wallpaper-panel aria-label="{{t "ui.a7f173cdaae4"}}" hidden>
   <form class="system-action-dialog-content" data-wallpaper-form>
     <input type="radio" name="mode" value="builtin" hidden checked>
     <fieldset class="wallpaper-themes">
-      <legend class="muted">Built-in</legend>
+      <legend class="muted">{{t "ui.1f43948106d1"}}</legend>
       <label class="wallpaper-theme-card">
-        <span class="wallpaper-theme-heading"><input type="radio" name="theme" value="v1">V1</span>
+        <span class="wallpaper-theme-heading"><input type="radio" name="theme" value="v1">{{t "ui.dae96fc0046a"}}</span>
         <span class="wallpaper-split-preview">
-          <span><img src="/static/wallpapers/jv-wp-v1-day-preview.webp" width="480" height="270" alt=""><span>Day</span></span>
-          <span><img src="/static/wallpapers/jv-wp-v1-night-preview.webp" width="480" height="270" alt=""><span>Night</span></span>
+          <span><img src="/static/wallpapers/jv-wp-v1-day-preview.webp" width="480" height="270" alt=""><span>{{t "ui.8f2364e11b8b"}}</span></span>
+          <span><img src="/static/wallpapers/jv-wp-v1-night-preview.webp" width="480" height="270" alt=""><span>{{t "ui.4e9f8db8242b"}}</span></span>
         </span>
       </label>
       <label class="wallpaper-theme-card">
-        <span class="wallpaper-theme-heading"><input type="radio" name="theme" value="v2" checked>V2</span>
+        <span class="wallpaper-theme-heading"><input type="radio" name="theme" value="v2" checked>{{t "ui.47cfe5eb8ada"}}</span>
         <span class="wallpaper-split-preview">
-          <span><img src="/static/wallpapers/jv-wp-v2-day-preview.webp" width="480" height="270" alt=""><span>Day</span></span>
-          <span><img src="/static/wallpapers/jv-wp-v2-night-preview.webp" width="480" height="270" alt=""><span>Night</span></span>
+          <span><img src="/static/wallpapers/jv-wp-v2-day-preview.webp" width="480" height="270" alt=""><span>{{t "ui.8f2364e11b8b"}}</span></span>
+          <span><img src="/static/wallpapers/jv-wp-v2-night-preview.webp" width="480" height="270" alt=""><span>{{t "ui.4e9f8db8242b"}}</span></span>
         </span>
       </label>
     </fieldset>
     <fieldset class="wallpaper-appearance" data-wallpaper-builtin-fields>
-      <legend class="muted">Appearance</legend>
-      <label><input type="radio" name="appearance" value="auto" checked>Automatic</label>
-      <label><input type="radio" name="appearance" value="day">Day</label>
-      <label><input type="radio" name="appearance" value="night">Night</label>
+      <legend class="muted">{{t "ui.3907fa7f8072"}}</legend>
+      <label><input type="radio" name="appearance" value="auto" checked>{{t "ui.d461a493a375"}}</label>
+      <label><input type="radio" name="appearance" value="day">{{t "ui.8f2364e11b8b"}}</label>
+      <label><input type="radio" name="appearance" value="night">{{t "ui.4e9f8db8242b"}}</label>
     </fieldset>
     <div class="wallpaper-schedule" data-wallpaper-schedule>
-      <label>Day starts<input type="time" name="dayStart" value="07:00" required></label>
-      <label>Night starts<input type="time" name="nightStart" value="19:00" required></label>
+      <label>{{t "ui.2c43d816d1f8"}}<input type="time" name="dayStart" value="07:00" required></label>
+      <label>{{t "ui.60f6b464f24b"}}<input type="time" name="nightStart" value="19:00" required></label>
     </div>
     <fieldset class="wallpaper-custom">
-      <legend class="muted">Custom</legend>
-      <label><input type="radio" name="mode" value="url">Web address</label>
-      <label><input type="radio" name="mode" value="upload">Upload picture</label>
+      <legend class="muted">{{t "ui.494ca78f7374"}}</legend>
+      <label><input type="radio" name="mode" value="url">{{t "ui.45099c558849"}}</label>
+      <label><input type="radio" name="mode" value="upload">{{t "ui.0aa62f7898f3"}}</label>
     </fieldset>
     <div data-wallpaper-url-fields hidden>
-      <label class="wallpaper-input-row">Web address<input type="url" name="url" placeholder="https://example.com/picture.jpg"></label>
-      <p class="muted">The image is loaded directly by this browser.</p>
+      <label class="wallpaper-input-row">{{t "ui.45099c558849"}}<input type="url" name="url" placeholder="https://example.com/picture.jpg"></label>
+      <p class="muted">{{t "ui.f027ef6fd71d"}}</p>
     </div>
     <div data-wallpaper-upload-fields hidden>
-      <label class="wallpaper-input-row">Picture<input type="file" name="picture" accept="image/jpeg,image/png,image/webp,image/avif"></label>
-      <p class="muted">JPEG, PNG, WebP or AVIF, up to 10 MiB.</p>
+      <label class="wallpaper-input-row">{{t "ui.9a1c54f55e7c"}}<input type="file" name="picture" accept="image/jpeg,image/png,image/webp,image/avif"></label>
+      <p class="muted">{{t "ui.b7f8709b4bb1"}}</p>
     </div>
     <p class="alert" data-wallpaper-error role="alert" hidden></p>
     <div class="action-row">
-      <button class="secondary" type="button" data-wallpaper-reset>Reset to default</button>
-      <button class="secondary" type="button" data-wallpaper-cancel>Cancel</button>
-      <button type="submit">Apply</button>
+      <button class="secondary" type="button" data-wallpaper-reset>{{t "ui.bc5b45ae7b60"}}</button>
+      <button class="secondary" type="button" data-wallpaper-cancel>{{t "ui.19766ed6ccb2"}}</button>
+      <button type="submit">{{t "ui.31e392d1c037"}}</button>
     </div>
   </form>
 </section>

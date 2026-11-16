@@ -26,12 +26,12 @@ func (a *App) systemWorkspaceLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	client, ok := a.api.(systemWorkspaceLogsAPI)
 	if !ok {
-		writeSystemWorkspaceError(w, http.StatusServiceUnavailable, "Diagnostic logs are unavailable.")
+		writeSystemWorkspaceError(w, http.StatusServiceUnavailable, ui(w, "ui.a7bab9c87013"))
 		return
 	}
 	logs, err := client.AdminDiagnosticLogs(r.Context(), session)
 	if err != nil {
-		a.writeSystemWorkspaceAPIError(w, err, "Diagnostic logs are unavailable.")
+		a.writeSystemWorkspaceAPIError(w, err, ui(w, "ui.a7bab9c87013"))
 		return
 	}
 	units := make([]api.FailedUnit, 0)
@@ -39,15 +39,15 @@ func (a *App) systemWorkspaceLogs(w http.ResponseWriter, r *http.Request) {
 	if live, supported := a.api.(systemWorkspaceFailedUnitsAPI); supported {
 		units, err = live.AdminFailedUnits(r.Context(), session)
 		if errors.Is(err, api.ErrUnauthorized) || errors.Is(err, api.ErrPasswordChangeRequired) {
-			a.writeSystemWorkspaceAPIError(w, err, "Failed systemd units are unavailable.")
+			a.writeSystemWorkspaceAPIError(w, err, ui(w, "ui.138f547a3261"))
 			return
 		}
 		if err != nil {
-			unavailable = "Failed systemd units are unavailable."
+			unavailable = ui(w, "ui.138f547a3261")
 			units = nil
 		}
 	} else {
-		unavailable = "Failed systemd units are unavailable."
+		unavailable = ui(w, "ui.138f547a3261")
 	}
 	writeSystemWorkspaceJSON(w, http.StatusOK, map[string]any{"ok": true, "logs": logs, "failed_units": units, "failed_units_error": unavailable})
 }
@@ -59,17 +59,17 @@ func (a *App) systemWorkspaceLog(w http.ResponseWriter, r *http.Request) {
 	}
 	category, id := r.PathValue("category"), r.PathValue("id")
 	if !validWorkspaceLogID(category, id) {
-		writeSystemWorkspaceError(w, http.StatusBadRequest, "Invalid diagnostic log identifier.")
+		writeSystemWorkspaceError(w, http.StatusBadRequest, ui(w, "ui.b4e5c635a06e"))
 		return
 	}
 	client, ok := a.api.(systemWorkspaceLogsAPI)
 	if !ok {
-		writeSystemWorkspaceError(w, http.StatusServiceUnavailable, "Diagnostic logs are unavailable.")
+		writeSystemWorkspaceError(w, http.StatusServiceUnavailable, ui(w, "ui.a7bab9c87013"))
 		return
 	}
 	data, err := client.AdminDiagnosticLog(r.Context(), session, category, id)
 	if err != nil {
-		a.writeSystemWorkspaceAPIError(w, err, "Diagnostic log is unavailable.")
+		a.writeSystemWorkspaceAPIError(w, err, ui(w, "ui.bde5c83597fc"))
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -113,12 +113,12 @@ func (a *App) systemWorkspaceFailedUnitJournal(w http.ResponseWriter, r *http.Re
 	}
 	unit := r.PathValue("unit")
 	if !api.ValidFailedUnitName(unit) {
-		writeSystemWorkspaceError(w, http.StatusBadRequest, "Invalid failed unit identifier.")
+		writeSystemWorkspaceError(w, http.StatusBadRequest, ui(w, "ui.d6b7ea342232"))
 		return
 	}
 	client, ok := a.api.(systemWorkspaceFailedUnitsAPI)
 	if !ok {
-		writeSystemWorkspaceError(w, http.StatusServiceUnavailable, "Failed unit journal is unavailable.")
+		writeSystemWorkspaceError(w, http.StatusServiceUnavailable, ui(w, "ui.c651952bfc8b"))
 		return
 	}
 	data, err := client.AdminFailedUnitJournal(r.Context(), session, unit)
@@ -134,11 +134,11 @@ func (a *App) systemWorkspaceFailedUnitJournal(w http.ResponseWriter, r *http.Re
 		if errors.As(err, &responseErr) && responseErr.StatusCode >= 400 && responseErr.StatusCode <= 599 {
 			status = responseErr.StatusCode
 		}
-		writeSystemWorkspaceError(w, status, "Failed unit journal is unavailable.")
+		writeSystemWorkspaceError(w, status, ui(w, "ui.c651952bfc8b"))
 		return
 	}
 	if len(data) > 256*1024 {
-		writeSystemWorkspaceError(w, http.StatusBadGateway, "Failed unit journal is unavailable.")
+		writeSystemWorkspaceError(w, http.StatusBadGateway, ui(w, "ui.c651952bfc8b"))
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -169,11 +169,11 @@ type systemWorkspaceNetworkReportAPI interface {
 func (a *App) systemWorkspaceGenerateReport(w http.ResponseWriter, r *http.Request, category string) {
 	reportName := "Support"
 	if category == "network" {
-		reportName = "Network"
+		reportName = ui(w, "ui.1744b96470b5")
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 4096)
 	if !a.validCSRF(r) {
-		writeSystemWorkspaceError(w, http.StatusForbidden, "Invalid CSRF token.")
+		writeSystemWorkspaceError(w, http.StatusForbidden, ui(w, "ui.74bccc44f472"))
 		return
 	}
 	session, _, ok := a.systemWorkspaceIdentity(w, r, "administrator")
@@ -181,12 +181,12 @@ func (a *App) systemWorkspaceGenerateReport(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if r.URL.RawQuery != "" || r.ParseForm() != nil || len(r.PostForm) > 1 || len(r.PostForm["csrf"]) > 1 {
-		writeSystemWorkspaceError(w, http.StatusBadRequest, reportName+" report takes no input.")
+		writeSystemWorkspaceError(w, http.StatusBadRequest, reportName+ui(w, "ui.147fea70fc4f"))
 		return
 	}
 	for key := range r.PostForm {
 		if key != "csrf" {
-			writeSystemWorkspaceError(w, http.StatusBadRequest, reportName+" report takes no input.")
+			writeSystemWorkspaceError(w, http.StatusBadRequest, reportName+ui(w, "ui.147fea70fc4f"))
 			return
 		}
 	}
@@ -195,7 +195,7 @@ func (a *App) systemWorkspaceGenerateReport(w http.ResponseWriter, r *http.Reque
 	if category == "network" {
 		client, supported := a.api.(systemWorkspaceNetworkReportAPI)
 		if !supported {
-			writeSystemWorkspaceError(w, http.StatusServiceUnavailable, "Network report is unavailable.")
+			writeSystemWorkspaceError(w, http.StatusServiceUnavailable, ui(w, "ui.87900632a243"))
 			return
 		}
 		entry, err = client.AdminGenerateNetworkReport(r.Context(), session)
@@ -208,7 +208,7 @@ func (a *App) systemWorkspaceGenerateReport(w http.ResponseWriter, r *http.Reque
 		entry, err = client.AdminGenerateSupportReport(r.Context(), session)
 	}
 	if err != nil {
-		a.writeSystemWorkspaceAPIError(w, err, reportName+" report could not be generated.")
+		a.writeSystemWorkspaceAPIError(w, err, reportName+ui(w, "ui.f574d2cdfe12"))
 		return
 	}
 	_, timestampErr := time.Parse(time.RFC3339Nano, entry.Timestamp)

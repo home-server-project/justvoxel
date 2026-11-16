@@ -452,11 +452,11 @@ func TestStandaloneMinecraftStorageSettingsUIRetired(t *testing.T) {
 	for _, path := range []string{
 		"templates/server_settings.html", "templates/storage_settings.html", "templates/storage_provision.html",
 	} {
-		if _, err := assets.ReadFile(path); err == nil {
+		if _, err := englishPresentationAsset(path); err == nil {
 			t.Errorf("retired template %s remains embedded", path)
 		}
 	}
-	if _, err := assets.ReadFile("templates/storage_browser.html"); err != nil {
+	if _, err := englishPresentationAsset("templates/storage_browser.html"); err != nil {
 		t.Fatalf("current Storage browser template missing: %v", err)
 	}
 	for _, tc := range []struct {

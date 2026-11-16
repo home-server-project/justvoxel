@@ -20,7 +20,7 @@ func (a *App) systemHardwareStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	client, ok := a.api.(systemHardwareAPI)
 	if !ok {
-		http.Error(w, "hardware status unavailable", http.StatusServiceUnavailable)
+		http.Error(w, ui(w, "ui.03a58db108c0"), http.StatusServiceUnavailable)
 		return
 	}
 	status, err := client.SystemHardwareStatus(r.Context(), session)
@@ -36,7 +36,7 @@ func (a *App) systemHardwareAction(w http.ResponseWriter, r *http.Request) {
 	}
 	client, ok := a.api.(systemHardwareAPI)
 	if !ok {
-		http.Error(w, "hardware controls unavailable", http.StatusServiceUnavailable)
+		http.Error(w, ui(w, "ui.aa3a4a59018d"), http.StatusServiceUnavailable)
 		return
 	}
 	request := api.SystemHardwareRequest{Action: r.FormValue("action")}
@@ -44,17 +44,17 @@ func (a *App) systemHardwareAction(w http.ResponseWriter, r *http.Request) {
 	case "display-delay":
 		delay, err := strconv.Atoi(r.FormValue("delay_seconds"))
 		if err != nil || delay < 1 || delay > 999 {
-			http.Error(w, "Delay must be 1–999 seconds", http.StatusBadRequest)
+			http.Error(w, ui(w, "ui.801a39b5de44"), http.StatusBadRequest)
 			return
 		}
 		request.DelaySeconds = delay
 	case "display-off", "display-on", "lid-enable", "lid-disable":
 		if r.FormValue("delay_seconds") != "" {
-			http.Error(w, "unexpected delay", http.StatusBadRequest)
+			http.Error(w, ui(w, "ui.0e1c08a2f807"), http.StatusBadRequest)
 			return
 		}
 	default:
-		http.Error(w, "unsupported hardware action", http.StatusBadRequest)
+		http.Error(w, ui(w, "ui.83a5c22fadc8"), http.StatusBadRequest)
 		return
 	}
 	status, err := client.AdminSystemHardwareAction(r.Context(), session, request)

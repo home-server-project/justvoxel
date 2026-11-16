@@ -48,21 +48,21 @@
     } catch (_) { return false; }
   };
   // Reuse the existing Playit setup appearance for VPN authentication.
-  // Only fixed provider names enter the HTML; never interpolate response data.
+  // Keep document.write static; set all presentation values through the DOM.
   const renderRemoteLoginPopup = (popup, id, failed = false) => {
     if (!popup || popup.closed) return;
     const providerName = id === "tailscale" ? "Tailscale" : "NetBird";
-    const title = failed ? "Remote access setup could not continue." : `Preparing ${providerName} login…`;
+    const title = failed ? jvT("ui.e92b39d45904") : jvT("ui.389f202d8a75", {v0: (providerName)});
     const description = failed
-      ? "Return to JustVoxel and try Activate again, or use the login link if one is shown."
-      : `Starting ${providerName} and generating your secure login link.`;
+      ? jvT("ui.c0ab9afe3c5c")
+      : jvT("ui.6cc09ed67201", {v0: (providerName)});
     popup.document.open();
     popup.document.write(`<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${providerName} setup</title>
+<title></title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#eef3f5;background:#0b1117}
 *{box-sizing:border-box}body{margin:0;min-height:100vh;display:flex;flex-direction:column;background:#0b1117}
@@ -75,22 +75,34 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
 <link rel="stylesheet" href="/static/playit-setup.css">
 </head>
 <body>
-<header aria-label="JustVoxel remote access"><span>JUSTVOXEL</span><span class="separator" aria-hidden="true">·</span><span class="brand">${providerName}</span></header>
+<header aria-label=""><span>JUSTVOXEL</span><span class="separator" aria-hidden="true">·</span><span class="brand"></span></header>
 <main>
-<section class="setup-card${failed ? " failure" : ""}" aria-labelledby="setup-title">
+<section class="setup-card" aria-labelledby="setup-title">
 <p class="eyebrow">REMOTE ACCESS SETUP</p>
-<h1 id="setup-title">${title}</h1>
-<p>${description}</p>
-${failed ? "" : `<p class="muted">This page will open ${providerName} automatically when ready.</p>
+<h1 id="setup-title"></h1>
+<p></p>
+<p class="muted"></p>
 <div class="claim-panel" role="status">
 <h2 class="claim-heading"><span class="pulse-dot" aria-hidden="true"></span>Secure login link</h2>
-<p>Waiting for the authentication link.</p>
-</div>`}
+<p></p>
+</div>
 </section>
 </main>
 </body>
 </html>`);
     popup.document.close();
+    popup.document.documentElement?.setAttribute("lang", globalThis.justVoxelLanguage?.locale || "en");
+    popup.document.title = providerName + " setup";
+    popup.document.querySelector("header").setAttribute("aria-label", jvT("ui.f2d34f9a3604"));
+    popup.document.querySelector("header .brand").textContent = providerName;
+    popup.document.querySelector(".setup-card").classList.toggle("failure", failed);
+    popup.document.querySelector("#setup-title").textContent = title;
+    popup.document.querySelector("#setup-title + p").textContent = description;
+    popup.document.querySelector(".muted").hidden = failed;
+    popup.document.querySelector(".claim-panel").hidden = failed;
+    popup.document.querySelector(".muted").textContent = `This page will open ${providerName} automatically when ready.`;
+    popup.document.querySelector(".claim-heading").lastChild.textContent = "Secure login link";
+    popup.document.querySelector(".claim-panel p").textContent = "Waiting for the authentication link.";
   };
   const openRemoteLoginPopup = (id) => {
     let popup = null;
@@ -117,7 +129,7 @@ ${failed ? "" : `<p class="muted">This page will open ${providerName} automatica
       if (!provider || provider.status_unavailable || providerTransitional(provider)) continue;
       if (!provider.service_active) {
         pendingDashboards.delete(id);
-        providerProgress.set(id, "Service activation has not completed. Refresh to check its status.");
+        providerProgress.set(id, jvT("ui.08952af4b5a2"));
         continue;
       }
       pendingDashboards.delete(id);
@@ -128,8 +140,8 @@ ${failed ? "" : `<p class="muted">This page will open ${providerName} automatica
         if (popup) popup.opener = null;
       } catch (_) { /* The fixed dashboard link remains available. */ }
       providerProgress.set(id, popup
-        ? "Service activated. Complete account setup in the provider dashboard."
-        : "Service activated. Use Open provider dashboard to complete account setup; your browser may have blocked automatic opening.");
+        ? jvT("ui.107d2ab8647d")
+        : jvT("ui.cb885910e721"));
     }
   };
   let remotePollSequence = 0;
@@ -145,9 +157,9 @@ ${failed ? "" : `<p class="muted">This page will open ${providerName} automatica
   const effectiveTabs = (snapshot) => (snapshot?.workspace_tabs || ["Overview"])
     .filter((tab) => tab !== "Wi-Fi" || (snapshot?.devices || []).some((device) => device.kind === "wifi"));
   const connectivitySummary = (value) => ({
-    full: "Internet connected", limited: "Limited connectivity", portal: "Sign-in network detected",
-    none: "No internet connection"
-  }[value] || "Network status unknown");
+    full: jvT("ui.efc751eb6e64"), limited: jvT("ui.4ead7680959f"), portal: jvT("ui.8c36e202e707"),
+    none: jvT("ui.c4184bd7daac")
+  }[value] || jvT("ui.676c3cd833ba"));
   const validPlayitClaim = (url) => /^https:\/\/playit\.gg\/claim\/[0-9a-fA-F]{10}(?![\s\S])$/.test(url || "");
   const renderPlayitPopup = (failed = false) => {
     if (!playitPopup || playitPopup.closed) return;
@@ -158,7 +170,7 @@ ${failed ? "" : `<p class="muted">This page will open ${providerName} automatica
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Playit setup</title>
+<title></title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#eef3f5;background:#0b1117}
 *{box-sizing:border-box}body{margin:0;min-height:100vh;display:flex;flex-direction:column;background:#0b1117}
@@ -171,12 +183,12 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
 <link rel="stylesheet" href="/static/playit-setup.css">
 </head>
 <body>
-<header aria-label="JustVoxel Playit"><span>JUSTVOXEL</span><span class="separator" aria-hidden="true">·</span><span class="brand">PLAYIT</span></header>
+<header aria-label=""><span>JUSTVOXEL</span><span class="separator" aria-hidden="true">·</span><span class="brand">PLAYIT</span></header>
 <main>
 <section class="setup-card failure" aria-labelledby="setup-title">
 <p class="eyebrow">PLAYIT SETUP</p>
-<h1 id="setup-title">Playit setup could not be started.</h1>
-<p>Return to JustVoxel and try Activate again.</p>
+<h1 id="setup-title"></h1>
+<p></p>
 </section>
 </main>
 </body>
@@ -187,7 +199,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Playit setup</title>
+<title></title>
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#eef3f5;background:#0b1117}
 *{box-sizing:border-box}body{margin:0;min-height:100vh;display:flex;flex-direction:column;background:#0b1117}
@@ -200,16 +212,16 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
 <link rel="stylesheet" href="/static/playit-setup.css">
 </head>
 <body>
-<header aria-label="JustVoxel Playit"><span>JUSTVOXEL</span><span class="separator" aria-hidden="true">·</span><span class="brand">PLAYIT</span></header>
+<header aria-label=""><span>JUSTVOXEL</span><span class="separator" aria-hidden="true">·</span><span class="brand">PLAYIT</span></header>
 <main>
 <section class="setup-card" aria-labelledby="setup-title">
 <p class="eyebrow">PLAYIT SETUP</p>
-<h1 id="setup-title">Preparing Playit setup…</h1>
-<p>Starting Playit and generating your secure setup link.</p>
-<p class="muted">This page will open Playit automatically when ready.</p>
+<h1 id="setup-title"></h1>
+<p></p>
+<p class="muted"></p>
 <div class="claim-panel" role="status">
-<h2 class="claim-heading"><span class="pulse-dot" aria-hidden="true"></span>Claim link</h2>
-<p>Waiting for Playit to generate the secure claim link.</p>
+<h2 class="claim-heading"><span class="pulse-dot" aria-hidden="true"></span> </h2>
+<p></p>
 </div>
 </section>
 </main>
@@ -217,6 +229,16 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
 </html>`);
     }
     playitPopup.document.close();
+    playitPopup.document.documentElement?.setAttribute("lang", globalThis.justVoxelLanguage?.locale || "en");
+    playitPopup.document.title = jvT("ui.3ff2b156e51f");
+    playitPopup.document.querySelector("header").setAttribute("aria-label", jvT("ui.83f793a8f365"));
+    playitPopup.document.querySelector("#setup-title").textContent = failed ? jvT("ui.999b774e4661") : jvT("ui.cab7909a1e25");
+    playitPopup.document.querySelector("#setup-title + p").textContent = failed ? jvT("ui.ec8f0dee88c4") : jvT("ui.3a3a95633b6d");
+    if (!failed) {
+      playitPopup.document.querySelector(".muted").textContent = jvT("ui.b8b8db33c0a2");
+      playitPopup.document.querySelector(".claim-heading").lastChild.textContent = jvT("ui.2ccf167b4c86");
+      playitPopup.document.querySelector(".claim-panel p").textContent = jvT("ui.b8613b69d448");
+    }
   };
   const failPlayitPopup = () => {
     try { renderPlayitPopup(true); } catch (_) { /* Popup may be unavailable. */ }
@@ -241,7 +263,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     } else if (["idle", "complete"].includes(playitSetup.state)) {
       closePlayitPopup();
     }
-    if (playitSetup.state === "failed") remoteError = "Playit setup failed or timed out.";
+    if (playitSetup.state === "failed") remoteError = jvT("ui.70af0fcfb7f3");
   };
   const isAdministrator = () => (currentSnapshot?.workspace_tabs || []).includes("Ethernet");
   let loadSequence = 0;
@@ -258,16 +280,16 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
 
   const signalBars = (strength) => {
     const value = Number(strength || 0);
-    if (value >= 75) return "Excellent";
-    if (value >= 50) return "Good";
-    if (value >= 30) return "Fair";
-    if (value > 0) return "Weak";
-    return "Unknown";
+    if (value >= 75) return jvT("ui.0dc8ee555c28");
+    if (value >= 50) return jvT("ui.c939327ca16d");
+    if (value >= 30) return jvT("ui.f7b19afcde96");
+    if (value > 0) return jvT("ui.8d6cea2517ff");
+    return jvT("ui.b764cdc0eab7");
   };
 
   const firstAddress = (config, includePrefix = true) => {
     const address = config?.addresses?.[0];
-    if (!address?.address) return "Not assigned";
+    if (!address?.address) return jvT("ui.13075c233611");
     if (!includePrefix) return address.address.split("/")[0];
     return address.prefix !== undefined ? address.address + "/" + address.prefix : address.address;
   };
@@ -302,12 +324,12 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       return null;
     }
     const result = await response.json().catch(() => ({}));
-    if (response.status === 403 && result.error === "password change required") {
+    if (response.status === 403 && jvC(result.error) === "password change required") {
       window.location.assign("/password");
       return null;
     }
     if (!response.ok) {
-      const error = new Error(result.error || "Network request failed.");
+      const error = new Error(result.error || jvT("ui.cd80c924a70a"));
       error.status = response.status;
       throw error;
     }
@@ -396,12 +418,12 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
 
   const createCheckpoint = async (interfaces) => {
     const unique = [...new Set((interfaces || []).filter(Boolean))];
-    if (!unique.length) throw new Error("No interface is available for a safety checkpoint.");
+    if (!unique.length) throw new Error(jvT("ui.e7842722d566"));
     const checkpoint = await postForm("/api/network/checkpoints", {
       interface: unique,
       rollback_timeout_seconds: 90,
     });
-    if (!checkpoint?.id) throw new Error("Network safety checkpoint was not created.");
+    if (!checkpoint?.id) throw new Error(jvT("ui.1af13b327171"));
     storeCheckpoint(checkpoint);
     return checkpoint;
   };
@@ -461,13 +483,13 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     status.setAttribute("aria-live", "polite");
     previous.type = next.type = "button";
     previous.className = next.className = "secondary network-action-button";
-    previous.textContent = "Previous";
-    next.textContent = "Next";
+    previous.textContent = jvT("ui.a57b08a480b8");
+    next.textContent = jvT("ui.1ff57a29d7c9");
     const update = () => {
       items.forEach((item, index) => { item.hidden = Math.floor(index / pageSize) !== page; });
       previous.disabled = page === 0;
       next.disabled = page === pages - 1;
-      status.textContent = "Page " + (page + 1) + " of " + pages;
+      status.textContent = jvT("ui.6076934f99bd") + (page + 1) + " of " + pages;
     };
     previous.addEventListener("click", () => { page--; update(); });
     next.addEventListener("click", () => { page++; update(); });
@@ -487,23 +509,23 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     status.className = "network-overview-status";
     status.append(
       internetStatus(snapshot),
-      badge(snapshot.networking_enabled ? "Networking on" : "Networking off", snapshot.networking_enabled ? "good" : "danger")
+      badge(snapshot.networking_enabled ? jvT("ui.e7c27b2f3aef") : jvT("ui.4bb993ee83ff"), snapshot.networking_enabled ? "good" : "danger")
     );
 
     const wifiDevices = (snapshot.devices || []).filter((device) => device.kind === "wifi");
     if (wifiDevices.length) {
       status.appendChild(
-        badge(snapshot.wireless_enabled ? "Wi-Fi on" : "Wi-Fi off", snapshot.wireless_enabled ? "" : "muted")
+        badge(snapshot.wireless_enabled ? jvT("ui.0f5eddd7f886") : jvT("ui.ba356882b016"), snapshot.wireless_enabled ? "" : "muted")
       );
     } else {
-      status.appendChild(badge("Wi-Fi not available", "muted"));
+      status.appendChild(badge(jvT("ui.a328fef833c4"), "muted"));
     }
 
     heading.appendChild(status);
 
     const subtitle = document.createElement("p");
     subtitle.className = "state-text network-overview-version";
-    subtitle.textContent = "NetworkManager " + (snapshot.version || "unknown version");
+    subtitle.textContent = jvT("ui.b1771a332842") + (snapshot.version || "unknown version");
 
     section.append(heading, subtitle);
     return section;
@@ -519,11 +541,11 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     const ethernet = devices.find((device) => device.kind === "ethernet" && device.state === "activated")
       || devices.find((device) => device.kind === "ethernet");
     section.append(heading,
-      row("IPv4", primary ? firstAddress(primary.ipv4, false) : "Unavailable"),
-      row("Ethernet", ethernet ? ethernet.interface + " · " + (ethernet.state === "activated" && ethernet.carrier !== false ? "Connected" : "Disconnected") : "Unavailable"));
+      row("IPv4", primary ? firstAddress(primary.ipv4, false) : jvT("ui.ca1844969742")),
+      row("Ethernet", ethernet ? ethernet.interface + " · " + (ethernet.state === "activated" && ethernet.carrier !== false ? jvT("ui.22965568d22a") : jvT("ui.04dfac3671b4")) : jvT("ui.ca1844969742")));
     for (const [id, name] of [["tailscale", "Tailscale"], ["netbird", "NetBird"], ["playit", "Playit"]]) {
       const provider = remoteProviders.find((item) => item.id === id);
-      section.appendChild(row(name, provider?.connected && provider.ip ? provider.ip.split("/")[0] : provider?.summary || "Unavailable"));
+      section.appendChild(row(name, provider?.connected && provider.ip ? provider.ip.split("/")[0] : provider?.summary || jvT("ui.ca1844969742")));
     }
     return section;
   };
@@ -535,7 +557,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
 
     const text = document.createElement("div");
     const title = document.createElement("strong");
-    title.textContent = "Keep these network settings?";
+    title.textContent = jvT("ui.0e32df3f9764");
     const detail = document.createElement("span");
     detail.dataset.networkCheckpointCountdown = checkpoint.expires_at || "";
     text.append(title, detail);
@@ -544,12 +566,12 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     const keep = document.createElement("button");
     keep.type = "button";
     keep.dataset.networkCheckpointKeep = checkpoint.id;
-    keep.textContent = "Keep settings";
+    keep.textContent = jvT("ui.0e8ac53f7659");
     const revert = document.createElement("button");
     revert.type = "button";
     revert.className = "secondary";
     revert.dataset.networkCheckpointRevert = checkpoint.id;
-    revert.textContent = "Revert now";
+    revert.textContent = jvT("ui.9cf62b1f1c72");
     actions.append(revert, keep);
 
     section.append(text, actions);
@@ -561,13 +583,13 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     if (!element) return;
     const expires = Date.parse(element.dataset.networkCheckpointCountdown || "");
     if (!Number.isFinite(expires)) {
-      element.textContent = "NetworkManager will restore the previous connection unless you confirm.";
+      element.textContent = jvT("ui.c8c0983ef060");
       return;
     }
     const seconds = Math.max(0, Math.ceil((expires - Date.now()) / 1000));
     element.textContent = seconds > 0
-      ? "Automatic rollback in " + seconds + " seconds."
-      : "Rollback timeout reached. Checking network state…";
+      ? jvT("ui.39dbca2fc797") + seconds + " seconds."
+      : jvT("ui.dd3ca3c47cb5");
     if (seconds === 0) {
       clearStoredCheckpoint();
       currentCheckpoint = null;
@@ -592,9 +614,9 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     const titleWrap = document.createElement("div");
     const kind = document.createElement("span");
     kind.className = "eyebrow network-device-kind";
-    kind.textContent = device.kind === "wifi" ? "Wi-Fi" : device.kind === "ethernet" ? "Ethernet" : "Network";
+    kind.textContent = device.kind === "wifi" ? "Wi-Fi" : device.kind === "ethernet" ? "Ethernet" : jvT("ui.1744b96470b5");
     const title = document.createElement("strong");
-    title.textContent = device.interface || "Unknown interface";
+    title.textContent = device.interface || jvT("ui.f9781840b7a4");
     titleWrap.append(kind, title);
 
     const stateBadge = badge(label(device.state), device.state === "activated" ? "good" : device.state === "failed" ? "danger" : "");
@@ -611,18 +633,18 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     const summary = document.createElement("div");
     summary.className = "network-device-summary";
     if (device.kind === "wifi") {
-      const ssid = device.wireless?.ssid || "Not connected";
+      const ssid = device.wireless?.ssid || jvT("ui.0303e1824670");
       summary.append(
-        row("Network", ssid),
-        row("Signal", device.wireless?.ssid ? signalBars(device.wireless?.signal) + " · " + (device.wireless?.signal || 0) + "%" : "—"),
+        row(jvT("ui.1744b96470b5"), ssid),
+        row(jvT("ui.1e9806e4227b"), device.wireless?.ssid ? signalBars(device.wireless?.signal) + " · " + (device.wireless?.signal || 0) + "%" : "—"),
         row("IPv4", firstAddress(device.ipv4, false))
       );
     } else {
       summary.append(
-        row("Link", device.carrier === false ? "Cable disconnected" : device.speed_mbps ? device.speed_mbps + " Mbps" : "Connected"),
+        row(jvT("ui.a6a32dbc5618"), device.carrier === false ? jvT("ui.bc9c4d065b35") : device.speed_mbps ? device.speed_mbps + " Mbps" : jvT("ui.22965568d22a")),
         row("IPv4", firstAddress(device.ipv4, false)),
-        row("Profile", device.active_connection?.id || "No active profile"),
-        row("Gateway", device.ipv4?.gateway || "—"),
+        row(jvT("ui.d696a35bdd18"), device.active_connection?.id || jvT("ui.ee3e198aa826")),
+        row(jvT("ui.41ed52921661"), device.ipv4?.gateway || "—"),
         row("DNS", device.ipv4?.dns?.join(", ") || "—"),
         row("MTU", device.mtu ? String(device.mtu) : "—")
       );
@@ -631,18 +653,18 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     const details = document.createElement("details");
     details.className = "network-device-details";
     const detailsSummary = document.createElement("summary");
-    detailsSummary.textContent = "Connection details";
+    detailsSummary.textContent = jvT("ui.51bfffbcdbcf");
     const body = document.createElement("div");
     body.className = "network-detail-grid";
     body.append(
-      row("Managed", device.managed ? "Yes" : "No"),
-      row("Hardware address", device.hardware_address || "—"),
+      row(jvT("ui.8f2de600bf94"), device.managed ? jvT("ui.85a39ab345d6") : jvT("ui.1ea442a134b2")),
+      row(jvT("ui.8036352a05b7"), device.hardware_address || "—"),
       row("MTU", device.mtu ? String(device.mtu) : "—"),
-      row("Gateway", device.ipv4?.gateway || "—"),
+      row(jvT("ui.41ed52921661"), device.ipv4?.gateway || "—"),
       row("DNS", device.ipv4?.dns?.join(", ") || "—"),
       row("IPv6", firstAddress(device.ipv6)),
-      row(device.kind === "ethernet" ? "Saved autoconnect" : "Autoconnect", device.active_connection ? (device.active_connection.autoconnect ? "On" : "Off") : "—"),
-      row(device.kind === "ethernet" ? "Saved IPv4 mode" : "IPv4 mode", device.active_connection?.ipv4_method || "—"),
+      row(device.kind === "ethernet" ? jvT("ui.a33a8f572209") : jvT("ui.a04e87255298"), device.active_connection ? (device.active_connection.autoconnect ? "On" : jvT("ui.ca7981b46ecf")) : "—"),
+      row(device.kind === "ethernet" ? jvT("ui.469e3c7987e4") : jvT("ui.9fdc9f555c8a"), device.active_connection?.ipv4_method || "—"),
       row("IPv6 mode", device.active_connection?.ipv6_method || "—")
     );
     details.append(detailsSummary, body);
@@ -661,7 +683,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     heading.className = "network-section-heading";
     const headingText = document.createElement("div");
     const title = document.createElement("h3");
-    title.textContent = "Nearby Wi-Fi";
+    title.textContent = jvT("ui.f2e9d2c6727e");
     const subtitle = document.createElement("span");
     subtitle.textContent = device.interface;
     headingText.append(title, subtitle);
@@ -669,15 +691,15 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     const headingActions = document.createElement("div");
     headingActions.className = "network-inline-actions";
     const toggle = actionButton(
-      currentSnapshot.wireless_enabled ? "Turn Wi-Fi off" : "Turn Wi-Fi on",
+      currentSnapshot.wireless_enabled ? jvT("ui.815fc0039346") : jvT("ui.3cbfdf6e372f"),
       "networkWifiRadio", currentSnapshot.wireless_enabled ? "off" : "on"
     );
-    const other = actionButton("Hidden network", "networkWifiOther", device.interface, "secondary");
+    const other = actionButton(jvT("ui.366763cbc9fd"), "networkWifiOther", device.interface, "secondary");
     const scan = document.createElement("button");
     scan.type = "button";
     scan.className = "primary network-scan-button";
     scan.dataset.networkScan = device.interface;
-    scan.textContent = "Scan";
+    scan.textContent = jvT("ui.ea1c510d1ddb");
     headingActions.append(toggle, other, scan);
     heading.append(headingText, headingActions);
     section.appendChild(heading);
@@ -688,7 +710,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     if (networks.length === 0) {
       const empty = document.createElement("p");
       empty.className = "network-empty";
-      empty.textContent = "No Wi-Fi networks are currently visible.";
+      empty.textContent = jvT("ui.441c0756b589");
       list.appendChild(empty);
     } else {
       networks.forEach((network) => {
@@ -696,10 +718,10 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         item.className = "network-wifi-row" + (network.active ? " active" : "");
         const main = document.createElement("div");
         const name = document.createElement("strong");
-        name.textContent = network.hidden ? "Hidden network" : network.ssid || "Unnamed network";
+        name.textContent = network.hidden ? jvT("ui.366763cbc9fd") : network.ssid || jvT("ui.2f23a756dea1");
         const meta = document.createElement("span");
         const parts = [signalBars(network.strength), String(network.strength || 0) + "%", label(network.security)];
-        if (network.known) parts.push("Saved");
+        if (network.known) parts.push(jvT("ui.b5c120b316c2"));
         meta.textContent = parts.join(" · ");
         main.append(name, meta);
         item.appendChild(main);
@@ -707,13 +729,13 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         const actions = document.createElement("div");
         actions.className = "network-wifi-row-actions";
         if (network.active) {
-          actions.append(badge("Connected", "good"), actionButton("Disconnect", "networkWifiDisconnect", device.interface, "danger"));
+          actions.append(badge(jvT("ui.22965568d22a"), "good"), actionButton(jvT("ui.acfc5be785a9"), "networkWifiDisconnect", device.interface, "danger"));
         } else if (network.profile_uuid) {
-          const connect = actionButton("Connect", "networkWifiSavedConnect", device.interface);
+          const connect = actionButton(jvT("ui.1a2303ede074"), "networkWifiSavedConnect", device.interface);
           connect.dataset.profileUuid = network.profile_uuid;
           actions.appendChild(connect);
         } else if (!network.hidden && supportedNewNetwork(network)) {
-          const join = actionButton("Join", "networkWifiJoin", device.interface);
+          const join = actionButton(jvT("ui.fd30fe681b4b"), "networkWifiJoin", device.interface);
           join.dataset.ssid = network.ssid || "";
           join.dataset.bssid = network.bssid || "";
           join.dataset.keyManagement = network.key_management || "";
@@ -722,7 +744,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         } else {
           const unavailable = document.createElement("span");
           unavailable.className = "network-wifi-unavailable";
-          unavailable.textContent = network.security === "enterprise" ? "Saved profile required" : "Unsupported";
+          unavailable.textContent = network.security === "enterprise" ? jvT("ui.e4f3d1d1205d") : jvT("ui.54324658e2eb");
           actions.appendChild(unavailable);
         }
         item.appendChild(actions);
@@ -755,7 +777,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     const details = document.createElement("details");
     details.className = "panel network-saved";
     const summary = document.createElement("summary");
-    summary.textContent = "Saved Wi-Fi networks (" + profiles.length + ")";
+    summary.textContent = jvT("ui.c2aac85d761d") + profiles.length + ")";
     const list = document.createElement("div");
     list.className = "network-saved-list";
     profiles.forEach((profile) => {
@@ -763,24 +785,24 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       item.className = "network-saved-row";
       const info = document.createElement("div");
       const name = document.createElement("strong");
-      name.textContent = profile.ssid || profile.id || "Saved Wi-Fi";
+      name.textContent = profile.ssid || profile.id || jvT("ui.b2e35fe02f63");
       const meta = document.createElement("span");
-      meta.textContent = (profile.autoconnect ? "Autoconnect" : "Manual") + " · " + label(profile.key_management || "open");
+      meta.textContent = (profile.autoconnect ? jvT("ui.a04e87255298") : jvT("ui.b0b9fe24ffa9")) + " · " + label(profile.key_management || "open");
       info.append(name, meta);
       item.appendChild(info);
 
       const actions = document.createElement("div");
       actions.className = "network-wifi-row-actions nav-admin-only";
       if (active.has(profile.uuid)) {
-        actions.appendChild(badge("Connected", "good"));
+        actions.appendChild(badge(jvT("ui.22965568d22a"), "good"));
       } else {
         const interfaceName = defaultWiFiInterface(snapshot, profile);
         if (interfaceName) {
-          const connect = actionButton("Connect", "networkWifiSavedConnect", interfaceName);
+          const connect = actionButton(jvT("ui.1a2303ede074"), "networkWifiSavedConnect", interfaceName);
           connect.dataset.profileUuid = profile.uuid;
           actions.appendChild(connect);
         }
-        const forget = actionButton("Forget", "networkWifiForget", profile.uuid, "secondary");
+        const forget = actionButton(jvT("ui.a6bd489d9550"), "networkWifiForget", profile.uuid, "secondary");
         actions.appendChild(forget);
       }
       item.appendChild(actions);
@@ -800,7 +822,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
 
     const heading = document.createElement("div");
     const title = document.createElement("strong");
-    title.textContent = connectionDraft.hidden ? "Join hidden network" : "Join " + connectionDraft.ssid;
+    title.textContent = connectionDraft.hidden ? jvT("ui.fbeebc16df15") : jvT("ui.bb23428b6599") + connectionDraft.ssid;
     const subtitle = document.createElement("span");
     subtitle.textContent = connectionDraft.interface;
     heading.append(title, subtitle);
@@ -814,7 +836,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
 
     if (connectionDraft.hidden) {
       const ssidLabel = document.createElement("label");
-      ssidLabel.textContent = "Network name";
+      ssidLabel.textContent = jvT("ui.b97af0128946");
       const ssid = document.createElement("input");
       ssid.name = "ssid";
       ssid.required = true;
@@ -824,14 +846,14 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       form.appendChild(ssidLabel);
 
       const securityLabel = document.createElement("label");
-      securityLabel.textContent = "Security";
+      securityLabel.textContent = jvT("ui.8f6fb4eb7f42");
       const security = document.createElement("select");
       security.name = "key_management";
       [
-        ["", "Open"],
+        ["", jvT("ui.ed077f3d8125")],
         ["wpa-psk", "WPA/WPA2 Personal"],
         ["sae", "WPA3 Personal"],
-        ["owe", "Enhanced Open (OWE)"],
+        ["owe", jvT("ui.3e104a888955")],
       ].forEach(([value, text]) => {
         const option = document.createElement("option");
         option.value = value;
@@ -855,7 +877,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
 
     const passwordLabel = document.createElement("label");
     passwordLabel.className = "network-connect-password";
-    passwordLabel.textContent = "Password";
+    passwordLabel.textContent = jvT("ui.e7cf3ef4f17c");
     const password = document.createElement("input");
     password.type = "password";
     password.name = "password";
@@ -866,7 +888,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
 
     const hint = document.createElement("small");
     hint.className = "network-connect-hint";
-    hint.textContent = "Enterprise and WEP setup are not supported here. Saved Enterprise profiles can still be connected.";
+    hint.textContent = jvT("ui.b9a44f748b66");
     form.appendChild(hint);
 
     const actions = document.createElement("div");
@@ -875,10 +897,10 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     cancel.type = "button";
     cancel.className = "secondary";
     cancel.dataset.networkConnectCancel = "true";
-    cancel.textContent = "Cancel";
+    cancel.textContent = jvT("ui.19766ed6ccb2");
     const connect = document.createElement("button");
     connect.type = "submit";
-    connect.textContent = "Connect";
+    connect.textContent = jvT("ui.1a2303ede074");
     actions.append(cancel, connect);
     form.appendChild(actions);
     panel.appendChild(form);
@@ -918,10 +940,10 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       return input;
     };
     const methodLabel = document.createElement("label");
-    methodLabel.textContent = "IPv4 mode";
+    methodLabel.textContent = jvT("ui.9fdc9f555c8a");
     const method = document.createElement("select");
     method.name = "method";
-    [["auto", "Automatic (DHCP)"], ["manual", "Manual"]].forEach(([value, text]) => {
+    [["auto", jvT("ui.df7c8f177d2e")], ["manual", jvT("ui.b0b9fe24ffa9")]].forEach(([value, text]) => {
       const option = document.createElement("option");
       option.value = value;
       option.textContent = text;
@@ -931,13 +953,13 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     methodLabel.appendChild(method);
     form.appendChild(methodLabel);
     const address = field("address", "IPv4 address", device.ipv4?.addresses?.[0]?.address);
-    const prefix = field("prefix", "Prefix length", device.ipv4?.addresses?.[0]?.prefix ?? 24, "number");
+    const prefix = field("prefix", jvT("ui.9b7eecc8b23d"), device.ipv4?.addresses?.[0]?.prefix ?? 24, "number");
     prefix.min = "0"; prefix.max = "32";
-    const gateway = field("gateway", "Gateway (optional)", device.ipv4?.gateway);
-    field("dns", "DNS servers (comma separated)", (device.ipv4?.dns || []).join(", "));
-    const mtu = field("mtu", "MTU (0 for automatic)", device.mtu || 0, "number");
+    const gateway = field("gateway", jvT("ui.9a3176cdc431"), device.ipv4?.gateway);
+    field("dns", jvT("ui.a0d86937a4d2"), (device.ipv4?.dns || []).join(", "));
+    const mtu = field("mtu", jvT("ui.a77024ba1df5"), device.mtu || 0, "number");
     mtu.min = "0"; mtu.max = "9000";
-    const autoconnect = field("autoconnect", "Connect automatically", device.active_connection.autoconnect, "checkbox");
+    const autoconnect = field("autoconnect", jvT("ui.bc4b00e5e098"), device.active_connection.autoconnect, "checkbox");
     const updateMode = () => {
       [address, prefix, gateway].forEach((input) => { input.disabled = method.value === "auto"; });
       address.required = method.value === "manual";
@@ -947,10 +969,10 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     updateMode();
     const hint = document.createElement("p");
     hint.className = "state-text";
-    hint.textContent = "Settings roll back after 90 seconds unless you Keep settings. Reconnect at the new address if needed. Blank DNS and MTU 0 use automatic settings.";
+    hint.textContent = jvT("ui.c8fa1cb5a4eb");
     const apply = document.createElement("button");
     apply.type = "submit";
-    apply.textContent = "Apply";
+    apply.textContent = jvT("ui.31e392d1c037");
     apply.disabled = Boolean(currentCheckpoint);
     const actions = document.createElement("div");
     actions.className = "network-form-actions";
@@ -969,41 +991,41 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     heading.className = "network-health-heading";
     const title = document.createElement("p");
     title.className = "eyebrow";
-    title.textContent = "Network health";
+    title.textContent = jvT("ui.d30f3eece6eb");
     const status = internetStatus(snapshot);
     heading.append(title, status);
     if (["none", "limited", "portal"].includes(snapshot.connectivity)) {
-      heading.appendChild(actionButton("Check internet now", "networkConnectivityCheck", "true"));
+      heading.appendChild(actionButton(jvT("ui.5fd2684fde6b"), "networkConnectivityCheck", "true"));
     }
     section.appendChild(heading);
     const grid = document.createElement("div");
     grid.className = "network-troubleshoot-devices";
-    if (!snapshot.networking_enabled) section.appendChild(row("Condition", "Networking is disabled"));
+    if (!snapshot.networking_enabled) section.appendChild(row(jvT("ui.39b36d38d6eb"), jvT("ui.cd204d443cd2")));
     const devices = (snapshot.devices || []).filter((device) => ["ethernet", "wifi"].includes(device.kind));
-    if (!devices.length) section.appendChild(row("Condition", "No Ethernet or Wi-Fi interface is available"));
+    if (!devices.length) section.appendChild(row(jvT("ui.39b36d38d6eb"), jvT("ui.b285d70453d6")));
     devices.forEach((device) => {
       const card = document.createElement("article");
       card.className = "panel network-device-card";
       const summary = document.createElement("div");
       summary.className = "network-health-summary";
       summary.append(
-        row("Interface", device.interface), row("State", label(device.state)),
-        row("Link", device.carrier === false ? "No carrier" : device.carrier === true ? "Carrier present" : "Not reported"),
+        row(jvT("ui.c26b3ed4ce70"), device.interface), row(jvT("ui.a3b50c476732"), label(device.state)),
+        row(jvT("ui.a6a32dbc5618"), device.carrier === false ? jvT("ui.388105a792f1") : device.carrier === true ? jvT("ui.14494dd61bac") : jvT("ui.adadface0166")),
         row("IPv4", firstAddress(device.ipv4, false)),
-        row("Default gateway", device.ipv4?.gateway || "Missing"),
-        row("DNS servers", device.ipv4?.dns?.join(", ") || "Missing"),
-        row("Active profile", device.active_connection?.id || "Missing")
+        row(jvT("ui.063ef3af2949"), device.ipv4?.gateway || jvT("ui.6be36ca49ee8")),
+        row(jvT("ui.a384b75cca98"), device.ipv4?.dns?.join(", ") || jvT("ui.6be36ca49ee8")),
+        row(jvT("ui.5608b89a8112"), device.active_connection?.id || jvT("ui.6be36ca49ee8"))
       );
       card.appendChild(summary);
       if (device.active_connection && device.managed) {
-        const repair = actionButton("Reconnect active profile", "networkReconnect", device.interface);
+        const repair = actionButton(jvT("ui.83b2f2e0db6b"), "networkReconnect", device.interface);
         repair.dataset.profileUuid = device.active_connection.uuid;
         repair.disabled = Boolean(currentCheckpoint);
         const actions = document.createElement("div");
         actions.className = "network-inline-actions";
         const explanation = document.createElement("p");
         explanation.className = "state-text";
-        explanation.textContent = "Reconnect this interface using its current settings. The connection may briefly pause; previous settings are restored unless you confirm.";
+        explanation.textContent = jvT("ui.eee1d2bb2ac7");
         actions.classList.add("network-reconnect-information");
         actions.append(explanation, repair);
         card.appendChild(actions);
@@ -1024,7 +1046,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         playitSetup = await postForm(relink ? "/api/network/remote-access/playit/relink" : "/api/network/remote-access/playit/setup");
         updatePlayitPopup();
       } catch (_) {
-        throw new Error(relink ? "Playit account could not be relinked. Try again." : "Playit setup could not be started. Try again.");
+        throw new Error(relink ? jvT("ui.a4d81f64042c") : jvT("ui.79af4d3a3060"));
       }
     });
   };
@@ -1038,16 +1060,16 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     body.className = "system-action-dialog-content";
     const title = document.createElement("h2");
     title.id = "playit-account-title";
-    title.textContent = "Playit.gg account";
+    title.textContent = jvT("ui.0b2d3d5d7041");
     popup.setAttribute("aria-labelledby", title.id);
     const message = document.createElement("p");
-    message.textContent = "Relinking resets this server's saved Playit agent connection and starts the Playit claim flow again. Existing tunnels are not migrated to another account automatically.";
+    message.textContent = jvT("ui.67ad6c402ff2");
     const actions = document.createElement("div"); actions.className = "action-row";
     const cancel = document.createElement("button");
-    cancel.type = "button"; cancel.className = "secondary"; cancel.textContent = "Cancel";
+    cancel.type = "button"; cancel.className = "secondary"; cancel.textContent = jvT("ui.19766ed6ccb2");
     cancel.addEventListener("click", () => popup.close());
     const relink = document.createElement("button");
-    relink.type = "button"; relink.textContent = "Relink account";
+    relink.type = "button"; relink.textContent = jvT("ui.beaddb19f0ef");
     relink.addEventListener("click", () => {
       if (remoteBusy || setupRunning()) return;
       popup.close();
@@ -1071,37 +1093,37 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     body.className = "system-action-dialog-content";
     const title = document.createElement("h2");
     title.id = "nord-login-title";
-    title.textContent = "NordVPN access token";
+    title.textContent = jvT("ui.09eb206a54f3");
     popup.setAttribute("aria-labelledby", title.id);
     const message = document.createElement("p");
-    message.textContent = "Use a current NordVPN access token to reconnect this server and enable Meshnet.";
+    message.textContent = jvT("ui.44487688c2b1");
     const details = document.createElement("div");
-    const existing = document.createElement("p"); existing.textContent = "Already have a NordVPN account?";
+    const existing = document.createElement("p"); existing.textContent = jvT("ui.2c47eff53d0b");
     const dashboard = document.createElement("a");
     dashboard.href = "https://my.nordaccount.com/dashboard/nordvpn/";
     dashboard.target = "_blank"; dashboard.rel = "noopener noreferrer";
     dashboard.className = "button-link"; dashboard.textContent = "Open NordVPN dashboard";
-    const newAccount = document.createElement("p"); newAccount.textContent = "Do not have a NordVPN account yet?";
+    const newAccount = document.createElement("p"); newAccount.textContent = jvT("ui.842fffba1546");
     const referral = document.createElement("a");
     referral.href = "https://refer-nordvpn.com/pZGMpGTrBrO";
     referral.target = "_blank"; referral.rel = "noopener noreferrer";
     referral.className = "button-link"; referral.textContent = "Create NordVPN account";
-    const heading = document.createElement("h3"); heading.textContent = "Get your NordVPN access token";
+    const heading = document.createElement("h3"); heading.textContent = jvT("ui.5d6fd1f1b37a");
     const instructions = document.createElement("ol");
     for (const text of [
-      "Open your NordVPN dashboard and sign in.",
-      "Select NordVPN from the left menu.",
-      "Scroll down to Advanced settings.",
-      "Under Access token, select Get Access token.",
-      "Select Generate new token.",
-      "Copy the token and paste it below."
+      jvT("ui.30abb1c510b5"),
+      jvT("ui.cca9199c9a20"),
+      jvT("ui.8113b4f1ba8d"),
+      jvT("ui.48fb704b886d"),
+      jvT("ui.7281848cc133"),
+      jvT("ui.29d65fd1755d")
     ]) {
       const step = document.createElement("li"); step.textContent = text; instructions.appendChild(step);
     }
     const note = document.createElement("small");
     note.className = "muted";
-    note.textContent = "NordVPN may ask you to verify your email before generating the token.";
-    const label = document.createElement("label"); label.textContent = "Access token";
+    note.textContent = jvT("ui.e114463706d5");
+    const label = document.createElement("label"); label.textContent = jvT("ui.9a911b08feb9");
     const input = document.createElement("input");
     input.type = "password"; input.maxLength = 4096;
     input.autocomplete = "off"; input.spellcheck = false; input.autocapitalize = "off";
@@ -1111,18 +1133,18 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     const actions = document.createElement("div"); actions.className = "action-row";
     let submitting = false;
     const cancel = document.createElement("button");
-    cancel.type = "button"; cancel.className = "secondary"; cancel.textContent = "Cancel";
+    cancel.type = "button"; cancel.className = "secondary"; cancel.textContent = jvT("ui.19766ed6ccb2");
     cancel.addEventListener("click", () => {
       if (submitting) return;
       input.value = "";
       popup.close();
     });
-    const login = document.createElement("button"); login.type = "button"; login.textContent = "Reconnect with new token";
+    const login = document.createElement("button"); login.type = "button"; login.textContent = jvT("ui.f3455b1b00f5");
     login.addEventListener("click", async () => {
       if (remoteBusy) return;
       if (!validNordAccessToken(input.value)) {
         input.value = "";
-        status.textContent = "invalid NordVPN access token";
+        status.textContent = jvT("ui.3347fdbbfc43");
         return;
       }
       let token = input.value;
@@ -1131,7 +1153,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       input.disabled = true;
       cancel.disabled = true;
       login.disabled = true;
-      login.textContent = "Reconnecting…";
+      login.textContent = jvT("ui.27b80374e115");
       remoteBusy = true;
       renderNetwork();
       try {
@@ -1140,13 +1162,13 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         await refreshRemoteAccess();
       } catch (error) {
         const nordLoginFailureMessages = new Set([
-          "NordVPN login could not be completed. Check the access token and retry.",
-          "NordVPN login succeeded, but Meshnet could not be activated. Retry Activate or open Troubleshoot."
+          jvT("ui.bea0b17a3742"),
+          jvT("ui.6bd3689fa539")
         ]);
         if (popup.open) {
           status.textContent = nordLoginFailureMessages.has(error?.message)
             ? error.message
-            : "NordVPN login could not be completed. Check the access token and retry.";
+            : jvT("ui.bea0b17a3742");
         }
       } finally {
         token = "";
@@ -1155,7 +1177,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         input.disabled = false;
         cancel.disabled = false;
         login.disabled = false;
-        login.textContent = "Reconnect with new token";
+        login.textContent = jvT("ui.f3455b1b00f5");
         remoteBusy = false;
         renderNetwork();
       }
@@ -1180,19 +1202,19 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     popup.className = "system-action-dialog";
     const body = document.createElement("div"); body.className = "system-action-dialog-content";
     const title = document.createElement("h2"); title.id = "nord-login-choice-title";
-    title.textContent = "NordVPN login";
+    title.textContent = jvT("ui.4250b2dbec33");
     popup.setAttribute("aria-labelledby", title.id);
     const message = document.createElement("p");
-    message.textContent = "NordVPN may already have a saved login on this server. Continue with the current login, or replace the access token.";
+    message.textContent = jvT("ui.70dd45762de1");
     const actions = document.createElement("div"); actions.className = "action-row";
     const cancel = document.createElement("button");
-    cancel.type = "button"; cancel.className = "secondary"; cancel.textContent = "Cancel";
+    cancel.type = "button"; cancel.className = "secondary"; cancel.textContent = jvT("ui.19766ed6ccb2");
     cancel.addEventListener("click", () => popup.close());
     const update = document.createElement("button");
     update.type = "button"; update.className = "secondary"; update.textContent = "Update Token";
     update.addEventListener("click", () => { popup.close(); showNordAccountDialog(); });
     const current = document.createElement("button");
-    current.type = "button"; current.textContent = "Use current login";
+    current.type = "button"; current.textContent = jvT("ui.e80ef082465d");
     current.addEventListener("click", async () => {
       if (remoteBusy) return;
       popup.close();
@@ -1222,12 +1244,12 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
   const renderRemoteAccess = () => {
     const section = document.createElement("section");
     section.className = "panel network-section";
-    section.appendChild(sectionHeading("Remote access", "Providers"));
+    section.appendChild(sectionHeading(jvT("ui.66354a1d3225"), jvT("ui.996c32b35f21")));
     const grid = document.createElement("div");
     grid.className = "network-provider-grid";
     const hint = document.createElement("p");
     hint.className = "state-text";
-    hint.textContent = remoteError || "Activate enables and starts a provider; Deactivate stops and disables it. Manage accounts and tunnels in the provider dashboard. Using multiple VPN options at the same time is possible but not recommended. Routing, DNS or firewall rules can conflict. If something breaks, report a reproducible issue on GitHub; it may be possible to fix. Playit remains independent.";
+    hint.textContent = remoteError || jvT("ui.26992440ff9a");
     section.appendChild(hint);
     remoteProviders.forEach((provider) => {
       const card = document.createElement("article");
@@ -1244,26 +1266,26 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         title.prepend(icon);
       }
       card.append(title,
-        row("Software", provider.status_unavailable ? "Unknown" : provider.installed ? "Installed" : "Unavailable"),
-        row("Service enabled", provider.status_unavailable ? "Unknown" : provider.service_enabled ? "Yes" : "No"),
-        row("Service", providerTransitional(provider) ? provider.service_state[0].toUpperCase() + provider.service_state.slice(1) + "…" : provider.service_active ? "Running" : label(provider.service_state).replace(/^./, (c) => c.toUpperCase())),
-        row(provider.id === "nordvpn" ? "Account" : "Configuration", provider.id === "nordvpn" ? provider.account || "Unknown" : provider.status_unavailable ? "Unknown" : provider.configured ? "Configured" : "Not configured")
+        row(jvT("ui.9b3289a385a5"), provider.status_unavailable ? jvT("ui.b764cdc0eab7") : provider.installed ? jvT("ui.f8b32f4e92bd") : jvT("ui.ca1844969742")),
+        row(jvT("ui.af06465d485d"), provider.status_unavailable ? jvT("ui.b764cdc0eab7") : provider.service_enabled ? jvT("ui.85a39ab345d6") : jvT("ui.1ea442a134b2")),
+        row(jvT("ui.d677190e0a99"), providerTransitional(provider) ? provider.service_state[0].toUpperCase() + provider.service_state.slice(1) + "…" : provider.service_active ? jvT("ui.f4ccae29e1bb") : label(provider.service_state).replace(/^./, (c) => c.toUpperCase())),
+        row(provider.id === "nordvpn" ? "Account" : jvT("ui.b332c3492d5e"), provider.id === "nordvpn" ? provider.account || jvT("ui.b764cdc0eab7") : provider.status_unavailable ? jvT("ui.b764cdc0eab7") : provider.configured ? jvT("ui.84aebc69a1bf") : jvT("ui.dd1841d29502"))
       );
       if (provider.id === "nordvpn") {
-        card.appendChild(row("Meshnet", provider.meshnet || "Unknown"));
-        if (provider.nord_name) card.appendChild(row("Nord name", provider.nord_name));
-        if (provider.ip) card.appendChild(row("Meshnet IP", provider.ip));
+        card.appendChild(row(jvT("ui.3a9f6b579cd4"), provider.meshnet || jvT("ui.b764cdc0eab7")));
+        if (provider.nord_name) card.appendChild(row(jvT("ui.29c5504827ca"), provider.nord_name));
+        if (provider.ip) card.appendChild(row(jvT("ui.7ce7f3a81eb0"), provider.ip));
       }
-      if (provider.id === "netbird" && provider.connected && provider.ip) card.appendChild(row("NetBird IP", provider.ip.split("/")[0]));
+      if (provider.id === "netbird" && provider.connected && provider.ip) card.appendChild(row(jvT("ui.52513d9a9d28"), provider.ip.split("/")[0]));
       if (provider.id === "tailscale") {
-        card.appendChild(row("Connection", provider.summary || "Unknown"));
-        if (provider.connected && provider.ip) card.appendChild(row("Tailscale IP", provider.ip.split("/")[0]));
+        card.appendChild(row(jvT("ui.639a40e82b9a"), provider.summary || jvT("ui.b764cdc0eab7")));
+        if (provider.connected && provider.ip) card.appendChild(row(jvT("ui.a452ee8ba9a0"), provider.ip.split("/")[0]));
       }
       if (provider.id === "playit") {
-        card.appendChild(row("Tunnels", provider.summary === "Running" ? "Unavailable" : provider.summary || "Unavailable"));
+        card.appendChild(row(jvT("ui.2e65f2b5ee02"), provider.summary === "Running" ? jvT("ui.ca1844969742") : provider.summary || jvT("ui.ca1844969742")));
         (provider.tunnels || []).forEach((tunnel) => {
-          card.appendChild(row(tunnel.is_disabled ? "Disabled tunnel" : "Public tunnel", tunnel.display_address));
-          card.appendChild(row("Local destination", tunnel.destination));
+          card.appendChild(row(tunnel.is_disabled ? jvT("ui.0401b21b94d9") : jvT("ui.6f213980234a"), tunnel.display_address));
+          card.appendChild(row(jvT("ui.16eb689dc945"), tunnel.destination));
         });
       }
       if (providerProgress.has(provider.id)) {
@@ -1279,21 +1301,21 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       if (provider.id === "playit") actions.className += " network-playit-lifecycle";
       if (provider.id === "nordvpn") actions.className += " network-nord-lifecycle";
       if (needsSetup) {
-        if (setupRunning()) card.appendChild(row("Setup", playitSetup.state === "waiting" ? "Waiting for approval" : "Preparing…"));
-        if (playitSetup.state === "failed") card.appendChild(row("Setup", "Failed or timed out"));
+        if (setupRunning()) card.appendChild(row(jvT("ui.7013af4c42fe"), playitSetup.state === "waiting" ? jvT("ui.10c5739b95bd") : jvT("ui.5d1fa38bcf0d")));
+        if (playitSetup.state === "failed") card.appendChild(row(jvT("ui.7013af4c42fe"), jvT("ui.089c1f975bf6")));
       }
       const controls = providerControls(provider);
-      const activate = actionButton("Activate", "networkProvider", provider.id, "primary");
+      const activate = actionButton(jvT("ui.24433c70eba5"), "networkProvider", provider.id, "primary");
       activate.dataset.action = "activate";
       activate.disabled = controls.activateDisabled;
-      const deactivate = actionButton("Deactivate", "networkProvider", provider.id);
+      const deactivate = actionButton(jvT("ui.fb1e6fa55327"), "networkProvider", provider.id);
       deactivate.dataset.action = "deactivate";
       deactivate.disabled = controls.deactivateDisabled;
       actions.appendChild(deactivate);
       if (provider.id === "playit") {
         const rightActions = document.createElement("div");
         rightActions.className = "network-playit-actions";
-        const account = actionButton("Account", "networkProvider", provider.id);
+        const account = actionButton(jvT("ui.7e1b0d5641f2"), "networkProvider", provider.id);
         account.dataset.action = "account";
         account.disabled = !provider.installed || remoteBusy || setupRunning();
         rightActions.append(account, activate);
@@ -1305,12 +1327,12 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         claim.target = "_blank";
         claim.rel = "noopener noreferrer";
         claim.className = "button-link primary network-action-button";
-        claim.textContent = "Open Playit setup";
+        claim.textContent = jvT("ui.c2f09f26c012");
         actions.appendChild(claim);
       } else if (provider.id === "nordvpn") {
         const rightActions = document.createElement("div");
         rightActions.className = "network-nord-actions";
-        const token = actionButton("Token", "networkProvider", provider.id);
+        const token = actionButton(jvT("ui.d2089be67295"), "networkProvider", provider.id);
         token.dataset.action = "token";
         token.disabled = !provider.installed || remoteBusy;
         rightActions.append(token, activate);
@@ -1324,7 +1346,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         login.target = "_blank";
         login.rel = "noopener noreferrer";
         login.className = "button-link primary network-action-button";
-        login.textContent = "Complete Tailscale login";
+        login.textContent = jvT("ui.2146b7fe17c8");
         actions.appendChild(login);
       }
       if (provider.id === "netbird" && !provider.connected && validNetbirdLoginURL(netbirdLoginURL)) {
@@ -1333,7 +1355,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         login.target = "_blank";
         login.rel = "noopener noreferrer";
         login.className = "button-link primary network-action-button";
-        login.textContent = "Complete NetBird login";
+        login.textContent = jvT("ui.4426a088b7b0");
         actions.appendChild(login);
       }
       const dashboard = document.createElement("a");
@@ -1342,7 +1364,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       dashboard.target = "_blank";
       dashboard.rel = "noopener noreferrer";
       dashboard.className = "button-link warning network-action-button";
-      dashboard.textContent = { tailscale: "Open Tailscale dashboard", netbird: "Open NetBird dashboard", playit: "Open Playit.gg dashboard", nordvpn: "Open NordVPN account" }[provider.id];
+      dashboard.textContent = { tailscale: jvT("ui.4691212b71d0"), netbird: jvT("ui.92a48aa76b62"), playit: jvT("ui.a661f3935b88"), nordvpn: jvT("ui.044dd47673b3") }[provider.id];
       actions.appendChild(dashboard);
       if (activate.parentElement === actions) actions.appendChild(activate);
       card.appendChild(actions);
@@ -1362,12 +1384,12 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     const tablist = document.createElement("nav");
     tablist.className = "system-workspace-tabs network-tabs";
     tablist.setAttribute("role", "tablist");
-    tablist.setAttribute("aria-label", "Network views");
+    tablist.setAttribute("aria-label", jvT("ui.2a6073b40239"));
     tabs.forEach((name) => {
       const button = document.createElement("button");
       button.type = "button";
       button.dataset.networkTab = name;
-      button.textContent = name;
+      button.textContent = jvS(name);
       button.setAttribute("role", "tab");
       button.setAttribute("aria-selected", String(name === selectedTab));
       button.tabIndex = name === selectedTab ? 0 : -1;
@@ -1388,12 +1410,12 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     } else if (selectedTab === "Ethernet") {
       devices.filter((device) => device.kind === "ethernet").forEach((device) => {
         const card = renderDevice(device, currentSnapshot);
-        if (currentCheckpoint?.interfaces?.includes(device.interface)) card.appendChild(row("Review", "Check the live address and connectivity, then Keep settings to save or Revert now."));
+        if (currentCheckpoint?.interfaces?.includes(device.interface)) card.appendChild(row(jvT("ui.aff0766a5290"), jvT("ui.4376411d3c2e")));
         else if (device.active_connection && device.state === "activated") card.appendChild(renderEthernetForm(device));
-        else card.appendChild(row("Configuration", "An active Ethernet profile is required. Use nm-hsp or nmtui locally to activate one."));
+        else card.appendChild(row(jvT("ui.b332c3492d5e"), jvT("ui.30e7963b582f")));
         panel.appendChild(card);
       });
-      if (!devices.some((device) => device.kind === "ethernet")) panel.appendChild(row("Ethernet", "No Ethernet interface is available"));
+      if (!devices.some((device) => device.kind === "ethernet")) panel.appendChild(row("Ethernet", jvT("ui.ea4aaf4c3791")));
     } else if (selectedTab === "Wi-Fi") {
       panel.appendChild(renderConnectivity(currentSnapshot));
       const layout = document.createElement("div");
@@ -1440,7 +1462,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     const sequence = ++loadSequence;
     clearRecoveryTimer();
     refreshButton.disabled = true;
-    state.textContent = "Loading network…";
+    state.textContent = jvT("ui.a62ed9454c60");
     try {
       const snapshot = await requestJSON("/api/network");
       if (!snapshot || sequence !== loadSequence) return;
@@ -1461,7 +1483,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         { id: "tailscale", display_name: "Tailscale", status_unavailable: true },
         { id: "netbird", display_name: "NetBird", status_unavailable: true },
         { id: "playit", display_name: "Playit.gg", status_unavailable: true },
-        { id: "nordvpn", display_name: "NordVPN Meshnet", status_unavailable: true },
+        { id: "nordvpn", display_name: jvT("ui.efbb9e0df755"), status_unavailable: true },
       ];
       remoteError = "";
       try {
@@ -1471,7 +1493,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         if (isAdministrator() && selectedTab === "Remote Access") {
           playitSetup = await requestJSON("/api/network/remote-access/playit/setup") || { state: "idle" };
         }
-      } catch (error) { remoteError = error?.message || "Remote access status unavailable."; }
+      } catch (error) { remoteError = error?.message || jvT("ui.d6b5cd96e853"); }
       if (sequence !== loadSequence) return;
       updatePlayitPopup();
       openActivatedDashboards();
@@ -1480,9 +1502,9 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       if (remoteProviders.some(providerTransitional) || setupRunning()) pollRemoteAccess();
     } catch (error) {
       if (sequence !== loadSequence) return;
-      state.textContent = error?.message || "Network information is unavailable.";
+      state.textContent = error?.message || jvT("ui.e9e5872f8df9");
       if (readStoredCheckpointID()) {
-        state.textContent += " Waiting for the network to recover…";
+        state.textContent += jvT("ui.1ad0f8c0f24a");
         scheduleRecovery();
       }
     } finally {
@@ -1492,21 +1514,21 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
 
   const requestScan = async (interfaceName, button) => {
     button.disabled = true;
-    button.textContent = "Scanning…";
+    button.textContent = jvT("ui.38d96da6e8b2");
     try {
       await postForm("/api/network/wifi/" + escapePath(interfaceName) + "/scan");
       window.setTimeout(loadNetwork, 900);
     } catch (error) {
-      state.textContent = error?.message || "Wi-Fi scan could not be started.";
+      state.textContent = error?.message || jvT("ui.8b311001f6ea");
     } finally {
       button.disabled = false;
-      button.textContent = "Scan";
+      button.textContent = jvT("ui.ea1c510d1ddb");
     }
   };
 
   const setRadio = async (enabled, button) => {
     button.disabled = true;
-    state.textContent = enabled ? "Turning Wi-Fi on…" : "Turning Wi-Fi off…";
+    state.textContent = enabled ? jvT("ui.fb62ab30dd6e") : jvT("ui.8fcf1e7523d7");
     try {
       if (enabled) {
         await postForm("/api/network/wifi/radio", { enabled: true });
@@ -1521,7 +1543,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       );
       await loadNetwork();
     } catch (error) {
-      state.textContent = error?.message || "Wi-Fi radio state could not be changed.";
+      state.textContent = error?.message || jvT("ui.bbe1d8a1c316");
       if (readStoredCheckpointID()) scheduleRecovery();
     } finally {
       button.disabled = false;
@@ -1530,7 +1552,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
 
   const connectSaved = async (interfaceName, profileUUID, button) => {
     button.disabled = true;
-    state.textContent = "Connecting Wi-Fi…";
+    state.textContent = jvT("ui.3da4bd0d247d");
     try {
       await runCheckpointedMutation([interfaceName], (checkpointID) =>
         postForm("/api/network/wifi/" + escapePath(interfaceName) + "/connect", {
@@ -1540,7 +1562,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       );
       await loadNetwork();
     } catch (error) {
-      state.textContent = error?.message || "Saved Wi-Fi network could not be connected.";
+      state.textContent = error?.message || jvT("ui.72747c73c861");
       if (readStoredCheckpointID()) scheduleRecovery();
     } finally {
       button.disabled = false;
@@ -1549,7 +1571,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
 
   const disconnectWiFi = async (interfaceName, button) => {
     button.disabled = true;
-    state.textContent = "Disconnecting Wi-Fi…";
+    state.textContent = jvT("ui.f7d90587893d");
     try {
       await runCheckpointedMutation([interfaceName], (checkpointID) =>
         postForm("/api/network/wifi/" + escapePath(interfaceName) + "/disconnect", {
@@ -1558,7 +1580,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       );
       await loadNetwork();
     } catch (error) {
-      state.textContent = error?.message || "Wi-Fi could not be disconnected.";
+      state.textContent = error?.message || jvT("ui.05d16938890e");
       if (readStoredCheckpointID()) scheduleRecovery();
     } finally {
       button.disabled = false;
@@ -1567,12 +1589,12 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
 
   const forgetWiFi = async (profileUUID, button) => {
     button.disabled = true;
-    state.textContent = "Forgetting saved Wi-Fi…";
+    state.textContent = jvT("ui.c5d2d8af4452");
     try {
       await postForm("/api/network/wifi/profiles/" + escapePath(profileUUID) + "/forget");
       await loadNetwork();
     } catch (error) {
-      state.textContent = error?.message || "Saved Wi-Fi could not be forgotten.";
+      state.textContent = error?.message || jvT("ui.342d17f0088a");
     } finally {
       button.disabled = false;
     }
@@ -1586,7 +1608,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     const password = passwordInput?.value || "";
     if (passwordInput) passwordInput.value = "";
 
-    state.textContent = "Connecting Wi-Fi…";
+    state.textContent = jvT("ui.3da4bd0d247d");
     try {
       await runCheckpointedMutation([interfaceName], (checkpointID) =>
         postForm("/api/network/wifi/" + escapePath(interfaceName) + "/connect", {
@@ -1601,7 +1623,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       connectionDraft = null;
       await loadNetwork();
     } catch (error) {
-      state.textContent = error?.message || "Wi-Fi network could not be connected.";
+      state.textContent = error?.message || jvT("ui.0d6c96df3093");
       if (readStoredCheckpointID()) scheduleRecovery();
       if (button) button.disabled = false;
     }
@@ -1609,7 +1631,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
 
   const confirmCheckpoint = async (id, button) => {
     button.disabled = true;
-    state.textContent = "Keeping network settings…";
+    state.textContent = jvT("ui.ebf818aa4414");
     try {
       await postForm("/api/network/checkpoints/" + escapePath(id) + "/confirm");
       clearStoredCheckpoint();
@@ -1622,14 +1644,14 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         const pending = await resumeCheckpoint();
         if (!pending) { currentCheckpoint = null; renderNetwork(); }
       } catch (_) { /* Connectivity safety remains owned by NetworkManager. */ }
-      state.textContent = error?.message || "Network settings could not be confirmed.";
+      state.textContent = error?.message || jvT("ui.0237be5d159e");
       button.disabled = false;
     }
   };
 
   const revertCheckpoint = async (id, button) => {
     button.disabled = true;
-    state.textContent = "Restoring previous network settings…";
+    state.textContent = jvT("ui.f81c97b0cbd9");
     try {
       await rollbackStoredCheckpoint(id);
       clearStoredCheckpoint();
@@ -1637,7 +1659,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       connectionDraft = null;
       scheduleRecovery();
     } catch (error) {
-      state.textContent = error?.message || "Previous network settings could not be restored.";
+      state.textContent = error?.message || jvT("ui.e6b11c7adcf9");
       button.disabled = false;
     }
   };
@@ -1646,7 +1668,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     button.disabled = true;
     try { await action(); await loadNetwork(); }
     catch (error) {
-      state.textContent = error?.message || "Network change failed.";
+      state.textContent = error?.message || jvT("ui.75dcb9e07392");
       if (readStoredCheckpointID()) scheduleRecovery();
     } finally { button.disabled = false; }
   };
@@ -1681,15 +1703,15 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         await refreshRemoteAccess();
       }
       if (sequence === remotePollSequence) {
-        if (providerProgress.has("netbird")) providerProgress.set("netbird", "Finish NetBird login in your browser, then select Refresh to see the assigned IP.");
-        if (providerProgress.has("tailscale")) providerProgress.set("tailscale", "Finish Tailscale login in your browser, then select Refresh to see the assigned IP.");
-        pendingDashboards.forEach((id) => providerProgress.set(id, "Service activation is still pending. Refresh to check its status, or use the provider dashboard link."));
+        if (providerProgress.has("netbird")) providerProgress.set("netbird", jvT("ui.69f389548f99"));
+        if (providerProgress.has("tailscale")) providerProgress.set("tailscale", jvT("ui.555fd8bc2259"));
+        pendingDashboards.forEach((id) => providerProgress.set(id, jvT("ui.647444b35c30")));
         pendingDashboards.clear();
         renderNetwork();
       }
     } catch (error) {
       failPlayitPopup();
-      remoteError = error?.message || "Remote access status unavailable. Refresh to retry.";
+      remoteError = error?.message || jvT("ui.2a14bb279de6");
       renderNetwork();
     }
   };
@@ -1706,7 +1728,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       pollRemoteAccess();
     } catch (error) {
       failPlayitPopup();
-      remoteError = error?.message || "Remote access change failed.";
+      remoteError = error?.message || jvT("ui.00b9c29d129c");
       try { await refreshRemoteAccess(); pollRemoteAccess(); } catch (_) { /* Keep the reported failure visible. */ }
     } finally {
       remoteBusy = false;
@@ -1734,7 +1756,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       selectedTab = tab.dataset.networkTab;
       connectionDraft = null;
       renderNetwork();
-      if (selectedTab === "Remote Access") refreshRemoteAccess().then(pollRemoteAccess).catch((error) => { state.textContent = error?.message || "Remote access status unavailable."; });
+      if (selectedTab === "Remote Access") refreshRemoteAccess().then(pollRemoteAccess).catch((error) => { state.textContent = error?.message || jvT("ui.d6b5cd96e853"); });
       content.querySelector('[aria-selected="true"]')?.focus();
       return;
     }
@@ -1778,21 +1800,21 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         showNordLoginChoice();
       } else if (id === "tailscale" && provider.dataset.action === "activate") {
         const loginTab = openRemoteLoginPopup(id);
-        providerProgress.set(id, "Starting Tailscale login…");
+        providerProgress.set(id, jvT("ui.29e09fc7a949"));
         runRemoteAction(async () => {
           try {
             const result = await postForm("/api/network/remote-access/tailscale", { action: "activate" });
-            if (result?.login_url && !validTailscaleLoginURL(result.login_url)) throw new Error("Tailscale returned an invalid login link.");
+            if (result?.login_url && !validTailscaleLoginURL(result.login_url)) throw new Error(jvT("ui.d53bb6301580"));
             tailscaleLoginURL = result?.login_url || "";
             if (tailscaleLoginURL) {
-              providerProgress.set(id, "Complete Tailscale login in your browser.");
+              providerProgress.set(id, jvT("ui.86667cf2364e"));
               if (loginTab && !loginTab.closed) {
                 try { loginTab.location.replace(tailscaleLoginURL); }
                 catch (_) { failRemoteLoginPopup(loginTab, id); /* Keep the login link in the card. */ }
               }
             } else {
               try { if (loginTab && !loginTab.closed) loginTab.close(); } catch (_) {}
-              providerProgress.set(id, "Checking Tailscale connection…");
+              providerProgress.set(id, jvT("ui.69eef3f45ce2"));
             }
           } catch (error) {
             failRemoteLoginPopup(loginTab, id);
@@ -1802,14 +1824,14 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         });
       } else if (id === "netbird" && provider.dataset.action === "activate") {
         const loginTab = openRemoteLoginPopup(id);
-        providerProgress.set(id, "Starting NetBird login…");
+        providerProgress.set(id, jvT("ui.161479722141"));
         runRemoteAction(async () => {
           try {
             const result = await postForm("/api/network/remote-access/netbird", { action: "activate" });
-            if (result?.login_url && !validNetbirdLoginURL(result.login_url)) throw new Error("NetBird returned an invalid login link.");
+            if (result?.login_url && !validNetbirdLoginURL(result.login_url)) throw new Error(jvT("ui.981f67cede6f"));
             netbirdLoginURL = result?.login_url || "";
             if (netbirdLoginURL) {
-              providerProgress.set(id, "Complete NetBird login in your browser.");
+              providerProgress.set(id, jvT("ui.f32f7fd2b4b2"));
               if (loginTab && !loginTab.closed) {
                 try { loginTab.location.replace(netbirdLoginURL); }
                 catch (_) { failRemoteLoginPopup(loginTab, id); /* Keep the login link in the card. */ }
@@ -1817,7 +1839,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
             } else {
               // NetBird may already have a saved login and connect without a URL.
               try { if (loginTab && !loginTab.closed) loginTab.close(); } catch (_) {}
-              providerProgress.set(id, "Checking NetBird connection…");
+              providerProgress.set(id, jvT("ui.d7d7b58a77d7"));
             }
           } catch (error) {
             failRemoteLoginPopup(loginTab, id);
@@ -1829,7 +1851,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         if (id === "playit" && provider.dataset.action === "deactivate") closePlayitPopup();
         const action = provider.dataset.action;
         if (action === "activate" && providerDashboards[id]) {
-          providerProgress.set(id, "Activating service…");
+          providerProgress.set(id, jvT("ui.e7785e94e602"));
         } else {
           pendingDashboards.delete(id);
           providerProgress.delete(id);
@@ -1944,7 +1966,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     selectedTab = tabs[index];
     connectionDraft = null;
     renderNetwork();
-    if (selectedTab === "Remote Access") refreshRemoteAccess().then(pollRemoteAccess).catch((error) => { state.textContent = error?.message || "Remote access status unavailable."; });
+    if (selectedTab === "Remote Access") refreshRemoteAccess().then(pollRemoteAccess).catch((error) => { state.textContent = error?.message || jvT("ui.d6b5cd96e853"); });
     content.querySelector('[aria-selected="true"]')?.focus();
   });
 

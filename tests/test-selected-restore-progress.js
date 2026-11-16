@@ -1,6 +1,6 @@
 // Browser polling fixtures: no browser, services, or privileged runtime required.
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
+const fs = require('./helpers/webui-i18n.cjs');
 const vm = require("node:vm");
 const source = fs.readFileSync("webui/internal/server/static/restore-operation.js", "utf8");
 async function fixture(progress, url = "/workspace/backups/restore/status?server=jv-family1") {

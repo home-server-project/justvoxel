@@ -93,7 +93,7 @@
         const custom = card.dataset.connectCard === 'custom';
         if (edition === 'Java') {
           const address = custom ? page.querySelector('[data-connect-domain-java]').textContent : endpoint.dataset.connectJoin;
-          if (address) lines.push(`Java: ${address}`);
+          if (address) lines.push(jvT("ui.228d546d38e2", {v0: (address)}));
         } else if (edition === 'Bedrock') {
           const address = custom ? endpoint.querySelector('[data-connect-domain-address]').textContent : endpoint.dataset.connectAddress;
           const port = endpoint.dataset.connectPort;
@@ -112,7 +112,7 @@
     const hostname = domain.value.trim();
     const invalid = !domain.disabled && !validHostname(hostname);
     domain.setAttribute('aria-invalid', String(invalid));
-    domain.setCustomValidity(invalid ? 'Enter a valid hostname without a URL, path or port.' : '');
+    domain.setCustomValidity(invalid ? jvT("ui.c9d4ae8bba68") : '');
     page.querySelectorAll('[data-connect-domain-address]').forEach(node => { node.textContent = invalid ? '' : hostname; });
     const javaAddress = page.querySelector('[data-connect-domain-java]');
     if (javaAddress) javaAddress.textContent = invalid ? '' : `${hostname}:${page.dataset.javaPort}`;
@@ -139,9 +139,9 @@
   page.querySelector('[data-connect-copy]').addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(invitationText.value);
-      copyStatus.textContent = 'Copied.';
+      copyStatus.textContent = jvT("ui.d249818eccab");
     } catch (_) {
-      copyStatus.textContent = 'Copy unavailable. Select the invitation text and copy it manually.';
+      copyStatus.textContent = jvT("ui.e30e3a48556a");
     }
   });
   switches.forEach(input => input.addEventListener('change', update));

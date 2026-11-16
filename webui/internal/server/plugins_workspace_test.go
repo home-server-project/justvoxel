@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os/exec"
 	"regexp"
 	"strings"
 	"testing"
@@ -16,7 +16,7 @@ import (
 )
 
 func TestPluginsWorkspaceProviderLogoAssets(t *testing.T) {
-	header, err := assets.ReadFile("templates/header.html")
+	header, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,7 +24,7 @@ func TestPluginsWorkspaceProviderLogoAssets(t *testing.T) {
 	placeholder := regexp.MustCompile(`(?i)<(?:text|rect)\b|>\s*(?:M|H|CF)\s*<`)
 	for _, provider := range []string{"modrinth", "hangar", "curseforge"} {
 		path := "static/providers/" + provider + ".svg"
-		logo, err := assets.ReadFile(path)
+		logo, err := englishPresentationAsset(path)
 		if err != nil {
 			t.Fatalf("%s: %v", path, err)
 		}
@@ -131,11 +131,11 @@ func TestPluginsWorkspaceForwardsCatalogFiltersAndRejectsMutation(t *testing.T) 
 	}
 }
 func TestPluginsWorkspaceUsesExistingWindowAndSafeRendering(t *testing.T) {
-	header, err := assets.ReadFile("templates/header.html")
+	header, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
-	script, err := assets.ReadFile("static/app.js")
+	script, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestPluginsWorkspaceUsesExistingWindowAndSafeRendering(t *testing.T) {
 	if strings.Contains(pluginScript, "context.textContent") {
 		t.Fatal("Plugins still writes the legacy context row")
 	}
-	css, err := assets.ReadFile("static/app.css")
+	css, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,11 +185,11 @@ func TestPluginsWorkspaceUsesExistingWindowAndSafeRendering(t *testing.T) {
 
 // These source assertions protect structure; they do not establish visual acceptance.
 func TestPluginsWorkspaceCompactInfoPresentation(t *testing.T) {
-	script, err := assets.ReadFile("static/app.js")
+	script, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
-	css, err := assets.ReadFile("static/app.css")
+	css, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,11 +251,11 @@ func TestPluginsWorkspaceCompactInfoPresentation(t *testing.T) {
 }
 
 func TestPluginsWorkspaceBoundedOverlay(t *testing.T) {
-	script, err := assets.ReadFile("static/app.js")
+	script, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
-	css, err := assets.ReadFile("static/app.css")
+	css, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +375,7 @@ func TestPluginsInstallRoutesAuthorizationCSRFAndContracts(t *testing.T) {
 	}
 }
 func TestPluginsInstallReviewProgressAndOwnershipRendering(t *testing.T) {
-	raw, err := assets.ReadFile("static/app.js")
+	raw, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -448,7 +448,7 @@ func TestPluginsAcknowledgeRequiresAdministratorCSRFAndExactForm(t *testing.T) {
 }
 
 func TestPluginsAdditionalInfoAndStructuredInstallPresentation(t *testing.T) {
-	raw, err := assets.ReadFile("static/app.js")
+	raw, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -620,7 +620,7 @@ func TestPluginsWorkspaceIconAdministratorAndOnlyProjectID(t *testing.T) {
 }
 
 func TestPluginsWorkspaceSharedSameOriginLogoAndFallback(t *testing.T) {
-	raw, err := assets.ReadFile("static/app.js")
+	raw, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -666,7 +666,7 @@ func TestPluginsWorkspaceSharedSameOriginLogoAndFallback(t *testing.T) {
 			t.Fatalf("identity reuse missing %s", want)
 		}
 	}
-	css, err := assets.ReadFile("static/app.css")
+	css, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -678,7 +678,7 @@ func TestPluginsWorkspaceSharedSameOriginLogoAndFallback(t *testing.T) {
 }
 
 func TestPluginsWorkspaceApprovedCompactHierarchyAndStageFlow(t *testing.T) {
-	raw, err := assets.ReadFile("static/app.js")
+	raw, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -744,7 +744,7 @@ func TestPluginsWorkspaceApprovedCompactHierarchyAndStageFlow(t *testing.T) {
 	if strings.Count(progress, `operation.status`) != 1 || !strings.Contains(progress, `index !== undefined && position < index`) || !strings.Contains(progress, `position === index`) || !strings.Contains(progress, `})[operation.stage]`) {
 		t.Fatal("progress must derive real states from the persisted stage and render status once")
 	}
-	rawCSS, err := assets.ReadFile("static/app.css")
+	rawCSS, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -844,15 +844,15 @@ func TestPluginsWorkspaceBoundedDiscoverQuery(t *testing.T) {
 }
 
 func TestPluginsWorkspaceToolbarCapacityAndPagination(t *testing.T) {
-	rawHeader, err := assets.ReadFile("templates/header.html")
+	rawHeader, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
-	rawJS, err := assets.ReadFile("static/app.js")
+	rawJS, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
-	rawCSS, err := assets.ReadFile("static/app.css")
+	rawCSS, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -892,7 +892,7 @@ func TestPluginsWorkspaceToolbarCapacityAndPagination(t *testing.T) {
 		t.Fatal("pagination footer closing tag missing")
 	}
 	for _, want := range []string{
-		`<span class="plugins-pagination-support">Can't find the plugin or mod you need, or did JustVoxel fail to install it? `,
+		`<span class="plugins-pagination-support">` + html.EscapeString(uiText("ui.151edcaf77c3")) + " ",
 		`<a href="https://github.com/home-server-project/justvoxel/issues/new?template=minecraft.yml" target="_blank" rel="noopener noreferrer">Report an issue</a>`,
 	} {
 		if !strings.Contains(footer, want) {
@@ -952,7 +952,7 @@ func TestPluginsWorkspaceToolbarCapacityAndPagination(t *testing.T) {
 }
 
 func TestPluginCorrectionReviewAndCursorStructure(t *testing.T) {
-	raw, err := assets.ReadFile("static/app.js")
+	raw, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -993,7 +993,7 @@ func TestPluginCorrectionReviewAndCursorStructure(t *testing.T) {
 	if strings.Index(review, `pluginRequest("install/plan"`) >= install {
 		t.Fatal("Install shown before plan review")
 	}
-	css, err := assets.ReadFile("static/app.css")
+	css, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1010,7 +1010,7 @@ func TestPluginCorrectionReviewAndCursorStructure(t *testing.T) {
 	if strings.Count(string(css), `.plugins-info-rows{`) != 1 {
 		t.Fatal("info rows must have one clear flex rule")
 	}
-	header, err := assets.ReadFile("templates/header.html")
+	header, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1038,7 +1038,7 @@ func TestPluginWorkspaceDirectReviewRejectionIsForwardedWithoutInstall(t *testin
 
 // Source assertions protect the inventory gate without claiming runtime acceptance.
 func TestPluginsWorkspaceInventoryRequiresVerifiedOperationState(t *testing.T) {
-	raw, err := assets.ReadFile("static/app.js")
+	raw, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1075,7 +1075,7 @@ func TestPluginsWorkspaceInventoryRequiresVerifiedOperationState(t *testing.T) {
 }
 
 func TestPluginsWorkspaceInventoryGatePrecedesFetchAndRendering(t *testing.T) {
-	raw, err := assets.ReadFile("static/app.js")
+	raw, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1186,13 +1186,13 @@ const pluginInventorySafe = pluginOperationSettled;
  }
 })().catch(error=>{console.error(error);process.exitCode=1});
 `
-	if output, err := exec.Command("node", "-e", "globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => acceptedServer.content_kind === \"mods\" ? \"mod\" : \"plugin\"; globalThis.contentPlural = () => acceptedServer.content_kind;\n"+program).CombinedOutput(); err != nil {
+	if output, err := nodeTestCommand("-e", "globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => acceptedServer.content_kind === \"mods\" ? \"mod\" : \"plugin\"; globalThis.contentPlural = () => acceptedServer.content_kind;\n"+program).CombinedOutput(); err != nil {
 		t.Fatalf("Installed persisted recovery: %v\n%s", err, output)
 	}
 }
 
 func TestPluginsWorkspaceVMCorrectionHeaderButtonsAndBackdrop(t *testing.T) {
-	raw, err := assets.ReadFile("static/app.js")
+	raw, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1252,7 +1252,7 @@ func TestPluginsWorkspaceVMCorrectionHeaderButtonsAndBackdrop(t *testing.T) {
 			t.Fatal("operation rendering or submission allowed backdrop dismissal")
 		}
 	}
-	rawCSS, err := assets.ReadFile("static/app.css")
+	rawCSS, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1281,7 +1281,7 @@ func TestPluginsWorkspaceVMCorrectionHeaderButtonsAndBackdrop(t *testing.T) {
 	}
 	// Static toolbar buttons and dynamically created actions all use the same
 	// button selector; cards and filters remain different element types.
-	rawHeader, err := assets.ReadFile("templates/header.html")
+	rawHeader, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1321,7 +1321,7 @@ func TestPluginsWorkspaceVMCorrectionHeaderButtonsAndBackdrop(t *testing.T) {
 
 func pluginWorkspaceScript(t *testing.T) string {
 	t.Helper()
-	raw, err := assets.ReadFile("static/app.js")
+	raw, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1343,14 +1343,14 @@ func pluginScriptSection(t *testing.T, script, first, next string) string {
 }
 
 func TestPluginsWorkspaceApprovedLiveSearchAndSharedTabs(t *testing.T) {
-	header, err := assets.ReadFile("templates/header.html")
+	header, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(header), `<button type="submit">Search</button>`) {
 		t.Fatal("visible Search button remains")
 	}
-	raw, err := assets.ReadFile("static/app.css")
+	raw, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1503,7 +1503,7 @@ const pluginRequest = async (route) => { requests.push(route); if (route !== "op
  }
 })().catch((error) => { console.error(error); process.exitCode = 1; });
 `
-	command := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program)
+	command := nodeTestCommand("-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("operation gates: %v\n%s", err, output)
 	}
@@ -1552,7 +1552,7 @@ panel.hidden = true; showOperation({...op,operation_id:"two"});
 assert.equal(headerCount,3);
 }
 `
-	command := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program)
+	command := nodeTestCommand("-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("operation DOM lifecycle: %v\n%s", err, output)
 	}
@@ -1580,7 +1580,7 @@ assert(prevented); assert.equal(timers.size,0); assert.equal(loads,2);
 for (const filter of filterEvents) { events.input(); filter(); assert.equal(timers.size,0); }
 assert.equal(loads,6);
 `
-	command := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program)
+	command := nodeTestCommand("-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("live plugin search: %v\n%s", err, output)
 	}
@@ -1588,7 +1588,7 @@ assert.equal(loads,6);
 
 func TestPluginWorkspaceApprovedPolish(t *testing.T) {
 	script := pluginWorkspaceScript(t)
-	header, err := assets.ReadFile("templates/header.html")
+	header, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1698,7 +1698,7 @@ assert.equal(new URL(installed.image.src, "https://appliance.example").searchPar
 assert.equal(identityTile("Manual", undefined).image, undefined);
 assert.equal(new URL(identityTile("No search icon", "root", "").image.src, "https://appliance.example").searchParams.has("icon_url"), false);
 `
-	if output, err := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program).CombinedOutput(); err != nil {
+	if output, err := nodeTestCommand("-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program).CombinedOutput(); err != nil {
 		t.Fatalf("same-origin icon delivery: %v\n%s", err, output)
 	}
 }
@@ -1831,7 +1831,7 @@ for (const missingLogo of ["", undefined]) {
 
 assert.equal(identityTile("Manual",undefined).image,undefined);
 `
-	if output, err := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program).CombinedOutput(); err != nil {
+	if output, err := nodeTestCommand("-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program).CombinedOutput(); err != nil {
 		t.Fatalf("icon fallback: %v\n%s", err, output)
 	}
 }
@@ -1860,10 +1860,10 @@ assert.equal(activations,2); assert.equal(cards[0].classList.contains("is-select
 closePanel(); assert.equal(panel.hidden,true);assert.equal(workspaceShell.inert,false);
 for(const c of cards){assert.equal(c.classList.contains("is-selected"),false);assert.equal(c.attrs["aria-pressed"],"false");}
 `
-	if output, err := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program).CombinedOutput(); err != nil {
+	if output, err := nodeTestCommand("-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program).CombinedOutput(); err != nil {
 		t.Fatalf("selection lifecycle: %v\n%s", err, output)
 	}
-	css, err := assets.ReadFile("static/app.css")
+	css, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1883,7 +1883,7 @@ for(const c of cards){assert.equal(c.classList.contains("is-selected"),false);as
 }
 
 func TestManagedPluginLifecycleUIContract(t *testing.T) {
-	raw, err := assets.ReadFile("static/app.js")
+	raw, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1910,7 +1910,7 @@ func TestManagedPluginLifecycleUIContract(t *testing.T) {
 			t.Fatal("review or progress missing", want)
 		}
 	}
-	css, err := assets.ReadFile("static/app.css")
+	css, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2006,7 +2006,7 @@ func TestGenericPluginWorkspaceOperationAcceptsAllFourMutations(t *testing.T) {
 
 func TestPluginsDiscoverSourceControlsAndReadOnlyCards(t *testing.T) {
 	script := pluginWorkspaceScript(t)
-	header, _ := assets.ReadFile("templates/header.html")
+	header, _ := englishPresentationAsset("templates/header.html")
 	for _, want := range []string{`name="modrinth" data-plugins-modrinth disabled`, `name="hangar" data-plugins-hangar disabled><img`, `placeholder="Search plugins or mods"`} {
 		if !strings.Contains(string(header), want) {
 			t.Fatal("source control", want)
@@ -2133,7 +2133,7 @@ for (const root of [modrinth,panelBody]) {
  assert.equal(tiles[0].children.filter(n=>n.tag==="img").length,1);
 }
 `
-	command := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program)
+	command := nodeTestCommand("-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program)
 	if out, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("catalog card source boundary: %v\n%s", err, out)
 	}
@@ -2164,7 +2164,7 @@ assert.equal(pageCursors.length,3);
 for(const c of controls){pageIndex=2;cursor=third;nextCursor=third;c.change();assert.equal(pageIndex,0);assert.deepEqual(cursor,original);assert.deepEqual(pageCursors,[original]);assert.equal(nextCursor,null);}
 assert.equal(loads,8);
 `
-	command := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program)
+	command := nodeTestCommand("-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program)
 	if out, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("composite cursor navigation: %v\n%s", err, out)
 	}
@@ -2213,7 +2213,7 @@ const fetch=async(url,options)=>{
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `
 
-	command := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program)
+	command := nodeTestCommand("-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program)
 	if out, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("source requests: %v\n%s", err, out)
 	}
@@ -2297,7 +2297,7 @@ nextCursor=second;next.events.click();assert.deepEqual(cursor,second);assert.equ
 previous.events.click();assert.deepEqual(cursor,firstCursor());assert.equal(pageIndex,0);
 })().catch(error=>{console.error(error);process.exitCode=1});
 `
-	if out, err := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program).CombinedOutput(); err != nil {
+	if out, err := nodeTestCommand("-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program).CombinedOutput(); err != nil {
 		t.Fatalf("cursor invalidation: %v\n%s", err, out)
 	}
 }
@@ -2316,15 +2316,15 @@ const stopPolling=()=>{throw new Error("installed project entered installation")
  assert.equal(infos,2);assert.equal(requests,0);
 })().catch(error=>{console.error(error);process.exitCode=1});
 `
-	if out, err := exec.Command("node", "-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program).CombinedOutput(); err != nil {
+	if out, err := nodeTestCommand("-e", "globalThis.justVoxelSelectedURL = value => value; globalThis.acceptedServer = {content_kind: \"plugins\"}; globalThis.contentSingular = () => \"plugin\"; globalThis.contentPlural = () => \"plugins\";\n"+program).CombinedOutput(); err != nil {
 		t.Fatalf("installed review guard: %v\n%s", err, out)
 	}
 }
 
 func TestPluginsPlainPaginationAndSemanticBadgeStyles(t *testing.T) {
 	script := pluginWorkspaceScript(t)
-	header, _ := assets.ReadFile("templates/header.html")
-	css, _ := assets.ReadFile("static/app.css")
+	header, _ := englishPresentationAsset("templates/header.html")
+	css, _ := englishPresentationAsset("static/app.css")
 	if !strings.Contains(string(header), `<span data-plugins-page>Page 1 of 1</span>`) {
 		t.Fatal("plain page label missing")
 	}
@@ -2459,11 +2459,11 @@ func TestPluginDiagnosticLinksUseExactLogWithoutReload(t *testing.T) {
 	if strings.Contains(link, "load()") || strings.Contains(link, "closePanel()") || strings.Contains(link, "workspaceWindow?.close()") {
 		t.Fatal("diagnostic link must preserve the Plugins workspace and overlay")
 	}
-	css, err := assets.ReadFile("static/app.css")
+	css, err := englishPresentationAsset("static/app.css")
 	if err != nil || !strings.Contains(string(css), ".plugins-diagnostic-link{display:flex;align-items:center;gap:.5rem}") {
 		t.Fatal("diagnostic sentence and action must share a line", err)
 	}
-	full, err := assets.ReadFile("static/app.js")
+	full, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2515,7 +2515,7 @@ function followExactLink(){
  try{await pluginRequest("install/plan",{});}catch(error){assert.equal(error.diagnosticID,undefined);}
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `
-	if output, err := exec.Command("node", "-e", program).CombinedOutput(); err != nil {
+	if output, err := nodeTestCommand("-e", program).CombinedOutput(); err != nil {
 		t.Fatalf("exact diagnostic navigation: %v\n%s", err, output)
 	}
 }
@@ -2568,7 +2568,7 @@ const panelError=(error)=>{throw error};
  assert.equal(installActions,0);
 })().catch(error=>{console.error(error);process.exitCode=1});
 `
-	command := exec.Command("node", "-e", program)
+	command := nodeTestCommand("-e", program)
 	if out, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("client-only mod detail offered Install: %v\n%s", err, out)
 	}
@@ -2752,7 +2752,7 @@ function verifyStages(op,name,source,id){
  assert(!flatten(panelBody).some(n=>n.tag==="header"));
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `
-	if output, err := exec.Command("node", "-e", program).CombinedOutput(); err != nil {
+	if output, err := nodeTestCommand("-e", program).CombinedOutput(); err != nil {
 		t.Fatalf("project presentation lifecycle: %v\n%s", err, output)
 	}
 }

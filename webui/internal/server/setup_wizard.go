@@ -162,12 +162,12 @@ type setupWizardPageData struct {
 }
 
 var setupWizardSteps = []setupWizardStepView{
-	{Number: setupServerStep, Name: "Server", Description: "Choose server software, welcome message, game mode and player limit."},
-	{Number: setupCrossplayStep, Name: "Cross-play", Description: "Choose Bedrock cross-play, connection ports, server updates and Minecraft version."},
-	{Number: setupMemoryStep, Name: "Memory", Description: "Choose how much system memory Minecraft may use."},
-	{Number: setupStorageStep, Name: "Storage", Description: "Choose where Minecraft worlds, configuration and server data will live."},
-	{Number: setupBackupsStep, Name: "Backups", Description: "Choose backup location, retention and automatic backup schedule."},
-	{Number: setupReviewStep, Name: "Review", Description: "Review the final setup plan and accept the Minecraft EULA before anything is applied."},
+	{Number: setupServerStep, Name: uiText("ui.aef7de28d529"), Description: uiText("ui.56155c701af2")},
+	{Number: setupCrossplayStep, Name: uiText("ui.3ea657a3bed3"), Description: uiText("ui.a2d06718165a")},
+	{Number: setupMemoryStep, Name: uiText("ui.c3963aedaac6"), Description: uiText("ui.04ddf5ea6a8a")},
+	{Number: setupStorageStep, Name: uiText("ui.a69c4dece144"), Description: uiText("ui.c94733afdeb2")},
+	{Number: setupBackupsStep, Name: uiText("ui.3334fee2c77f"), Description: uiText("ui.43357c17c842")},
+	{Number: setupReviewStep, Name: uiText("ui.aff0766a5290"), Description: uiText("ui.b9bfb4f46eb4")},
 }
 
 func (a *App) registerSetupWizardRoutes(mux *http.ServeMux) {
@@ -196,12 +196,12 @@ func (a *App) setupWizardVersionPreview(w http.ResponseWriter, r *http.Request) 
 	}
 	draft, exists := setupDrafts.get(a, session)
 	if !exists || !draft.Started || draft.CurrentStep != setupCrossplayStep {
-		http.Error(w, "Version setup is unavailable", http.StatusConflict)
+		http.Error(w, ui(w, "ui.dc22c4a5d894"), http.StatusConflict)
 		return
 	}
 	client, ok := a.api.(setupVersionPreviewAPI)
 	if !ok {
-		http.Error(w, "Version information is unavailable", http.StatusServiceUnavailable)
+		http.Error(w, ui(w, "ui.7a50a1009c04"), http.StatusServiceUnavailable)
 		return
 	}
 	bedrock := draft.Server.BedrockEnabled
@@ -210,7 +210,7 @@ func (a *App) setupWizardVersionPreview(w http.ResponseWriter, r *http.Request) 
 	}
 	status, err := client.AdminSetupVersionPreview(r.Context(), session, r.URL.Query().Get("policy"), r.URL.Query().Get("version"), bedrock, draft.Minecraft.ServerType)
 	if err != nil {
-		http.Error(w, "Version information is unavailable", http.StatusServiceUnavailable)
+		http.Error(w, ui(w, "ui.7a50a1009c04"), http.StatusServiceUnavailable)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -306,7 +306,7 @@ func (a *App) setupWizardStart(w http.ResponseWriter, r *http.Request) {
 	draft, err := a.newSetupDraft(r.Context(), session, client, isAddServerRequest(r))
 	if err != nil {
 		if isAddServerRequest(r) {
-			message := "Server defaults are unavailable. Check existing server configuration and appliance storage, then try again."
+			message := ui(w, "ui.b2186731d416")
 			if detail, ok := api.ErrorMessage(err); ok {
 				message += " " + detail
 			}
@@ -361,7 +361,7 @@ func (a *App) setupWizardSaveServer(w http.ResponseWriter, r *http.Request) {
 		draft.Server.Complete = false
 		setupDrafts.save(a, session, draft)
 		w.WriteHeader(http.StatusBadRequest)
-		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), "Selected Minecraft server software is not available yet.")
+		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), ui(w, "ui.9751f6c717f5"))
 		return
 	}
 
@@ -370,7 +370,7 @@ func (a *App) setupWizardSaveServer(w http.ResponseWriter, r *http.Request) {
 		if draft.AddServer {
 			fresh, err := a.newAddServerDraft(r.Context(), session, client)
 			if err != nil {
-				http.Error(w, "Server defaults could not be resolved. Try again.", http.StatusServiceUnavailable)
+				http.Error(w, ui(w, "ui.27af82be2b6c"), http.StatusServiceUnavailable)
 				return
 			}
 			draft.Minecraft.JavaPort, draft.Minecraft.BedrockPort = fresh.Minecraft.JavaPort, fresh.Minecraft.BedrockPort
@@ -424,7 +424,7 @@ func (a *App) setupWizardSaveServer(w http.ResponseWriter, r *http.Request) {
 		draft.Server.Complete = false
 		setupDrafts.save(a, session, draft)
 		w.WriteHeader(http.StatusBadRequest)
-		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), "Choose a valid game mode.")
+		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), ui(w, "ui.9b4e69acae19"))
 		return
 	}
 	if serverType == "bedrock" {
@@ -551,7 +551,7 @@ func (a *App) setupWizardNavigate(w http.ResponseWriter, r *http.Request) {
 	}
 	direction := r.FormValue("direction")
 	if direction != "next" && direction != "back" && direction != "jump" {
-		http.Error(w, "invalid setup navigation", http.StatusBadRequest)
+		http.Error(w, ui(w, "ui.206f6ee68aa5"), http.StatusBadRequest)
 		return
 	}
 	target, _ := strconv.Atoi(r.FormValue("step"))
@@ -560,7 +560,7 @@ func (a *App) setupWizardNavigate(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
 			return
 		}
-		http.Error(w, "setup step has not been visited", http.StatusBadRequest)
+		http.Error(w, ui(w, "ui.9e74df88d315"), http.StatusBadRequest)
 		return
 	}
 	setupReviews.delete(a, session)
@@ -614,7 +614,7 @@ func (a *App) setupWizardRequest(w http.ResponseWriter, r *http.Request, require
 	}
 	if isAddServerRequest(r) {
 		if mustChange(r) {
-			http.Error(w, "Password change required", http.StatusForbidden)
+			http.Error(w, ui(w, "ui.77288ba735df"), http.StatusForbidden)
 			return "", nil, api.SessionInfo{}, false
 		}
 		if !configuration.Configured {
@@ -622,14 +622,14 @@ func (a *App) setupWizardRequest(w http.ResponseWriter, r *http.Request, require
 				http.Redirect(w, r, "/setup", http.StatusSeeOther)
 				return "", nil, api.SessionInfo{}, false
 			}
-			http.Error(w, "Complete appliance setup before adding a server.", http.StatusConflict)
+			http.Error(w, ui(w, "ui.6ebbfdec1e9a"), http.StatusConflict)
 			return "", nil, api.SessionInfo{}, false
 		}
 		if draft, exists := setupDrafts.get(a, session); exists && !draft.AddServer {
 			if a.redirectCurrentSetupOperation(w, r, session, client) {
 				return "", nil, api.SessionInfo{}, false
 			}
-			http.Error(w, "Finish or cancel the existing setup before adding a server.", http.StatusConflict)
+			http.Error(w, ui(w, "ui.853d0de131fb"), http.StatusConflict)
 			return "", nil, api.SessionInfo{}, false
 		}
 		return session, client, identity, true
@@ -688,7 +688,7 @@ func (a *App) renderSetupWizard(w http.ResponseWriter, identity api.SessionInfo,
 		SoftwareGroups: softwareGroups, SimpleState: draft.SimpleState, SimpleFamily: draft.SimpleFamily, SimpleSoftware: simpleSoftware(draft.SimpleFamily),
 		AddServer: draft.AddServer, BasePath: basePath, DisplayName: draft.DisplayName, RunningMemory: runningMemory,
 		StartOnBoot: draft.StartOnBoot, StartAfterSetup: draft.StartAfterSetup, StartAfterUnavailable: draft.StartAfterUnavailable, StartBootUnavailable: draft.StartBootUnavailable, BackupAvailable: draft.BackupAvailable, OtherMemoryMiB: draft.OtherMemoryMiB,
-		Title: "First setup", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI,
+		Title: ui(w, "ui.a64036d36e20"), Version: a.config.Version, ManagementAPI: a.config.ManagementAPI,
 		CSRF: csrf, Identity: identity, Started: draft.Started, CurrentStep: draft.CurrentStep,
 		Current: current, Steps: steps, Error: errorMessage,
 		Server: draft.Server, Minecraft: draft.Minecraft, Storage: draft.Storage, Backups: draft.Backups,
@@ -778,9 +778,9 @@ func draftFromSetupDefaults(defaults api.AdminSetupDefaults, inventory api.Admin
 
 func validateSetupServer(server setupServerDraft) error {
 	if strings.ContainsAny(server.MOTD, "\r\n") {
-		return errors.New("Welcome message must be a single line.")
+		return errors.New(uiText("ui.471148d47bdf"))
 	}
-	if _, err := parsePositiveFormInt(server.MaxPlayers, "Maximum players"); err != nil {
+	if _, err := parsePositiveFormInt(server.MaxPlayers, uiText("ui.e1f268f4f175")); err != nil {
 		return err
 	}
 	return nil
@@ -790,26 +790,26 @@ func validateSetupResources(minecraft setupMinecraftDraft, defaults api.AdminSet
 	if minecraft.ServerType == "bedrock" {
 		limit, ok := setupMemoryMiB(minecraft.ContainerMemory)
 		if !ok || limit < 512 || defaults.SystemMemoryMiB > 0 && limit > defaults.SystemMemoryMiB-1024 {
-			return errors.New("Bedrock container memory must leave at least 1 GiB for JustVoxel")
+			return errors.New(uiText("ui.fc22812ed3ae"))
 		}
 		return nil
 	}
 	javaMiB, ok := setupMemoryMiB(minecraft.JavaMemory)
 	if !ok {
-		return errors.New("Minecraft game memory must use a size such as 4G or 4096M.")
+		return errors.New(uiText("ui.fa44f3dc9abc"))
 	}
 	containerMiB, ok := setupMemoryMiB(minecraft.ContainerMemory)
 	if !ok {
-		return errors.New("Maximum Minecraft memory must use a size such as 6G or 6144M.")
+		return errors.New(uiText("ui.79316905d4b4"))
 	}
 	if containerMiB <= javaMiB {
-		return errors.New("Maximum Minecraft memory must be larger than Minecraft game memory.")
+		return errors.New(uiText("ui.ee2308252ddd"))
 	}
 	if containerMiB-javaMiB < 512 {
-		return errors.New("Maximum Minecraft memory must leave at least 512 MiB above Minecraft game memory.")
+		return errors.New(uiText("ui.732fc517a8e0"))
 	}
 	if defaults.SystemMemoryMiB > 0 && containerMiB > defaults.SystemMemoryMiB-1024 {
-		return errors.New("Maximum Minecraft memory must leave at least 1 GiB for JustVoxel and system services.")
+		return errors.New(uiText("ui.bca51603e2ef"))
 	}
 	return nil
 }
@@ -817,14 +817,14 @@ func validateSetupResources(minecraft setupMinecraftDraft, defaults api.AdminSet
 func validateSetupConnections(minecraft setupMinecraftDraft) error {
 	if minecraft.ServerType == "bedrock" {
 		if minecraft.BedrockTCPPort < 1 || minecraft.BedrockTCPPort > 65535 || minecraft.BedrockUDPStart < 1 || minecraft.BedrockUDPEnd < minecraft.BedrockUDPStart || minecraft.BedrockUDPEnd > 65535 {
-			return errors.New("Bedrock connection ports are invalid")
+			return errors.New(uiText("ui.0cd24e3d834e"))
 		}
 		return nil
 	}
-	if _, err := parseSetupPort(minecraft.JavaPort, "Minecraft Java TCP port"); err != nil {
+	if _, err := parseSetupPort(minecraft.JavaPort, uiText("ui.7658b8ed58ab")); err != nil {
 		return err
 	}
-	if _, err := parseSetupPort(minecraft.BedrockPort, "Bedrock TCP/UDP port"); err != nil {
+	if _, err := parseSetupPort(minecraft.BedrockPort, uiText("ui.60abc420b980")); err != nil {
 		return err
 	}
 	return nil
@@ -840,7 +840,7 @@ func validSetupGameMode(mode string) bool {
 
 func validateSetupMinecraft(minecraft setupMinecraftDraft, defaults api.AdminSetupDefaults) error {
 	if !validSetupGameMode(minecraft.GameMode) || minecraft.ServerType == "bedrock" && minecraft.GameMode == "spectator" {
-		return errors.New("Choose a valid game mode.")
+		return errors.New(uiText("ui.9b4e69acae19"))
 	}
 	if err := validateSetupResources(minecraft, defaults); err != nil {
 		return err
@@ -855,12 +855,12 @@ func validateSetupVersion(minecraft setupMinecraftDraft) error {
 	if minecraft.ServerType == "spigot" && minecraft.RuntimeImageTag != "" {
 		required := setupRuntimeImage(minecraft.ServerType, minecraft.ResolvedVersion)
 		if required == "" || minecraft.RuntimeImageTag != required {
-			return errors.New("The resolved Spigot runtime does not match its Minecraft release.")
+			return errors.New(uiText("ui.c1f08010ae17"))
 		}
 	}
 
 	if !setupImageTagPattern.MatchString(minecraft.ImageTag) {
-		return errors.New("Server update channel or tag is invalid.")
+		return errors.New(uiText("ui.785f5f4ad87e"))
 	}
 	switch minecraft.VersionPolicy {
 	case "recommended":
@@ -869,17 +869,17 @@ func validateSetupVersion(minecraft setupMinecraftDraft) error {
 		// The planner resolves an exact preview; runtime keeps this policy moving.
 	case "pinned":
 		if minecraft.Version == "" || minecraft.Version == "LATEST" || !setupVersionPattern.MatchString(minecraft.Version) {
-			return errors.New("Specific Minecraft version is invalid.")
+			return errors.New(uiText("ui.e4fcec805dbc"))
 		}
 	default:
-		return errors.New("Choose a Minecraft version.")
+		return errors.New(uiText("ui.921968d62cc1"))
 	}
 	return nil
 }
 
 func validateSetupConnectionDraft(draft setupDraft) error {
 	if draft.Server.BedrockEnabled && !recommendedServerSupportsBedrock(draft.Minecraft.ServerType) {
-		return errors.New("Managed Bedrock cross-play requires supported plugin software or verified Fabric/NeoForge compatibility.")
+		return errors.New(uiText("ui.59d898937352"))
 	}
 	return validateSetupConnections(draft.Minecraft)
 }
@@ -887,7 +887,7 @@ func validateSetupConnectionDraft(draft setupDraft) error {
 func parseSetupPort(value, label string) (int, error) {
 	port, err := strconv.Atoi(strings.TrimSpace(value))
 	if err != nil || port < 1 || port > 65535 {
-		return 0, fmt.Errorf("%s must be between 1 and 65535.", label)
+		return 0, fmt.Errorf(uiText("ui.2763142982e3"), label)
 	}
 	return port, nil
 }

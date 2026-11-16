@@ -8,7 +8,7 @@ import (
 )
 
 func TestWorkspaceHeaderControls(t *testing.T) {
-	header, err := assets.ReadFile("templates/header.html")
+	header, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestWorkspaceHeaderControls(t *testing.T) {
 	if closes["system-monitor"] == "" {
 		t.Error("system monitor lost its close control")
 	}
-	app, err := assets.ReadFile("static/app.js")
+	app, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,14 +57,14 @@ func TestWorkspaceHeaderControls(t *testing.T) {
 	if len(controlCenter) != 2 || !strings.Contains(controlCenter[1], `<svg class="control-center-icon"`) || !strings.Contains(controlCenter[1], `aria-hidden="true"`) || !strings.Contains(controlCenter[1], `Control Center`) || strings.Contains(controlCenter[1], "⚙") {
 		t.Error("Control Center must retain its label and use an accessible SVG gear")
 	}
-	networkCSS, err := assets.ReadFile("static/network-workspace.css")
+	networkCSS, err := englishPresentationAsset("static/network-workspace.css")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(networkCSS), `.network-workspace-header .system-monitor-header-button:not(.workspace-header-refresh){width:31px;height:31px;font-size:1.08rem}`) || strings.Contains(string(networkCSS), `.network-workspace-header .system-monitor-header-button{`) {
 		t.Error("network header button rule must leave shared Refresh typography and geometry intact")
 	}
-	css, err := assets.ReadFile("static/app.css")
+	css, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestWorkspaceHeaderControls(t *testing.T) {
 }
 
 func TestGatewayNavigationKeepsSwitchOutsideSurfaces(t *testing.T) {
-	header, err := assets.ReadFile("templates/header.html")
+	header, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestGatewayNavigationKeepsSwitchOutsideSurfaces(t *testing.T) {
 }
 
 func TestGatewaySettingsCompactComposition(t *testing.T) {
-	header, err := assets.ReadFile("templates/header.html")
+	header, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +223,7 @@ func TestGatewaySettingsCompactComposition(t *testing.T) {
 }
 
 func TestGatewayHelpReferenceSectionsStayCompact(t *testing.T) {
-	header, err := assets.ReadFile("templates/header.html")
+	header, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +300,7 @@ func TestGatewayHelpReferenceSectionsStayCompact(t *testing.T) {
 func TestWorkspaceHeaderGeometryAndGreenRefresh(t *testing.T) {
 	read := func(name string) string {
 		t.Helper()
-		data, err := assets.ReadFile(name)
+		data, err := englishPresentationAsset(name)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -451,7 +451,7 @@ func TestWorkspaceHeaderGeometryAndGreenRefresh(t *testing.T) {
 }
 
 func TestControlCenterTriggerMeetsTopbarEdges(t *testing.T) {
-	data, err := assets.ReadFile("static/app.css")
+	data, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -495,7 +495,7 @@ func TestControlCenterTriggerMeetsTopbarEdges(t *testing.T) {
 }
 
 func TestWorkspaceHeadersShareControlCenterTypography(t *testing.T) {
-	data, err := assets.ReadFile("static/app.css")
+	data, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -541,7 +541,7 @@ func TestWorkspaceHeadersShareControlCenterTypography(t *testing.T) {
 	if shared < 0 {
 		t.Fatal("shared authoritative workspace title rule missing")
 	}
-	network, err := assets.ReadFile("static/network-workspace.css")
+	network, err := englishPresentationAsset("static/network-workspace.css")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -573,7 +573,7 @@ func TestWorkspaceHeadersShareControlCenterTypography(t *testing.T) {
 }
 
 func TestDesktopControlCenterRoundedButtonGeometry(t *testing.T) {
-	data, err := assets.ReadFile("static/app.css")
+	data, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}

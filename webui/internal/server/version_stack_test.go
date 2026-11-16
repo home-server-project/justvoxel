@@ -60,7 +60,7 @@ func TestVersionStackUpdateRequiresAdministratorAndCSRF(t *testing.T) {
 }
 
 func TestVersionStackUIUsesSafeStackStateAndSingleReview(t *testing.T) {
-	data, err := os.ReadFile("static/version-workspace.js")
+	data, err := englishPresentationAsset("static/version-workspace.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestVersionRecoveryWordingInNormalWebUI(t *testing.T) {
 			if entry.IsDir() {
 				return nil
 			}
-			data, err := os.ReadFile(root + "/" + path)
+			data, err := englishPresentationAsset(root + "/" + path)
 			if err != nil {
 				return err
 			}

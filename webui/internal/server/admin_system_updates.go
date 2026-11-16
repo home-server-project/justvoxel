@@ -120,17 +120,17 @@ func (a *App) systemUpdateRequest(w http.ResponseWriter, r *http.Request, requir
 		return "", nil, false
 	}
 	if mustChange(r) {
-		http.Error(w, "password change required", http.StatusForbidden)
+		http.Error(w, ui(w, "ui.63bae92440ec"), http.StatusForbidden)
 		return "", nil, false
 	}
 	session, ok := sessionFromRequest(r)
 	if !ok {
-		http.Error(w, "authentication required", http.StatusUnauthorized)
+		http.Error(w, ui(w, "ui.cbac8bee7536"), http.StatusUnauthorized)
 		return "", nil, false
 	}
 	client, ok := a.api.(adminSystemUpdatesAPI)
 	if !ok {
-		http.Error(w, "system updates are unavailable", http.StatusServiceUnavailable)
+		http.Error(w, ui(w, "ui.05add43d545f"), http.StatusServiceUnavailable)
 		return "", nil, false
 	}
 	identity, err := client.Session(r.Context(), session)
@@ -139,7 +139,7 @@ func (a *App) systemUpdateRequest(w http.ResponseWriter, r *http.Request, requir
 		return "", nil, false
 	}
 	if identity.Role != "administrator" {
-		http.Error(w, "Administrator access required", http.StatusForbidden)
+		http.Error(w, ui(w, "ui.031cc7a3ec82"), http.StatusForbidden)
 		return "", nil, false
 	}
 	return session, client, true
@@ -148,11 +148,11 @@ func (a *App) systemUpdateRequest(w http.ResponseWriter, r *http.Request, requir
 func (a *App) handleSystemUpdateAPIError(w http.ResponseWriter, err error) {
 	if errors.Is(err, api.ErrUnauthorized) {
 		a.clearSessionCookies(w)
-		http.Error(w, "authentication required", http.StatusUnauthorized)
+		http.Error(w, ui(w, "ui.cbac8bee7536"), http.StatusUnauthorized)
 		return
 	}
 	if errors.Is(err, api.ErrPasswordChangeRequired) {
-		http.Error(w, "password change required", http.StatusForbidden)
+		http.Error(w, ui(w, "ui.63bae92440ec"), http.StatusForbidden)
 		return
 	}
 	var responseErr *api.ResponseError
@@ -163,12 +163,12 @@ func (a *App) handleSystemUpdateAPIError(w http.ResponseWriter, err error) {
 		}
 		message := responseErr.Message
 		if message == "" {
-			message = "system update request failed"
+			message = ui(w, "ui.787303f8fef1")
 		}
 		writeSystemUpdateJSON(w, status, map[string]string{"error": message})
 		return
 	}
-	http.Error(w, "system update service unavailable", http.StatusBadGateway)
+	http.Error(w, ui(w, "ui.b312c215bcd9"), http.StatusBadGateway)
 }
 
 func writeSystemUpdateJSON(w http.ResponseWriter, status int, value any) {
@@ -185,14 +185,14 @@ func (a *App) systemUpdateForce(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.RawQuery != "" || len(r.PostForm) != 1 || len(r.PostForm["csrf"]) != 1 {
-		http.Error(w, "Force update takes no options", http.StatusBadRequest)
+		http.Error(w, ui(w, "ui.b7d8b6dcc785"), http.StatusBadRequest)
 		return
 	}
 	recovery, ok := client.(interface {
 		AdminSystemUpdateForce(context.Context, string) (api.AdminSystemUpdateStatus, error)
 	})
 	if !ok {
-		http.Error(w, "Update recovery is unavailable", http.StatusServiceUnavailable)
+		http.Error(w, ui(w, "ui.fd01efc54fe6"), http.StatusServiceUnavailable)
 		return
 	}
 	status, err := recovery.AdminSystemUpdateForce(r.Context(), session)

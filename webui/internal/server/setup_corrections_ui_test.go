@@ -4,14 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os/exec"
 	"strings"
 	"testing"
 )
 
 func correctionSource(t *testing.T, name string) string {
 	t.Helper()
-	data, err := assets.ReadFile(name)
+	data, err := englishPresentationAsset(name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +136,7 @@ assert.equal(next.disabled, true);
 assert.equal(preview.children[0].className, "notice warning setup-version-panel");
 assert(text().includes("No usable server build was found for this version."));
 `
-	cmd := exec.Command("node")
+	cmd := nodeTestCommand()
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("version preview behavior: %v\n%s", err, output)
@@ -210,7 +209,7 @@ assert.equal(page.clock.children[0].textContent, "12:42 AM");
 assert.equal(page.clock.children[2].textContent, "Oct 11 2026");
 })().catch(error => { console.error(error); process.exitCode = 1; });
 `
-	cmd := exec.Command("node")
+	cmd := nodeTestCommand()
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("clock display behavior: %v\n%s", err, output)
@@ -348,7 +347,7 @@ func TestWizardScheduleAndHeadings(t *testing.T) {
 }
 
 func TestWizardModalStorageBehaviorAndStateRefresh(t *testing.T) {
-	cmd := exec.Command("node", "../../../tests/test-setup-inline-storage.js")
+	cmd := nodeTestCommand("../../../tests/test-setup-inline-storage.js")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("modal wizard disk operations: %v\n%s", err, output)
 	}
@@ -419,7 +418,7 @@ const flatten = n => [n.textContent || "", ...(n.children || []).flatMap(flatten
   }
 })().catch(error => { console.error(error); process.exitCode = 1; });
 `
-	cmd := exec.Command("node")
+	cmd := nodeTestCommand()
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("About metadata presentation: %v\n%s", err, output)
@@ -541,7 +540,7 @@ let fetch = async () => { throw new Error("transport unavailable"); };
   assert.match(preview.children[0].children[1].textContent, /Enter a Minecraft version/);
 })().catch(error => { console.error(error); process.exitCode = 1; });
 `
-	cmd := exec.Command("node")
+	cmd := nodeTestCommand()
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("version notices: %v\n%s", err, output)

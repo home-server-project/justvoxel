@@ -62,7 +62,7 @@ func TestStandaloneSystemSettingsUIRetired(t *testing.T) {
 		"users.html",
 		"validation.html",
 	} {
-		if _, err := assets.ReadFile("templates/" + name); !errors.Is(err, fs.ErrNotExist) {
+		if _, err := englishPresentationAsset("templates/" + name); !errors.Is(err, fs.ErrNotExist) {
 			t.Errorf("retired embedded template %s: got %v, want file not found", name, err)
 		}
 	}

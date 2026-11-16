@@ -44,9 +44,9 @@
     find('[data-telegram-token-cancel]').hidden = !configured || !replacing;
   };
   const permission = (draft, edited) => {
-    const group = node('label', 'Permission '); group.className = 'telegram-permission';
-    const select = document.createElement('select'); select.setAttribute('aria-label', 'Permission');
-    for (const [key, label] of [['read_only', 'Read Only'], ['server_management', 'Server Management']]) {
+    const group = node('label', jvT("ui.c0a479d66f82")); group.className = 'telegram-permission';
+    const select = document.createElement('select'); select.setAttribute('aria-label', jvT("ui.229efc8f5263"));
+    for (const [key, label] of [['read_only', jvT("ui.ca1048507ded")], ['server_management', jvT("ui.5754cb826093")]]) {
       const option = node('option', label); option.value = key; select.append(option);
     }
     select.value = draft.permission;
@@ -62,15 +62,15 @@
     label.prepend(input); return label;
   };
   const send = async payload => {
-    if (!primary()) throw new Error('Sign in as the primary voxel administrator.');
+    if (!primary()) throw new Error(jvT("ui.220fabe28e2a"));
     const options = {credentials: 'same-origin', cache: 'no-store', headers: {Accept: 'application/json'}};
     if (payload) {
-      options.method = 'POST';
+      options.method = "POST";
       options.body = new URLSearchParams({csrf: find('[data-telegram-content]').dataset.telegramCsrf, request: JSON.stringify(payload)});
     }
     const response = await fetch('/api/telegram', options);
     if (!response.ok || response.redirected) {
-      let message = 'Telegram settings could not be loaded or saved. Verify the bot token and use a dedicated bot without another polling app or webhook.';
+      let message = jvT("ui.136c99c24ae8");
       try { const result = await response.json(); if (typeof result.error === 'string' && result.error.length <= 300) message = result.error; } catch (_) { /* Keep the fixed fallback. */ }
       throw new Error(message);
     }
@@ -87,7 +87,7 @@
     renderHeader();
     dialog.dispatchEvent(new CustomEvent('telegram-state', {detail: {...presentation}}));
     if (!active()) return;
-    const labels = {disconnected: 'Disconnected', unverified: 'Token saved — verification needed', verification_failed: 'Verification failed', verified: 'Bot verified', connecting: 'Connecting', connected: 'Connected', disabled: 'Disabled', connection_retry: 'Connection interrupted — retrying', connection_paused: 'Connection paused — verify the bot and enable again'};
+    const labels = {disconnected: jvT("ui.04dfac3671b4"), unverified: jvT("ui.2137ad12923b"), verification_failed: jvT("ui.f0f2383f8af8"), verified: jvT("ui.f724fb6f802d"), connecting: jvT("ui.d403c686f6a1"), connected: jvT("ui.22965568d22a"), disabled: jvT("ui.75081b593d15"), connection_retry: jvT("ui.d863e61f0f53"), connection_paused: jvT("ui.bc896a6b4afe")};
     const status = find('[data-telegram-status]');
     status.textContent = `${snapshot.bot_name ? `@${snapshot.bot_name}  ` : ''}● ${labels[snapshot.status] || 'Connection unavailable'}`;
     status.className = `gateway-connection-state${['verified', 'connected'].includes(snapshot.status) ? ' success' : ['verification_failed', 'connection_retry', 'connection_paused'].includes(snapshot.status) ? ' error' : snapshot.status === 'unverified' ? ' warning' : ''}`;
@@ -95,7 +95,7 @@
     find('[data-telegram-verify]').hidden = snapshot.verified;
     find('[data-telegram-verify]').disabled = !snapshot.configured;
     find('[data-telegram-pair]').disabled = !snapshot.enabled;
-    find('[data-telegram-operation]').textContent = snapshot.operation_status ? snapshot.operation_status.replaceAll('_', ' ') : 'No Telegram operations yet.';
+    find('[data-telegram-operation]').textContent = snapshot.operation_status ? snapshot.operation_status.replaceAll('_', ' ') : jvT("ui.d54609390f7a");
     const users = find('[data-telegram-users]'); users.replaceChildren();
     const userIDs = new Set((snapshot.users || []).map(user => user.id));
     for (const id of userDrafts.keys()) if (!userIDs.has(id)) userDrafts.delete(id);
@@ -103,9 +103,9 @@
       const row = node('div', ''); row.className = 'integration-lane';
       const draft = userDrafts.get(user.id) || {permission: user.permission, notifications: user.notifications};
       const edited = () => userDrafts.set(user.id, draft);
-      row.append(node('strong', 'Access'), node('span', `User ${user.id}`), permission(draft, edited), notifications(draft, edited),
-        button('Save', () => change({action: 'user', user_id: user.id, permission: draft.permission, notifications: draft.notifications})),
-        button('Revoke', () => change({action: 'revoke', user_id: user.id})));
+      row.append(node('strong', jvT("ui.ec5ba0abb717")), node('span', jvT("ui.19de1acb0e29", {v0: (user.id)})), permission(draft, edited), notifications(draft, edited),
+        button(jvT("ui.1509f561f241"), () => change({action: 'user', user_id: user.id, permission: draft.permission, notifications: draft.notifications})),
+        button(jvT("ui.87e6d00bbf53"), () => change({action: 'revoke', user_id: user.id})));
       users.append(row);
     }
     const pending = find('[data-telegram-pending]'); pending.replaceChildren();
@@ -116,14 +116,14 @@
       if (pendingDraft) {
         challenge.textContent = '';
         const draft = pendingDraft;
-        pending.append(node('span', `User ${draft.id}`), permission(draft, () => {}), notifications(draft, () => {}),
-          button('Approve', () => change({action: 'approve', user_id: draft.id, permission: draft.permission, notifications: draft.notifications})));
+        pending.append(node('span', jvT("ui.19de1acb0e29", {v0: (draft.id)})), permission(draft, () => {}), notifications(draft, () => {}),
+          button(jvT("ui.6007acbe30b2"), () => change({action: 'approve', user_id: draft.id, permission: draft.permission, notifications: draft.notifications})));
       }
     }
     if (!pairing || pendingID || !snapshot.configured || pairing.expires !== pairingExpires) clearPairingCommand();
     challenge.textContent = pairingCommand;
     find('[data-telegram-copy]').hidden = !pairingCommand;
-    find('[data-telegram-expiry]').textContent = pairing && !pendingID ? `Expires ${new Date(pairing.expires).toLocaleTimeString()}` : '';
+    find('[data-telegram-expiry]').textContent = pairing && !pendingID ? jvT("ui.5503bbe0d985", {v0: (new Date(pairing.expires).toLocaleTimeString())}) : '';
   };
   const change = async payload => {
     const globalChange = payload.action === 'enabled';
@@ -131,7 +131,7 @@
     const requestGeneration = generation;
     const requestSurface = surfaceGeneration;
     const current = () => requestGeneration === generation && workspaceOpen() && (globalChange || (requestSurface === surfaceGeneration && active()));
-    busy = true; renderHeader(); report('Saving…');
+    busy = true; renderHeader(); report(jvT("ui.23e39291d613"));
     try {
       let snapshot = await send(payload);
       if (!current()) return;
@@ -156,7 +156,7 @@
         if (!current()) return;
       } else if (payload.action === 'verify') verificationFailed = false;
       render(snapshot);
-      report(verificationFailed ? 'Token saved, but verification failed. Check the token or connection.' : 'Saved.');
+      report(verificationFailed ? jvT("ui.714d3e2f50db") : jvT("ui.fca046ccd586"));
     } catch (error) { if (current()) report(error.message); }
     finally { if (payload && Object.hasOwn(payload, 'token')) payload.token = ''; busy = false; renderHeader(); if (!active()) clearSecrets(); }
   };
@@ -205,11 +205,11 @@
       textarea.remove();
     }
     if (command !== pairingCommand || !active()) return;
-    if (copied) { find('[data-telegram-copy]').textContent = 'Copied'; setTimeout(() => { find('[data-telegram-copy]').textContent = 'Copy'; }, 2000); }
+    if (copied) { find('[data-telegram-copy]').textContent = jvT("ui.8d525e5f158b"); setTimeout(() => { find('[data-telegram-copy]').textContent = jvT("ui.e21f935f11d7"); }, 2000); }
     else {
       const range = document.createRange(); range.selectNodeContents(challenge);
       const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
-      feedback.textContent = 'Command selected. Press Ctrl+C to copy.';
+      feedback.textContent = jvT("ui.ce0d876e5715");
     }
   });
   find('[data-telegram-disconnect]').addEventListener('click', () => change({action: 'disconnect'}));

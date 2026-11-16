@@ -28,7 +28,7 @@ func (a *App) minecraftContainerWorkspace(w http.ResponseWriter, r *http.Request
 	}
 	client, ok := a.api.(minecraftContainerAPI)
 	if !ok {
-		writeMinecraftWorkspaceError(w, 503, "Container maintenance is unavailable.")
+		writeMinecraftWorkspaceError(w, 503, ui(w, "ui.10e725f8d499"))
 		return
 	}
 	query := r.URL.Query()
@@ -36,16 +36,16 @@ func (a *App) minecraftContainerWorkspace(w http.ResponseWriter, r *http.Request
 	r.URL.RawQuery = query.Encode()
 	if r.Method == http.MethodGet && r.URL.Path == "/api/version/container/status" {
 		if len(query) != 0 {
-			writeMinecraftWorkspaceError(w, 400, "Invalid container status request.")
+			writeMinecraftWorkspaceError(w, 400, ui(w, "ui.b0a61f2de3f3"))
 			return
 		}
 		out, err := client.MinecraftInstanceContainerStatus(r.Context(), session, selected.ID)
 		if err != nil {
-			a.writeMinecraftWorkspaceAPIError(w, err, "Container information is unavailable.")
+			a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.ab79f4caf391"))
 			return
 		}
 		if out.InstanceID != selected.ID {
-			writeMinecraftWorkspaceError(w, 503, "Selected container identity could not be verified.")
+			writeMinecraftWorkspaceError(w, 503, ui(w, "ui.d2997af148a4"))
 			return
 		}
 		writeMinecraftWorkspaceJSON(w, 200, struct {
@@ -62,7 +62,7 @@ func (a *App) minecraftContainerWorkspace(w http.ResponseWriter, r *http.Request
 	} else {
 		r.Body = http.MaxBytesReader(w, r.Body, 4096)
 		if r.ParseForm() != nil || len(query) != 0 {
-			writeMinecraftWorkspaceError(w, 400, "Invalid container update request.")
+			writeMinecraftWorkspaceError(w, 400, ui(w, "ui.b00521c2118b"))
 			return
 		}
 		allowed := []string{"csrf", "plan_fingerprint", "restart_now", "backup_before_restart", "confirm_players", "restore_digest"}
@@ -76,18 +76,18 @@ func (a *App) minecraftContainerWorkspace(w http.ResponseWriter, r *http.Request
 		}
 		for key, values := range r.PostForm {
 			if !slices.Contains(allowed, key) || len(values) != 1 {
-				writeMinecraftWorkspaceError(w, 400, "Invalid container update request.")
+				writeMinecraftWorkspaceError(w, 400, ui(w, "ui.b00521c2118b"))
 				return
 			}
 		}
 		for _, key := range []string{"restart_now", "backup_before_restart", "confirm_players"} {
 			if value := r.FormValue(key); value != "" && value != "yes" && value != "no" {
-				writeMinecraftWorkspaceError(w, 400, "Invalid container update choice.")
+				writeMinecraftWorkspaceError(w, 400, ui(w, "ui.3a71f134c8d4"))
 				return
 			}
 		}
 		if !a.validCSRF(r) {
-			writeMinecraftWorkspaceError(w, 403, "Invalid CSRF token.")
+			writeMinecraftWorkspaceError(w, 403, ui(w, "ui.74bccc44f472"))
 			return
 		}
 		if retention {
@@ -96,23 +96,23 @@ func (a *App) minecraftContainerWorkspace(w http.ResponseWriter, r *http.Request
 				value = "1"
 			}
 			if strings.Trim(value, "0123456789") != "" {
-				writeMinecraftWorkspaceError(w, 400, "Keep previous images must be a non-negative integer.")
+				writeMinecraftWorkspaceError(w, 400, ui(w, "ui.3343c4387296"))
 				return
 			}
 			n, parseErr := strconv.Atoi(value)
 			if parseErr != nil || n < 0 {
-				writeMinecraftWorkspaceError(w, 400, "Keep previous images must be a non-negative integer.")
+				writeMinecraftWorkspaceError(w, 400, ui(w, "ui.3343c4387296"))
 				return
 			}
 			writer, ok := a.api.(interface {
 				MinecraftInstanceContainerRetention(context.Context, string, string, int) error
 			})
 			if !ok {
-				writeMinecraftWorkspaceError(w, 503, "Previous image retention is unavailable.")
+				writeMinecraftWorkspaceError(w, 503, ui(w, "ui.e25c8609ecb8"))
 				return
 			}
 			if err := writer.MinecraftInstanceContainerRetention(r.Context(), session, selected.ID, n); err != nil {
-				a.writeMinecraftWorkspaceAPIError(w, err, "Previous image retention could not be saved.")
+				a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.cb2baeb8a0df"))
 				return
 			}
 			writeMinecraftWorkspaceJSON(w, 200, map[string]any{"ok": true, "keep_previous_images": n})
@@ -127,11 +127,11 @@ func (a *App) minecraftContainerWorkspace(w http.ResponseWriter, r *http.Request
 		}
 	}
 	if err != nil {
-		a.writeMinecraftWorkspaceAPIError(w, err, "Container operation is unavailable.")
+		a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.ca1e194a59d9"))
 		return
 	}
 	if out.Operation != nil && (out.Operation.InstanceID != selected.ID || out.Operation.OperationType != "minecraft_container_update") {
-		writeMinecraftWorkspaceError(w, 404, "Selected container operation not found.")
+		writeMinecraftWorkspaceError(w, 404, ui(w, "ui.805e95ac8928"))
 		return
 	}
 	writeMinecraftWorkspaceJSON(w, code, out)

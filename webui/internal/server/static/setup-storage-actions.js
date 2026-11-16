@@ -6,10 +6,10 @@
   async function refreshWizardInventory(successMessage = '') {
     const wizardPath = form().getAttribute('action').replace(/\/[^/]+$/, '');
     const response = await fetch(wizardPath, {credentials: 'same-origin', cache: 'no-store', headers: {Accept: 'text/html'}});
-    if (!response.ok || response.redirected) throw new Error('Inventory could not be refreshed. Sign in again if your session expired.');
+    if (!response.ok || response.redirected) throw new Error(jvT("ui.a07558119b42"));
     const page = new DOMParser().parseFromString(await response.text(), 'text/html');
     const replacement = page.querySelector(formSelector), current = form();
-    if (!current || !replacement || current.getAttribute('action') !== replacement.getAttribute('action')) throw new Error('Setup changed. Return to the current setup step.');
+    if (!current || !replacement || current.getAttribute('action') !== replacement.getAttribute('action')) throw new Error(jvT("ui.08377a1e89e0"));
     // Snapshot after discovery to retain edits made during the request. No browser storage.
     const fields = (root) => [...root.querySelectorAll('input, select, textarea')].filter(field => !field.closest('dialog') && !field.matches('[data-storage-action-csrf]'));
     const key = (field) => field.name || JSON.stringify(field.dataset);
@@ -40,7 +40,7 @@
       const payload = await response.json();
       if (!response.ok || !payload?.ok) {
         const conflict = /conflict|inconsistent|another filesystem/i.test(payload?.error || '');
-        throw new Error(conflict ? 'Saved mount location conflicts with another filesystem. Choose another partition or ask your administrator for help.' : 'Partition cannot be selected safely. Refresh the drives before continuing.');
+        throw new Error(conflict ? jvT("ui.74c01fdd91bd") : jvT("ui.3a0f8bfdb2b2"));
       }
       const status = payload.proposed;
       available = Boolean(status && status.device === oldDevice && status.uuid === nextChoice.dataset.uuid &&
@@ -77,7 +77,7 @@
       notice.hidden = !lostSelection && !successMessage;
       notice.className = lostSelection ? 'notice error' : 'notice success';
       notice.setAttribute('role', lostSelection ? 'alert' : 'status');
-      notice.textContent = lostSelection ? [successMessage, selectionError, 'The previous partition selection was cleared. Choose another partition or system storage, or open the partition details to try verification again.'].filter(Boolean).join(' ') : successMessage;
+      notice.textContent = lostSelection ? [successMessage, selectionError, jvT("ui.7891920c2698")].filter(Boolean).join(' ') : successMessage;
     }
     [...replacement.querySelectorAll('[data-storage-disk]')].find(button => button.dataset.storageDisk === selectedDisk)?.click();
   }
@@ -112,7 +112,7 @@
           if (knownMount && ['none', 'justvoxel', 'external'].includes(status.persistence)) choice.dataset.mountpoint = knownMount;
           current.dispatchEvent(new CustomEvent('setup-destination-select', {detail: path}));
         },
-        async onChanged(successMessage = 'Storage updated.') {
+        async onChanged(successMessage = jvT("ui.019bd0148d26")) {
           // Invalidate old inventory immediately without blocking Back, Cancel or system storage.
           current.dataset.inventoryStale = 'true';
           current.querySelectorAll('[data-storage-partition], [data-storage-free-space]').forEach(button => { button.disabled = true; });
@@ -121,7 +121,7 @@
           const notice = current.querySelector('[data-setup-inventory-error]');
           const message = document.createElement('p');
           notice.replaceChildren(message, retry); notice.hidden = false; notice.className = 'notice error'; notice.setAttribute('role', 'alert');
-          message.textContent = successMessage + ' Refreshing drives…';
+          message.textContent = successMessage + jvT("ui.e54de815ced3");
           async function refresh() {
             retry.disabled = true;
             try { await refreshWizardInventory(successMessage); }
@@ -129,7 +129,7 @@
               if (current.querySelector('[data-setup-storage-type], [data-setup-backup-type]')?.value === 'partition') {
                 current.querySelectorAll('[data-setup-storage-device], [data-setup-storage-mount], [data-setup-storage-path], [data-setup-backup-device], [data-setup-backup-mount], [data-setup-backup-path]').forEach(field => { field.value = ''; });
               }
-              message.textContent = successMessage + ' ' + error.message + ' Partition choices are unavailable until drives can be refreshed. Retry, choose system storage, go Back, or cancel setup.';
+              message.textContent = successMessage + ' ' + error.message + jvT("ui.086f9e13007d");
             } finally { retry.disabled = false; }
           }
           retry.addEventListener('click', () => void refresh());

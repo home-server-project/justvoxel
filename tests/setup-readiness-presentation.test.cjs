@@ -1,6 +1,6 @@
 // Focused dependency-free presentation and uncertain-submission regressions.
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
+const fs = require('./helpers/webui-i18n.cjs');
 const path = require("node:path");
 const vm = require("node:vm");
 const root = path.join(__dirname, "..");

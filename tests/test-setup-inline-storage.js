@@ -1,6 +1,6 @@
 // Run with node. Exercises production wizard code with mocked DOM and APIs only.
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
+const fs = require('./helpers/webui-i18n.cjs');
 const path = require('node:path');
 const vm = require('node:vm');
 const base = path.join(__dirname, '../webui/internal/server/static');

@@ -1,9 +1,9 @@
 {{define "how_to_connect.html"}}<!doctype html>
-<html lang="en" class="connect-document">
-<head>
+<html lang="{{locale}}" class="connect-document">
+<head><script src="/i18n.js"></script><script src="/static/i18n.js"></script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>JustVoxel — How to connect</title>
+  <title>{{t "ui.15076743a90b"}}</title>
   <link rel="icon" type="image/png" href="/static/justvoxel-favicon.png">
   <link rel="stylesheet" href="/static/app.css">
   <link rel="stylesheet" href="/static/how-to-connect.css">
@@ -12,23 +12,23 @@
 <body class="connect-page">
 <main class="connect-shell" data-connect-page data-connect-server-name="{{.ConnectionGuide.ServerName}}"{{if .ConnectionGuide.Configured}} data-java-port="{{.ConnectionGuide.JavaPort}}"{{if .ConnectionGuide.Bedrock}} data-bedrock-port="{{.ConnectionGuide.BedrockPort}}"{{end}}{{end}}>
 {{if and (not .ConnectionGuide.Configured) (or .SelectedMinecraftID (not .ConnectionServers))}}
-<section class="connect-empty panel"><h1>Minecraft is not configured yet</h1><p>Ask the server owner to complete Minecraft setup. A connection guide will be available here once the server is configured.</p></section>
+<section class="connect-empty panel"><h1>{{t "ui.f6d6c7412745"}}</h1><p>{{t "ui.a8c77d8cc282"}}</p></section>
 {{else}}
 <section class="connect-controls panel" aria-labelledby="connect-title">
-  <p class="connect-eyebrow eyebrow">JUSTVOXEL · SHARE THE ADVENTURE</p>
-  <div class="connect-title-row title-row"><h1 id="connect-title">How to connect</h1><div class="connect-server-lane">
-    <span id="connect-server-label">Server:</span>
+  <p class="connect-eyebrow eyebrow">{{t "ui.e7faf93f7b32"}}</p>
+  <div class="connect-title-row title-row"><h1 id="connect-title">{{t "ui.2198ec8ff357"}}</h1><div class="connect-server-lane">
+    <span id="connect-server-label">{{t "ui.087fbe073393"}}</span>
     <details class="server-selector" data-selected-server="{{.SelectedMinecraftID}}">
-      <summary aria-labelledby="connect-server-label connect-server-name"><span id="connect-server-name">{{if .SelectedMinecraftID}}{{range .ConnectionServers}}{{if eq .ID $.SelectedMinecraftID}}{{.Name}}{{end}}{{end}}{{else}}Choose server{{end}}</span></summary>
+      <summary aria-labelledby="connect-server-label connect-server-name"><span id="connect-server-name">{{if .SelectedMinecraftID}}{{range .ConnectionServers}}{{if eq .ID $.SelectedMinecraftID}}{{.Name}}{{end}}{{end}}{{else}}{{t "ui.389e87e83148"}}{{end}}</span></summary>
       <div class="server-selector-menu" popover="auto">
         {{range .ConnectionServers}}<button type="button" class="server-selector-option" data-server-id="{{.ID}}" aria-pressed="{{if eq .ID $.SelectedMinecraftID}}true{{else}}false{{end}}"><span>{{.Name}}</span></button>{{end}}
       </div>
     </details>
   </div></div>
-  {{if not .SelectedMinecraftID}}<p>Choose a server to see its connection guide.</p>
+  {{if not .SelectedMinecraftID}}<p>{{t "ui.e35e5206b720"}}</p>
 </section>
   {{else}}
-  <p>Choose how your friends will join, then save the connection guide to share.</p>
+  <p>{{t "ui.73ca90a52d27"}}</p>
   <div class="connect-methods">
     <div class="connect-method-row connect-method-row-primary">
     {{range .ConnectionGuide.Methods}}{{if or (eq .ID "local") (eq .ID "playit")}}{{template "connect-method-control" .}}{{end}}{{end}}
@@ -39,56 +39,56 @@
   </div>
   <div class="connect-actions connect-domain">
     {{range .ConnectionGuide.Methods}}{{if eq .ID "custom"}}
-    <label for="connect-domain">Custom domain</label>
-    <input id="connect-domain" type="text" autocomplete="off" spellcheck="false" maxlength="253" placeholder="minecraft.example.com" aria-describedby="connect-domain-help" disabled>
-    <input id="connect-custom" type="checkbox" role="switch" aria-label="Include Custom domain" data-connect-method="custom"{{if not .Available}} disabled{{end}}>
+    <label for="connect-domain">{{t "ui.d7d4c1e416bc"}}</label>
+    <input id="connect-domain" type="text" autocomplete="off" spellcheck="false" maxlength="253" placeholder="{{t "ui.ee843216077b"}}" aria-describedby="connect-domain-help" disabled>
+    <input id="connect-custom" type="checkbox" role="switch" aria-label="{{t "ui.2491ac59c4bb"}}" data-connect-method="custom"{{if not .Available}} disabled{{end}}>
     {{end}}{{end}}
-    <button type="button" data-connect-print disabled>Save to PDF</button>
-    <small class="muted" id="connect-domain-help">Hostname only — no https:// or port.</small>
+    <button type="button" data-connect-print disabled>{{t "ui.af168522d640"}}</button>
+    <small class="muted" id="connect-domain-help">{{t "ui.ec2ae07ec7b8"}}</small>
   </div>
-  <div class="connect-invite-controls"><button type="button" data-connect-invite disabled>Invite friends</button></div>
-  <noscript><p>Enable JavaScript to select connection methods and generate your guide.</p></noscript>
+  <div class="connect-invite-controls"><button type="button" data-connect-invite disabled>{{t "ui.2614b42d8452"}}</button></div>
+  <noscript><p>{{t "ui.37c0da68dbf6"}}</p></noscript>
 </section>
 <dialog class="connect-invitation" data-connect-invitation aria-labelledby="connect-invitation-title">
-  <h2 id="connect-invitation-title">Invite friends</h2>
+  <h2 id="connect-invitation-title">{{t "ui.2614b42d8452"}}</h2>
   <p>{{.ConnectionGuide.ServerName}}</p>
-  <label for="connect-invitation-text">Invitation</label>
+  <label for="connect-invitation-text">{{t "ui.af4ea02852eb"}}</label>
   <textarea id="connect-invitation-text" data-connect-invitation-text readonly rows="10" spellcheck="false"></textarea>
   <p data-connect-copy-status role="status" aria-live="polite"></p>
-  <div class="action-row"><button type="button" class="secondary" data-connect-invitation-close>Close</button><button type="button" data-connect-copy>Copy invitation</button></div>
+  <div class="action-row"><button type="button" class="secondary" data-connect-invitation-close>{{t "ui.7d9eb7acb13e"}}</button><button type="button" data-connect-copy>{{t "ui.74554e40cdde"}}</button></div>
 </dialog>
 <article class="connect-guide" data-connect-guide hidden>
-  <header class="connect-guide-heading"><div class="connect-guide-top-row"><img class="connect-print-logo" src="/static/justvoxel-login-logo.png" alt="JustVoxel" width="2172" height="724"><p>{{.ConnectionGuide.Server}}</p></div><h1>JustVoxel Connection Guide</h1><span class="connect-editions badge">Java Edition{{if .ConnectionGuide.Bedrock}} + Bedrock Edition{{end}}</span><p>Connection methods: <span data-connect-summary></span></p></header>
-  <section aria-labelledby="connect-addresses"><h2 id="connect-addresses">Your connection options</h2><div class="connect-cards">
+  <header class="connect-guide-heading"><div class="connect-guide-top-row"><img class="connect-print-logo" src="/static/justvoxel-login-logo.png" alt="JustVoxel" width="2172" height="724"><p>{{.ConnectionGuide.Server}}</p></div><h1>{{t "ui.347567c7f91d"}}</h1><span class="connect-editions badge">{{t "ui.8716240ed98f"}}{{if .ConnectionGuide.Bedrock}} {{t "ui.cadd2c84f2f8"}}{{end}}</span><p>{{t "ui.fab0755656a5"}} <span data-connect-summary></span></p></header>
+  <section aria-labelledby="connect-addresses"><h2 id="connect-addresses">{{t "ui.56b27edf5966"}}</h2><div class="connect-cards">
   {{range .ConnectionGuide.Methods}}
-    {{if .Available}}<section class="connect-card" data-connect-card="{{.ID}}" data-connect-name="{{.Name}}" hidden><h3>{{.Name}}</h3><p>{{.Note}}</p>
+    {{if .Available}}<section class="connect-card" data-connect-card="{{.ID}}" data-connect-name="{{ts .Name}}" hidden><h3>{{ts .Name}}</h3><p>{{ts .Note}}</p>
       {{if eq .ID "custom"}}
-      <div class="connect-endpoint" data-connect-endpoint="Java"><h4>Java</h4><p>Address: <strong data-connect-domain-address></strong></p><p>Port: {{$.ConnectionGuide.JavaPort}}</p><p>Enter in Minecraft: <code data-connect-domain-java></code></p></div>
-      {{if $.ConnectionGuide.Bedrock}}<div class="connect-endpoint" data-connect-endpoint="Bedrock" data-connect-port="{{$.ConnectionGuide.BedrockPort}}"><h4>Bedrock</h4><p>Address: <strong data-connect-domain-address></strong></p><p>Port: {{$.ConnectionGuide.BedrockPort}}</p></div>{{end}}
+      <div class="connect-endpoint" data-connect-endpoint="Java"><h4>Java</h4><p>{{t "ui.fa0882e21637"}} <strong data-connect-domain-address></strong></p><p>{{t "ui.1269dd55bea3"}} {{$.ConnectionGuide.JavaPort}}</p><p>{{t "ui.e09d05cf64f4"}} <code data-connect-domain-java></code></p></div>
+      {{if $.ConnectionGuide.Bedrock}}<div class="connect-endpoint" data-connect-endpoint="Bedrock" data-connect-port="{{$.ConnectionGuide.BedrockPort}}"><h4>Bedrock</h4><p>{{t "ui.fa0882e21637"}} <strong data-connect-domain-address></strong></p><p>{{t "ui.1269dd55bea3"}} {{$.ConnectionGuide.BedrockPort}}</p></div>{{end}}
       {{else}}{{range .Endpoints}}
-      <div class="connect-endpoint" data-connect-endpoint="{{.Edition}}" data-connect-address="{{.Address}}" data-connect-port="{{.Port}}" data-connect-join="{{.JoinAddress}}"><h4>{{.Edition}}</h4><p>Address: <strong>{{.Address}}</strong></p>{{if .Port}}<p>Port: <strong>{{.Port}}</strong></p>{{else}}{{if eq .Edition "Bedrock"}}<p>The tunnel did not report a public port. Ask the server owner for the public Bedrock port before joining.</p>{{end}}{{end}}{{if eq .Edition "Java"}}<p>Enter in Minecraft: <code>{{.JoinAddress}}</code></p>{{end}}</div>
+      <div class="connect-endpoint" data-connect-endpoint="{{.Edition}}" data-connect-address="{{.Address}}" data-connect-port="{{.Port}}" data-connect-join="{{.JoinAddress}}"><h4>{{.Edition}}</h4><p>{{t "ui.fa0882e21637"}} <strong>{{.Address}}</strong></p>{{if .Port}}<p>{{t "ui.1269dd55bea3"}} <strong>{{.Port}}</strong></p>{{else}}{{if eq .Edition "Bedrock"}}<p>{{t "ui.6e33337b0f6b"}}</p>{{end}}{{end}}{{if eq .Edition "Java"}}<p>{{t "ui.e09d05cf64f4"}} <code>{{.JoinAddress}}</code></p>{{end}}</div>
       {{end}}{{end}}
     </section>{{end}}
   {{end}}
   </div></section>
-  <section class="connect-instructions"><h2>Join with Java Edition</h2><ol><li>Open Minecraft Launcher and start Minecraft: Java Edition.</li><li>Choose <strong>Multiplayer</strong>.</li><li>Choose <strong>Add Server</strong>.</li><li>Enter a server name — any name you like.</li><li>Use one of the Java connection addresses shown above in <strong>Server Address</strong>.</li><li>Choose <strong>Done</strong>, select the server and choose <strong>Join Server</strong>.</li></ol><p>For a quick visit, choose <strong>Direct Connection</strong> instead of Add Server, enter the same Java address and choose Join Server.</p>{{if eq .ConnectionGuide.JavaPort 25565}}<p>For methods using the configured Java port, Minecraft normally lets you omit <code>:25565</code>. Keep any explicit public Playit port shown above.</p>{{else}}<p>For methods using the configured Java port, enter <code>address:{{.ConnectionGuide.JavaPort}}</code>. For Playit, use its exact public Java address above.</p>{{end}}</section>
+  <section class="connect-instructions"><h2>{{t "ui.0b1a4570e6d5"}}</h2><ol><li>{{t "ui.aa78a50961a3"}}</li><li>{{t "ui.c7f937836f5d"}} <strong>{{t "ui.563370a7b0ef"}}</strong>.</li><li>{{t "ui.c7f937836f5d"}} <strong>{{t "ui.da8993ec0654"}}</strong>.</li><li>{{t "ui.0496fa2044c3"}}</li><li>{{t "ui.6c3265865fd5"}} <strong>{{t "ui.181cda8ec311"}}</strong>.</li><li>{{t "ui.c7f937836f5d"}} <strong>{{t "ui.11a6767d5674"}}</strong>{{t "ui.4a6a02b18d16"}} <strong>{{t "ui.1639f9466caf"}}</strong>.</li></ol><p>{{t "ui.1cd4b1f6f9ea"}} <strong>{{t "ui.92734bd863f4"}}</strong> {{t "ui.3da88adc6e45"}}</p>{{if eq .ConnectionGuide.JavaPort 25565}}<p>{{t "ui.71592cae0a19"}} <code>:25565</code>{{t "ui.f696be4627f2"}}</p>{{else}}<p>{{t "ui.29efda847567"}} <code>{{t "ui.333c2a2219da"}}{{.ConnectionGuide.JavaPort}}</code>{{t "ui.137e625ec147"}}</p>{{end}}</section>
   {{if .ConnectionGuide.Bedrock}}
-  <section class="connect-instructions"><h2>Join with Bedrock Edition</h2><p>For Windows, iPhone, iPad and Android.</p><ol><li>Open Minecraft Bedrock Edition.</li><li>Choose <strong>Play</strong>.</li><li>Open <strong>Servers</strong>.</li><li>Choose <strong>Add Server</strong>.</li><li>Enter a server name and one of the Bedrock addresses shown above.</li><li>Enter that method’s corresponding <strong>Bedrock port</strong>.</li><li>Choose <strong>Add</strong>, then <strong>Play</strong>.</li></ol><p>Java and Bedrock ports may differ. Use the Bedrock address and port together; Playit can use a different public port.</p><p>If a selected method has only Java information, choose another method for Bedrock.</p></section>
-  <section class="connect-instructions"><h2>PS5 · Method 1: BedrockConnect DNS</h2><ol><li>Open PS5 <strong>Settings → Network → Settings → Set Up Internet Connection</strong>.</li><li>Highlight your active Wi-Fi or wired connection and open <strong>Advanced Settings</strong>.</li><li>Change <strong>DNS Settings</strong> from Automatic to <strong>Manual</strong>.</li><li>Set <strong>Primary DNS: 45.55.68.52</strong> and <strong>Secondary DNS: 8.8.8.8</strong>.</li><li>Save and wait for the network test.</li><li>Open Minecraft → <strong>Play → Servers</strong>.</li><li>Open a compatible featured server to reach the BedrockConnect list.</li><li>Choose <strong>Connect to a Server / Add Server</strong>.</li><li>Enter one of the enabled Bedrock addresses and its matching port from this guide.</li></ol><p class="connect-callout"><strong>The PS5 DNS address is not the Minecraft server address.</strong> DNS helps you open the server list; use a Bedrock connection address from this guide to join Minecraft.</p><p>If PS5 internet stops working, restore <strong>DNS Settings → Automatic</strong> and use the phone method below.</p></section>
-  <section class="connect-instructions"><h2>PS5 · Method 2: BedrockTogether phone app</h2><ol><li>Connect your phone and PS5 to the <strong>same home router/network</strong>. Disable cellular data and VPN on the phone while testing.</li><li>Install <strong>BedrockTogether for Minecraft</strong> on iPhone or Android.</li><li>Allow the required <strong>Local Network / nearby-device permissions</strong>.</li><li>Enter one of the Bedrock addresses in this guide and its matching port.</li><li>Choose <strong>Start / Run</strong> in BedrockTogether and leave it open.</li><li>On PS5, open Minecraft → <strong>Play → Friends</strong>.</li><li>Look under <strong>LAN Games</strong> and join the server that appears.</li></ol><p>After joining successfully, the phone app can normally be closed.</p><p>If the server does not appear: avoid guest Wi-Fi and mobile hotspots; turn off VPN and iCloud Private Relay while testing; keep BedrockTogether running; restart Minecraft once if necessary.</p><p>Tailscale, NetBird and NordVPN Meshnet still require access to the relevant private network on the connecting device. These PS5 methods do not grant that access.</p></section>
+  <section class="connect-instructions"><h2>{{t "ui.968e4ce600f4"}}</h2><p>{{t "ui.95c96b1cd28c"}}</p><ol><li>{{t "ui.8adeadee0204"}}</li><li>{{t "ui.c7f937836f5d"}} <strong>{{t "ui.436e61016e26"}}</strong>.</li><li>{{t "ui.ed077f3d8125"}} <strong>{{t "ui.68d7beb6df59"}}</strong>.</li><li>{{t "ui.c7f937836f5d"}} <strong>{{t "ui.da8993ec0654"}}</strong>.</li><li>{{t "ui.5f059190e7c7"}}</li><li>{{t "ui.6352c21e205d"}} <strong>{{t "ui.f34bf1022246"}}</strong>.</li><li>{{t "ui.c7f937836f5d"}} <strong>{{t "ui.9fd728c66c9a"}}</strong>{{t "ui.aae687415b64"}} <strong>{{t "ui.436e61016e26"}}</strong>.</li></ol><p>{{t "ui.3514e3b6b3e6"}}</p><p>{{t "ui.b37b08e3b778"}}</p></section>
+  <section class="connect-instructions"><h2>{{t "ui.c56f93e3851c"}}</h2><ol><li>{{t "ui.50cdcd84ff2c"}} <strong>{{t "ui.1d1ebe12f38a"}}</strong>.</li><li>{{t "ui.1bc6e61a4bd3"}} <strong>{{t "ui.22d4f6088b71"}}</strong>.</li><li>{{t "ui.c0bf75bd78bf"}} <strong>{{t "ui.01631291e4f1"}}</strong> {{t "ui.99fae5e46870"}} <strong>{{t "ui.b0b9fe24ffa9"}}</strong>.</li><li>{{t "ui.b6f6f3ad07b3"}} <strong>{{t "ui.689f878726a9"}}</strong> {{t "ui.6201111b83a0"}} <strong>{{t "ui.d146e6342675"}}</strong>.</li><li>{{t "ui.a7c54518f53d"}}</li><li>{{t "ui.7d01fada7b05"}} <strong>{{t "ui.67d1676c9540"}}</strong>.</li><li>{{t "ui.af12b114a77c"}}</li><li>{{t "ui.c7f937836f5d"}} <strong>{{t "ui.d0d24df8c91d"}}</strong>.</li><li>{{t "ui.eb0d1b62acdd"}}</li></ol><p class="connect-callout"><strong>{{t "ui.50f26bf5c90c"}}</strong> {{t "ui.81b14b718566"}}</p><p>{{t "ui.27c22e5f66f7"}} <strong>{{t "ui.19f542ffc2e3"}}</strong> {{t "ui.939d5962543d"}}</p></section>
+  <section class="connect-instructions"><h2>{{t "ui.cfe8cb138d89"}}</h2><ol><li>{{t "ui.797e6189628d"}} <strong>{{t "ui.b63bb840aff8"}}</strong>{{t "ui.dac5d91830ea"}}</li><li>{{t "ui.569ca49f4aaf"}} <strong>{{t "ui.6188b061764f"}}</strong> {{t "ui.91d4d4d37b92"}}</li><li>{{t "ui.db70b4e2d513"}} <strong>{{t "ui.53ed1084a5e7"}}</strong>.</li><li>{{t "ui.0b61459c3464"}}</li><li>{{t "ui.c7f937836f5d"}} <strong>{{t "ui.659d7435ec20"}}</strong> {{t "ui.c6b4166e6db2"}}</li><li>{{t "ui.51f58c3eaf62"}} <strong>{{t "ui.2de134db8517"}}</strong>.</li><li>{{t "ui.8e4ba23c05e7"}} <strong>{{t "ui.c5b46058cd50"}}</strong> {{t "ui.db39383293ab"}}</li></ol><p>{{t "ui.9dd8f5a53420"}}</p><p>{{t "ui.31a4d8d520cb"}}</p><p>{{t "ui.c1ce8e29207f"}}</p></section>
   {{end}}
-  <section class="connect-instructions"><h2>“You are not whitelisted”</h2><p>If Minecraft says the player is not whitelisted, <strong>the network connection succeeded</strong>.</p><p>Send the server owner your exact Minecraft gamertag and a clear screenshot/photo of the message.</p></section>
-  <section class="connect-instructions"><h2>Having trouble joining?</h2><ul><li>Check the correct Minecraft edition and selected connection method.</li><li>Check the address and the corresponding Java{{if .ConnectionGuide.Bedrock}} or Bedrock{{end}} port.</li><li>Update Minecraft and restart it once.</li>{{if .ConnectionGuide.Bedrock}}<li>For PS5 DNS problems, restore DNS Settings to Automatic.</li>{{end}}</ul><p>If it still fails, send the server owner your exact error screenshot, exact Minecraft gamertag, device type, {{if .ConnectionGuide.Bedrock}}Java or Bedrock edition{{else}}Minecraft edition{{end}}, and the connection method used.</p></section>
-  <footer class="connect-guide-footer">JustVoxel · Minecraft with friends</footer>
+  <section class="connect-instructions"><h2>{{t "ui.db668d271c51"}}</h2><p>{{t "ui.da964fe94836"}} <strong>{{t "ui.87a6fb45341f"}}</strong>.</p><p>{{t "ui.71a0a19ba150"}}</p></section>
+  <section class="connect-instructions"><h2>{{t "ui.af8b9309dd6e"}}</h2><ul><li>{{t "ui.b0a59195b0c8"}}</li><li>{{t "ui.926b1779f918"}}{{if .ConnectionGuide.Bedrock}} {{t "ui.d56254d65677"}}{{end}} {{t "ui.2cecb76534af"}}</li><li>{{t "ui.2c5f10aa8b07"}}</li>{{if .ConnectionGuide.Bedrock}}<li>{{t "ui.753827d87d4e"}}</li>{{end}}</ul><p>{{t "ui.e2a6a6bf5a0f"}} {{if .ConnectionGuide.Bedrock}}{{t "ui.1ee3391cc11d"}}{{else}}{{t "ui.9ea345e13561"}}{{end}}{{t "ui.6b1a990a8f5d"}}</p></section>
+  <footer class="connect-guide-footer">{{t "ui.ee6278c0600d"}}</footer>
 </article>
-<div class="connect-print-blocked">Choose a valid connection method in JustVoxel before saving this guide as PDF.</div>
+<div class="connect-print-blocked">{{t "ui.ef3fd849505c"}}</div>
 {{end}}
 {{end}}
 </main>
-</body>
+{{template "language-dialog" .}}</body>
 </html>{{end}}
 
 {{define "connect-method-control"}}<div class="connect-method">
-  <label class="connect-method-label" for="connect-{{.ID}}">{{if eq .ID "local"}}<img class="connect-method-icon" src="/static/provider-icons/local-network.svg" alt="" aria-hidden="true">{{else if eq .ID "tailscale"}}<img class="connect-method-icon" src="/static/provider-icons/tailscale.svg" alt="" aria-hidden="true">{{else if eq .ID "netbird"}}<img class="connect-method-icon" src="/static/provider-icons/netbird.svg" alt="" aria-hidden="true">{{else if eq .ID "playit"}}<img class="connect-method-icon" src="/static/provider-icons/playit.svg" alt="" aria-hidden="true">{{else if eq .ID "nordvpn"}}<img class="connect-method-icon" src="/static/provider-icons/nordvpn.svg" alt="" aria-hidden="true">{{end}}{{.Name}}</label>
-  <input id="connect-{{.ID}}" type="checkbox" role="switch" aria-label="Include {{.Name}}" data-connect-method="{{.ID}}"{{if .Default}} checked{{end}}{{if not .Available}} disabled{{end}}>
+  <label class="connect-method-label" for="connect-{{.ID}}">{{if eq .ID "local"}}<img class="connect-method-icon" src="/static/provider-icons/local-network.svg" alt="" aria-hidden="true">{{else if eq .ID "tailscale"}}<img class="connect-method-icon" src="/static/provider-icons/tailscale.svg" alt="" aria-hidden="true">{{else if eq .ID "netbird"}}<img class="connect-method-icon" src="/static/provider-icons/netbird.svg" alt="" aria-hidden="true">{{else if eq .ID "playit"}}<img class="connect-method-icon" src="/static/provider-icons/playit.svg" alt="" aria-hidden="true">{{else if eq .ID "nordvpn"}}<img class="connect-method-icon" src="/static/provider-icons/nordvpn.svg" alt="" aria-hidden="true">{{end}}{{ts .Name}}</label>
+  <input id="connect-{{.ID}}" type="checkbox" role="switch" aria-label="{{t "ui.a44fb713f349" "name" (ts .Name)}}" data-connect-method="{{.ID}}"{{if .Default}} checked{{end}}{{if not .Available}} disabled{{end}}>
 </div>{{end}}

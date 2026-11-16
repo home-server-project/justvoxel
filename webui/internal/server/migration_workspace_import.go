@@ -76,7 +76,7 @@ func (a *App) migrationWorkspaceImportRequest(w http.ResponseWriter, r *http.Req
 	}
 	client, ok := a.api.(adminMigrationWorkspaceImportAPI)
 	if !ok {
-		http.Error(w, "Server Import management is unavailable", http.StatusServiceUnavailable)
+		http.Error(w, ui(w, "ui.ac6951e54f48"), http.StatusServiceUnavailable)
 		return "", nil, api.SessionInfo{}, false
 	}
 	return session, client, identity, true
@@ -125,10 +125,10 @@ func (a *App) migrationWorkspaceImportReview(w http.ResponseWriter, r *http.Requ
 				a.renderMigrationWorkspaceImportReview(w, http.StatusOK, identity, scrubMigrationWorkspaceImportSecrets(request), plan, csrfFromRequest(r), migrationWorkspaceImportPrompt(plan), "", migrationWorkspaceSelectedID(r))
 				return
 			}
-			a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, scrubMigrationWorkspaceImportSecrets(request), plan, csrfFromRequest(r), "", migrationWorkspaceImportPlanError(plan, err, "Server Import planning was rejected."), migrationWorkspaceSelectedID(r))
+			a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, scrubMigrationWorkspaceImportSecrets(request), plan, csrfFromRequest(r), "", migrationWorkspaceImportPlanError(plan, err, ui(w, "ui.a422bb1f8713")), migrationWorkspaceSelectedID(r))
 			return
 		}
-		a.handleMigrationWorkspaceRequestError(w, r, err, "Server Import planning is unavailable.")
+		a.handleMigrationWorkspaceRequestError(w, r, err, ui(w, "ui.9f6ea0843d43"))
 		return
 	}
 	a.renderMigrationWorkspaceImportReview(w, http.StatusOK, identity, scrubMigrationWorkspaceImportSecrets(request), plan, csrfFromRequest(r), "", "", migrationWorkspaceSelectedID(r))
@@ -159,25 +159,25 @@ func (a *App) migrationWorkspaceImportApply(w http.ResponseWriter, r *http.Reque
 			if migrationWorkspaceImportPlanNeedsInput(plan.Code) {
 				prompt = migrationWorkspaceImportPrompt(plan)
 			}
-			a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, scrubMigrationWorkspaceImportSecrets(request), plan, csrfFromRequest(r), prompt, migrationWorkspaceImportPlanError(plan, err, "Server Import changed and must be reviewed again."), migrationWorkspaceSelectedID(r))
+			a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, scrubMigrationWorkspaceImportSecrets(request), plan, csrfFromRequest(r), prompt, migrationWorkspaceImportPlanError(plan, err, ui(w, "ui.15bcb6a29318")), migrationWorkspaceSelectedID(r))
 			return
 		}
-		a.handleMigrationWorkspaceRequestError(w, r, err, "Server Import planning is unavailable.")
+		a.handleMigrationWorkspaceRequestError(w, r, err, ui(w, "ui.9f6ea0843d43"))
 		return
 	}
 
 	publicRequest := scrubMigrationWorkspaceImportSecrets(request)
 	if submitted := strings.TrimSpace(r.FormValue("plan_fingerprint")); submitted == "" || submitted != plan.PlanFingerprint {
-		a.renderMigrationWorkspaceImportReview(w, http.StatusConflict, identity, publicRequest, plan, csrfFromRequest(r), "", "This Server Import changed since it was reviewed. Review the current source and destination again before continuing.", migrationWorkspaceSelectedID(r))
+		a.renderMigrationWorkspaceImportReview(w, http.StatusConflict, identity, publicRequest, plan, csrfFromRequest(r), "", ui(w, "ui.a64e64b1034c"), migrationWorkspaceSelectedID(r))
 		return
 	}
 	if strings.TrimSpace(r.FormValue("import_confirmation")) != "IMPORT" {
-		a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, publicRequest, plan, csrfFromRequest(r), "", "Complete the Import confirmation slider before starting this Server Import.", migrationWorkspaceSelectedID(r))
+		a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, publicRequest, plan, csrfFromRequest(r), "", ui(w, "ui.7e2d11808806"), migrationWorkspaceSelectedID(r))
 		return
 	}
 	requirements := plan.Requirements
 	if requirements == nil {
-		a.renderMigrationWorkspaceImportReview(w, http.StatusBadGateway, identity, publicRequest, plan, csrfFromRequest(r), "", "Server Import did not return its required safety confirmations.", migrationWorkspaceSelectedID(r))
+		a.renderMigrationWorkspaceImportReview(w, http.StatusBadGateway, identity, publicRequest, plan, csrfFromRequest(r), "", ui(w, "ui.6751c946f2c5"), migrationWorkspaceSelectedID(r))
 		return
 	}
 	playersConfirmed := r.FormValue("players_confirmed") == "yes"
@@ -187,15 +187,15 @@ func (a *App) migrationWorkspaceImportApply(w http.ResponseWriter, r *http.Reque
 	onlineModeConfirmed := r.FormValue("online_mode_confirmed") == "yes"
 
 	if requirements.PlayersConfirmationRequired && !playersConfirmed {
-		a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, publicRequest, plan, csrfFromRequest(r), "", "Confirm that the online players may be interrupted before starting Server Import.", migrationWorkspaceSelectedID(r))
+		a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, publicRequest, plan, csrfFromRequest(r), "", ui(w, "ui.6ed85a980b54"), migrationWorkspaceSelectedID(r))
 		return
 	}
 	if requirements.VanillaConfirmationRequired && !vanillaConfirmed {
-		a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, publicRequest, plan, csrfFromRequest(r), "", "Confirm the reviewed Vanilla-to-Paper conversion before starting Server Import.", migrationWorkspaceSelectedID(r))
+		a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, publicRequest, plan, csrfFromRequest(r), "", ui(w, "ui.c1463b7ff9e4"), migrationWorkspaceSelectedID(r))
 		return
 	}
 	if requirements.PluginsConfirmationRequired && !pluginsConfirmed {
-		a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, publicRequest, plan, csrfFromRequest(r), "", "Confirm that the reviewed external plugin JARs may be preserved and executed.", migrationWorkspaceSelectedID(r))
+		a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, publicRequest, plan, csrfFromRequest(r), "", ui(w, "ui.87c0882ca808"), migrationWorkspaceSelectedID(r))
 		return
 	}
 	if requirements.OnlineModeConfirmationRequired && !onlineModeConfirmed {
@@ -219,11 +219,11 @@ func (a *App) migrationWorkspaceImportApply(w http.ResponseWriter, r *http.Reque
 	request.Source.SMBPassword = ""
 	backupSMBPassword = ""
 	if err != nil {
-		a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, publicRequest, plan, csrfFromRequest(r), "", apiMessage(err, "Could not start Server Import."), migrationWorkspaceSelectedID(r))
+		a.renderMigrationWorkspaceImportReview(w, http.StatusBadRequest, identity, publicRequest, plan, csrfFromRequest(r), "", apiMessage(err, ui(w, "ui.f9adf77c9ecf")), migrationWorkspaceSelectedID(r))
 		return
 	}
 	if !result.OK || result.Operation == nil || result.Operation.OperationType != "migration_import" {
-		a.renderMigrationWorkspaceImportReview(w, http.StatusBadGateway, identity, publicRequest, plan, csrfFromRequest(r), "", "Server Import did not return a valid persistent operation.", migrationWorkspaceSelectedID(r))
+		a.renderMigrationWorkspaceImportReview(w, http.StatusBadGateway, identity, publicRequest, plan, csrfFromRequest(r), "", ui(w, "ui.a84fcf28dfb4"), migrationWorkspaceSelectedID(r))
 		return
 	}
 	http.Redirect(w, r, migrationSelectedURL(r, "/workspace/migration/progress/"+result.Operation.OperationID), http.StatusSeeOther)
@@ -232,17 +232,17 @@ func (a *App) migrationWorkspaceImportApply(w http.ResponseWriter, r *http.Reque
 func (a *App) migrationWorkspaceImportDependencies(w http.ResponseWriter, r *http.Request, session string, client adminMigrationWorkspaceImportAPI) (api.AdminMigrationImportDiscoveryResponse, api.AdminMigrationExportDiscoveryResponse, api.AdminStorageDiscovery, bool) {
 	discovery, err := client.AdminMigrationImportDiscovery(r.Context(), session)
 	if err != nil {
-		a.handleMigrationWorkspaceRequestError(w, r, err, "Server Import discovery is unavailable.")
+		a.handleMigrationWorkspaceRequestError(w, r, err, ui(w, "ui.11ba32d5bbba"))
 		return api.AdminMigrationImportDiscoveryResponse{}, api.AdminMigrationExportDiscoveryResponse{}, api.AdminStorageDiscovery{}, false
 	}
 	devices, err := client.AdminMigrationExportDiscovery(r.Context(), session)
 	if err != nil {
-		a.handleMigrationWorkspaceRequestError(w, r, err, "Server Import media discovery is unavailable.")
+		a.handleMigrationWorkspaceRequestError(w, r, err, ui(w, "ui.c5cf2c28d72c"))
 		return api.AdminMigrationImportDiscoveryResponse{}, api.AdminMigrationExportDiscoveryResponse{}, api.AdminStorageDiscovery{}, false
 	}
 	inventory := api.AdminStorageDiscovery{}
 	if !discovery.Configured {
-		http.Error(w, "Create a Minecraft server through Setup / Add Server before Import.", http.StatusConflict)
+		http.Error(w, ui(w, "ui.63fd18644fde"), http.StatusConflict)
 		return api.AdminMigrationImportDiscoveryResponse{}, api.AdminMigrationExportDiscoveryResponse{}, inventory, false
 	}
 
@@ -322,7 +322,7 @@ func parseMigrationWorkspaceImportForm(r *http.Request, discovery api.AdminMigra
 		return api.AdminMigrationImportRequest{}, errors.New("unsupported Server Import source type")
 	}
 	if strings.ContainsAny(source.Path+source.Device+source.Source+source.Username+source.Domain+source.SelectedRoot+source.SourceVersion, "\r\n") {
-		return api.AdminMigrationImportRequest{}, errors.New("Server Import source contains invalid characters")
+		return api.AdminMigrationImportRequest{}, errors.New(uiText("ui.b1663c5a507d"))
 	}
 
 	destination, err := parseMigrationWorkspaceImportDestination(r, discovery, inventory)
@@ -349,7 +349,7 @@ func parseMigrationWorkspaceImportDestination(r *http.Request, discovery api.Adm
 		}, nil
 	}
 
-	return api.AdminMigrationImportDestinationRequest{}, errors.New("Create a Minecraft server through Setup / Add Server before Import.")
+	return api.AdminMigrationImportDestinationRequest{}, errors.New(uiText("ui.63fd18644fde"))
 }
 
 func importServerSoftwareLabel(serverType string) string {
@@ -389,11 +389,11 @@ func migrationWorkspaceImportPlanError(plan api.AdminMigrationImportPlanResponse
 func migrationWorkspaceImportPrompt(plan api.AdminMigrationImportPlanResponse) string {
 	switch plan.Code {
 	case "source_selection_required":
-		return "Choose one of the backups or server folders JustVoxel found in this location."
+		return uiText("ui.e84d0fa2997d")
 	case "multiple_roots", "stale_root":
-		return "Choose exactly one Minecraft server root detected by JustVoxel."
+		return uiText("ui.ca95db728c63")
 	case "source_version_required":
-		return "Enter the exact Minecraft version used by this source so JustVoxel can validate a matching stable Paper build."
+		return uiText("ui.56a9a391159d")
 	default:
 		return ""
 	}
@@ -406,7 +406,7 @@ func (a *App) renderMigrationWorkspaceImportPage(w http.ResponseWriter, status i
 	}
 	a.renderMigrationWorkspace(w, "migration_workspace_import.html", status, migrationWorkspaceImportPageData{
 		ServerID:      serverID,
-		Title:         "Server Import",
+		Title:         ui(w, "ui.ffe624a69618"),
 		Version:       a.config.Version,
 		ManagementAPI: a.config.ManagementAPI,
 		CSRF:          csrf,
@@ -452,7 +452,7 @@ func (a *App) renderMigrationWorkspaceImportReview(w http.ResponseWriter, status
 	}
 	a.renderMigrationWorkspace(w, "migration_workspace_import_review.html", status, migrationWorkspaceImportReviewPageData{
 		ServerID:            serverID,
-		Title:               "Review Server Import",
+		Title:               ui(w, "ui.7ee41abefcae"),
 		Version:             a.config.Version,
 		ManagementAPI:       a.config.ManagementAPI,
 		CSRF:                csrf,

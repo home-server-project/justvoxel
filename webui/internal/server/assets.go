@@ -5,7 +5,7 @@ import (
 	"embed"
 )
 
-//go:embed templates/*.html static/*
+//go:embed templates/*.html static/* locales/*.json
 var assets embed.FS
 
 var _ = context.Background

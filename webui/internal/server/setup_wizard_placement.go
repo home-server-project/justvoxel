@@ -12,7 +12,7 @@ func (a *App) resolveRecommendedSetupStorage(ctx context.Context, session string
 		AdminRecommendedSetupStorage(context.Context, string) (api.RecommendedSetupPlacement, error)
 	})
 	if !ok {
-		return errors.New("Recommended storage discovery is unavailable.")
+		return errors.New(uiText("ui.dd50b5a59176"))
 	}
 	placement, err := client.AdminRecommendedSetupStorage(ctx, session)
 	if err != nil {

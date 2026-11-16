@@ -71,12 +71,12 @@ func (a *App) migrationWorkspaceRecoveryRequest(w http.ResponseWriter, r *http.R
 	}
 	client, ok := a.api.(adminMigrationWorkspaceRecoveryAPI)
 	if !ok {
-		http.Error(w, "Migration Recovery management is unavailable", http.StatusServiceUnavailable)
+		http.Error(w, ui(w, "ui.5c0c8938828e"), http.StatusServiceUnavailable)
 		return "", nil, api.SessionInfo{}, false, false
 	}
 	current, err := client.AdminCurrentMigrationOperation(r.Context(), session)
 	if err != nil {
-		a.handleMigrationWorkspaceRequestError(w, r, err, "Server Migration operation status is unavailable.")
+		a.handleMigrationWorkspaceRequestError(w, r, err, ui(w, "ui.9ebe3ac32640"))
 		return "", nil, api.SessionInfo{}, false, false
 	}
 	if current.Operation != nil {
@@ -84,7 +84,7 @@ func (a *App) migrationWorkspaceRecoveryRequest(w http.ResponseWriter, r *http.R
 			return session, client, identity, current.Operation.OperationType == "migration_import", true
 		}
 		if !migrationWorkspaceOperationType(current.Operation.OperationType) {
-			http.Error(w, "Server Migration operation status is invalid", http.StatusBadGateway)
+			http.Error(w, ui(w, "ui.a2ee2f05ca1e"), http.StatusBadGateway)
 			return "", nil, api.SessionInfo{}, false, false
 		}
 		http.Redirect(w, r, migrationSelectedURL(r, "/workspace/migration/progress/"+current.Operation.OperationID), http.StatusSeeOther)
@@ -103,7 +103,7 @@ func (a *App) migrationWorkspaceRecoveryPage(w http.ResponseWriter, r *http.Requ
 	}
 	discovery, err := client.AdminMigrationRecoveryDiscovery(r.Context(), session)
 	if err != nil {
-		a.handleMigrationWorkspaceRequestError(w, r, err, "Migration Recovery discovery is unavailable.")
+		a.handleMigrationWorkspaceRequestError(w, r, err, ui(w, "ui.7e7eff5aca52"))
 		return
 	}
 	operationID := ""
@@ -111,7 +111,7 @@ func (a *App) migrationWorkspaceRecoveryPage(w http.ResponseWriter, r *http.Requ
 	recoveryNeedsAttention := false
 	current, currentErr := client.AdminCurrentMigrationOperation(r.Context(), session)
 	if currentErr != nil {
-		a.handleMigrationWorkspaceRequestError(w, r, currentErr, "Server Migration operation status is unavailable.")
+		a.handleMigrationWorkspaceRequestError(w, r, currentErr, ui(w, "ui.9ebe3ac32640"))
 		return
 	}
 	if current.Operation != nil && current.Operation.State == "needs_attention" {
@@ -131,7 +131,7 @@ func (a *App) migrationWorkspaceRecoveryReview(w http.ResponseWriter, r *http.Re
 	}
 	discovery, err := client.AdminMigrationRecoveryDiscovery(r.Context(), session)
 	if err != nil {
-		a.handleMigrationWorkspaceRequestError(w, r, err, "Migration Recovery discovery is unavailable.")
+		a.handleMigrationWorkspaceRequestError(w, r, err, ui(w, "ui.7e7eff5aca52"))
 		return
 	}
 	request, err := parseMigrationWorkspaceRecoveryForm(r, discovery)
@@ -143,10 +143,10 @@ func (a *App) migrationWorkspaceRecoveryReview(w http.ResponseWriter, r *http.Re
 	if err != nil {
 		var responseErr *api.ResponseError
 		if errors.As(err, &responseErr) && responseErr.StatusCode == http.StatusBadRequest && plan.SchemaVersion != "" {
-			a.renderMigrationWorkspaceRecoveryReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), apiMessage(err, "Migration Recovery planning was rejected."), migrationWorkspaceSelectedID(r))
+			a.renderMigrationWorkspaceRecoveryReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), apiMessage(err, ui(w, "ui.fa1afa682313")), migrationWorkspaceSelectedID(r))
 			return
 		}
-		a.handleMigrationWorkspaceRequestError(w, r, err, "Migration Recovery planning is unavailable.")
+		a.handleMigrationWorkspaceRequestError(w, r, err, ui(w, "ui.34fcb6a8932c"))
 		return
 	}
 	a.renderMigrationWorkspaceRecoveryReview(w, http.StatusOK, identity, request, plan, csrfFromRequest(r), "", migrationWorkspaceSelectedID(r))
@@ -159,7 +159,7 @@ func (a *App) migrationWorkspaceRecoveryApply(w http.ResponseWriter, r *http.Req
 	}
 	discovery, err := client.AdminMigrationRecoveryDiscovery(r.Context(), session)
 	if err != nil {
-		a.handleMigrationWorkspaceRequestError(w, r, err, "Migration Recovery discovery is unavailable.")
+		a.handleMigrationWorkspaceRequestError(w, r, err, ui(w, "ui.7e7eff5aca52"))
 		return
 	}
 	request, err := parseMigrationWorkspaceRecoveryForm(r, discovery)
@@ -171,22 +171,22 @@ func (a *App) migrationWorkspaceRecoveryApply(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		var responseErr *api.ResponseError
 		if errors.As(err, &responseErr) && responseErr.StatusCode == http.StatusBadRequest && plan.SchemaVersion != "" {
-			a.renderMigrationWorkspaceRecoveryReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), apiMessage(err, "Migration Recovery state changed and must be reviewed again."), migrationWorkspaceSelectedID(r))
+			a.renderMigrationWorkspaceRecoveryReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), apiMessage(err, ui(w, "ui.fb60580e832d")), migrationWorkspaceSelectedID(r))
 			return
 		}
-		a.handleMigrationWorkspaceRequestError(w, r, err, "Migration Recovery planning is unavailable.")
+		a.handleMigrationWorkspaceRequestError(w, r, err, ui(w, "ui.34fcb6a8932c"))
 		return
 	}
 	if submitted := strings.TrimSpace(r.FormValue("plan_fingerprint")); submitted == "" || submitted != plan.PlanFingerprint {
-		a.renderMigrationWorkspaceRecoveryReview(w, http.StatusConflict, identity, request, plan, csrfFromRequest(r), "This retained Migration Recovery state changed since it was reviewed. Review the current state again before continuing.", migrationWorkspaceSelectedID(r))
+		a.renderMigrationWorkspaceRecoveryReview(w, http.StatusConflict, identity, request, plan, csrfFromRequest(r), ui(w, "ui.e2c61487aca2"), migrationWorkspaceSelectedID(r))
 		return
 	}
 	if r.FormValue("cleanup_confirmed") != "yes" {
-		a.renderMigrationWorkspaceRecoveryReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), "Confirm cleanup before continuing.", migrationWorkspaceSelectedID(r))
+		a.renderMigrationWorkspaceRecoveryReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), ui(w, "ui.33aa4339001a"), migrationWorkspaceSelectedID(r))
 		return
 	}
 	if plan.Requirements == nil || !plan.Requirements.FinalizeConfirmationRequired {
-		a.renderMigrationWorkspaceRecoveryReview(w, http.StatusBadGateway, identity, request, plan, csrfFromRequest(r), "JustVoxel cannot confirm this cleanup right now.", migrationWorkspaceSelectedID(r))
+		a.renderMigrationWorkspaceRecoveryReview(w, http.StatusBadGateway, identity, request, plan, csrfFromRequest(r), ui(w, "ui.e6d4985788e7"), migrationWorkspaceSelectedID(r))
 		return
 	}
 	result, err := client.AdminMigrationRecoveryApply(r.Context(), session, api.AdminMigrationRecoveryApplyRequest{
@@ -195,11 +195,11 @@ func (a *App) migrationWorkspaceRecoveryApply(w http.ResponseWriter, r *http.Req
 		FinalizeConfirmed: true,
 	})
 	if err != nil {
-		a.renderMigrationWorkspaceRecoveryReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), apiMessage(err, "Could not start recovery file cleanup."), migrationWorkspaceSelectedID(r))
+		a.renderMigrationWorkspaceRecoveryReview(w, http.StatusBadRequest, identity, request, plan, csrfFromRequest(r), apiMessage(err, ui(w, "ui.36eb315ebd2b")), migrationWorkspaceSelectedID(r))
 		return
 	}
 	if !result.OK || result.Operation == nil || result.Operation.OperationType != "migration_recovery" {
-		a.renderMigrationWorkspaceRecoveryReview(w, http.StatusBadGateway, identity, request, plan, csrfFromRequest(r), "Migration Recovery did not return a valid persistent operation.", migrationWorkspaceSelectedID(r))
+		a.renderMigrationWorkspaceRecoveryReview(w, http.StatusBadGateway, identity, request, plan, csrfFromRequest(r), ui(w, "ui.94f54cabc6c4"), migrationWorkspaceSelectedID(r))
 		return
 	}
 	http.Redirect(w, r, migrationSelectedURL(r, "/workspace/migration/progress/"+result.Operation.OperationID), http.StatusSeeOther)
@@ -212,30 +212,30 @@ func (a *App) migrationWorkspaceRecoveryResolve(w http.ResponseWriter, r *http.R
 	}
 	discovery, err := client.AdminMigrationRecoveryDiscovery(r.Context(), session)
 	if err != nil {
-		a.handleMigrationWorkspaceRequestError(w, r, err, "Migration Recovery discovery is unavailable.")
+		a.handleMigrationWorkspaceRequestError(w, r, err, ui(w, "ui.7e7eff5aca52"))
 		return
 	}
 	current, err := client.AdminCurrentMigrationOperation(r.Context(), session)
 	if err != nil {
-		a.handleMigrationWorkspaceRequestError(w, r, err, "Server Migration operation status is unavailable.")
+		a.handleMigrationWorkspaceRequestError(w, r, err, ui(w, "ui.9ebe3ac32640"))
 		return
 	}
 	if current.Operation == nil || current.Operation.State != "needs_attention" ||
 		(current.Operation.OperationType != "migration_import" && current.Operation.OperationType != "migration_recovery" && current.Operation.OperationType != "migration_export") {
-		http.Error(w, "Migration operation does not require resolution", http.StatusConflict)
+		http.Error(w, ui(w, "ui.544589e2ce76"), http.StatusConflict)
 		return
 	}
 	recoveryNeedsAttention := current.Operation.OperationType == "migration_recovery" || current.Operation.OperationType == "migration_export"
 	if len(discovery.Transactions) != 0 {
-		message := "Retained Import recovery state exists and must be reviewed before keeping the current server."
+		message := ui(w, "ui.5f88b4671375")
 		if recoveryNeedsAttention {
-			message = "Retained recovery state exists and must be reviewed before keeping the current server."
+			message = ui(w, "ui.6cf897de299a")
 		}
 		a.renderMigrationWorkspaceRecoveryPage(w, http.StatusConflict, identity, discovery, importNeedsAttention, recoveryNeedsAttention, "", csrfFromRequest(r), message, migrationWorkspaceSelectedID(r))
 		return
 	}
 	if strings.TrimSpace(r.FormValue("operation_id")) != current.Operation.OperationID || r.FormValue("keep_current_state") != "yes" {
-		a.renderMigrationWorkspaceRecoveryPage(w, http.StatusBadRequest, identity, discovery, importNeedsAttention, recoveryNeedsAttention, current.Operation.OperationID, csrfFromRequest(r), "Confirm keeping the validated current server before continuing.", migrationWorkspaceSelectedID(r))
+		a.renderMigrationWorkspaceRecoveryPage(w, http.StatusBadRequest, identity, discovery, importNeedsAttention, recoveryNeedsAttention, current.Operation.OperationID, csrfFromRequest(r), ui(w, "ui.3c364622d2cc"), migrationWorkspaceSelectedID(r))
 		return
 	}
 	if recoveryNeedsAttention {
@@ -248,9 +248,9 @@ func (a *App) migrationWorkspaceRecoveryResolve(w http.ResponseWriter, r *http.R
 		})
 	}
 	if err != nil {
-		message := "Failed Server Import could not be resolved safely."
+		message := ui(w, "ui.6f3b6ff4590a")
 		if recoveryNeedsAttention {
-			message = "Failed Migration Recovery could not be resolved safely."
+			message = ui(w, "ui.399682ac12ba")
 		}
 		a.renderMigrationWorkspaceRecoveryPage(w, http.StatusConflict, identity, discovery, importNeedsAttention, recoveryNeedsAttention, current.Operation.OperationID, csrfFromRequest(r), apiMessage(err, message), migrationWorkspaceSelectedID(r))
 		return
@@ -268,11 +268,11 @@ func parseMigrationWorkspaceRecoveryForm(r *http.Request, discovery api.AdminMig
 			continue
 		}
 		if !summary.Finalizable {
-			return api.AdminMigrationRecoveryPlanRequest{}, errors.New("JustVoxel cannot safely clean up these recovery files in the current server state")
+			return api.AdminMigrationRecoveryPlanRequest{}, errors.New(uiText("ui.f276e8ceb36b"))
 		}
 		return api.AdminMigrationRecoveryPlanRequest{Transaction: transaction}, nil
 	}
-	return api.AdminMigrationRecoveryPlanRequest{}, errors.New("Choose recovery files currently shown on this page")
+	return api.AdminMigrationRecoveryPlanRequest{}, errors.New(uiText("ui.6c626bb4963d"))
 }
 
 func (a *App) renderMigrationWorkspaceRecoveryPage(w http.ResponseWriter, status int, identity api.SessionInfo, discovery api.AdminMigrationRecoveryDiscoveryResponse, importNeedsAttention, recoveryNeedsAttention bool, operationID, csrf, errorMessage string, serverID string) {
@@ -284,7 +284,7 @@ func (a *App) renderMigrationWorkspaceRecoveryPage(w http.ResponseWriter, status
 	}
 	a.renderMigrationWorkspace(w, "migration_workspace_recovery.html", status, migrationWorkspaceRecoveryPageData{
 		ServerID:               serverID,
-		Title:                  "Migration Recovery",
+		Title:                  ui(w, "ui.504ca73ba883"),
 		Version:                a.config.Version,
 		ManagementAPI:          a.config.ManagementAPI,
 		CSRF:                   csrf,
@@ -300,15 +300,15 @@ func (a *App) renderMigrationWorkspaceRecoveryPage(w http.ResponseWriter, status
 }
 
 func (a *App) renderMigrationWorkspaceRecoveryReview(w http.ResponseWriter, status int, identity api.SessionInfo, request api.AdminMigrationRecoveryPlanRequest, plan api.AdminMigrationRecoveryPlanResponse, csrf, errorMessage string, serverID string) {
-	modeLabel := "Retained recovery state"
-	phaseLabel := "Unknown"
+	modeLabel := ui(w, "ui.c7d2c34a5578")
+	phaseLabel := ui(w, "ui.b764cdc0eab7")
 	if plan.Normalized != nil {
 		modeLabel = migrationWorkspaceRecoveryModeLabel(plan.Normalized.Mode)
 		phaseLabel = migrationWorkspaceRecoveryPhaseLabel(plan.Normalized.Phase)
 	}
 	a.renderMigrationWorkspace(w, "migration_workspace_recovery_review.html", status, migrationWorkspaceRecoveryReviewPageData{
 		ServerID:      serverID,
-		Title:         "Review Migration Recovery",
+		Title:         ui(w, "ui.e1cc448edd18"),
 		Version:       a.config.Version,
 		ManagementAPI: a.config.ManagementAPI,
 		CSRF:          csrf,
@@ -324,11 +324,11 @@ func (a *App) renderMigrationWorkspaceRecoveryReview(w http.ResponseWriter, stat
 func migrationWorkspaceRecoveryModeLabel(value string) string {
 	switch value {
 	case "configured":
-		return "Configured server rollback"
+		return uiText("ui.5be9693f1680")
 	case "configured-attention":
-		return "Configured rollback requiring attention"
+		return uiText("ui.da4a608c56b9")
 	case "fresh-unconfigured":
-		return "Fresh appliance rollback"
+		return uiText("ui.ca0a18636910")
 	default:
 		return migrationWorkspaceFriendlyToken(value)
 	}
@@ -337,11 +337,11 @@ func migrationWorkspaceRecoveryModeLabel(value string) string {
 func migrationWorkspaceRecoveryPhaseLabel(value string) string {
 	switch value {
 	case "rolled-back":
-		return "Rolled back"
+		return uiText("ui.71592236d852")
 	case "critical-rollback":
-		return "Critical rollback retained"
+		return uiText("ui.bc75bdf6f78d")
 	case "rolled-back-fresh":
-		return "Fresh Import rolled back"
+		return uiText("ui.5375bbeb9452")
 	default:
 		return migrationWorkspaceFriendlyToken(value)
 	}

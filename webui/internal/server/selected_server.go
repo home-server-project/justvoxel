@@ -40,23 +40,23 @@ func (a *App) selectedMinecraft(w http.ResponseWriter, r *http.Request, session 
 	id := ""
 	if exists {
 		if len(values) != 1 || !addServerIDPattern.MatchString(values[0]) {
-			writeMinecraftWorkspaceError(w, 400, "Invalid server selection.")
+			writeMinecraftWorkspaceError(w, 400, ui(w, "ui.abda10a5fa44"))
 			return selectedServerContext{}, false
 		}
 		id = values[0]
 	}
 	instances, err := a.independentServerInventory(r.Context(), session)
 	if err != nil {
-		writeMinecraftWorkspaceError(w, 503, "Server selection could not be checked.")
+		writeMinecraftWorkspaceError(w, 503, ui(w, "ui.23112b254b17"))
 		return selectedServerContext{}, false
 	}
 	if !exists {
 		if len(instances) == 0 {
-			writeMinecraftWorkspaceError(w, 409, "No Minecraft servers are configured. Add a Minecraft server.")
+			writeMinecraftWorkspaceError(w, 409, ui(w, "ui.f30501d9bdd9"))
 			return selectedServerContext{}, false
 		}
 		if len(instances) != 1 {
-			writeMinecraftWorkspaceError(w, 409, "Choose a Minecraft server.")
+			writeMinecraftWorkspaceError(w, 409, ui(w, "ui.01fabcf55f34"))
 			return selectedServerContext{}, false
 		}
 		id = instances[0].ID
@@ -66,7 +66,7 @@ func (a *App) selectedMinecraft(w http.ResponseWriter, r *http.Request, session 
 			return selectedServerContext{ID: id, Name: instance.DisplayName}, true
 		}
 	}
-	writeMinecraftWorkspaceError(w, 404, "Selected server is no longer available.")
+	writeMinecraftWorkspaceError(w, 404, ui(w, "ui.eca706fcd65b"))
 	return selectedServerContext{}, false
 }
 func (a *App) minecraftSelection(w http.ResponseWriter, r *http.Request) {
@@ -76,7 +76,7 @@ func (a *App) minecraftSelection(w http.ResponseWriter, r *http.Request) {
 	}
 	instances, err := a.independentServerInventory(r.Context(), session)
 	if err != nil {
-		a.writeMinecraftWorkspaceAPIError(w, err, "Server list is unavailable.")
+		a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.b681d9a7fc45"))
 		return
 	}
 	selected := selectedServerContext{}
@@ -119,7 +119,7 @@ func (a *App) selectedMinecraftWorkspace(w http.ResponseWriter, r *http.Request,
 	}
 	client, ok := a.api.(selectedMinecraftAPI)
 	if !ok {
-		writeMinecraftWorkspaceError(w, 503, "Selected server controls are unavailable.")
+		writeMinecraftWorkspaceError(w, 503, ui(w, "ui.9ffd18fb5953"))
 		return true
 	}
 	path := r.URL.Path
@@ -130,7 +130,7 @@ func (a *App) selectedMinecraftWorkspace(w http.ResponseWriter, r *http.Request,
 	if strings.HasSuffix(path, "/logs") {
 		logs, err := client.MinecraftInstanceLogs(r.Context(), session, selected.ID)
 		if err != nil {
-			a.writeMinecraftWorkspaceAPIError(w, err, "Logs are unavailable.")
+			a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.e1049525c721"))
 		} else {
 			writeMinecraftWorkspaceJSON(w, 200, minecraftWorkspaceLogsResponse{OK: true, Lines: strings.Split(logs, "\n")})
 		}
@@ -138,7 +138,7 @@ func (a *App) selectedMinecraftWorkspace(w http.ResponseWriter, r *http.Request,
 	}
 	current, err := client.MinecraftInstanceConfiguration(r.Context(), session, selected.ID)
 	if err != nil {
-		a.writeMinecraftWorkspaceAPIError(w, err, "Selected server settings are unavailable.")
+		a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.bbd7c341c39d"))
 		return true
 	}
 	if r.Method == http.MethodGet {
@@ -188,7 +188,7 @@ func (a *App) selectedMinecraftWorkspace(w http.ResponseWriter, r *http.Request,
 	digest := sha256.Sum256(append(append([]byte(selected.ID+":"), before...), after...))
 	review := hex.EncodeToString(digest[:])
 	if apply && r.FormValue("review") != review {
-		writeMinecraftWorkspaceError(w, 409, "Settings changed since Review. Review this server again.")
+		writeMinecraftWorkspaceError(w, 409, ui(w, "ui.39f443367304"))
 		return true
 	}
 	// Compare the entire definition so only Start on Boot avoids a restart.
@@ -209,29 +209,29 @@ func (a *App) selectedMinecraftWorkspace(w http.ResponseWriter, r *http.Request,
 	state, stateErr := client.MinecraftInstanceStatus(r.Context(), session, selected.ID)
 	plan := map[string]any{"ok": true, "applied": false, "review": review, "changes": changes,
 		"server_name": selected.Name, "runtime_state": state.State, "reviewed_settings": true}
-	warnings := []string{"The server stays stopped. Start it normally when ready."}
+	warnings := []string{ui(w, "ui.f18fa5927b35")}
 	blocked := stateErr != nil || state.ID != selected.ID || (state.State != "stopped" && state.State != "running")
 	if blocked && r.FormValue("tab") == "overview" {
-		writeMinecraftWorkspaceError(w, 409, "Server state is unavailable or changing. Review again before applying settings.")
+		writeMinecraftWorkspaceError(w, 409, ui(w, "ui.c4a78abd3102"))
 		return true
 	}
 	restart := !bootOnly && state.State == "running" && len(changes) > 0
 	confirm := r.FormValue("confirm_players") == "yes"
 	if bootOnly {
-		warnings = []string{"Only Start on Boot changes. The server's current running or stopped state is preserved."}
+		warnings = []string{ui(w, "ui.db2c8b15eebb")}
 	} else if restart && !blocked {
 		players, playerErr := client.MinecraftInstancePlayers(r.Context(), session, selected.ID)
 		if playerErr != nil || players.ID != selected.ID || players.State != "online" || players.Online < 0 {
 			blocked = true
-			warnings = []string{selected.Name + " is running. Player information is unavailable. Review again before applying changes."}
+			warnings = []string{selected.Name + ui(w, "ui.f6da1ffb6f13")}
 		} else {
 			plan["online"] = players.Online
 			plan["confirmation_required"] = players.Online > 0
-			warnings = []string{fmt.Sprintf("%s is running. Players online: %d. Applying these changes will restart %s automatically.", selected.Name, players.Online, selected.Name)}
+			warnings = []string{fmt.Sprintf(ui(w, "ui.56ef3335a65a"), selected.Name, players.Online, selected.Name)}
 		}
 	}
 	if stateErr != nil || state.ID != selected.ID || (state.State != "stopped" && state.State != "running") {
-		warnings = []string{"Server state is unavailable or changing. Review again before applying changes."}
+		warnings = []string{ui(w, "ui.40f689b1f685")}
 	}
 	plan["warnings"], plan["apply_blocked"], plan["restart_required"] = warnings, blocked, restart
 	if !apply || blocked || (plan["confirmation_required"] == true && !confirm) {
@@ -242,47 +242,47 @@ func (a *App) selectedMinecraftWorkspace(w http.ResponseWriter, r *http.Request,
 	if restart {
 		lifecycle, ok = a.api.(selectedSettingsLifecycleAPI)
 		if !ok {
-			writeMinecraftWorkspaceError(w, 503, "Safe server restart is unavailable. Review again later.")
+			writeMinecraftWorkspaceError(w, 503, ui(w, "ui.91d30945c2b6"))
 			return true
 		}
 		// The normal lifecycle rechecks players under its mutation lock and uses
 		// the established player-aware graceful stop, including warning countdown.
 		stopped, stopErr := lifecycle.MinecraftInstanceActionConfirmed(r.Context(), session, selected.ID, "stop", confirm)
 		if stopErr != nil {
-			a.writeMinecraftWorkspaceAPIError(w, stopErr, "The server could not be stopped safely. Settings were not applied.")
+			a.writeMinecraftWorkspaceAPIError(w, stopErr, ui(w, "ui.451d978a6d73"))
 			return true
 		}
 		if stopped.ConfirmationRequired {
 			plan["confirmation_required"], plan["online"] = true, stopped.Online
-			plan["warnings"] = []string{fmt.Sprintf("%s is running. Players online: %d. Confirm that you want to restart it now.", selected.Name, stopped.Online)}
+			plan["warnings"] = []string{fmt.Sprintf(ui(w, "ui.744ef70c54e1"), selected.Name, stopped.Online)}
 			writeMinecraftWorkspaceJSON(w, 200, plan)
 			return true
 		}
 		state, err = client.MinecraftInstanceStatus(r.Context(), session, selected.ID)
 		if !stopped.OK || err != nil || state.ID != selected.ID || state.State != "stopped" {
-			writeMinecraftWorkspaceError(w, 409, "The server's graceful stop could not be verified. Settings were not applied.")
+			writeMinecraftWorkspaceError(w, 409, ui(w, "ui.396b953359d0"))
 			return true
 		}
 	}
 	if err = client.SetMinecraftInstanceConfiguration(r.Context(), session, selected.ID, next); err != nil {
 		// The existing configuration operation owns rollback/recovery. Never
 		// start a server whose configuration application failed.
-		a.writeMinecraftWorkspaceAPIError(w, err, "Settings could not be applied. The server has not been restarted.")
+		a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.21f3e4d97eaf"))
 		return true
 	}
 	if restart {
 		started, startErr := lifecycle.MinecraftInstanceActionConfirmed(r.Context(), session, selected.ID, "start", false)
 		if startErr != nil {
-			a.writeMinecraftWorkspaceAPIError(w, startErr, "Settings were saved, but the server could not start. Check its status before starting it normally.")
+			a.writeMinecraftWorkspaceAPIError(w, startErr, ui(w, "ui.b035da86f445"))
 			return true
 		}
 		state, err = client.MinecraftInstanceStatus(r.Context(), session, selected.ID)
 		if !started.OK || err != nil || state.ID != selected.ID || state.State != "running" {
-			writeMinecraftWorkspaceError(w, 409, "Settings were saved, but the server's running state could not be verified. Check its status.")
+			writeMinecraftWorkspaceError(w, 409, ui(w, "ui.e04e61e4bded"))
 			return true
 		}
 	}
-	plan["applied"], plan["message"] = true, "Server settings saved."
+	plan["applied"], plan["message"] = true, ui(w, "ui.5620878f3da7")
 	if restart {
 		plan["restarted"] = true
 	}
@@ -294,7 +294,7 @@ func selectedSettingsOverlay(r *http.Request, current api.InstanceRuntimeSetting
 	if r.FormValue("tab") == "overview" {
 		v, e := strconv.ParseBool(r.FormValue("start_on_boot"))
 		if e != nil {
-			return current, errors.New("Choose Start on Boot.")
+			return current, errors.New(uiText("ui.e47e26c6a03c"))
 		}
 		current.StartOnBoot = v
 		return current, nil
@@ -316,7 +316,7 @@ func selectedSettingsOverlay(r *http.Request, current api.InstanceRuntimeSetting
 		current.BedrockEnabled = request.BedrockEnabled
 		current.BedrockPort = request.BedrockPort
 	default:
-		return current, errors.New("Choose a supported settings section.")
+		return current, errors.New(uiText("ui.40feea1fd913"))
 	}
 	return current, nil
 }
@@ -331,17 +331,17 @@ func (a *App) selectedMinecraftSnapshot(w http.ResponseWriter, r *http.Request) 
 	}
 	client, ok := a.api.(selectedMinecraftAPI)
 	if !ok {
-		writeMinecraftWorkspaceError(w, 503, "Server status is unavailable.")
+		writeMinecraftWorkspaceError(w, 503, ui(w, "ui.a95d80be4cce"))
 		return
 	}
 	c, err := client.MinecraftInstanceConfiguration(r.Context(), session, selected.ID)
 	if err != nil {
-		a.writeMinecraftWorkspaceAPIError(w, err, "Server settings are unavailable.")
+		a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.e7b087268b8e"))
 		return
 	}
 	state, err := client.MinecraftInstanceStatus(r.Context(), session, selected.ID)
 	if err != nil || state.ID != selected.ID {
-		a.writeMinecraftWorkspaceAPIError(w, err, "Server status is unavailable.")
+		a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.a95d80be4cce"))
 		return
 	}
 	players, err := client.MinecraftInstancePlayers(r.Context(), session, selected.ID)
@@ -349,7 +349,7 @@ func (a *App) selectedMinecraftSnapshot(w http.ResponseWriter, r *http.Request) 
 		players.State = "unknown"
 	}
 	playerState := "unavailable"
-	var online any = "Unavailable"
+	var online any = ui(w, "ui.ca1844969742")
 	if players.State == "online" {
 		playerState, online = "online", players.Online
 	} else if players.State == "offline" {
@@ -359,7 +359,7 @@ func (a *App) selectedMinecraftSnapshot(w http.ResponseWriter, r *http.Request) 
 }
 func (a *App) selectedMinecraftPresentation(w http.ResponseWriter, r *http.Request) {
 	if !a.validCSRF(r) {
-		writeMinecraftWorkspaceError(w, 403, "Invalid CSRF token.")
+		writeMinecraftWorkspaceError(w, 403, ui(w, "ui.74bccc44f472"))
 		return
 	}
 	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator")
@@ -372,7 +372,7 @@ func (a *App) selectedMinecraftPresentation(w http.ResponseWriter, r *http.Reque
 	}
 	client, ok := a.api.(selectedMinecraftAPI)
 	if !ok {
-		writeMinecraftWorkspaceError(w, 503, "Server controls are unavailable.")
+		writeMinecraftWorkspaceError(w, 503, ui(w, "ui.5d561696dd33"))
 		return
 	}
 	var err error
@@ -382,7 +382,7 @@ func (a *App) selectedMinecraftPresentation(w http.ResponseWriter, r *http.Reque
 		err = client.DeleteMinecraftInstance(r.Context(), session, selected.ID, r.FormValue("confirm_name"))
 	}
 	if err != nil {
-		a.writeMinecraftWorkspaceAPIError(w, err, "Server action did not complete. Retry the same action.")
+		a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.d7769f5853f3"))
 		return
 	}
 	writeMinecraftWorkspaceJSON(w, 200, map[string]any{"ok": true, "redirect": "/minecraft/servers?deleted=yes"})
@@ -393,26 +393,26 @@ func (a *App) selectedWhitelist(w http.ResponseWriter, r *http.Request, session 
 		MinecraftInstanceWhitelist(context.Context, string, string, any) (api.TextOutputResponse, error)
 	})
 	if !ok {
-		writeMinecraftWorkspaceError(w, 503, "Whitelist is unavailable.")
+		writeMinecraftWorkspaceError(w, 503, ui(w, "ui.8249e3a5a00e"))
 		return
 	}
 	if strings.HasSuffix(r.URL.Path, "/state") {
 		enabled, err := strconv.ParseBool(r.FormValue("enabled"))
 		if err != nil {
-			writeMinecraftWorkspaceError(w, 400, "Whitelist state is required.")
+			writeMinecraftWorkspaceError(w, 400, ui(w, "ui.ede858c00b87"))
 			return
 		}
 		current, err := settings.MinecraftInstanceConfiguration(r.Context(), session, selected.ID)
 		if err != nil {
-			a.writeMinecraftWorkspaceAPIError(w, err, "Whitelist is unavailable.")
+			a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.8249e3a5a00e"))
 			return
 		}
 		current.Whitelist = enabled
 		if err = settings.SetMinecraftInstanceConfiguration(r.Context(), session, selected.ID, current); err != nil {
-			a.writeMinecraftWorkspaceAPIError(w, err, "Whitelist change failed.")
+			a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.fa3b35c1d480"))
 			return
 		}
-		writeMinecraftWorkspaceJSON(w, 200, minecraftWorkspaceTextResponse{OK: true, Message: "Whitelist updated."})
+		writeMinecraftWorkspaceJSON(w, 200, minecraftWorkspaceTextResponse{OK: true, Message: ui(w, "ui.f3ac5dffc52f")})
 		return
 	}
 	var request any
@@ -421,11 +421,11 @@ func (a *App) selectedWhitelist(w http.ResponseWriter, r *http.Request, session 
 	}
 	result, err := client.MinecraftInstanceWhitelist(r.Context(), session, selected.ID, request)
 	if err != nil {
-		a.writeMinecraftWorkspaceAPIError(w, err, "Whitelist is unavailable.")
+		a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.8249e3a5a00e"))
 		return
 	}
 	if r.Method != http.MethodGet {
-		writeMinecraftWorkspaceJSON(w, 200, minecraftWorkspaceTextResponse{OK: true, Output: result.Output, Message: "Whitelist updated."})
+		writeMinecraftWorkspaceJSON(w, 200, minecraftWorkspaceTextResponse{OK: true, Output: result.Output, Message: ui(w, "ui.f3ac5dffc52f")})
 		return
 	}
 	entries, parsed := parseMinecraftWorkspaceWhitelist(result.Output)
@@ -438,7 +438,7 @@ func (a *App) selectedWhitelist(w http.ResponseWriter, r *http.Request, session 
 
 func (a *App) selectedMinecraftConsole(w http.ResponseWriter, r *http.Request) {
 	if !a.validCSRF(r) {
-		writeMinecraftWorkspaceError(w, http.StatusForbidden, "Invalid CSRF token.")
+		writeMinecraftWorkspaceError(w, http.StatusForbidden, ui(w, "ui.74bccc44f472"))
 		return
 	}
 	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator")
@@ -447,7 +447,7 @@ func (a *App) selectedMinecraftConsole(w http.ResponseWriter, r *http.Request) {
 	}
 	// RCON never infers a target, even for a single-server inventory.
 	if len(r.URL.Query()["server"]) != 1 || r.FormValue("server_id") != r.URL.Query().Get("server") {
-		writeMinecraftWorkspaceError(w, http.StatusConflict, "Server selection changed. Choose the server again.")
+		writeMinecraftWorkspaceError(w, http.StatusConflict, ui(w, "ui.2abb7427913d"))
 		return
 	}
 	selected, ok := a.selectedMinecraft(w, r, session)
@@ -469,7 +469,7 @@ func (a *App) selectedMinecraftConsole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if result.ID != selected.ID || !result.OK {
-		writeMinecraftWorkspaceError(w, 502, "Selected server response could not be verified.")
+		writeMinecraftWorkspaceError(w, 502, ui(w, "ui.1e57161e8be3"))
 		return
 	}
 	writeMinecraftWorkspaceJSON(w, 200, result)

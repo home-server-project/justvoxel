@@ -27,7 +27,7 @@ func (a *App) beginSetupDiagnosticBestEffort(ctx context.Context, client adminDi
 	if err != nil || !setupOperationIDPattern.MatchString(response.SessionID) {
 		return ""
 	}
-	_ = diagnostics.AdminSetupDiagnosticEvent(ctx, session, response.SessionID, "WebUI setup wizard started", map[string]string{})
+	_ = diagnostics.AdminSetupDiagnosticEvent(ctx, session, response.SessionID, uiText("ui.c5c3672e7204"), map[string]string{})
 	return response.SessionID
 }
 
@@ -83,12 +83,12 @@ func (a *App) setupWizardDiagnosticDownload(w http.ResponseWriter, r *http.Reque
 	}
 	id := r.PathValue("id")
 	if !setupOperationIDPattern.MatchString(id) {
-		http.Error(w, "invalid setup operation", http.StatusBadRequest)
+		http.Error(w, ui(w, "ui.ef3ac7723f8b"), http.StatusBadRequest)
 		return
 	}
 	downloader, ok := client.(setupDiagnosticDownloadAPI)
 	if !ok {
-		http.Error(w, "setup diagnostic download is unavailable", http.StatusServiceUnavailable)
+		http.Error(w, ui(w, "ui.54486a97567b"), http.StatusServiceUnavailable)
 		return
 	}
 	data, err := downloader.AdminSetupDiagnosticLog(r.Context(), session, id)

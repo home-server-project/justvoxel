@@ -38,7 +38,7 @@ func (a *App) providerPasswordPage(w http.ResponseWriter, r *http.Request) {
 	}
 	client, ok := a.authAPI()
 	if !ok {
-		http.Error(w, "authentication settings unavailable", http.StatusServiceUnavailable)
+		http.Error(w, ui(w, "ui.28fba7410d7d"), http.StatusServiceUnavailable)
 		return
 	}
 	status, err := client.AuthStatus(r.Context(), session)
@@ -48,11 +48,11 @@ func (a *App) providerPasswordPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		http.Error(w, "authentication settings unavailable", http.StatusBadGateway)
+		http.Error(w, ui(w, "ui.28fba7410d7d"), http.StatusBadGateway)
 		return
 	}
 	a.renderPassword(w, passwordPageData{
-		Title:              "Change administrator password",
+		Title:              ui(w, "ui.b6a5c36e81de"),
 		Version:            a.config.Version,
 		ManagementAPI:      a.config.ManagementAPI,
 		CSRF:               csrfFromRequest(r),
@@ -78,7 +78,7 @@ func (a *App) providerPasswordChange(w http.ResponseWriter, r *http.Request) {
 	}
 	client, ok := a.authAPI()
 	if !ok {
-		http.Error(w, "authentication settings unavailable", http.StatusServiceUnavailable)
+		http.Error(w, ui(w, "ui.28fba7410d7d"), http.StatusServiceUnavailable)
 		return
 	}
 	status, err := client.AuthStatus(r.Context(), session)
@@ -88,7 +88,7 @@ func (a *App) providerPasswordChange(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		http.Error(w, "authentication settings unavailable", http.StatusBadGateway)
+		http.Error(w, ui(w, "ui.28fba7410d7d"), http.StatusBadGateway)
 		return
 	}
 
@@ -98,14 +98,14 @@ func (a *App) providerPasswordChange(w http.ResponseWriter, r *http.Request) {
 	if newPassword != confirmPassword || len(newPassword) < status.MinimumPasswordLen {
 		w.WriteHeader(http.StatusBadRequest)
 		a.renderPassword(w, passwordPageData{
-			Title:              "Change administrator password",
+			Title:              ui(w, "ui.b6a5c36e81de"),
 			Version:            a.config.Version,
 			ManagementAPI:      a.config.ManagementAPI,
 			CSRF:               csrfFromRequest(r),
 			OAuthRequest:       oauthContinuation(r),
 			MinimumPasswordLen: status.MinimumPasswordLen,
 			SystemMode:         status.Mode == "system",
-			Error:              "New passwords must match and meet the host system password policy.",
+			Error:              ui(w, "ui.bc857e7fc12d"),
 		})
 		return
 	}
@@ -116,13 +116,13 @@ func (a *App) providerPasswordChange(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, oauthContinuePath("/login", oauthContinuation(r)), http.StatusSeeOther)
 			return
 		}
-		message := "Password change was rejected by the host system password policy."
+		message := ui(w, "ui.8f9cdd4f0888")
 		if reason, ok := api.ErrorMessage(err); ok {
 			message = reason
 		}
 		w.WriteHeader(http.StatusBadRequest)
 		a.renderPassword(w, passwordPageData{
-			Title:              "Change administrator password",
+			Title:              ui(w, "ui.b6a5c36e81de"),
 			Version:            a.config.Version,
 			ManagementAPI:      a.config.ManagementAPI,
 			CSRF:               csrfFromRequest(r),
@@ -141,7 +141,7 @@ func (a *App) providerPasswordChange(w http.ResponseWriter, r *http.Request) {
 func (a *App) renderPassword(w http.ResponseWriter, data passwordPageData) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	if err := a.templates.ExecuteTemplate(w, "password.html", data); err != nil {
-		http.Error(w, "render error", http.StatusInternalServerError)
+	if err := a.executeTemplate(w, "password.html", data); err != nil {
+		http.Error(w, ui(w, "ui.4a9d9119358b"), http.StatusInternalServerError)
 	}
 }

@@ -24,29 +24,29 @@ func (a *App) telegramAdmin(w http.ResponseWriter, r *http.Request) {
 	}
 	client, ok := a.api.(telegramAdminAPI)
 	if !ok {
-		gatewayJSON(w, 503, map[string]string{"error": "Telegram unavailable."})
+		gatewayJSON(w, 503, map[string]string{"error": ui(w, "ui.c2a0120d57f6")})
 		return
 	}
 	var body json.RawMessage
 	if r.Method == "POST" {
 		r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
 		if r.ParseForm() != nil {
-			gatewayJSON(w, 400, map[string]string{"error": "Invalid request."})
+			gatewayJSON(w, 400, map[string]string{"error": ui(w, "ui.af92524e4c08")})
 			return
 		}
 		if !a.validCSRF(r) {
-			gatewayJSON(w, 403, map[string]string{"error": "Invalid CSRF token."})
+			gatewayJSON(w, 403, map[string]string{"error": ui(w, "ui.74bccc44f472")})
 			return
 		}
 		body = json.RawMessage(r.FormValue("request"))
 		if len(body) == 0 || !json.Valid(body) {
-			gatewayJSON(w, 400, map[string]string{"error": "Invalid request."})
+			gatewayJSON(w, 400, map[string]string{"error": ui(w, "ui.af92524e4c08")})
 			return
 		}
 	}
 	result, err := client.TelegramAdmin(r.Context(), session, body)
 	if err != nil {
-		message := "Telegram settings could not be loaded or saved. Check the bot, session, and any pending Factory Reset."
+		message := ui(w, "ui.42851165fb3e")
 		status := http.StatusBadGateway
 		var response *api.ResponseError
 		// This explicit settings endpoint returns fixed appliance messages, never

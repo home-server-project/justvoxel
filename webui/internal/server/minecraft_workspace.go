@@ -132,26 +132,26 @@ func (a *App) registerMinecraftWorkspaceRoutes(mux *http.ServeMux) {
 
 func (a *App) minecraftWorkspaceIdentity(w http.ResponseWriter, r *http.Request, allowed ...string) (string, api.SessionInfo, bool) {
 	if mustChange(r) {
-		writeMinecraftWorkspaceError(w, http.StatusForbidden, "Password change required.")
+		writeMinecraftWorkspaceError(w, http.StatusForbidden, ui(w, "ui.fe5ad66e02ea"))
 		return "", api.SessionInfo{}, false
 	}
 	session, ok := sessionFromRequest(r)
 	if !ok {
-		writeMinecraftWorkspaceError(w, http.StatusUnauthorized, "Authentication required.")
+		writeMinecraftWorkspaceError(w, http.StatusUnauthorized, ui(w, "ui.45cceda8377a"))
 		return "", api.SessionInfo{}, false
 	}
 	client, ok := a.api.(sessionIdentityAPI)
 	if !ok {
-		writeMinecraftWorkspaceError(w, http.StatusServiceUnavailable, "Role-aware controls are unavailable.")
+		writeMinecraftWorkspaceError(w, http.StatusServiceUnavailable, ui(w, "ui.cb4fa257c689"))
 		return "", api.SessionInfo{}, false
 	}
 	identity, err := client.Session(r.Context(), session)
 	if err != nil {
-		a.writeMinecraftWorkspaceAPIError(w, err, "Session information is unavailable.")
+		a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.98a9fb5b71d1"))
 		return "", api.SessionInfo{}, false
 	}
 	if identity.MustChange {
-		writeMinecraftWorkspaceError(w, 403, "Password change required.")
+		writeMinecraftWorkspaceError(w, 403, ui(w, "ui.fe5ad66e02ea"))
 		return "", api.SessionInfo{}, false
 	}
 	for _, role := range allowed {
@@ -159,7 +159,7 @@ func (a *App) minecraftWorkspaceIdentity(w http.ResponseWriter, r *http.Request,
 			return session, identity, true
 		}
 	}
-	writeMinecraftWorkspaceError(w, http.StatusForbidden, "Operation not permitted for this role.")
+	writeMinecraftWorkspaceError(w, http.StatusForbidden, ui(w, "ui.765e141d59df"))
 	return "", api.SessionInfo{}, false
 }
 
@@ -181,7 +181,7 @@ func (a *App) minecraftWorkspaceSettingsApply(w http.ResponseWriter, r *http.Req
 
 func (a *App) minecraftWorkspaceSettingsChange(w http.ResponseWriter, r *http.Request, apply bool) {
 	if !a.validCSRF(r) {
-		writeMinecraftWorkspaceError(w, http.StatusForbidden, "Invalid CSRF token.")
+		writeMinecraftWorkspaceError(w, http.StatusForbidden, ui(w, "ui.74bccc44f472"))
 		return
 	}
 	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator")
@@ -193,7 +193,7 @@ func (a *App) minecraftWorkspaceSettingsChange(w http.ResponseWriter, r *http.Re
 
 func minecraftWorkspaceConfigurationRequest(r *http.Request, current api.AdminConfigurationDiscovery) (api.AdminConfigurationChangeRequest, error) {
 	if err := r.ParseForm(); err != nil {
-		return api.AdminConfigurationChangeRequest{}, errors.New("Could not read the Minecraft settings.")
+		return api.AdminConfigurationChangeRequest{}, errors.New(uiText("ui.43df7ec7f9a8"))
 	}
 	request := configurationRequestFromDiscovery(current)
 	request.ConfirmPlayers = r.FormValue("confirm_players") == "yes"
@@ -203,35 +203,35 @@ func minecraftWorkspaceConfigurationRequest(r *http.Request, current api.AdminCo
 		request.JavaMemory = strings.TrimSpace(r.FormValue("java_memory"))
 		request.ContainerMemory = strings.TrimSpace(r.FormValue("container_memory"))
 		if request.JavaMemory == "" || request.ContainerMemory == "" {
-			return request, errors.New("Minecraft memory values are required.")
+			return request, errors.New(uiText("ui.981b7337f373"))
 		}
 	case "gameplay":
-		maxPlayers, err := parsePositiveFormInt(r.FormValue("max_players"), "Maximum players")
+		maxPlayers, err := parsePositiveFormInt(r.FormValue("max_players"), uiText("ui.e1f268f4f175"))
 		if err != nil {
 			return request, err
 		}
 		request.MaxPlayers = maxPlayers
 		request.MOTD = strings.TrimSpace(r.FormValue("motd"))
 		if request.MOTD == "" {
-			return request, errors.New("Server welcome message is required.")
+			return request, errors.New(uiText("ui.0e596941556e"))
 		}
 		request.GameMode = r.FormValue("game_mode")
 		switch request.GameMode {
 		case "survival", "creative", "adventure", "spectator":
 		default:
-			return request, errors.New("Choose a valid Minecraft game mode.")
+			return request, errors.New(uiText("ui.f4da7e01cc43"))
 		}
 	case "crossplay":
-		javaPort, err := parsePositiveFormInt(r.FormValue("java_port"), "Minecraft Java port")
+		javaPort, err := parsePositiveFormInt(r.FormValue("java_port"), uiText("ui.4d830c2e53c4"))
 		if err != nil {
 			return request, err
 		}
-		bedrockPort, err := parsePositiveFormInt(r.FormValue("bedrock_port"), "Bedrock port")
+		bedrockPort, err := parsePositiveFormInt(r.FormValue("bedrock_port"), uiText("ui.f34bf1022246"))
 		if err != nil {
 			return request, err
 		}
 		if javaPort > 65535 || bedrockPort > 65535 {
-			return request, errors.New("Minecraft ports must be between 1 and 65535.")
+			return request, errors.New(uiText("ui.477441ce538e"))
 		}
 		request.JavaPort = javaPort
 		request.BedrockPort = bedrockPort
@@ -241,10 +241,10 @@ func minecraftWorkspaceConfigurationRequest(r *http.Request, current api.AdminCo
 		request.VersionPolicy = strings.TrimSpace(r.FormValue("version_policy"))
 		request.Version = strings.TrimSpace(r.FormValue("version"))
 		if request.ImageTag == "" || request.VersionPolicy == "" {
-			return request, errors.New("Minecraft image tag and version policy are required.")
+			return request, errors.New(uiText("ui.80bad70aa65e"))
 		}
 	default:
-		return request, errors.New("Choose a Minecraft settings section.")
+		return request, errors.New(uiText("ui.82aa8ce60823"))
 	}
 	return request, nil
 }
@@ -259,7 +259,7 @@ func (a *App) minecraftWorkspaceWhitelist(w http.ResponseWriter, r *http.Request
 
 func (a *App) minecraftWorkspaceWhitelistChange(w http.ResponseWriter, r *http.Request) {
 	if !a.validCSRF(r) {
-		writeMinecraftWorkspaceError(w, http.StatusForbidden, "Invalid CSRF token.")
+		writeMinecraftWorkspaceError(w, http.StatusForbidden, ui(w, "ui.74bccc44f472"))
 		return
 	}
 	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator", "operator")
@@ -282,10 +282,10 @@ func (a *App) writeMinecraftWorkspaceAPIError(w http.ResponseWriter, err error, 
 	message := fallback
 	if errors.Is(err, api.ErrUnauthorized) {
 		status = http.StatusUnauthorized
-		message = "Authentication required."
+		message = ui(w, "ui.45cceda8377a")
 	} else if errors.Is(err, api.ErrPasswordChangeRequired) {
 		status = http.StatusForbidden
-		message = "Password change required."
+		message = ui(w, "ui.fe5ad66e02ea")
 	} else {
 		var responseErr *api.ResponseError
 		if errors.As(err, &responseErr) {
@@ -314,7 +314,7 @@ func writeMinecraftWorkspaceJSON(w http.ResponseWriter, status int, value any) {
 // Only the administrator can change the authoritative whitelist setting.
 func (a *App) minecraftWorkspaceWhitelistState(w http.ResponseWriter, r *http.Request) {
 	if !a.validCSRF(r) {
-		writeMinecraftWorkspaceError(w, http.StatusForbidden, "Invalid CSRF token.")
+		writeMinecraftWorkspaceError(w, http.StatusForbidden, ui(w, "ui.74bccc44f472"))
 		return
 	}
 	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator")
@@ -328,7 +328,7 @@ func (a *App) minecraftWorkspaceInstance(w http.ResponseWriter, r *http.Request)
 	roles := []string{"administrator", "operator", "viewer"}
 	if r.Method == http.MethodPost {
 		if !a.validCSRF(r) {
-			writeMinecraftWorkspaceError(w, http.StatusForbidden, "Invalid CSRF token.")
+			writeMinecraftWorkspaceError(w, http.StatusForbidden, ui(w, "ui.74bccc44f472"))
 			return
 		}
 		roles = []string{"administrator"}
@@ -342,7 +342,7 @@ func (a *App) minecraftWorkspaceInstance(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if r.Method != http.MethodGet {
-		writeMinecraftWorkspaceError(w, http.StatusConflict, "Server identity is immutable.")
+		writeMinecraftWorkspaceError(w, http.StatusConflict, ui(w, "ui.e0f6fe514016"))
 		return
 	}
 	writeMinecraftWorkspaceJSON(w, http.StatusOK, api.MinecraftIdentity{Status: "available", ID: selected.ID})

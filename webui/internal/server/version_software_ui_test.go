@@ -2,13 +2,12 @@ package server
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 	"testing"
 )
 
 func TestMigrationSwitchCardsAndReviewedActions(t *testing.T) {
-	script, err := assets.ReadFile("static/server-migration-switch.js")
+	script, err := englishPresentationAsset("static/server-migration-switch.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +76,7 @@ async function open(fail=false) {
  assert.match(failure.progress.textContent,/Switch did not complete/);assert.doesNotMatch(failure.progress.textContent,/Clone created and verified/);assert.match(failure.progress.textContent,/Recover Switch/);
 })().catch(error=>{console.error(error);process.exitCode=1;});
 `
-	cmd := exec.Command("node")
+	cmd := nodeTestCommand()
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("Migration Switch behavior: %v\n%s", err, output)
@@ -85,7 +84,7 @@ async function open(fail=false) {
 }
 
 func TestSetupSimpleSoftwareCardWording(t *testing.T) {
-	data, err := assets.ReadFile("templates/setup_wizard.html")
+	data, err := englishPresentationAsset("templates/setup_wizard.html")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -30,31 +30,31 @@ func (p selectedRestoreProgress) Busy() bool {
 func restoreProgressLabel(state string) string {
 	switch state {
 	case "idle":
-		return "Ready"
+		return uiText("ui.5fa7aac5375c")
 	case "accepted", "validating":
 		return "Validating"
 	case "staging", "ready_to_apply":
-		return "Preparing Restore data"
+		return uiText("ui.1c84ade9fb65")
 	case "shutdown":
-		return "Stopping Minecraft safely"
+		return uiText("ui.995beb2af122")
 	case "preserving_original", "replacement_activated", "original_preserved":
-		return "Applying Restore data"
+		return uiText("ui.6cdbd4f77314")
 	case "runtime_verification":
-		return "Runtime validation"
+		return uiText("ui.724382940a57")
 	case "rollback_required", "recovering":
-		return "Preparing recovery"
+		return uiText("ui.b62ffd61bf8c")
 	case "original_restored":
-		return "Restoring previous Minecraft data"
+		return uiText("ui.109857563af5")
 	case "rollback_verification":
-		return "Rolling back"
+		return uiText("ui.8b9e964b606b")
 	case "rolled_back":
-		return "Rolled back"
+		return uiText("ui.71592236d852")
 	case "completed":
 		return "Complete"
 	case "recovery_required", "interrupted", "failed":
-		return "Needs attention"
+		return uiText("ui.c1ebc7817870")
 	default:
-		return "Checking Restore status"
+		return uiText("ui.f9daad8f5a86")
 	}
 }
 
@@ -68,25 +68,25 @@ func presentSelectedRestore(p selectedRestoreProgress) selectedRestoreProgress {
 	p.RolledBack = p.State == "rolled_back" && !p.RecoveryRequired
 	p.Attention = p.RecoveryRequired || p.State == "interrupted" || p.State == "failed"
 	p.Terminal = p.Complete || p.RolledBack || p.Attention || p.State == "idle"
-	p.Status = "Restore is in progress for this Minecraft server."
+	p.Status = uiText("ui.6d934ee1803d")
 	// Active Recovery can still have a recovery_required journal stage while
 	// the Agent explicitly reports recovery_required=false. Keep polling.
 	if p.State == "recovery_required" && !p.RecoveryRequired {
-		p.StateLabel = "Preparing recovery"
+		p.StateLabel = uiText("ui.b62ffd61bf8c")
 		if p.Stage == "recovery_required" || p.Stage == "" {
-			p.StageLabel = "Preparing recovery"
+			p.StageLabel = uiText("ui.b62ffd61bf8c")
 		}
 	}
 	switch {
 	case p.Attention:
-		p.StateLabel = "Needs attention"
-		p.Status = "Restore needs administrator attention. Review recovery before starting another Restore."
+		p.StateLabel = uiText("ui.c1ebc7817870")
+		p.Status = uiText("ui.f4231c2da286")
 	case p.Complete:
-		p.Status = "Minecraft Restore completed successfully. The restored runtime passed validation."
+		p.Status = uiText("ui.0c192101a9ac")
 	case p.RolledBack:
-		p.Status = "Restore was rolled back safely. The previous Minecraft data was restored and verified."
+		p.Status = uiText("ui.a5cc653350d4")
 	case p.State == "idle":
-		p.Status = "No Restore is currently running for this server."
+		p.Status = uiText("ui.e720806d820c")
 	}
 	return p
 }
@@ -105,7 +105,7 @@ func readSelectedRestore(ctx context.Context, client selectedBackupsAPI, session
 		RecoveryRequired bool   `json:"recovery_required"`
 	}
 	if json.Unmarshal(raw, &status) != nil || status.ID != id {
-		return p, fmt.Errorf("Restore identity could not be verified.")
+		return p, fmt.Errorf("%s", uiText("ui.0dc768ae2272"))
 	}
 	p.ID, p.State, p.Stage, p.RecoveryRequired = status.ID, status.State, status.Stage, status.RecoveryRequired
 	return presentSelectedRestore(p), nil
@@ -122,12 +122,12 @@ func (a *App) selectedRestoreStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	client, ok := a.api.(selectedBackupsAPI)
 	if !ok {
-		writeMinecraftWorkspaceError(w, 503, "Restore status is unavailable.")
+		writeMinecraftWorkspaceError(w, 503, ui(w, "ui.367bc30f5104"))
 		return
 	}
 	progress, err := readSelectedRestore(r.Context(), client, session, selected.ID)
 	if err != nil {
-		a.writeMinecraftWorkspaceAPIError(w, err, "Restore status or identity could not be verified.")
+		a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.afadfb0b5986"))
 		return
 	}
 	writeMinecraftWorkspaceJSON(w, 200, progress)

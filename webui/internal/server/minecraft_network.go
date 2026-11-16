@@ -30,17 +30,17 @@ type minecraftNetworkPage struct {
 func minecraftNetworkStateBadge(state string) (string, string) {
 	switch state {
 	case "running":
-		return "Running", "good"
+		return uiText("ui.f4ccae29e1bb"), "good"
 	case "stopped":
-		return "Stopped", "danger"
+		return uiText("ui.1a4f630ac1b6"), "danger"
 	case "failed":
-		return "Failed", "danger"
+		return uiText("ui.031a8f0f659d"), "danger"
 	case "starting":
-		return "Starting", "warning"
+		return uiText("ui.aeed4d26bb5f"), "warning"
 	case "stopping":
-		return "Stopping", "warning"
+		return uiText("ui.a71ee1d4ac5c"), "warning"
 	default:
-		return "Unavailable", "muted"
+		return uiText("ui.ca1844969742"), "muted"
 	}
 }
 
@@ -58,12 +58,12 @@ func (a *App) minecraftNetwork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodPost && !a.validCSRF(r) {
-		http.Error(w, "Invalid CSRF token.", http.StatusForbidden)
+		http.Error(w, ui(w, "ui.74bccc44f472"), http.StatusForbidden)
 		return
 	}
 	client, ok := a.api.(minecraftNetworkAPI)
 	if !ok {
-		http.Error(w, "Minecraft Network is unavailable.", 503)
+		http.Error(w, ui(w, "ui.48eb13811ccb"), 503)
 		return
 	}
 	if r.Method == http.MethodGet && r.URL.Query().Get("runtime_only") == "true" {
@@ -71,12 +71,12 @@ func (a *App) minecraftNetwork(w http.ResponseWriter, r *http.Request) {
 			MinecraftNetworkRuntime(context.Context, string) (api.MinecraftNetworkStatus, error)
 		})
 		if !ok {
-			http.Error(w, "Minecraft Network status is unavailable.", 503)
+			http.Error(w, ui(w, "ui.6454e38a3538"), 503)
 			return
 		}
 		status, err := runtimeClient.MinecraftNetworkRuntime(r.Context(), session)
 		if err != nil {
-			http.Error(w, "Minecraft Network status is unavailable.", 503)
+			http.Error(w, ui(w, "ui.6454e38a3538"), 503)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -86,7 +86,7 @@ func (a *App) minecraftNetwork(w http.ResponseWriter, r *http.Request) {
 		}{status.Servers})
 		return
 	}
-	data := minecraftNetworkPage{Title: "Minecraft Network", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI, CSRF: csrfFromRequest(r)}
+	data := minecraftNetworkPage{Title: ui(w, "ui.60d8c0cc037f"), Version: a.config.Version, ManagementAPI: a.config.ManagementAPI, CSRF: csrfFromRequest(r)}
 	if r.Method == http.MethodPost {
 		var err error
 		switch r.FormValue("action") {
@@ -103,30 +103,30 @@ func (a *App) minecraftNetwork(w http.ResponseWriter, r *http.Request) {
 		case "add", "remove":
 			err = client.MinecraftNetworkWhitelist(r.Context(), session, r.FormValue("platform"), r.FormValue("action"), r.FormValue("name"))
 		default:
-			http.Error(w, "Invalid Minecraft Network operation.", 400)
+			http.Error(w, ui(w, "ui.bf4ce85ab01d"), 400)
 			return
 		}
 		if err != nil {
-			data.Error = "Minecraft Network could not complete this change. If recovery is required, choose Retry recovery."
+			data.Error = ui(w, "ui.18aada9a9c04")
 			if message, ok := api.ErrorMessage(err); ok {
 				data.Error = message
 			}
 		} else {
-			data.Message = "Minecraft Network was updated."
+			data.Message = ui(w, "ui.faaadd021144")
 		}
 	}
 	network, err := client.MinecraftNetwork(r.Context(), session)
 	if err != nil {
-		http.Error(w, "Minecraft Network status is unavailable.", 503)
+		http.Error(w, ui(w, "ui.6454e38a3538"), 503)
 		return
 	}
 	if data.Message != "" && r.FormValue("action") == "configure" && !network.Config.Enabled {
-		data.Message = "Minecraft Network settings saved. Network remains disabled."
+		data.Message = ui(w, "ui.0cd43827d23e")
 	}
 	data.Network = network
 	inventory, err := a.independentServerInventory(r.Context(), session)
 	if err != nil {
-		http.Error(w, "Minecraft server list is unavailable.", 503)
+		http.Error(w, ui(w, "ui.d8eb66798ffa"), 503)
 		return
 	}
 	names := map[string]string{}
@@ -144,7 +144,7 @@ func (a *App) minecraftNetwork(w http.ResponseWriter, r *http.Request) {
 		row.StateLabel, row.StateClass = minecraftNetworkStateBadge(server.State)
 		row.CompatibilityReason = server.CompatibilityReason
 		if row.CompatibilityReason == "" {
-			row.CompatibilityReason = "Not supported by Minecraft Network"
+			row.CompatibilityReason = ui(w, "ui.9f0c91726736")
 		}
 		if server.Eligible {
 			data.SupportedServers = append(data.SupportedServers, row)

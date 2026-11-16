@@ -86,9 +86,9 @@ func (disk storageBrowserDiskView) PartitionTableLabel() string {
 	case "msdos":
 		return "MBR"
 	case "none":
-		return "No partition table"
+		return uiText("ui.feff1fe15289")
 	default:
-		return "Unknown partition table"
+		return uiText("ui.faea5cfb33a8")
 	}
 }
 
@@ -131,18 +131,18 @@ func (a *App) storageBrowserWindow(w http.ResponseWriter, r *http.Request) {
 	if data.Configuration.Configured {
 		destination, err := a.storageDestinationData(r, session, identity, csrfFromRequest(r), nil, nil)
 		if err != nil {
-			data.BackupDestinationNote = "Backup destination information is temporarily unavailable. Refresh Storage to try again."
+			data.BackupDestinationNote = ui(w, "ui.01d19daee2cf")
 		} else {
 			if r.URL.Query().Get("result") == "destination" {
-				destination.Message = "Backup destination updated. New backups will use it."
+				destination.Message = ui(w, "ui.b074f47785c2")
 			}
 			data.BackupDestination = &destination
 		}
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	if err := a.templates.ExecuteTemplate(w, "storage_browser_content", data); err != nil {
-		http.Error(w, "render error", http.StatusInternalServerError)
+	if err := a.executeTemplate(w, "storage_browser_content", data); err != nil {
+		http.Error(w, ui(w, "ui.4a9d9119358b"), http.StatusInternalServerError)
 	}
 }
 
@@ -162,7 +162,7 @@ func (a *App) buildStorageBrowserPageData(ctx context.Context, session string, c
 	if migrationClient, ok := any(client).(storageBrowserMigrationDiscoveryAPI); ok {
 		discovery, err := migrationClient.AdminDataMigrationDiscovery(ctx, session)
 		if err != nil {
-			migrationNote = "Minecraft storage assignment is temporarily unavailable. Other storage actions are still available."
+			migrationNote = uiText("ui.95769f6b4ee1")
 		} else {
 			for _, candidate := range discovery.Partitions {
 				migrationCandidates[candidate.Path] = candidate
@@ -172,7 +172,7 @@ func (a *App) buildStorageBrowserPageData(ctx context.Context, session string, c
 			}
 		}
 	} else {
-		migrationNote = "Minecraft storage assignment is unavailable in this WebUI build."
+		migrationNote = uiText("ui.ad8bbfd8d5d8")
 	}
 
 	data := storageBrowserPresentation(storage, configuration, identity, csrf, migrationCandidates, migrationWholeDisks)
@@ -295,7 +295,7 @@ func storageBrowserPresentation(storage api.AdminStorageDiscovery, configuration
 	}
 
 	return storageBrowserPageData{
-		Title: "Storage",
+		Title: uiText("ui.a69c4dece144"),
 		CSRF:  csrf, Identity: identity, Configuration: configuration, Disks: disks,
 		InternalDisks: internalDisks, ExternalDisks: externalDisks, SelectedDisk: selectedDisk,
 	}
@@ -358,7 +358,7 @@ func storageBrowserFilesystemDisplay(filesystem string) string {
 	case "swap":
 		return "Swap"
 	case "":
-		return "Not formatted"
+		return uiText("ui.af9d8f12b31f")
 	default:
 		return filesystem
 	}
@@ -369,7 +369,7 @@ func storageBrowserRole(device api.AdminStorageDevice, configuration api.AdminCo
 		return "Swap"
 	}
 	if device.System {
-		return "System partition"
+		return uiText("ui.31f023724e64")
 	}
 	roles := make([]string, 0, 2)
 	if configuration.Configured {
@@ -377,19 +377,19 @@ func storageBrowserRole(device api.AdminStorageDevice, configuration api.AdminCo
 			roles = append(roles, "Minecraft")
 		}
 		if storageDeviceMatchesConfiguration(device, configuration.Backup.ExpectedUUID, configuration.Backup.MountPoint, configuration.Backup.Path) {
-			roles = append(roles, "Backups")
+			roles = append(roles, uiText("ui.3334fee2c77f"))
 		}
 	}
 	if len(roles) > 0 {
 		return strings.Join(roles, " + ")
 	}
 	if device.Filesystem == "" {
-		return "Not formatted"
+		return uiText("ui.af9d8f12b31f")
 	}
 	if len(device.Mountpoints) > 0 {
-		return "Mounted"
+		return uiText("ui.81f39eb58b3b")
 	}
-	return "Available"
+	return uiText("ui.e674447337e8")
 }
 
 func storageDeviceMatchesConfiguration(device api.AdminStorageDevice, expectedUUID, expectedMountPoint, configuredPath string) bool {
@@ -415,7 +415,7 @@ func (a *App) adminDiscoveryRequest(w http.ResponseWriter, r *http.Request) (str
 	}
 	client, ok := a.api.(adminDiscoveryAPI)
 	if !ok {
-		http.Error(w, "appliance discovery is unavailable", http.StatusServiceUnavailable)
+		http.Error(w, ui(w, "ui.5b04d3cecec9"), http.StatusServiceUnavailable)
 		return "", nil, api.SessionInfo{}, false
 	}
 	identity, err := client.Session(r.Context(), session)
@@ -424,7 +424,7 @@ func (a *App) adminDiscoveryRequest(w http.ResponseWriter, r *http.Request) (str
 		return "", nil, api.SessionInfo{}, false
 	}
 	if identity.Role != "administrator" {
-		http.Error(w, "Administrator access required", http.StatusForbidden)
+		http.Error(w, ui(w, "ui.031cc7a3ec82"), http.StatusForbidden)
 		return "", nil, api.SessionInfo{}, false
 	}
 	return session, client, identity, true
@@ -440,14 +440,14 @@ func (a *App) handleAdminDiscoveryError(w http.ResponseWriter, r *http.Request, 
 		http.Redirect(w, r, "/password", http.StatusSeeOther)
 		return
 	}
-	http.Error(w, "appliance discovery is unavailable", http.StatusBadGateway)
+	http.Error(w, ui(w, "ui.5b04d3cecec9"), http.StatusBadGateway)
 }
 
 func (a *App) renderAdminDiscovery(w http.ResponseWriter, name string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	if err := a.templates.ExecuteTemplate(w, name, data); err != nil {
-		http.Error(w, "render error", http.StatusInternalServerError)
+	if err := a.executeTemplate(w, name, data); err != nil {
+		http.Error(w, ui(w, "ui.4a9d9119358b"), http.StatusInternalServerError)
 	}
 }
 

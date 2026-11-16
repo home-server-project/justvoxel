@@ -55,7 +55,7 @@ func (a *App) networkStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	client, ok := a.api.(networkAPI)
 	if !ok {
-		writeNetworkWebError(w, http.StatusServiceUnavailable, "Network service unavailable")
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.913e6bb55f33"))
 		return
 	}
 	status, err := client.NetworkStatus(r.Context(), session)
@@ -64,7 +64,7 @@ func (a *App) networkStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	identityClient, ok := a.api.(sessionIdentityAPI)
 	if !ok {
-		writeNetworkWebError(w, http.StatusServiceUnavailable, "Session service unavailable")
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.a140ed2343d7"))
 		return
 	}
 	identity, err := identityClient.Session(r.Context(), session)
@@ -85,7 +85,7 @@ func (a *App) networkWiFiNetworks(w http.ResponseWriter, r *http.Request) {
 	}
 	client, ok := a.api.(networkAPI)
 	if !ok {
-		writeNetworkWebError(w, http.StatusServiceUnavailable, "Network service unavailable")
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.913e6bb55f33"))
 		return
 	}
 	networks, err := client.WiFiNetworks(r.Context(), session, r.PathValue("interface"))
@@ -106,7 +106,7 @@ func (a *App) networkWiFiScan(w http.ResponseWriter, r *http.Request) {
 	}
 	client, ok := a.api.(networkAPI)
 	if !ok {
-		writeNetworkWebError(w, http.StatusServiceUnavailable, "Network service unavailable")
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.913e6bb55f33"))
 		return
 	}
 	if err := client.RequestWiFiScan(r.Context(), session, r.PathValue("interface")); !a.handleNetworkAPIError(w, err) {
@@ -125,7 +125,7 @@ func (a *App) networkCheckpointCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		writeNetworkWebError(w, http.StatusBadRequest, "invalid network checkpoint request")
+		writeNetworkWebError(w, http.StatusBadRequest, ui(w, "ui.f854f9255b68"))
 		return
 	}
 
@@ -149,7 +149,7 @@ func (a *App) networkCheckpointCreate(w http.ResponseWriter, r *http.Request) {
 
 	client, ok := a.api.(networkAPI)
 	if !ok {
-		writeNetworkWebError(w, http.StatusServiceUnavailable, "Network service unavailable")
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.913e6bb55f33"))
 		return
 	}
 	checkpoint, err := client.CreateNetworkCheckpoint(r.Context(), session, interfaces, timeout)
@@ -166,7 +166,7 @@ func (a *App) networkCheckpointStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	client, ok := a.api.(networkAPI)
 	if !ok {
-		writeNetworkWebError(w, http.StatusServiceUnavailable, "Network service unavailable")
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.913e6bb55f33"))
 		return
 	}
 	checkpoint, err := client.NetworkCheckpoint(r.Context(), session, r.PathValue("id"))
@@ -187,7 +187,7 @@ func (a *App) networkCheckpointConfirm(w http.ResponseWriter, r *http.Request) {
 	}
 	client, ok := a.api.(networkAPI)
 	if !ok {
-		writeNetworkWebError(w, http.StatusServiceUnavailable, "Network service unavailable")
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.913e6bb55f33"))
 		return
 	}
 	if err := client.ConfirmNetworkCheckpoint(r.Context(), session, r.PathValue("id")); !a.handleNetworkAPIError(w, err) {
@@ -211,7 +211,7 @@ func (a *App) networkCheckpointRollback(w http.ResponseWriter, r *http.Request) 
 	}
 	client, ok := a.api.(networkAPI)
 	if !ok {
-		writeNetworkWebError(w, http.StatusServiceUnavailable, "Network service unavailable")
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.913e6bb55f33"))
 		return
 	}
 	result, err := client.RollbackNetworkCheckpoint(r.Context(), session, r.PathValue("id"))
@@ -236,12 +236,12 @@ func (a *App) networkWiFiRadioChange(w http.ResponseWriter, r *http.Request) {
 	}
 	enabled, err := strconv.ParseBool(strings.TrimSpace(r.FormValue("enabled")))
 	if err != nil {
-		writeNetworkWebError(w, http.StatusBadRequest, "invalid Wi-Fi radio state")
+		writeNetworkWebError(w, http.StatusBadRequest, ui(w, "ui.852b976d8789"))
 		return
 	}
 	client, ok := a.api.(networkAPI)
 	if !ok {
-		writeNetworkWebError(w, http.StatusServiceUnavailable, "Network service unavailable")
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.913e6bb55f33"))
 		return
 	}
 	result, err := client.SetWiFiRadio(r.Context(), session, enabled, strings.TrimSpace(r.FormValue("checkpoint_id")))
@@ -266,7 +266,7 @@ func (a *App) networkWiFiConnectChange(w http.ResponseWriter, r *http.Request) {
 	}
 	client, ok := a.api.(networkAPI)
 	if !ok {
-		writeNetworkWebError(w, http.StatusServiceUnavailable, "Network service unavailable")
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.913e6bb55f33"))
 		return
 	}
 	request := api.NetworkWiFiConnectRequest{
@@ -301,7 +301,7 @@ func (a *App) networkWiFiDisconnectChange(w http.ResponseWriter, r *http.Request
 	}
 	client, ok := a.api.(networkAPI)
 	if !ok {
-		writeNetworkWebError(w, http.StatusServiceUnavailable, "Network service unavailable")
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.913e6bb55f33"))
 		return
 	}
 	result, err := client.DisconnectWiFi(
@@ -327,7 +327,7 @@ func (a *App) networkWiFiForgetChange(w http.ResponseWriter, r *http.Request) {
 	}
 	client, ok := a.api.(networkAPI)
 	if !ok {
-		writeNetworkWebError(w, http.StatusServiceUnavailable, "Network service unavailable")
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.913e6bb55f33"))
 		return
 	}
 	result, err := client.ForgetWiFiProfile(r.Context(), session, r.PathValue("uuid"))
@@ -344,7 +344,7 @@ func (a *App) networkAdministratorSession(w http.ResponseWriter, r *http.Request
 	}
 	client, ok := a.api.(sessionIdentityAPI)
 	if !ok {
-		writeNetworkWebError(w, http.StatusServiceUnavailable, "Session service unavailable")
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.a140ed2343d7"))
 		return "", false
 	}
 	identity, err := client.Session(r.Context(), session)
@@ -352,7 +352,7 @@ func (a *App) networkAdministratorSession(w http.ResponseWriter, r *http.Request
 		return "", false
 	}
 	if identity.Role != "administrator" {
-		writeNetworkWebError(w, http.StatusForbidden, "Administrator access required")
+		writeNetworkWebError(w, http.StatusForbidden, ui(w, "ui.031cc7a3ec82"))
 		return "", false
 	}
 	return session, true
@@ -391,12 +391,12 @@ func (a *App) handleNetworkAPIError(w http.ResponseWriter, err error) bool {
 		}
 		message := responseErr.Message
 		if strings.TrimSpace(message) == "" {
-			message = "Network service request failed"
+			message = ui(w, "ui.4130c162a583")
 		}
 		writeNetworkWebError(w, status, message)
 		return false
 	}
-	writeNetworkWebError(w, http.StatusBadGateway, "Network service unavailable")
+	writeNetworkWebError(w, http.StatusBadGateway, ui(w, "ui.913e6bb55f33"))
 	return false
 }
 
@@ -427,7 +427,7 @@ func (a *App) networkRemoteAccessStatus(w http.ResponseWriter, r *http.Request) 
 	}
 	client, ok := a.api.(networkConfigurationAPI)
 	if !ok {
-		writeNetworkWebError(w, http.StatusServiceUnavailable, "Network service unavailable")
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.913e6bb55f33"))
 		return
 	}
 	status, err := client.RemoteAccessStatus(r.Context(), session)
@@ -455,7 +455,7 @@ func (a *App) networkConfigurationChange(w http.ResponseWriter, r *http.Request)
 	}
 	client, ok := a.api.(networkConfigurationAPI)
 	if !ok {
-		writeNetworkWebError(w, http.StatusServiceUnavailable, "Network service unavailable")
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.913e6bb55f33"))
 		return
 	}
 	var result any = map[string]bool{"ok": true}
@@ -480,7 +480,7 @@ func (a *App) networkConfigurationChange(w http.ResponseWriter, r *http.Request)
 		mtu, mtuErr := strconv.ParseUint(r.FormValue("mtu"), 10, 32)
 		autoconnect, autoErr := strconv.ParseBool(r.FormValue("autoconnect"))
 		if prefixErr != nil || mtuErr != nil || autoErr != nil {
-			writeNetworkWebError(w, http.StatusBadRequest, "invalid Ethernet numeric or autoconnect value")
+			writeNetworkWebError(w, http.StatusBadRequest, ui(w, "ui.e9154784b4df"))
 			return
 		}
 		settings := api.EthernetSettings{
@@ -503,9 +503,9 @@ func (a *App) networkConfigurationChange(w http.ResponseWriter, r *http.Request)
 
 func networkWorkspaceTabs(role string) []string {
 	if role == "administrator" {
-		return []string{"Overview", "Ethernet", "Wi-Fi", "Troubleshoot", "Remote Access"}
+		return []string{uiText("ui.d4b1ea5708dd"), "Ethernet", "Wi-Fi", "Troubleshoot", uiText("ui.7946a3c57900")}
 	}
-	return []string{"Overview"}
+	return []string{uiText("ui.d4b1ea5708dd")}
 }
 
 type networkPlayitSetupAPI interface {
@@ -523,7 +523,7 @@ func (a *App) networkPlayitSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	client, ok := a.api.(networkPlayitSetupAPI)
 	if !ok {
-		writeNetworkWebError(w, http.StatusServiceUnavailable, "Playit setup unavailable")
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.d8b364255566"))
 		return
 	}
 	status, err := client.PlayitSetup(r.Context(), session, r.Method == http.MethodPost)
@@ -548,12 +548,12 @@ func (a *App) networkPlayitRelink(w http.ResponseWriter, r *http.Request) {
 	}
 	client, ok := a.api.(networkPlayitRelinkAPI)
 	if !ok {
-		writeNetworkWebError(w, http.StatusServiceUnavailable, "Playit account relink unavailable")
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.3c89303b7da2"))
 		return
 	}
 	status, err := client.PlayitRelink(r.Context(), session)
 	if err != nil {
-		writeNetworkWebError(w, http.StatusServiceUnavailable, "Playit account could not be relinked; try again")
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.cbe7bce2f849"))
 		return
 	}
 	writeNetworkWebJSON(w, http.StatusOK, status)
@@ -574,12 +574,12 @@ func (a *App) networkNordLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.RawQuery != "" || r.ParseForm() != nil {
-		writeNetworkWebError(w, http.StatusBadRequest, "invalid NordVPN access token")
+		writeNetworkWebError(w, http.StatusBadRequest, ui(w, "ui.3347fdbbfc43"))
 		return
 	}
 	for key, values := range r.PostForm {
 		if (key != "token" && key != "csrf") || len(values) != 1 {
-			writeNetworkWebError(w, http.StatusBadRequest, "invalid NordVPN access token")
+			writeNetworkWebError(w, http.StatusBadRequest, ui(w, "ui.3347fdbbfc43"))
 			return
 		}
 	}
@@ -588,22 +588,22 @@ func (a *App) networkNordLogin(w http.ResponseWriter, r *http.Request) {
 	r.Form.Del("token")
 	if !api.ValidNordAccessToken(token) {
 		token = ""
-		writeNetworkWebError(w, http.StatusBadRequest, "invalid NordVPN access token")
+		writeNetworkWebError(w, http.StatusBadRequest, ui(w, "ui.3347fdbbfc43"))
 		return
 	}
 	client, ok := a.api.(networkNordAPI)
 	if !ok {
-		writeNetworkWebError(w, http.StatusServiceUnavailable, "NordVPN login unavailable")
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.d7e07eefb756"))
 		return
 	}
 	result, err := client.NordVPNTokenLogin(r.Context(), session, token)
 	token = ""
 	if err != nil {
-		message := "NordVPN login could not be completed. Check the access token and retry."
+		message := ui(w, "ui.bea0b17a3742")
 		if safeMessage, ok := api.ErrorMessage(err); ok {
 			switch safeMessage {
 			case "NordVPN login could not be completed. Check the access token and retry.",
-				"NordVPN login succeeded, but Meshnet could not be activated. Retry Activate or open Troubleshoot.":
+				ui(w, "ui.6bd3689fa539"):
 				message = safeMessage
 			}
 		}

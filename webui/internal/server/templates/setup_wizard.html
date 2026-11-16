@@ -1,10 +1,10 @@
 {{define "setup_wizard.html"}}{{$wizard := .}}<!doctype html>
-<html lang="en">
-<head>
+<html lang="{{locale}}">
+<head><script src="/i18n.js"></script><script src="/static/i18n.js"></script>
   <link rel="icon" type="image/png" href="/static/justvoxel-favicon.png">
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>JustVoxel - {{if .AddServer}}Add Minecraft Server{{else}}First setup{{end}}</title>
+  <title>{{t "ui.4e6a66af8e92"}} {{if .AddServer}}{{t "ui.8d8b67e246d1"}}{{else}}{{t "ui.a64036d36e20"}}{{end}}</title>
   <link rel="stylesheet" href="/static/app.css">
   <link rel="stylesheet" href="/static/storage-browser.css">
   <link rel="stylesheet" href="/static/setup.css">
@@ -20,51 +20,51 @@
 <body class="role-administrator setup-body{{if .Started}} setup-advanced{{end}}">
 <header class="setup-header topbar setup-topbar">
   <a class="brand-link brand-mark" href="{{$wizard.BasePath}}" aria-current="page" aria-label="{{if .AddServer}}Add Minecraft Server{{else}}JustVoxel first setup{{end}}"><img class="brand-logo" src="/static/justvoxel-logo.png" alt="JustVoxel"></a>
-  <div class="topbar-clock" data-topbar-clock aria-label="Local time">--:--</div>
+  <div class="topbar-clock" data-topbar-clock aria-label="{{t "ui.2397ec601845"}}">--:--</div>
   <form class="nav-logout setup-topbar-logout" method="post" action="/logout">
     <input type="hidden" name="csrf" value="{{.CSRF}}">
-    <button class="secondary" type="submit">Log out</button>
+    <button class="secondary" type="submit">{{t "ui.49616145514e"}}</button>
   </form>
 </header>
 <main class="setup-shell">
   {{if not .Started}}
   <section class="panel setup-welcome setup-entry setup-entry-wizard">
-    <p class="eyebrow">Minecraft setup</p>
-    <h1>{{if .AddServer}}Add Minecraft Server{{else}}Set up your Minecraft server{{end}}</h1>
-    {{if .Error}}<div class="notice error" role="alert">{{.Error}}</div>{{end}}
-    <p class="setup-lead">{{if .AddServer}}Use recommended defaults or customize your new server.{{else}}Use recommended defaults to get running quickly, or choose Advanced setup to customize Minecraft, storage and backups before anything is applied.{{end}}</p>
-    <p class="field-help">You can change these settings later from the JustVoxel Control Center.</p>
+    <p class="eyebrow">{{t "ui.0d9286585998"}}</p>
+    <h1>{{if .AddServer}}{{t "ui.8d8b67e246d1"}}{{else}}{{t "ui.78345d7c8cb9"}}{{end}}</h1>
+    {{if .Error}}<div class="notice error" role="alert">{{ts .Error}}</div>{{end}}
+    <p class="setup-lead">{{if .AddServer}}{{t "ui.378807d3264a"}}{{else}}{{t "ui.eb0d74ddabd8"}}{{end}}</p>
+    <p class="field-help">{{t "ui.6a236a81d4de"}}</p>
 
     <div class="setup-mode-grid">
       <section class="setup-mode-card setup-mode-recommended">
-        <span class="setup-mode-kicker">Fast path</span>
-        <h2>Simple setup</h2>
-        <p>JustVoxel chooses the defaults for you.</p>
+        <span class="setup-mode-kicker">{{t "ui.8fc00dac3b6a"}}</span>
+        <h2>{{t "ui.09a7c425bf09"}}</h2>
+        <p>{{t "ui.8d33ab89e52f"}}</p>
         {{template "setup-simple-card" .}}
       </section>
 
       <section class="setup-mode-card setup-mode-advanced">
-        <span class="setup-mode-kicker">Custom path</span>
-        <h2>Advanced setup</h2>
-        <p>{{if .AddServer}}Walk through the same six steps to choose server settings and backups using your selected storage.{{else}}Walk through the full guided setup and choose memory, ports, version policy, storage and backup destination yourself.{{end}}</p>
+        <span class="setup-mode-kicker">{{t "ui.260f308a01fb"}}</span>
+        <h2>{{t "ui.c7de0706c177"}}</h2>
+        <p>{{if .AddServer}}{{t "ui.5b8e747b86a0"}}{{else}}{{t "ui.47896239c772"}}{{end}}</p>
         <form method="post" action="{{$wizard.BasePath}}/start">
           <input type="hidden" name="csrf" value="{{.CSRF}}">
-          <button class="secondary" type="submit">Start advanced setup</button>
+          <button class="secondary" type="submit">{{t "ui.5b0590601465"}}</button>
         </form>
       </section>
     </div>
 
-    {{if .AddServer}}<div class="setup-terminal-note"><form method="post" action="{{$wizard.BasePath}}/cancel"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary setup-dashboard-exit" type="submit">Cancel</button></form></div>{{else}}<div class="setup-terminal-note"><a class="button-link secondary setup-dashboard-exit" href="/">Back to dashboard</a><div class="setup-terminal-help"><span>Prefer the terminal?</span><code>mjust setup</code><small>Available from a local console or SSH.</small></div></div>{{end}}
+    {{if .AddServer}}<div class="setup-terminal-note"><form method="post" action="{{$wizard.BasePath}}/cancel"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary setup-dashboard-exit" type="submit">{{t "ui.19766ed6ccb2"}}</button></form></div>{{else}}<div class="setup-terminal-note"><a class="button-link secondary setup-dashboard-exit" href="/">{{t "ui.b59e0c1cc1e1"}}</a><div class="setup-terminal-help"><span>{{t "ui.664bc4eb2830"}}</span><code>mjust setup</code><small>{{t "ui.225ea4805111"}}</small></div></div>{{end}}
   </section>
   {{else}}
   <div class="setup-stage-header">
-  <ol class="setup-progress" aria-label="Setup progress">{{range .Steps}}<li class="{{if .Active}}active{{end}} {{if .Complete}}complete{{end}}" {{if .Active}}aria-current="step"{{end}}>{{if .Complete}}<form method="post" action="{{$wizard.BasePath}}/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="{{.Number}}"><button type="submit"><span class="setup-number">{{.Number}}</span><span>{{.Name}}</span></button></form>{{else}}<span class="setup-number">{{.Number}}</span><span>{{.Name}}</span>{{end}}</li>{{end}}</ol>
+  <ol class="setup-progress" aria-label="{{t "ui.e9b4495ace72"}}">{{range .Steps}}<li class="{{if .Active}}active{{end}} {{if .Complete}}complete{{end}}" {{if .Active}}aria-current="step"{{end}}>{{if .Complete}}<form method="post" action="{{$wizard.BasePath}}/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="{{.Number}}"><button type="submit"><span class="setup-number">{{.Number}}</span><span>{{ts .Name}}</span></button></form>{{else}}<span class="setup-number">{{.Number}}</span><span>{{ts .Name}}</span>{{end}}</li>{{end}}</ol>
   </div>
 
   <section class="panel setup-step-panel setup-wizard-panel setup-advanced-frame">
-    <h2>{{.Current.Name}}</h2>
-    <p class="setup-lead">{{.Current.Description}}</p>
-    {{if .Error}}<div class="notice error" role="alert">{{.Error}}</div>{{end}}
+    <h2>{{ts .Current.Name}}</h2>
+    <p class="setup-lead">{{ts .Current.Description}}</p>
+    {{if .Error}}<div class="notice error" role="alert">{{ts .Error}}</div>{{end}}
 
     {{if eq .CurrentStep 1}}
     <form method="post" action="{{$wizard.BasePath}}/server" class="setup-form">
@@ -73,9 +73,9 @@
       <div class="setup-software-groups setup-software-lanes">
       {{range .SoftwareGroups}}
       <fieldset class="setup-server-types setup-server-types-compact">
-        <legend>{{.Name}}</legend>{{if .Description}}<small>{{.Description}}</small>{{end}}
+        <legend>{{ts .Name}}</legend>{{if .Description}}<small>{{ts .Description}}</small>{{end}}
         {{range .Software}}
-        <label class="setup-server-type server-software-card is-available"><input type="radio" name="server_type" value="{{.ID}}" {{if eq .ID $wizard.Minecraft.ServerType}}checked{{end}}><span class="server-software-icon" aria-hidden="true"><img src="/static/server-software/{{.ID}}.svg" alt="" width="48" height="48"></span><span class="server-software-copy"><strong>{{.Name}}</strong><small>{{.Description}}</small></span></label>
+        <label class="setup-server-type server-software-card is-available"><input type="radio" name="server_type" value="{{.ID}}" {{if eq .ID $wizard.Minecraft.ServerType}}checked{{end}}><span class="server-software-icon" aria-hidden="true"><img src="/static/server-software/{{.ID}}.svg" alt="" width="48" height="48"></span><span class="server-software-copy"><strong>{{ts .Name}}</strong><small>{{ts .Description}}</small></span></label>
         {{end}}
       </fieldset>
       {{end}}
@@ -83,23 +83,23 @@
       <div class="setup-form-grid">
         <input type="hidden" name="motd_automatic" value="{{.Server.MOTDAutomatic}}" data-setup-motd-automatic>
         {{template "setup-instance-name" .}}
-        <label class="setup-field">Welcome message<input name="motd" value="{{.Server.MOTD}}" autocomplete="off" {{if .Server.MOTDAutomatic}}placeholder="Automatic: JustVoxel {{if eq .Minecraft.ServerType "pufferfish"}}Pufferfish{{else if eq .Minecraft.ServerType "leaf"}}Leaf{{else if eq .Minecraft.ServerType "purpur"}}Purpur{{else if eq .Minecraft.ServerType "vanilla"}}Vanilla{{else}}Paper{{end}} Minecraft &lt;resolved version&gt; Server"{{end}} data-setup-motd><span class="field-help">Shown to players in the Minecraft server list. Technical name: MOTD.</span></label>
-        <label class="setup-field">Game mode<select name="game_mode" required><option value="survival" {{if eq .Minecraft.GameMode "survival"}}selected{{end}}>Survival</option><option value="creative" {{if eq .Minecraft.GameMode "creative"}}selected{{end}}>Creative</option><option value="adventure" {{if eq .Minecraft.GameMode "adventure"}}selected{{end}}>Adventure</option>{{if ne .Minecraft.ServerType "bedrock"}}<option value="spectator" {{if eq .Minecraft.GameMode "spectator"}}selected{{end}}>Spectator</option>{{end}}</select></label>
-        <label class="setup-field">Maximum players<input name="max_players" type="number" min="1" step="1" value="{{.Server.MaxPlayers}}" inputmode="numeric"><span class="field-help">Used for the player limit and memory recommendations.</span></label>
+        <label class="setup-field">{{t "ui.797389fc28b4"}}<input name="motd" value="{{.Server.MOTD}}" autocomplete="off" {{if .Server.MOTDAutomatic}}placeholder="{{t "ui.103e07b590fa"}} JustVoxel {{if eq .Minecraft.ServerType "pufferfish"}}Pufferfish{{else if eq .Minecraft.ServerType "leaf"}}Leaf{{else if eq .Minecraft.ServerType "purpur"}}Purpur{{else if eq .Minecraft.ServerType "vanilla"}}Vanilla{{else}}Paper{{end}} Minecraft &lt;resolved version&gt; Server"{{end}} data-setup-motd><span class="field-help">{{t "ui.cc7f8a08780a"}}</span></label>
+        <label class="setup-field">{{t "ui.ede76ceab6f1"}}<select name="game_mode" required><option value="survival" {{if eq .Minecraft.GameMode "survival"}}selected{{end}}>{{t "ui.8302496de0ac"}}</option><option value="creative" {{if eq .Minecraft.GameMode "creative"}}selected{{end}}>{{t "ui.2c7e63313045"}}</option><option value="adventure" {{if eq .Minecraft.GameMode "adventure"}}selected{{end}}>{{t "ui.9a3c16424750"}}</option>{{if ne .Minecraft.ServerType "bedrock"}}<option value="spectator" {{if eq .Minecraft.GameMode "spectator"}}selected{{end}}>{{t "ui.5ccda7f08fd1"}}</option>{{end}}</select></label>
+        <label class="setup-field">{{t "ui.e1f268f4f175"}}<input name="max_players" type="number" min="1" step="1" value="{{.Server.MaxPlayers}}" inputmode="numeric"><span class="field-help">{{t "ui.103547770375"}}</span></label>
 
       </div>
       <div class="setup-startup-grid">
       <div class="setup-startup-option">
-      <label class="setup-toggle-card"><span>Start after setup</span><input class="date-time-switch" type="checkbox" name="start_after_setup" {{if and .StartAfterSetup (not .StartAfterUnavailable)}}checked{{end}} {{if .StartAfterUnavailable}}disabled{{end}}></label>
-      {{if .StartAfterUnavailable}}<div class="memory-status danger">Not enough Minecraft memory capacity to start this server after setup. {{if .RunningMemory}}Running or starting servers already reserve {{.RunningMemory}}. {{end}}You can still create this server and start it after another server is stopped.</div>{{end}}
+      <label class="setup-toggle-card"><span>{{t "ui.2c8e0f48aedd"}}</span><input class="date-time-switch" type="checkbox" name="start_after_setup" {{if and .StartAfterSetup (not .StartAfterUnavailable)}}checked{{end}} {{if .StartAfterUnavailable}}disabled{{end}}></label>
+      {{if .StartAfterUnavailable}}<div class="memory-status danger">{{t "ui.6931fbdae5d3"}} {{if .RunningMemory}}{{t "ui.2ba8c2f450f0"}} {{.RunningMemory}}. {{end}}{{t "ui.2c72261b6bec"}}</div>{{end}}
       </div>
       <div class="setup-startup-option">
-      <label class="setup-toggle-card"><span>Start on Boot</span><input class="date-time-switch" type="checkbox" name="start_on_boot" {{if and .StartOnBoot (not .StartBootUnavailable)}}checked{{end}} {{if .StartBootUnavailable}}disabled{{end}}></label>
-      {{if .StartBootUnavailable}}<div class="memory-status danger">Start on Boot is unavailable because the boot-enabled Minecraft servers would exceed available memory. You can still create this server with automatic start disabled.</div>{{end}}
+      <label class="setup-toggle-card"><span>{{t "ui.7f369a5b5b05"}}</span><input class="date-time-switch" type="checkbox" name="start_on_boot" {{if and .StartOnBoot (not .StartBootUnavailable)}}checked{{end}} {{if .StartBootUnavailable}}disabled{{end}}></label>
+      {{if .StartBootUnavailable}}<div class="memory-status danger">{{t "ui.d7c273254ad0"}}</div>{{end}}
       </div>
       </div>
       </div>
-      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="{{$wizard.BasePath}}/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button type="submit">Continue</button></div></div>
+      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="{{$wizard.BasePath}}/cancel" formnovalidate>{{t "ui.c17bac18b5a6"}}</button><div class="setup-step-navigation"><button type="submit">{{t "ui.31fbef162594"}}</button></div></div>
     </form>
 
     {{else if eq .CurrentStep 2}}
@@ -108,44 +108,44 @@
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       {{if ne .Minecraft.ServerType "bedrock"}}
       <div class="setup-form-grid">
-        <label class="setup-field">Minecraft Java TCP port<input name="java_port" type="number" min="1" max="65535" value="{{.Minecraft.JavaPort}}" inputmode="numeric"><span class="field-help">Default: 25565/TCP.</span></label>
-        <label class="setup-field" data-bedrock-port-field>Bedrock TCP/UDP port<input name="bedrock_port" type="number" min="1" max="65535" value="{{.Minecraft.BedrockPort}}" inputmode="numeric"><span class="field-help">Default: 19132/TCP and UDP. Used only when Bedrock cross-play is enabled.</span></label>
+        <label class="setup-field">{{t "ui.7658b8ed58ab"}}<input name="java_port" type="number" min="1" max="65535" value="{{.Minecraft.JavaPort}}" inputmode="numeric"><span class="field-help">{{t "ui.14dde7594723"}}</span></label>
+        <label class="setup-field" data-bedrock-port-field>{{t "ui.60abc420b980"}}<input name="bedrock_port" type="number" min="1" max="65535" value="{{.Minecraft.BedrockPort}}" inputmode="numeric"><span class="field-help">{{t "ui.25809200b377"}}</span></label>
       </div>
 
       {{end}}
       <div class="setup-version-columns">
         {{if eq .Minecraft.ServerType "bedrock"}}
-        <section class="setup-version-column" aria-label="Connection">
-          <label class="setup-field">TCP signaling port<input value="{{.Minecraft.BedrockTCPPort}}" readonly></label>
-          <label class="setup-field">UDP gameplay range<input value="{{.Minecraft.BedrockUDPStart}}–{{.Minecraft.BedrockUDPEnd}}" readonly></label>
+        <section class="setup-version-column" aria-label="{{t "ui.639a40e82b9a"}}">
+          <label class="setup-field">{{t "ui.77eee6c5c149"}}<input value="{{.Minecraft.BedrockTCPPort}}" readonly></label>
+          <label class="setup-field">{{t "ui.dc25a9962feb"}}<input value="{{.Minecraft.BedrockUDPStart}}–{{.Minecraft.BedrockUDPEnd}}" readonly></label>
         </section>
-        <section class="setup-version-column" aria-label="Minecraft version">
-          <label class="setup-field">Minecraft version<input value="{{.Minecraft.ResolvedVersion}}" readonly></label>
+        <section class="setup-version-column" aria-label="{{t "ui.96bede3bff29"}}">
+          <label class="setup-field">{{t "ui.96bede3bff29"}}<input value="{{.Minecraft.ResolvedVersion}}" readonly></label>
         </section>
         {{else}}
-        <section class="setup-version-column" aria-label="Server update channel">
-        <label class="setup-field">Server update channel<select id="image-channel" data-current-tag="{{.Minecraft.ImageTag}}"><option value="stable" {{if eq .Minecraft.ImageTag "stable"}}selected{{end}}>Stable (recommended)</option><option value="latest" {{if eq .Minecraft.ImageTag "latest"}}selected{{end}}>Latest</option><option value="custom" {{if and (ne .Minecraft.ImageTag "stable") (ne .Minecraft.ImageTag "latest")}}selected{{end}}>Custom</option></select><span class="field-help">Controls how JustVoxel server software updates are delivered. Choose the Minecraft game version separately.</span></label>
-        <label id="custom-image-tag-field" class="setup-field" {{if or (eq .Minecraft.ImageTag "stable") (eq .Minecraft.ImageTag "latest")}}hidden{{end}}>Custom server update tag<input id="custom-image-tag" value="{{if and (ne .Minecraft.ImageTag "stable") (ne .Minecraft.ImageTag "latest")}}{{.Minecraft.ImageTag}}{{end}}" autocomplete="off" placeholder="Enter a supported update tag"><span class="field-help">Advanced option. Use an upstream tag only when you know you need it.</span></label>
+        <section class="setup-version-column" aria-label="{{t "ui.e0e5ffeb622e"}}">
+        <label class="setup-field">{{t "ui.e0e5ffeb622e"}}<select id="image-channel" data-current-tag="{{.Minecraft.ImageTag}}"><option value="stable" {{if eq .Minecraft.ImageTag "stable"}}selected{{end}}>{{t "ui.cbb8e35b3719"}}</option><option value="latest" {{if eq .Minecraft.ImageTag "latest"}}selected{{end}}>{{t "ui.8730d3c2022a"}}</option><option value="custom" {{if and (ne .Minecraft.ImageTag "stable") (ne .Minecraft.ImageTag "latest")}}selected{{end}}>{{t "ui.494ca78f7374"}}</option></select><span class="field-help">{{t "ui.e8cf07e3b76a"}}</span></label>
+        <label id="custom-image-tag-field" class="setup-field" {{if or (eq .Minecraft.ImageTag "stable") (eq .Minecraft.ImageTag "latest")}}hidden{{end}}>{{t "ui.e9dd905ae825"}}<input id="custom-image-tag" value="{{if and (ne .Minecraft.ImageTag "stable") (ne .Minecraft.ImageTag "latest")}}{{.Minecraft.ImageTag}}{{end}}" autocomplete="off" placeholder="{{t "ui.97ff282294d0"}}"><span class="field-help">{{t "ui.749cddd61c79"}}</span></label>
         <input id="image-tag" name="image_tag" type="hidden" value="{{.Minecraft.ImageTag}}">
         </section>
-        <section class="setup-version-column" aria-label="Minecraft version">
-        <label class="setup-field">Minecraft version<select id="version-policy" name="version_policy"><option value="recommended" {{if eq .Minecraft.VersionPolicy "recommended"}}selected{{end}}>Recommended</option><option value="latest" {{if eq .Minecraft.VersionPolicy "latest"}}selected{{end}}>Latest</option><option value="pinned" {{if eq .Minecraft.VersionPolicy "pinned"}}selected{{end}}>Specific version</option></select></label>
-        <label id="specific-version-field" class="setup-field setup-field-wide" {{if ne .Minecraft.VersionPolicy "pinned"}}hidden{{end}}>Specific Minecraft version<input id="minecraft-version" name="version" value="{{.Minecraft.Version}}" autocomplete="off"><span class="field-help">Choose an exact version. Available pre-release builds can also be used.</span></label>
+        <section class="setup-version-column" aria-label="{{t "ui.96bede3bff29"}}">
+        <label class="setup-field">{{t "ui.96bede3bff29"}}<select id="version-policy" name="version_policy"><option value="recommended" {{if eq .Minecraft.VersionPolicy "recommended"}}selected{{end}}>{{t "ui.d70604e84304"}}</option><option value="latest" {{if eq .Minecraft.VersionPolicy "latest"}}selected{{end}}>{{t "ui.8730d3c2022a"}}</option><option value="pinned" {{if eq .Minecraft.VersionPolicy "pinned"}}selected{{end}}>{{t "ui.c36f2cb11a3a"}}</option></select></label>
+        <label id="specific-version-field" class="setup-field setup-field-wide" {{if ne .Minecraft.VersionPolicy "pinned"}}hidden{{end}}>{{t "ui.2afcc6f66692"}}<input id="minecraft-version" name="version" value="{{.Minecraft.Version}}" autocomplete="off"><span class="field-help">{{t "ui.aa89056e0d85"}}</span></label>
         </section>
         {{end}}
       </div>
       <div class="setup-version-preview" id="setup-version-preview" role="status" aria-live="polite">
         {{if .Minecraft.ResolvedVersion}}
-        <div class="notice success setup-version-panel"><span class="setup-version-kicker">Recommended</span><strong class="setup-version-candidate">{{.Minecraft.ResolvedVersion}}</strong><span class="setup-version-note">Minecraft build classification: Release</span></div>
+        <div class="notice success setup-version-panel"><span class="setup-version-kicker">{{t "ui.d70604e84304"}}</span><strong class="setup-version-candidate">{{.Minecraft.ResolvedVersion}}</strong><span class="setup-version-note">{{t "ui.f92f8532a667"}}</span></div>
         {{else}}
-        <div class="notice setup-version-panel"><span class="setup-version-kicker">Minecraft version</span><p class="setup-version-explanation">Checking available versions…</p></div>
+        <div class="notice setup-version-panel"><span class="setup-version-kicker">{{t "ui.96bede3bff29"}}</span><p class="setup-version-explanation">{{t "ui.c193a42f50aa"}}</p></div>
         {{end}}
       </div>
       {{if ne .Minecraft.ServerType "bedrock"}}
-      <label class="setup-toggle-card"><span><strong>Enable Bedrock cross-play</strong><small class="field-help">{{if or (eq .Minecraft.ServerType "vanilla") (eq .Minecraft.ServerType "forge") (eq .Minecraft.ServerType "quilt")}}This software supports Java only.{{else}}Allow supported Bedrock clients to join through Geyser/Floodgate. Compatibility is checked above.{{end}}</small></span><input class="date-time-switch" type="checkbox" name="bedrock_enabled" data-bedrock-toggle {{if or (eq .Minecraft.ServerType "vanilla") (eq .Minecraft.ServerType "forge") (eq .Minecraft.ServerType "quilt")}}disabled{{end}} {{if .Server.BedrockEnabled}}checked{{end}}></label>
+      <label class="setup-toggle-card"><span><strong>{{t "ui.dc9b45c28c00"}}</strong><small class="field-help">{{if or (eq .Minecraft.ServerType "vanilla") (eq .Minecraft.ServerType "forge") (eq .Minecraft.ServerType "quilt")}}{{t "ui.869dd17f477a"}}{{else}}{{t "ui.71802b66db30"}}{{end}}</small></span><input class="date-time-switch" type="checkbox" name="bedrock_enabled" data-bedrock-toggle {{if or (eq .Minecraft.ServerType "vanilla") (eq .Minecraft.ServerType "forge") (eq .Minecraft.ServerType "quilt")}}disabled{{end}} {{if .Server.BedrockEnabled}}checked{{end}}></label>
       {{end}}
       </div>
-      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="{{$wizard.BasePath}}/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next" {{if ne .Minecraft.ServerType "bedrock"}}disabled{{end}}>Continue</button></div></div>
+      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="{{$wizard.BasePath}}/cancel" formnovalidate>{{t "ui.c17bac18b5a6"}}</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>{{t "ui.76900f1bfd16"}}</button><button type="submit" name="direction" value="next" {{if ne .Minecraft.ServerType "bedrock"}}disabled{{end}}>{{t "ui.31fbef162594"}}</button></div></div>
     </form>
 
     {{else if eq .CurrentStep 3}}
@@ -153,19 +153,19 @@
       <div class="setup-step-content">
       <input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" id="max-players" value="{{.Server.MaxPlayers}}">
       <div class="setup-memory" {{if eq .Minecraft.ServerType "bedrock"}}data-memory-mode="container" {{end}}data-memory-settings data-system-memory-mib="{{.Defaults.SystemMemoryMiB}}" data-min-reserve-mib="{{.Defaults.SystemReserveMinimumMiB}}" data-recommended-reserve-mib="{{.Defaults.SystemReserveRecommendedMiB}}"{{if .AddServer}} data-other-memory-mib="{{.OtherMemoryMiB}}"{{end}}>
-        <div class="setup-memory-summary"><div><span>System memory</span><strong>{{.SystemMemory}} detected</strong></div><div><span>Recommended headroom</span><strong>{{.SystemReserveRecommended}}</strong></div><div><span>Minimum headroom</span><strong>{{.SystemReserveMinimum}}</strong></div></div>
-        <p class="field-help">JustVoxel typically uses 0.6–1.0 GiB. Memory outside Minecraft remains available for Linux, cache, backups, updates and temporary spikes.</p>
-        <div class="memory-presets" aria-label="Minecraft memory presets"><button type="button" class="secondary" data-memory-preset="light">Light</button><button type="button" data-memory-preset="recommended">Recommended</button><button type="button" class="secondary" data-memory-preset="high">High memory</button><button type="button" class="secondary" data-memory-preset="custom">Custom</button></div>
-        <p class="field-help">Presets are starting points based on system memory and headroom. Larger servers or heavier plugins may need High memory or Custom settings.</p>
+        <div class="setup-memory-summary"><div><span>{{t "ui.c57da9573a67"}}</span><strong>{{.SystemMemory}} {{t "ui.b96da48a63e7"}}</strong></div><div><span>{{t "ui.6d7131999541"}}</span><strong>{{.SystemReserveRecommended}}</strong></div><div><span>{{t "ui.1a75077c43c7"}}</span><strong>{{.SystemReserveMinimum}}</strong></div></div>
+        <p class="field-help">{{t "ui.3610e9e1b41e"}}</p>
+        <div class="memory-presets" aria-label="{{t "ui.3fd97432509e"}}"><button type="button" class="secondary" data-memory-preset="light">{{t "ui.dbcd5e7bb7a0"}}</button><button type="button" data-memory-preset="recommended">{{t "ui.d70604e84304"}}</button><button type="button" class="secondary" data-memory-preset="high">{{t "ui.5e644c364e57"}}</button><button type="button" class="secondary" data-memory-preset="custom">{{t "ui.494ca78f7374"}}</button></div>
+        <p class="field-help">{{t "ui.5ce42c08fec4"}}</p>
         {{if eq .Minecraft.ServerType "bedrock"}}
-        <label class="setup-field">Maximum Minecraft memory<input id="container-memory" name="container_memory" value="{{.Minecraft.ContainerMemory}}" autocomplete="off" placeholder="2G"><span class="field-help">Container memory limit for the native Bedrock server.</span></label>
+        <label class="setup-field">{{t "ui.dfd505296613"}}<input id="container-memory" name="container_memory" value="{{.Minecraft.ContainerMemory}}" autocomplete="off" placeholder="2G"><span class="field-help">{{t "ui.7d013061fd23"}}</span></label>
         {{else}}
-        <div class="setup-form-grid"><label class="setup-field">Minecraft game memory<input id="java-memory" name="java_memory" value="{{.Minecraft.JavaMemory}}" autocomplete="off" placeholder="4G"><span class="field-help">Memory available directly to the Minecraft Java server. Technical name: Java heap.</span></label><label class="setup-field">Maximum Minecraft memory<input id="container-memory" name="container_memory" value="{{.Minecraft.ContainerMemory}}" autocomplete="off" placeholder="6G"><span class="field-help">Maximum for Minecraft, Java, plugins and runtime overhead. Technical name: container memory limit.</span></label></div>
+        <div class="setup-form-grid"><label class="setup-field">{{t "ui.038f7b4cf610"}}<input id="java-memory" name="java_memory" value="{{.Minecraft.JavaMemory}}" autocomplete="off" placeholder="4G"><span class="field-help">{{t "ui.1866359aee58"}}</span></label><label class="setup-field">{{t "ui.dfd505296613"}}<input id="container-memory" name="container_memory" value="{{.Minecraft.ContainerMemory}}" autocomplete="off" placeholder="6G"><span class="field-help">{{t "ui.c84bbefc7d8b"}}</span></label></div>
         {{end}}
         <div id="memory-status" class="memory-status" aria-live="polite"></div>
       </div>
       </div>
-      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="{{$wizard.BasePath}}/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
+      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="{{$wizard.BasePath}}/cancel" formnovalidate>{{t "ui.c17bac18b5a6"}}</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>{{t "ui.76900f1bfd16"}}</button><button type="submit" name="direction" value="next">{{t "ui.31fbef162594"}}</button></div></div>
     </form>
 
     {{else if eq .CurrentStep 4}}
@@ -179,34 +179,34 @@
 
       <div class="setup-storage-choice-grid">
         <button class="setup-storage-choice{{if eq .Storage.Type "system"}} is-selected{{end}}" type="button" data-setup-storage-system data-system-path="{{.Defaults.DataPath}}">
-          <span class="setup-storage-choice-kicker">Simple</span>
-          <strong>Use JustVoxel system storage</strong>
-          <small>Store Minecraft at <code>{{.Defaults.DataPath}}</code>. No disk preparation is required.</small>
+          <span class="setup-storage-choice-kicker">{{t "ui.3fee95da5ab6"}}</span>
+          <strong>{{t "ui.915daf56b0c8"}}</strong>
+          <small>{{t "ui.d38249f76afe"}} <code>{{.Defaults.DataPath}}</code>{{t "ui.e61b440d18fe"}}</small>
         </button>
         <button class="setup-storage-choice{{if eq .Storage.Type "partition"}} is-selected{{end}}" type="button" data-setup-storage-internal>
-          <span class="setup-storage-choice-kicker">Custom</span>
-          <strong>Use another internal disk</strong>
-          <small>Choose an existing Linux filesystem, format a blank partition, or create one in unallocated space.</small>
+          <span class="setup-storage-choice-kicker">{{t "ui.494ca78f7374"}}</span>
+          <strong>{{t "ui.f240e2bc0809"}}</strong>
+          <small>{{t "ui.19e1973ed40c"}}</small>
         </button>
       </div>
 
       <section data-setup-storage-system-panel {{if ne .Storage.Type "system"}}hidden{{end}}>
         <div class="setup-target-card">
-          <strong>JustVoxel system storage</strong>
+          <strong>{{t "ui.70ab3badd7f8"}}</strong>
           <span><code>{{.Defaults.DataPath}}</code></span>
-          <small>Recommended. You can migrate Minecraft data later.</small>
+          <small>{{t "ui.1d257426fd59"}}</small>
         </div>
       </section>
 
       <section class="setup-storage-browser" data-setup-storage-internal-panel {{if ne .Storage.Type "partition"}}hidden{{end}}>
         {{template "storage_browser_content" .StorageBrowser}}
-        {{if gt .ExternalStorageCount 0}}<div class="notice setup-storage-external-note">External drives are unavailable for Minecraft data. Use them for backups in Step 5.</div>{{end}}
+        {{if gt .ExternalStorageCount 0}}<div class="notice setup-storage-external-note">{{t "ui.961c286283f1"}}</div>{{end}}
       </section>
 
 
       <div class="notice error" role="alert" data-setup-inventory-error hidden></div>
       </div>
-      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="{{$wizard.BasePath}}/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
+      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="{{$wizard.BasePath}}/cancel" formnovalidate>{{t "ui.c17bac18b5a6"}}</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>{{t "ui.76900f1bfd16"}}</button><button type="submit" name="direction" value="next">{{t "ui.31fbef162594"}}</button></div></div>
       <input type="hidden" value="{{.CSRF}}" data-storage-action-csrf>
     </form>
 
@@ -224,37 +224,37 @@
 
       <div class="setup-backup-topline">
         <div class="setup-backup-schedule">
-          <label class="setup-field">Daily time<input name="backup_daily_time" type="time" value="{{.Backups.DailyTime}}"></label>
-          <label class="setup-field">Keep<input name="backup_keep" type="number" min="1" step="1" value="{{.Backups.Keep}}" inputmode="numeric"></label>
+          <label class="setup-field">{{t "ui.04b60058d9ba"}}<input name="backup_daily_time" type="time" value="{{.Backups.DailyTime}}"></label>
+          <label class="setup-field">{{t "ui.183f00f483d3"}}<input name="backup_keep" type="number" min="1" step="1" value="{{.Backups.Keep}}" inputmode="numeric"></label>
         </div>
-        <label class="setup-toggle-field setup-backup-automatic"><span>Automatic backups</span><input class="date-time-switch" type="checkbox" name="backup_automatic" {{if .Backups.Automatic}}checked{{end}}></label>
+        <label class="setup-toggle-field setup-backup-automatic"><span>{{t "ui.cb8603c8ce91"}}</span><input class="date-time-switch" type="checkbox" name="backup_automatic" {{if .Backups.Automatic}}checked{{end}}></label>
       </div>
 
       <div class="setup-backup-choice-grid">
         <button class="setup-backup-choice{{if eq .Backups.Type "system"}} is-selected{{end}}" type="button" data-setup-backup-choice="system" data-system-path="{{.Defaults.BackupPath}}">
-          <span class="setup-storage-choice-kicker">Simple</span>
-          <strong>System storage</strong>
-          <small>Use the standard JustVoxel backup directory.</small>
+          <span class="setup-storage-choice-kicker">{{t "ui.3fee95da5ab6"}}</span>
+          <strong>{{t "ui.78157120c120"}}</strong>
+          <small>{{t "ui.5ae66a89ef86"}}</small>
         </button>
         <button class="setup-backup-choice{{if eq .Backups.Type "partition"}} is-selected{{end}}" type="button" data-setup-backup-choice="partition">
-          <span class="setup-storage-choice-kicker">Local disk</span>
-          <strong>Internal or USB drive</strong>
-          <small>Use an existing filesystem, blank partition, or unallocated space on a local backup disk.</small>
+          <span class="setup-storage-choice-kicker">{{t "ui.8c7556976d69"}}</span>
+          <strong>{{t "ui.fa0e9f4915ef"}}</strong>
+          <small>{{t "ui.24a68ad04141"}}</small>
         </button>
         <button class="setup-backup-choice{{if eq .Backups.Type "nfs"}} is-selected{{end}}" type="button" data-setup-backup-choice="nfs">
-          <span class="setup-storage-choice-kicker">Network</span>
-          <strong>NFS share</strong>
-          <small>Back up to a NAS or Linux/Unix file server using NFS.</small>
+          <span class="setup-storage-choice-kicker">{{t "ui.1744b96470b5"}}</span>
+          <strong>{{t "ui.77d3f2ebbad7"}}</strong>
+          <small>{{t "ui.d3332b9b0a3e"}}</small>
         </button>
         <button class="setup-backup-choice{{if eq .Backups.Type "smb"}} is-selected{{end}}" type="button" data-setup-backup-choice="smb">
-          <span class="setup-storage-choice-kicker">Network</span>
-          <strong>SMB share</strong>
-          <small>Back up to Windows, Samba, or a NAS using SMB/CIFS.</small>
+          <span class="setup-storage-choice-kicker">{{t "ui.1744b96470b5"}}</span>
+          <strong>{{t "ui.a1b2711b0a99"}}</strong>
+          <small>{{t "ui.966104cbedc7"}}</small>
         </button>
       </div>
 
       <section data-setup-backup-panel="system" {{if ne .Backups.Type "system"}}hidden{{end}}>
-        <div class="setup-target-card"><strong>JustVoxel system backup directory</strong><span><code>{{.Defaults.BackupPath}}</code></span></div>
+        <div class="setup-target-card"><strong>{{t "ui.cae016d259e0"}}</strong><span><code>{{.Defaults.BackupPath}}</code></span></div>
       </section>
 
       <section class="setup-storage-browser" data-setup-backup-panel="partition" {{if ne .Backups.Type "partition"}}hidden{{end}}>
@@ -263,75 +263,75 @@
 
       <section data-setup-backup-panel="nfs" {{if ne .Backups.Type "nfs"}}hidden{{end}}>
         <div class="setup-network-backup-card">
-          <label class="setup-field setup-field-wide">NFS source<input data-setup-network-source="nfs" value="{{if eq .Backups.Type "nfs"}}{{.Backups.Source}}{{end}}" autocomplete="off" placeholder="nas:/volume/backups"><span class="field-help">Use <code>server:/export</code>.</span></label>
+          <label class="setup-field setup-field-wide">{{t "ui.eadfccf8dcf9"}}<input data-setup-network-source="nfs" value="{{if eq .Backups.Type "nfs"}}{{.Backups.Source}}{{end}}" autocomplete="off" placeholder="nas:/volume/backups"><span class="field-help">{{t "ui.c36d819e7bc6"}} <code>server:/export</code>.</span></label>
           <div class="setup-form-grid">
-            <label class="setup-field">Local mount point<input data-setup-network-mount="nfs" value="{{if eq .Backups.Type "nfs"}}{{.Backups.MountPoint}}{{end}}" autocomplete="off" placeholder="/var/mnt/justvoxel-backup"></label>
-            <label class="setup-field">Backup directory<input data-setup-network-path="nfs" value="{{if eq .Backups.Type "nfs"}}{{.Backups.Path}}{{end}}" autocomplete="off" placeholder="/var/mnt/justvoxel-backup/backups"></label>
+            <label class="setup-field">{{t "ui.f233a97a7e98"}}<input data-setup-network-mount="nfs" value="{{if eq .Backups.Type "nfs"}}{{.Backups.MountPoint}}{{end}}" autocomplete="off" placeholder="/var/mnt/justvoxel-backup"></label>
+            <label class="setup-field">{{t "ui.734dd02dc28d"}}<input data-setup-network-path="nfs" value="{{if eq .Backups.Type "nfs"}}{{.Backups.Path}}{{end}}" autocomplete="off" placeholder="/var/mnt/justvoxel-backup/backups"></label>
           </div>
-          <div class="notice compact">JustVoxel verifies the NFS source during setup before using it.</div>
+          <div class="notice compact">{{t "ui.e757a3d400dc"}}</div>
         </div>
       </section>
 
       <section data-setup-backup-panel="smb" {{if ne .Backups.Type "smb"}}hidden{{end}}>
         <div class="setup-network-backup-card">
-          <label class="setup-field setup-field-wide">SMB share<input data-setup-network-source="smb" value="{{if eq .Backups.Type "smb"}}{{.Backups.Source}}{{end}}" autocomplete="off" placeholder="//nas/backups"><span class="field-help">Use <code>//server/share</code>.</span></label>
+          <label class="setup-field setup-field-wide">{{t "ui.a1b2711b0a99"}}<input data-setup-network-source="smb" value="{{if eq .Backups.Type "smb"}}{{.Backups.Source}}{{end}}" autocomplete="off" placeholder="//nas/backups"><span class="field-help">{{t "ui.c36d819e7bc6"}} <code>//server/share</code>.</span></label>
           <div class="setup-form-grid">
-            <label class="setup-field">Username<input data-setup-smb-username value="{{if eq .Backups.Type "smb"}}{{.Backups.Username}}{{end}}" autocomplete="username"></label>
-            <label class="setup-field">Domain / workgroup <span class="muted">optional</span><input data-setup-smb-domain value="{{if eq .Backups.Type "smb"}}{{.Backups.Domain}}{{end}}" autocomplete="off"></label>
-            <label class="setup-field">Local mount point<input data-setup-network-mount="smb" value="{{if eq .Backups.Type "smb"}}{{.Backups.MountPoint}}{{end}}" autocomplete="off" placeholder="/var/mnt/justvoxel-backup"></label>
-            <label class="setup-field">Backup directory<input data-setup-network-path="smb" value="{{if eq .Backups.Type "smb"}}{{.Backups.Path}}{{end}}" autocomplete="off" placeholder="/var/mnt/justvoxel-backup/backups"></label>
+            <label class="setup-field">{{t "ui.e3b89e9d33f8"}}<input data-setup-smb-username value="{{if eq .Backups.Type "smb"}}{{.Backups.Username}}{{end}}" autocomplete="username"></label>
+            <label class="setup-field">{{t "ui.ba68211ccd8a"}} <span class="muted">{{t "ui.ec91fdd9256c"}}</span><input data-setup-smb-domain value="{{if eq .Backups.Type "smb"}}{{.Backups.Domain}}{{end}}" autocomplete="off"></label>
+            <label class="setup-field">{{t "ui.f233a97a7e98"}}<input data-setup-network-mount="smb" value="{{if eq .Backups.Type "smb"}}{{.Backups.MountPoint}}{{end}}" autocomplete="off" placeholder="/var/mnt/justvoxel-backup"></label>
+            <label class="setup-field">{{t "ui.734dd02dc28d"}}<input data-setup-network-path="smb" value="{{if eq .Backups.Type "smb"}}{{.Backups.Path}}{{end}}" autocomplete="off" placeholder="/var/mnt/justvoxel-backup/backups"></label>
           </div>
-          <div class="setup-secret-inline">Password will be requested when setup starts.</div>
+          <div class="setup-secret-inline">{{t "ui.abe6479bdf91"}}</div>
         </div>
       </section>
 
-      {{if .SameDiskWarning}}<div class="setup-backup-resilience setup-disk-warning" role="note" data-setup-same-disk-warning><strong>Backups are on the same disk</strong><span>If this disk fails, both Minecraft and its backups could be lost.</span></div>{{end}}
+      {{if .SameDiskWarning}}<div class="setup-backup-resilience setup-disk-warning" role="note" data-setup-same-disk-warning><strong>{{t "ui.4e8f7fbea51a"}}</strong><span>{{t "ui.55782943c1ce"}}</span></div>{{end}}
 
 
       <div class="notice error" role="alert" data-setup-inventory-error hidden></div>
       </div>
-      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="{{$wizard.BasePath}}/cancel" formnovalidate>Cancel setup</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" name="direction" value="next">Continue</button></div></div>
+      <div class="setup-step-actions"><button class="secondary" type="submit" formaction="{{$wizard.BasePath}}/cancel" formnovalidate>{{t "ui.c17bac18b5a6"}}</button><div class="setup-step-navigation"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>{{t "ui.76900f1bfd16"}}</button><button type="submit" name="direction" value="next">{{t "ui.31fbef162594"}}</button></div></div>
       <input type="hidden" value="{{.CSRF}}" data-storage-action-csrf>
     </form>
 
     {{else}}
-    <div class="setup-placeholder"><strong>Review configuration</strong><span>Server, Minecraft, storage and backup choices are now stored only in this Administrator-session draft. A4.4 adds the complete human-readable review, EULA acceptance and validated setup plan. Nothing can be applied yet.</span></div>
+    <div class="setup-placeholder"><strong>{{t "ui.da791254e00e"}}</strong><span>{{t "ui.19649340c556"}}</span></div>
     {{end}}
 
   </section>
   {{end}}
 </main>
 {{template "project-footer" .}}
-</body>
+{{template "language-dialog" .}}</body>
 </html>{{end}}
 
-{{define "setup-instance-name"}}<label class="setup-field">Server name<input name="display_name" value="{{.DisplayName}}" placeholder="Family Survival" required maxlength="64" autocomplete="off"></label>{{end}}
+{{define "setup-instance-name"}}<label class="setup-field">{{t "ui.21babfed6c38"}}<input name="display_name" value="{{.DisplayName}}" placeholder="{{t "ui.ff19b5160ef8"}}" required maxlength="64" autocomplete="off"></label>{{end}}
 
 {{define "setup-simple-card"}}
 <form method="post" action="{{.BasePath}}/simple" class="setup-recommended-form" data-simple-setup>
 <input type="hidden" name="csrf" value="{{.CSRF}}">
 {{if eq .SimpleState 1}}
 <div class="setup-simple-content">
-<fieldset class="setup-simple-choices setup-simple-families"><legend>Choose family</legend>
-<label class="setup-server-type server-software-card is-available"><input type="radio" name="family" value="plugins" required {{if eq .SimpleFamily "plugins"}}checked{{end}}><span class="server-software-copy"><strong>Plugins</strong><span class="setup-family-items"><span><img src="/static/server-software/paper.svg" alt="" width="20" height="20">Paper</span> · <span><img src="/static/server-software/purpur.svg" alt="" width="20" height="20">Purpur</span> · <span><img src="/static/server-software/spigot.svg" alt="" width="20" height="20">Spigot</span> · <span><img src="/static/server-software/pufferfish.svg" alt="" width="20" height="20">Pufferfish</span> · <span><img src="/static/server-software/leaf.svg" alt="" width="20" height="20">Leaf</span></span><small>Plugins · Cross-play</small></span></label>
-<label class="setup-server-type server-software-card is-available"><input type="radio" name="family" value="mods" required {{if eq .SimpleFamily "mods"}}checked{{end}}><span class="server-software-copy"><strong>Mods</strong><span class="setup-family-items"><span><img src="/static/server-software/fabric.svg" alt="" width="20" height="20">Fabric</span> · <span><img src="/static/server-software/neoforge.svg" alt="" width="20" height="20">NeoForge</span> · <span><img src="/static/server-software/forge.svg" alt="" width="20" height="20">Forge</span> · <span><img src="/static/server-software/quilt.svg" alt="" width="20" height="20">Quilt</span></span><small>Mod loaders</small><small>Cross-play: Fabric · NeoForge</small></span></label>
-<label class="setup-server-type server-software-card is-available"><input type="radio" name="family" value="original" required {{if or (eq .SimpleFamily "original") (eq .SimpleFamily "vanilla") (eq .SimpleFamily "bedrock")}}checked{{end}}><span class="server-software-copy"><strong>Vanilla Java · Bedrock</strong><span class="setup-family-items"><span><img src="/static/server-software/vanilla.svg" alt="" width="20" height="20">Vanilla</span><span><img src="/static/server-software/bedrock.svg" alt="" width="20" height="20">Bedrock</span></span><small>Original Minecraft · no plugins or mods</small><small>Native Bedrock server</small></span></label>
+<fieldset class="setup-simple-choices setup-simple-families"><legend>{{t "ui.0b0528e6a99a"}}</legend>
+<label class="setup-server-type server-software-card is-available"><input type="radio" name="family" value="plugins" required {{if eq .SimpleFamily "plugins"}}checked{{end}}><span class="server-software-copy"><strong>{{t "ui.9514b7ff4860"}}</strong><span class="setup-family-items"><span><img src="/static/server-software/paper.svg" alt="" width="20" height="20">Paper</span> · <span><img src="/static/server-software/purpur.svg" alt="" width="20" height="20">Purpur</span> · <span><img src="/static/server-software/spigot.svg" alt="" width="20" height="20">Spigot</span> · <span><img src="/static/server-software/pufferfish.svg" alt="" width="20" height="20">Pufferfish</span> · <span><img src="/static/server-software/leaf.svg" alt="" width="20" height="20">Leaf</span></span><small>{{t "ui.53f743143895"}}</small></span></label>
+<label class="setup-server-type server-software-card is-available"><input type="radio" name="family" value="mods" required {{if eq .SimpleFamily "mods"}}checked{{end}}><span class="server-software-copy"><strong>{{t "ui.6e58b577a084"}}</strong><span class="setup-family-items"><span><img src="/static/server-software/fabric.svg" alt="" width="20" height="20">Fabric</span> · <span><img src="/static/server-software/neoforge.svg" alt="" width="20" height="20">NeoForge</span> · <span><img src="/static/server-software/forge.svg" alt="" width="20" height="20">Forge</span> · <span><img src="/static/server-software/quilt.svg" alt="" width="20" height="20">Quilt</span></span><small>{{t "ui.2e43190a6798"}}</small><small>{{t "ui.8a214e383a2d"}}</small></span></label>
+<label class="setup-server-type server-software-card is-available"><input type="radio" name="family" value="original" required {{if or (eq .SimpleFamily "original") (eq .SimpleFamily "vanilla") (eq .SimpleFamily "bedrock")}}checked{{end}}><span class="server-software-copy"><strong>{{t "ui.10ef48de6660"}}</strong><span class="setup-family-items"><span><img src="/static/server-software/vanilla.svg" alt="" width="20" height="20">{{t "ui.05dcae2b47ae"}}</span><span><img src="/static/server-software/bedrock.svg" alt="" width="20" height="20">Bedrock</span></span><small>{{t "ui.499c75715ac6"}}</small><small>{{t "ui.ef3a030b8c60"}}</small></span></label>
 </fieldset>
 </div>
-<button type="submit" data-simple-next {{if eq .SimpleFamily ""}}disabled{{end}}>Use simple setup</button>
+<button type="submit" data-simple-next {{if eq .SimpleFamily ""}}disabled{{end}}>{{t "ui.37e45515c61e"}}</button>
 {{else if eq .SimpleState 2}}
 <div class="setup-simple-content">
-<fieldset class="setup-simple-choices"><legend>Choose software</legend>
-{{range .SimpleSoftware}}<label class="setup-server-type server-software-card is-available"><input type="radio" name="server_type" value="{{.ID}}" required {{if eq .ID $.Minecraft.ServerType}}checked{{end}}><span class="server-software-icon" aria-hidden="true"><img src="/static/server-software/{{.ID}}.svg" alt="" width="48" height="48"></span><span class="server-software-copy"><strong>{{.Name}}</strong><small>{{.Description}}</small></span></label>{{end}}
+<fieldset class="setup-simple-choices"><legend>{{t "ui.f52dad4ef9aa"}}</legend>
+{{range .SimpleSoftware}}<label class="setup-server-type server-software-card is-available"><input type="radio" name="server_type" value="{{.ID}}" required {{if eq .ID $.Minecraft.ServerType}}checked{{end}}><span class="server-software-icon" aria-hidden="true"><img src="/static/server-software/{{.ID}}.svg" alt="" width="48" height="48"></span><span class="server-software-copy"><strong>{{ts .Name}}</strong><small>{{ts .Description}}</small></span></label>{{end}}
 </fieldset>
 </div>
-<div class="setup-simple-actions"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit" data-simple-next {{if eq .Minecraft.ServerType ""}}disabled{{end}}>Next</button></div>
+<div class="setup-simple-actions"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>{{t "ui.76900f1bfd16"}}</button><button type="submit" data-simple-next {{if eq .Minecraft.ServerType ""}}disabled{{end}}>{{t "ui.1ff57a29d7c9"}}</button></div>
 {{else}}
 <div class="setup-simple-content">
 {{template "setup-instance-name" .}}
-<label class="setup-field">Game mode<select name="game_mode" required><option value="survival" {{if eq .Minecraft.GameMode "survival"}}selected{{end}}>Survival</option><option value="creative" {{if eq .Minecraft.GameMode "creative"}}selected{{end}}>Creative</option><option value="adventure" {{if eq .Minecraft.GameMode "adventure"}}selected{{end}}>Adventure</option>{{if ne .Minecraft.ServerType "bedrock"}}<option value="spectator" {{if eq .Minecraft.GameMode "spectator"}}selected{{end}}>Spectator</option>{{end}}</select></label>
+<label class="setup-field">{{t "ui.ede76ceab6f1"}}<select name="game_mode" required><option value="survival" {{if eq .Minecraft.GameMode "survival"}}selected{{end}}>{{t "ui.8302496de0ac"}}</option><option value="creative" {{if eq .Minecraft.GameMode "creative"}}selected{{end}}>{{t "ui.2c7e63313045"}}</option><option value="adventure" {{if eq .Minecraft.GameMode "adventure"}}selected{{end}}>{{t "ui.9a3c16424750"}}</option>{{if ne .Minecraft.ServerType "bedrock"}}<option value="spectator" {{if eq .Minecraft.GameMode "spectator"}}selected{{end}}>{{t "ui.5ccda7f08fd1"}}</option>{{end}}</select></label>
 </div>
-<div class="setup-simple-actions"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>Back</button><button type="submit">Next</button></div>
+<div class="setup-simple-actions"><button class="secondary" type="submit" name="direction" value="back" formnovalidate>{{t "ui.76900f1bfd16"}}</button><button type="submit">{{t "ui.1ff57a29d7c9"}}</button></div>
 {{end}}
 </form>
 {{end}}

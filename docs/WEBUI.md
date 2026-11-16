@@ -439,3 +439,36 @@ can prove the staged deployment is recoverable.
 
 Successful Update logs are short. Failure and recovery logs retain deployment
 comparisons and redacted recovery output for support or a future issue report.
+
+## Interface languages
+
+The WebUI ships embedded `en` and `fr-CA` catalogs in
+`webui/internal/server/locales/`. English is the canonical source; templates,
+WebUI presentation messages and browser scripts share its keys. The Canadian
+French catalog is a first-pass translation open to normal corrections.
+
+The first page uses the browser's `Accept-Language` preference, with French
+preferences selecting Canadian French. Unsupported or malformed preferences
+fall back to English. The Globe beside Sign in or immediately before Logout
+opens the language selector for every role. A manual choice is saved in the
+non-secret `jv_lang` cookie and overrides browser preferences on future requests.
+Missing or incompatible translations fall back to the English message.
+
+Only JustVoxel interface text is translated. User-selected names, filenames,
+paths, commands, versions, raw logs and Minecraft console output retain their
+original values. Plugin/mod names, authors, descriptions and other provider
+content remain as supplied; provider requests do not negotiate a language.
+Machine-facing OpenAPI, MCP, OAuth protocol messages and protected-resource
+metadata remain stable English regardless of the browser locale. Browser
+administration and OAuth consent HTML use the selected interface language.
+The CLI remains English.
+
+When changing interface copy, edit the English catalog and the corresponding
+French entry using the existing key. Preserve named interpolation placeholders
+and printf arguments. New browser text uses `jvT` for text and `jvH` in existing
+HTML templates; placeholder values retain the original HTML escaping contract.
+`uiText` provides canonical English for presentation helpers whose values also
+serve as internal state labels. Translate those labels only at their explicit
+presentation slot (`ts` / `jvS`); never apply source lookup to provider metadata,
+user data, logs or raw command output. Catalog compatibility and locale selection
+are covered by focused WebUI source tests.

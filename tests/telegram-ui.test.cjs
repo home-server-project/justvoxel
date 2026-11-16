@@ -1,7 +1,7 @@
 'use strict';
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const {readFileSync} = require('node:fs');
+const {readFileSync} = require('./helpers/webui-i18n.cjs');
 const vm = require('node:vm');
 const base = `${__dirname}/../webui/internal/server/`;
 const source = readFileSync(`${base}static/telegram.js`, 'utf8');

@@ -1,13 +1,12 @@
 package server
 
 import (
-	"os/exec"
 	"strings"
 	"testing"
 )
 
 func TestDesktopWorkspaceViewportBounds(t *testing.T) {
-	source, err := assets.ReadFile("static/app.js")
+	source, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,12 +66,12 @@ clampWorkspaceWindow(compact); assert.equal(compact.style.left, "-50px");
 workspaceCompactQuery.matches = false; compact.open = false;
 clampWorkspaceWindow(compact); assert.equal(compact.style.top, "-50px");
 `
-	cmd := exec.Command("node")
+	cmd := nodeTestCommand()
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("workspace bounds: %v\n%s", err, output)
 	}
-	css, err := assets.ReadFile("static/app.css")
+	css, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -39,11 +39,11 @@ func (a *App) newBackupsDeleteAction(w http.ResponseWriter, r *http.Request, app
 	}
 	deleter, ok := any(client).(newBackupsDeleteAPI)
 	if !ok {
-		writeNewBackupsDeleteJSON(w, http.StatusServiceUnavailable, api.AdminBackupDeleteResponse{OK: false, Error: "backup deletion is unavailable"})
+		writeNewBackupsDeleteJSON(w, http.StatusServiceUnavailable, api.AdminBackupDeleteResponse{OK: false, Error: ui(w, "ui.62df33cd7560")})
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		writeNewBackupsDeleteJSON(w, http.StatusBadRequest, api.AdminBackupDeleteResponse{OK: false, Error: "could not read backup selection"})
+		writeNewBackupsDeleteJSON(w, http.StatusBadRequest, api.AdminBackupDeleteResponse{OK: false, Error: ui(w, "ui.4658a4a9d9cd")})
 		return
 	}
 
@@ -56,7 +56,7 @@ func (a *App) newBackupsDeleteAction(w http.ResponseWriter, r *http.Request, app
 		}
 	}
 	if len(ids) < 1 || len(ids) > 100 {
-		writeNewBackupsDeleteJSON(w, http.StatusBadRequest, api.AdminBackupDeleteResponse{OK: false, Error: "choose between 1 and 100 backups"})
+		writeNewBackupsDeleteJSON(w, http.StatusBadRequest, api.AdminBackupDeleteResponse{OK: false, Error: ui(w, "ui.06383f592333")})
 		return
 	}
 

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -113,8 +114,8 @@ func TestConnectionGuidePageEditionsAndRoles(t *testing.T) {
 					t.Fatalf("missing %q", want)
 				}
 			}
-			for _, marker := range []string{"Join with Bedrock Edition", "PS5 · Method 1", "PS5 · Method 2", "19139", "45.55.68.52", "<h4>Bedrock</h4>", "Java Edition + Bedrock Edition"} {
-				if strings.Contains(body, marker) != bedrock {
+			for _, marker := range []string{"Join with Bedrock Edition", "PS5 · Method 1", "PS5 · Method 2", "19139", "45.55.68.52", "<h4>Bedrock</h4>", uiText("ui.8716240ed98f") + " " + uiText("ui.cadd2c84f2f8")} {
+				if strings.Contains(html.UnescapeString(body), marker) != bedrock {
 					t.Fatalf("bedrock=%v marker %q", bedrock, marker)
 				}
 			}
@@ -187,9 +188,15 @@ func TestConnectionGuideEmptyInventorySelection(t *testing.T) {
 					t.Errorf("empty page contains %q", absent)
 				}
 			}
+			// The language picker preserves the current URL, including ?server=.
+			// The empty Minecraft page itself must remain identical.
+			content, _, found := strings.Cut(body, "</main>")
+			if !found {
+				t.Fatal("empty page main content missing")
+			}
 			if tc.query == "" {
-				emptyPage = body
-			} else if body != emptyPage {
+				emptyPage = content
+			} else if content != emptyPage {
 				t.Fatal("empty selection changed the normal empty page")
 			}
 		})
@@ -267,7 +274,10 @@ func TestConnectionGuideCustomDomainIsClientPresentationOnly(t *testing.T) {
 	request.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
 	response := httptest.NewRecorder()
 	app.Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), "injected.example") {
+	// Language selection retains the request URL for its return navigation.
+	// Custom-domain state must never enter the Minecraft presentation.
+	presentation, _, found := strings.Cut(response.Body.String(), "</main>")
+	if response.Code != http.StatusOK || !found || strings.Contains(presentation, "injected.example") {
 		t.Fatal("server accepted custom-domain presentation state")
 	}
 	request = httptest.NewRequest(http.MethodPost, "/minecraft/how-to-connect", strings.NewReader("domain=injected.example"))
@@ -326,11 +336,11 @@ func TestConnectionGuidePlayitMapping(t *testing.T) {
 	}
 }
 func TestConnectionGuideControlCenterAndSafety(t *testing.T) {
-	header, _ := assets.ReadFile("templates/header.html")
+	header, _ := englishPresentationAsset("templates/header.html")
 	if !strings.Contains(string(header), `class="control-tile button-link" href="/minecraft/how-to-connect{{if .SelectedMinecraftID}}?server={{.SelectedMinecraftID}}{{end}}" target="_blank" rel="noopener"`) {
 		t.Fatal("safe read-only launcher missing")
 	}
-	js, _ := assets.ReadFile("static/how-to-connect.js")
+	js, _ := englishPresentationAsset("static/how-to-connect.js")
 	for _, forbidden := range []string{"innerHTML", "localStorage", "sessionStorage", "POST", "PUT", "PATCH", "DELETE", "XMLHttpRequest", "sendBeacon", "workspaceServerSelections", "justVoxelSelectServer", "justVoxelSelectedURL", "justVoxelSelectionGeneration", "data-server-selector-slot", "data-server-workspace", "readWorkspaceWindowState", "writeWorkspaceWindowState"} {
 		if strings.Contains(string(js), forbidden) {
 			t.Fatalf("unsafe presentation behavior %s", forbidden)
@@ -481,7 +491,7 @@ func TestConnectionGuideApprovedVisualContract(t *testing.T) {
 	if strings.TrimSpace(body[buttonEnd:actionsEnd]) != `<small class="muted" id="connect-domain-help">Hostname only — no https:// or port.</small>` {
 		t.Fatal("Save to PDF must end the primary row, followed only by the hostname helper on its own row")
 	}
-	login, err := assets.ReadFile("templates/login.html")
+	login, err := englishPresentationAsset("templates/login.html")
 	if err != nil || !strings.Contains(string(login), `src="/static/justvoxel-login-logo.png"`) {
 		t.Fatal("print guide must use the exact login logo")
 	}
@@ -525,8 +535,20 @@ func TestConnectionGuideSelectedFriendlyNameAndInvitation(t *testing.T) {
 		if guideStart < 0 {
 			t.Fatal("selected guide missing")
 		}
-		guide := body[guideStart:]
-		if strings.Contains(guide, "jv-") || strings.Contains(guide, "Kids Creative") || strings.Contains(body, "<script>bad</script>") {
+		guide, _, found := strings.Cut(body[guideStart:], "</article>")
+		if !found {
+			t.Fatal("selected guide closing tag missing")
+		}
+		invitationStart := strings.Index(body, `<dialog class="connect-invitation"`)
+		if invitationStart < 0 {
+			t.Fatal("selected invitation missing")
+		}
+		invitation, _, found := strings.Cut(body[invitationStart:], "</dialog>")
+		if !found {
+			t.Fatal("selected invitation closing tag missing")
+		}
+		// The language picker return URL lies outside both presentation areas.
+		if strings.Contains(guide, "jv-") || strings.Contains(guide, "Kids Creative") || strings.Contains(invitation, "jv-") || strings.Contains(invitation, "Kids Creative") || strings.Contains(body, "<script>bad</script>") {
 			t.Fatal("invitation presentation exposed identity, another server, or unescaped name")
 		}
 		if strings.Join(client.reads, ",") != "configuration:jv-family1" {

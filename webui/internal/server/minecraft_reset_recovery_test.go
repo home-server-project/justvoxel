@@ -1,13 +1,12 @@
 package server
 
 import (
-	"os/exec"
 	"strings"
 	"testing"
 )
 
 func TestMinecraftResetRecoveryBrowserFlow(t *testing.T) {
-	script, err := assets.ReadFile("static/app.js")
+	script, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +94,7 @@ const button = label => content.all().find(node => node.tagName === "button" && 
  assert.ok(calls.at(-1).endsWith("/minecraft/plan"));
 })().catch(error => { console.error(error); process.exitCode = 1; });
 `
-	cmd := exec.Command("node")
+	cmd := nodeTestCommand()
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("reset recovery: %v\n%s", err, output)
@@ -103,7 +102,7 @@ const button = label => content.all().find(node => node.tagName === "button" && 
 }
 
 func TestDashboardCanonicalBrowserURL(t *testing.T) {
-	script, err := assets.ReadFile("static/app.js")
+	script, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +157,7 @@ for (const tab of ["switch", "software"]) {
  assert.equal(migrated.searchParams.get("result"),"started");
 }
 `
-	cmd := exec.Command("node")
+	cmd := nodeTestCommand()
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("browser selection recovery: %v\n%s", err, output)

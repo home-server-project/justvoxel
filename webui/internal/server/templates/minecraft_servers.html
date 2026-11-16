@@ -1,9 +1,9 @@
 {{define "minecraft-servers-page-start"}}<!doctype html>
-<html lang="en">
-<head>
+<html lang="{{locale}}">
+<head><script src="/i18n.js"></script><script src="/static/i18n.js"></script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>JustVoxel - {{.Title}}</title>
+  <title>{{t "ui.4e6a66af8e92"}} {{ts .Title}}</title>
   <link rel="icon" type="image/png" href="/static/justvoxel-favicon.png">
   <link rel="stylesheet" href="/static/app.css">
   <link rel="stylesheet" href="/static/setup.css">
@@ -13,57 +13,57 @@
 </head>
 <body class="role-administrator setup-body minecraft-servers-body">
 <header class="setup-header topbar setup-topbar">
-  <a class="brand-link brand-mark" href="/" aria-label="JustVoxel dashboard"><img class="brand-logo" src="/static/justvoxel-logo.png" alt="JustVoxel"></a>
-  <div class="topbar-clock" data-topbar-clock aria-label="Local time">--:--</div>
-  <form class="nav-logout setup-topbar-logout" method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">Log out</button></form>
+  <a class="brand-link brand-mark" href="/" aria-label="{{t "ui.6e76c1a4edf1"}}"><img class="brand-logo" src="/static/justvoxel-logo.png" alt="JustVoxel"></a>
+  <div class="topbar-clock" data-topbar-clock aria-label="{{t "ui.2397ec601845"}}">--:--</div>
+  <form class="nav-logout setup-topbar-logout" method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">{{t "ui.49616145514e"}}</button></form>
 </header>
 <main class="setup-shell">
 {{end}}
 {{define "minecraft_servers.html"}}
-  {{if .Error}}<p class="notice error" role="alert">{{.Error}}</p>{{end}}
-  {{if .Message}}<p class="notice success" role="status">{{.Message}}</p>{{end}}
+  {{if .Error}}<p class="notice error" role="alert">{{ts .Error}}</p>{{end}}
+  {{if .Message}}<p class="notice success" role="status">{{ts .Message}}</p>{{end}}
   <section class="minecraft-server-inventory" data-server-csrf="{{.CSRF}}">
-  <nav class="minecraft-workspace-tabs minecraft-server-arrange-toolbar" aria-label="Minecraft Servers actions">
-    <a href="{{if .Configured}}/minecraft/servers/add?new=1{{else}}/setup{{end}}"{{if .Configured}} target="justvoxel-add-server"{{end}}>Add Server</a>
-    <button type="button" data-minecraft-network-open>Network</button>
-    <button type="button" data-server-arrange hidden>Rearrange</button>
-    <button type="button" data-server-arrange-done hidden>Done</button>
+  <nav class="minecraft-workspace-tabs minecraft-server-arrange-toolbar" aria-label="{{t "ui.1544743d0f68"}}">
+    <a href="{{if .Configured}}/minecraft/servers/add?new=1{{else}}/setup{{end}}"{{if .Configured}} target="justvoxel-add-server"{{end}}>{{t "ui.da8993ec0654"}}</a>
+    <button type="button" data-minecraft-network-open>{{t "ui.1744b96470b5"}}</button>
+    <button type="button" data-server-arrange hidden>{{t "ui.3ba468e5905f"}}</button>
+    <button type="button" data-server-arrange-done hidden>{{t "ui.11a6767d5674"}}</button>
   </nav>
   <p class="notice error" role="status" data-server-feedback hidden></p>
   <div class="minecraft-server-entries">
     {{range .Servers}}
     <article class="panel minecraft-server-card minecraft-server-health-{{.CardHealth}}" data-minecraft-server-card data-network-member="{{.NetworkMember}}" data-server-id="{{.ContextID}}" data-server-name="{{.Name}}">
-      <div class="minecraft-server-heading"><h2>{{.Name}}</h2><strong class="minecraft-server-state {{.StateClass}}">{{.State}}</strong></div>
+      <div class="minecraft-server-heading"><h2>{{.Name}}</h2><strong class="minecraft-server-state {{.StateClass}}">{{ts .State}}</strong></div>
       <div class="minecraft-server-software-row"><p class="muted">{{if .SoftwareIcon}}<img class="minecraft-server-software-icon" src="{{.SoftwareIcon}}" alt="">{{end}}<span>{{.Software}} · {{.Version}}</span></p>
         <details class="storage-action-menu minecraft-server-more" data-server-normal-actions>
-          <summary aria-label="Server actions for {{.Name}}">⋯</summary>
+          <summary aria-label="{{t "ui.3f6eca3bf7aa" "name" .Name}}">⋯</summary>
           <div class="storage-action-menu-popover minecraft-server-more-items" popover="auto">
-            <a href="/?workspace=minecraft&amp;server={{.ContextID}}" data-server-workspace="minecraft">Settings</a>
-            <a href="/?workspace=backups&amp;server={{.ContextID}}" data-server-workspace="backups">Backups</a>
-            <a href="/?workspace=version&amp;server={{.ContextID}}" data-server-workspace="version">Update</a>
-            <a href="/?workspace=migration&amp;server={{.ContextID}}" data-server-workspace="migration">Migration</a>
-            <a href="/?workspace=plugins&amp;server={{.ContextID}}" data-server-workspace="plugins">Plugins &amp; Mods</a>
-            <button type="button" data-server-invite>Invite friends</button>
-            <a href="/minecraft/how-to-connect?server={{.ContextID}}" target="_blank" rel="noopener">How to connect</a>
+            <a href="/?workspace=minecraft&amp;server={{.ContextID}}" data-server-workspace="minecraft">{{t "ui.74a883a037bc"}}</a>
+            <a href="/?workspace=backups&amp;server={{.ContextID}}" data-server-workspace="backups">{{t "ui.3334fee2c77f"}}</a>
+            <a href="/?workspace=version&amp;server={{.ContextID}}" data-server-workspace="version">{{t "ui.c1c1009d3f37"}}</a>
+            <a href="/?workspace=migration&amp;server={{.ContextID}}" data-server-workspace="migration">{{t "ui.cc149190687e"}}</a>
+            <a href="/?workspace=plugins&amp;server={{.ContextID}}" data-server-workspace="plugins">{{t "ui.70171ec7a356"}}</a>
+            <button type="button" data-server-invite>{{t "ui.2614b42d8452"}}</button>
+            <a href="/minecraft/how-to-connect?server={{.ContextID}}" target="_blank" rel="noopener">{{t "ui.2198ec8ff357"}}</a>
             <hr>
-            {{if .CanRestart}}<button type="button" data-server-restart>Restart</button>{{end}}
-            <button type="button" class="storage-action-danger" data-server-delete>Delete server</button>
+            {{if .CanRestart}}<button type="button" data-server-restart>{{t "ui.6b983a81e5e8"}}</button>{{end}}
+            <button type="button" class="storage-action-danger" data-server-delete>{{t "ui.7e9464a23e43"}}</button>
           </div>
         </details>
       </div>
-      {{if .ConfigurationError}}<p class="notice error">{{.ConfigurationError}}</p>{{end}}
+      {{if .ConfigurationError}}<p class="notice error">{{ts .ConfigurationError}}</p>{{end}}
       <div class="minecraft-server-metrics">
-        <div><span>{{if .NetworkMember}}Java via Network{{else}}Java port{{end}}</span><strong>{{if .ConnectionAvailable}}{{if .ConnectionJavaPort}}{{.ConnectionJavaPort}}{{else}}Unavailable{{end}}{{else}}Unavailable{{end}}</strong></div>
-        <div><span>{{if .NetworkMember}}Bedrock via Network{{else}}Bedrock port{{end}}</span><strong>{{if .ConnectionAvailable}}{{if .ConnectionBedrockEnabled}}{{.ConnectionBedrockPort}}{{else}}Disabled{{end}}{{else}}Unavailable{{end}}</strong></div>
-        <div data-server-ram data-server-state="{{.State}}"><span>RAM</span><strong data-server-ram-value>{{if eq .State "Stopped"}}---{{else}}Unavailable{{end}}</strong><svg data-server-ram-graph viewBox="0 0 116 12" preserveAspectRatio="none" aria-hidden="true"></svg></div>
+        <div><span>{{if .NetworkMember}}{{t "ui.0107f8e4ef57"}}{{else}}{{t "ui.d12eefdf97ff"}}{{end}}</span><strong>{{if .ConnectionAvailable}}{{if .ConnectionJavaPort}}{{.ConnectionJavaPort}}{{else}}{{t "ui.ca1844969742"}}{{end}}{{else}}{{t "ui.ca1844969742"}}{{end}}</strong></div>
+        <div><span>{{if .NetworkMember}}{{t "ui.9a017bf3c24b"}}{{else}}{{t "ui.f34bf1022246"}}{{end}}</span><strong>{{if .ConnectionAvailable}}{{if .ConnectionBedrockEnabled}}{{.ConnectionBedrockPort}}{{else}}{{t "ui.75081b593d15"}}{{end}}{{else}}{{t "ui.ca1844969742"}}{{end}}</strong></div>
+        <div data-server-ram data-server-state="{{.State}}"><span>RAM</span><strong data-server-ram-value>{{if eq .State "Stopped"}}---{{else}}{{t "ui.ca1844969742"}}{{end}}</strong><svg data-server-ram-graph viewBox="0 0 116 12" preserveAspectRatio="none" aria-hidden="true"></svg></div>
       </div>
       <div class="minecraft-server-switches" data-server-normal-actions>
-        <label><span>Server running</span><input class="date-time-switch" type="checkbox" role="switch" data-server-running aria-label="Server running for {{.Name}}"{{if .Running}} checked{{end}}{{if not .CanSwitch}} disabled{{end}}></label>
-        <label><span>Start on Boot{{if .NetworkMember}} · Managed by Network{{end}}</span><input class="date-time-switch" type="checkbox" role="switch" data-server-boot aria-label="Start on Boot for {{.Name}}"{{if .StartOnBoot}} checked{{end}}{{if not .CanConfigureBoot}} disabled{{end}}></label>
+        <label><span>{{t "ui.06b0ab106202"}}</span><input class="date-time-switch" type="checkbox" role="switch" data-server-running aria-label="{{t "ui.17e2f3cb13b3" "name" .Name}}"{{if .Running}} checked{{end}}{{if not .CanSwitch}} disabled{{end}}></label>
+        <label><span>{{t "ui.7f369a5b5b05"}}{{if .NetworkMember}} {{t "ui.f01571b9bfac"}}{{end}}</span><input class="date-time-switch" type="checkbox" role="switch" data-server-boot aria-label="{{t "ui.247e61bb4639" "name" .Name}}"{{if .StartOnBoot}} checked{{end}}{{if not .CanConfigureBoot}} disabled{{end}}></label>
       </div>
       <div class="minecraft-server-move-actions" data-server-arrange-actions hidden>
-        <button class="secondary" type="button" data-server-move-earlier>Move earlier</button>
-        <button class="secondary" type="button" data-server-move-later>Move later</button>
+        <button class="secondary" type="button" data-server-move-earlier>{{t "ui.736612d4d0a9"}}</button>
+        <button class="secondary" type="button" data-server-move-later>{{t "ui.d6e856081ebe"}}</button>
       </div>
     </article>
     {{end}}
@@ -72,17 +72,17 @@
 {{end}}
 {{define "minecraft-servers-page-end"}}</main>
 {{template "project-footer" .}}
-</body>
+{{template "language-dialog" .}}</body>
 </html>{{end}}
 
 {{define "minecraft-server-summary"}}
 <p class="muted">{{.Software}} · {{.Version}}</p>
-<p class="minecraft-server-state"><strong>{{.State}}</strong></p>
-{{if .ConfigurationError}}<p class="notice error">{{.ConfigurationError}}</p>{{end}}
+<p class="minecraft-server-state"><strong>{{ts .State}}</strong></p>
+{{if .ConfigurationError}}<p class="notice error">{{ts .ConfigurationError}}</p>{{end}}
 {{if .ConfigurationAvailable}}
 <div class="minecraft-overview-grid">
-  <div class="minecraft-overview-card"><span>Java port</span><strong>{{if .JavaPort}}{{.JavaPort}}{{else}}Unavailable{{end}}</strong></div>
-  <div class="minecraft-overview-card"><span>Bedrock</span><strong>{{if .BedrockEnabled}}{{.BedrockPort}}{{else}}Disabled{{end}}</strong></div>
+  <div class="minecraft-overview-card"><span>{{t "ui.d12eefdf97ff"}}</span><strong>{{if .JavaPort}}{{.JavaPort}}{{else}}{{t "ui.ca1844969742"}}{{end}}</strong></div>
+  <div class="minecraft-overview-card"><span>Bedrock</span><strong>{{if .BedrockEnabled}}{{.BedrockPort}}{{else}}{{t "ui.75081b593d15"}}{{end}}</strong></div>
 </div>
 {{end}}
 {{end}}

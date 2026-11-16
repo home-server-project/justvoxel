@@ -111,8 +111,8 @@ func TestCurseForgeWorkspaceAuthorizationAndCSRF(t *testing.T) {
 	}
 }
 func TestCurseForgeWorkspaceMarkupAndSecretBoundary(t *testing.T) {
-	header, _ := assets.ReadFile("templates/header.html")
-	script, _ := assets.ReadFile("static/app.js")
+	header, _ := englishPresentationAsset("templates/header.html")
+	script, _ := englishPresentationAsset("static/app.js")
 	markup, js := string(header), string(script)
 	last := -1
 	for _, tab := range []string{"discover", "installed", "addons", "curseforge-api"} {
@@ -154,11 +154,11 @@ func TestCurseForgeWorkspaceMarkupAndSecretBoundary(t *testing.T) {
 	}
 }
 func TestCurseForgeInlineFormAndNoticeLifecycle(t *testing.T) {
-	node, err := exec.LookPath("node")
+	_, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node unavailable")
 	}
-	script, _ := assets.ReadFile("static/app.js")
+	script, _ := englishPresentationAsset("static/app.js")
 	js := string(script)
 	start := strings.Index(js, "  const curseForgeSwitch =")
 	end := strings.Index(js[start:], "  const returnToInstalled =") + start
@@ -239,7 +239,7 @@ func TestCurseForgeInlineFormAndNoticeLifecycle(t *testing.T) {
  assert.equal(requests.at(-1).options.method,"DELETE");assert.equal(requests.at(-1).options.body.get("csrf"),"csrf-token");assert.equal(requests.at(-1).options.body.has("key"),false);
  })().catch(error=>{console.error(error);process.exitCode=1;});
  `
-	if out, err := exec.Command(node, "-e", harness).CombinedOutput(); err != nil {
+	if out, err := nodeTestCommand("-e", harness).CombinedOutput(); err != nil {
 		t.Fatalf("switch lifecycle: %v\n%s", err, out)
 	}
 }

@@ -7,7 +7,7 @@ import (
 )
 
 func TestSystemMonitorPersistedRestoreAllowsAllSupportedRoles(t *testing.T) {
-	source, err := assets.ReadFile("static/app.js")
+	source, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestSystemMonitorPersistedRestoreAllowsAllSupportedRoles(t *testing.T) {
 }
 
 func TestSystemMonitorProcessCountUIContract(t *testing.T) {
-	header, err := assets.ReadFile("templates/header.html")
+	header, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestSystemMonitorProcessCountUIContract(t *testing.T) {
 		t.Fatalf("top processes choices = %v, want exactly 5, 10, 15", options)
 	}
 
-	script, err := assets.ReadFile("static/app.js")
+	script, err := englishPresentationAsset("static/app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestSystemMonitorProcessCountUIContract(t *testing.T) {
 		t.Error("empty Alerts card must remain hidden")
 	}
 
-	css, err := assets.ReadFile("static/app.css")
+	css, err := englishPresentationAsset("static/app.css")
 	if err != nil {
 		t.Fatal(err)
 	}

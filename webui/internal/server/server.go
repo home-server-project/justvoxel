@@ -125,7 +125,7 @@ func New(client API, cfg Config) (*App, error) {
 	if cfg.ExternalScheme == "" {
 		cfg.ExternalScheme = "http"
 	}
-	t, err := template.New("pages").Funcs(template.FuncMap{"systemTimezone": systemTimezone, "systemNow": func() int64 { return time.Now().UnixMilli() }}).ParseFS(assets, "templates/*.html")
+	t, err := template.New("pages").Funcs(localeTemplateFuncs("en", "/login")).Funcs(template.FuncMap{"systemTimezone": systemTimezone, "systemNow": func() int64 { return time.Now().UnixMilli() }}).ParseFS(assets, "templates/*.html")
 	if err != nil {
 		return nil, err
 	}
@@ -138,6 +138,8 @@ func New(client API, cfg Config) (*App, error) {
 
 func (a *App) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /language", a.languagePreference)
+	mux.HandleFunc("GET /i18n.js", a.languageScript)
 	a.registerAgentGatewayRoutes(mux)
 	a.registerTelegramRoutes(mux)
 	a.registerDiscordRoutes(mux)
@@ -185,7 +187,10 @@ func (a *App) Handler() http.Handler {
 			a.terminalProxy(w, r)
 			return
 		}
-		mux.ServeHTTP(w, r)
+		localized := &localeWriter{ResponseWriter: w, locale: requestLocale(r), returnPath: languageReturnPath(r.URL.RequestURI())}
+		localized.Header().Add("Vary", "Accept-Language")
+		localized.Header().Add("Vary", "Cookie")
+		mux.ServeHTTP(localized, r)
 	})
 	return securityHeaders(handler)
 }
@@ -219,13 +224,13 @@ func (a *App) loginPage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	a.render(w, "login.html", pageData{Title: "Sign in", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI})
+	a.render(w, "login.html", pageData{Title: ui(w, "ui.bfd402b2f6f3"), Version: a.config.Version, ManagementAPI: a.config.ManagementAPI})
 }
 
 func (a *App) login(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "invalid request", http.StatusBadRequest)
+		http.Error(w, ui(w, "ui.8daf3a877523"), http.StatusBadRequest)
 		return
 	}
 	username := strings.TrimSpace(r.FormValue("username"))
@@ -233,22 +238,22 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 	result, err := a.api.Login(r.Context(), username, password)
 	if err != nil {
 		status := http.StatusBadGateway
-		msg := "Management service unavailable"
+		msg := ui(w, "ui.cf952d0a3dab")
 		if errors.Is(err, api.ErrUnauthorized) {
 			status = http.StatusUnauthorized
-			msg = "Invalid administrator credentials"
+			msg = ui(w, "ui.d383cd72b8ec")
 		}
 		w.WriteHeader(status)
-		a.render(w, "login.html", pageData{Title: "Sign in", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI, Error: msg, OAuthRequest: oauthContinuation(r)})
+		a.render(w, "login.html", pageData{Title: ui(w, "ui.bfd402b2f6f3"), Version: a.config.Version, ManagementAPI: a.config.ManagementAPI, Error: msg, OAuthRequest: oauthContinuation(r)})
 		return
 	}
 	if result.ManagementAPI != "" && result.ManagementAPI != a.config.ManagementAPI {
-		http.Error(w, "management API compatibility mismatch", http.StatusServiceUnavailable)
+		http.Error(w, ui(w, "ui.feddfa539b02"), http.StatusServiceUnavailable)
 		return
 	}
 	csrf, err := randomToken(32)
 	if err != nil {
-		http.Error(w, "could not create session", http.StatusInternalServerError)
+		http.Error(w, ui(w, "ui.955ec9c5d5c3"), http.StatusInternalServerError)
 		return
 	}
 	a.setCookie(w, sessionCookie, result.Session, true)
@@ -280,7 +285,7 @@ func (a *App) passwordPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	csrf := csrfFromRequest(r)
-	a.render(w, "password.html", pageData{Title: "Change password", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI, CSRF: csrf})
+	a.render(w, "password.html", pageData{Title: ui(w, "ui.3f9c991f63a9"), Version: a.config.Version, ManagementAPI: a.config.ManagementAPI, CSRF: csrf})
 }
 
 func (a *App) passwordChange(w http.ResponseWriter, r *http.Request) {
@@ -298,7 +303,7 @@ func (a *App) passwordChange(w http.ResponseWriter, r *http.Request) {
 	confirmPassword := r.FormValue("confirm_password")
 	if newPassword != confirmPassword || len(newPassword) < 12 || len(newPassword) > 128 {
 		w.WriteHeader(http.StatusBadRequest)
-		a.render(w, "password.html", pageData{Title: "Change password", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI, CSRF: csrfFromRequest(r), Error: "New password must match and be 12 to 128 characters."})
+		a.render(w, "password.html", pageData{Title: ui(w, "ui.3f9c991f63a9"), Version: a.config.Version, ManagementAPI: a.config.ManagementAPI, CSRF: csrfFromRequest(r), Error: ui(w, "ui.0578f694e731")})
 		return
 	}
 	if err := a.api.ChangePassword(r.Context(), session, currentPassword, newPassword); err != nil {
@@ -308,7 +313,7 @@ func (a *App) passwordChange(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.WriteHeader(http.StatusBadRequest)
-		a.render(w, "password.html", pageData{Title: "Change password", Version: a.config.Version, ManagementAPI: a.config.ManagementAPI, CSRF: csrfFromRequest(r), Error: "Password change was rejected."})
+		a.render(w, "password.html", pageData{Title: ui(w, "ui.3f9c991f63a9"), Version: a.config.Version, ManagementAPI: a.config.ManagementAPI, CSRF: csrfFromRequest(r), Error: ui(w, "ui.c1683634fe84")})
 		return
 	}
 	a.clearSessionCookies(w)
@@ -351,12 +356,12 @@ func (a *App) dashboard(w http.ResponseWriter, r *http.Request) {
 func (a *App) dashboardStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if mustChange(r) {
-		http.Error(w, "password change required", http.StatusForbidden)
+		http.Error(w, ui(w, "ui.63bae92440ec"), http.StatusForbidden)
 		return
 	}
 	session, ok := sessionFromRequest(r)
 	if !ok {
-		http.Error(w, "authentication required", http.StatusUnauthorized)
+		http.Error(w, ui(w, "ui.cbac8bee7536"), http.StatusUnauthorized)
 		return
 	}
 	selected, ok := a.dashboardMinecraftSelection(w, r, session)
@@ -367,19 +372,19 @@ func (a *App) dashboardStatus(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, api.ErrUnauthorized) {
 			a.clearSessionCookies(w)
-			http.Error(w, "authentication required", http.StatusUnauthorized)
+			http.Error(w, ui(w, "ui.cbac8bee7536"), http.StatusUnauthorized)
 			return
 		}
 		if errors.Is(err, api.ErrPasswordChangeRequired) {
-			http.Error(w, "password change required", http.StatusForbidden)
+			http.Error(w, ui(w, "ui.63bae92440ec"), http.StatusForbidden)
 			return
 		}
-		http.Error(w, "management service unavailable", http.StatusBadGateway)
+		http.Error(w, ui(w, "ui.0b8e73a792bb"), http.StatusBadGateway)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(dashboardSnapshot{Status: data.Status, Players: data.Players, Attention: data.Attention}); err != nil {
-		http.Error(w, "could not encode dashboard status", http.StatusInternalServerError)
+		http.Error(w, ui(w, "ui.5beef011b7fe"), http.StatusInternalServerError)
 	}
 }
 
@@ -402,12 +407,12 @@ func (a *App) minecraftAction(action string) http.HandlerFunc {
 		selectionRequest.URL = &selectionURL
 		if values, exists := r.PostForm["server"]; exists {
 			if len(values) != 1 || !addServerIDPattern.MatchString(values[0]) {
-				http.Error(w, "Invalid server selection.", http.StatusBadRequest)
+				http.Error(w, uiText("ui.abda10a5fa44"), http.StatusBadRequest)
 				return
 			}
 			query := selectionURL.Query()
 			if existing, exists := query["server"]; exists && (len(existing) != 1 || existing[0] != values[0]) {
-				http.Error(w, "Invalid server selection.", http.StatusBadRequest)
+				http.Error(w, uiText("ui.abda10a5fa44"), http.StatusBadRequest)
 				return
 			}
 			query.Set("server", values[0])
@@ -422,7 +427,7 @@ func (a *App) minecraftAction(action string) http.HandlerFunc {
 			MinecraftInstanceActionConfirmed(context.Context, string, string, string, bool) (api.MinecraftActionResponse, error)
 		})
 		if !ok {
-			http.Error(w, "Minecraft control is unavailable.", http.StatusServiceUnavailable)
+			http.Error(w, uiText("ui.ec9d0da939bb"), http.StatusServiceUnavailable)
 			return
 		}
 		result, actionErr := client.MinecraftInstanceActionConfirmed(r.Context(), session, selectedID, action, confirmPlayers)
@@ -461,7 +466,7 @@ func (a *App) minecraftAction(action string) http.HandlerFunc {
 			if result.Message != "" {
 				data.Error = result.Message
 			} else {
-				data.Error = "Minecraft operation failed."
+				data.Error = uiText("ui.c06b47a2ff1c")
 			}
 			w.WriteHeader(http.StatusBadRequest)
 			a.render(w, "dashboard.html", data)
@@ -540,7 +545,7 @@ func instancePresentation(configuration api.InstanceRuntimeSettings) api.Status 
 	var status api.Status
 	mc := &status.Minecraft
 	mc.Configured = true
-	mc.State = "Unavailable"
+	mc.State = uiText("ui.ca1844969742")
 	mc.ServerSoftware = serverSoftware(configuration.Software)
 	mc.ServerType = configuration.Software
 	mc.Version = configuration.Version
@@ -559,7 +564,7 @@ func (a *App) dashboardData(ctx context.Context, session, csrf string, selected 
 	// Appliance status supplies host and JustVoxel information only.
 	status.Backup = (api.Status{}).Backup
 	status.Minecraft = (api.Status{}).Minecraft
-	status.Minecraft.State = "Not configured"
+	status.Minecraft.State = uiText("ui.dd1841d29502")
 	players := api.Players{State: "not_configured"}
 	if selected.ID == "" {
 		instances, inventoryErr := a.independentServerInventory(ctx, session)
@@ -568,7 +573,7 @@ func (a *App) dashboardData(ctx context.Context, session, csrf string, selected 
 		}
 		if len(instances) > 0 {
 			status.Minecraft.Configured = true
-			status.Minecraft.State = "Choose server"
+			status.Minecraft.State = uiText("ui.389e87e83148")
 			players = api.Players{Configured: true, State: "selection_required"}
 		}
 	}
@@ -584,8 +589,8 @@ func (a *App) dashboardData(ctx context.Context, session, csrf string, selected 
 				status.Backup.Enabled = settings.Enabled
 			}
 		}
-		status.Minecraft.State = "Unavailable"
-		players = api.Players{State: "unavailable", Error: "Player information is temporarily unavailable."}
+		status.Minecraft.State = uiText("ui.ca1844969742")
+		players = api.Players{State: "unavailable", Error: uiText("ui.7dfac59b23ae")}
 		if client, ok := a.api.(interface {
 			MinecraftInstanceConfiguration(context.Context, string, string) (api.InstanceRuntimeSettings, error)
 			MinecraftInstanceStatus(context.Context, string, string) (api.MinecraftInstanceStatus, error)
@@ -637,7 +642,7 @@ func (a *App) dashboardData(ctx context.Context, session, csrf string, selected 
 				if client, ok := a.api.(selectedBackupsAPI); ok {
 					progress, restoreErr := readSelectedRestore(ctx, client, session, selected.ID)
 					if data.Attention == nil && restoreErr == nil && progress.RecoveryRequired {
-						data.Attention = &dashboardAttention{Title: "Restore needs attention", Status: progress.Status, Action: "/workspace/backups?server=" + url.QueryEscape(selected.ID), Label: "Review Restore"}
+						data.Attention = &dashboardAttention{Title: uiText("ui.06c309b55c7c"), Status: progress.Status, Action: "/workspace/backups?server=" + url.QueryEscape(selected.ID), Label: uiText("ui.a20f72d1c96d")}
 					}
 				}
 			}
@@ -649,14 +654,14 @@ func (a *App) dashboardData(ctx context.Context, session, csrf string, selected 
 func dashboardCurrentAttention(ctx context.Context, operations dashboardOperationAPI, session string) *dashboardAttention {
 	if current, err := operations.AdminCurrentMigrationOperation(ctx, session); err == nil && current.Operation != nil && current.Operation.State == "needs_attention" {
 		action := "/?workspace=migration"
-		label := "Open Server Migration"
-		title := "Server Migration needs attention"
+		label := uiText("ui.8ed14e450fc7")
+		title := uiText("ui.9b1153f3f6bd")
 		if current.Operation.OperationType == "migration_import" || current.Operation.OperationType == "migration_recovery" {
 			action = "/?workspace=migration&tab=recovery"
-			label = "Review Migration Recovery"
+			label = uiText("ui.e1cc448edd18")
 		}
 		if current.Operation.OperationType == "migration_recovery" {
-			title = "Migration Recovery needs attention"
+			title = uiText("ui.fa528d210ff5")
 		}
 		return &dashboardAttention{
 			Title:  title,
@@ -669,13 +674,13 @@ func dashboardCurrentAttention(ctx context.Context, operations dashboardOperatio
 	// TODO: offer recovery only when original target ownership can be proven.
 	if current, err := operations.AdminCurrentRestoreOperation(ctx, session); err == nil && current.Operation != nil && current.Operation.State == "needs_attention" {
 		return &dashboardAttention{
-			Title:  "Restore needs attention",
+			Title:  uiText("ui.06c309b55c7c"),
 			Status: current.Operation.Status,
 		}
 	}
 	if current, err := operations.AdminCurrentFactoryResetOperation(ctx, session); err == nil && current.Operation != nil && current.Operation.State == "needs_attention" {
 		return &dashboardAttention{
-			Title:  "Full Factory Reset needs attention",
+			Title:  uiText("ui.619901d58072"),
 			Status: current.Operation.Status,
 		}
 	}
@@ -692,17 +697,17 @@ func (a *App) handleDashboardError(w http.ResponseWriter, r *http.Request, err e
 		http.Redirect(w, r, "/password", http.StatusSeeOther)
 		return
 	}
-	http.Error(w, "management service unavailable", http.StatusBadGateway)
+	http.Error(w, ui(w, "ui.0b8e73a792bb"), http.StatusBadGateway)
 }
 
 func actionResultMessage(action string) string {
 	switch action {
 	case "start":
-		return "Minecraft start requested."
+		return uiText("ui.679d3458fbfc")
 	case "stop":
-		return "Minecraft stop requested."
+		return uiText("ui.07501a985a96")
 	case "restart":
-		return "Minecraft restart requested."
+		return uiText("ui.210b3f610eff")
 	default:
 		return ""
 	}
@@ -720,20 +725,20 @@ func pendingAction(action string) string {
 func actionLabel(action string) string {
 	switch action {
 	case "stop":
-		return "Stop anyway"
+		return uiText("ui.9160a1e009bd")
 	case "restart":
-		return "Restart anyway"
+		return uiText("ui.04d4d59f0be6")
 	default:
-		return "Continue"
+		return uiText("ui.31fbef162594")
 	}
 }
 
 func actionOperation(action string) string {
 	switch action {
 	case "stop":
-		return "Stopping Minecraft"
+		return uiText("ui.5a739ecdb05e")
 	case "restart":
-		return "Restarting Minecraft"
+		return uiText("ui.fb9fb7aca4bf")
 	default:
 		return "Continuing"
 	}
@@ -742,21 +747,21 @@ func actionOperation(action string) string {
 func actionProgress(action string) string {
 	switch action {
 	case "start":
-		return "Starting…"
+		return uiText("ui.bbe5fc3b9ef3")
 	case "stop":
-		return "Stopping…"
+		return uiText("ui.bbe8574175ab")
 	case "restart":
-		return "Restarting…"
+		return uiText("ui.75d0f1469d16")
 	default:
-		return "Working…"
+		return uiText("ui.5474eef8d0f1")
 	}
 }
 
 func (a *App) render(w http.ResponseWriter, name string, data pageData) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	if err := a.templates.ExecuteTemplate(w, name, data); err != nil {
-		http.Error(w, "render error", http.StatusInternalServerError)
+	if err := a.executeTemplate(w, name, data); err != nil {
+		http.Error(w, ui(w, "ui.4a9d9119358b"), http.StatusInternalServerError)
 	}
 }
 

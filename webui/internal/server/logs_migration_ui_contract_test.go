@@ -1,18 +1,17 @@
 package server
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func TestSystemLogsGroupedResizableWorkspace(t *testing.T) {
-	js, err := os.ReadFile(filepath.Join("static", "app.js"))
+	js, err := englishPresentationAsset(filepath.Join("static", "app.js"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	css, err := os.ReadFile(filepath.Join("static", "app.css"))
+	css, err := englishPresentationAsset(filepath.Join("static", "app.css"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +51,7 @@ func TestSystemLogsGroupedResizableWorkspace(t *testing.T) {
 }
 
 func TestMigrationWorkspaceHasBoundedContentAndNormalConfirmation(t *testing.T) {
-	css, err := os.ReadFile(filepath.Join("static", "app.css"))
+	css, err := englishPresentationAsset(filepath.Join("static", "app.css"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +72,7 @@ func TestMigrationWorkspaceHasBoundedContentAndNormalConfirmation(t *testing.T) 
 		t.Fatal("Migration confirmation must remain in the content flow")
 	}
 	for _, name := range []string{"migration_workspace_recovery_review.html"} {
-		markup, err := os.ReadFile(filepath.Join("templates", name))
+		markup, err := englishPresentationAsset(filepath.Join("templates", name))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -91,7 +90,7 @@ func TestMigrationWorkspaceHasBoundedContentAndNormalConfirmation(t *testing.T) 
 }
 
 func TestMigrationWorkspaceScrollsOnlyItsBody(t *testing.T) {
-	css, err := os.ReadFile(filepath.Join("static", "app.css"))
+	css, err := englishPresentationAsset(filepath.Join("static", "app.css"))
 	if err != nil {
 		t.Fatal(err)
 	}

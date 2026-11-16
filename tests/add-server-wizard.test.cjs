@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { readFileSync, readdirSync } = require('node:fs');
+const { readFileSync, readdirSync } = require('./helpers/webui-i18n.cjs');
 const path = require('node:path');
 const { test } = require('node:test');
 const root = path.join(__dirname, '../webui/internal/server');

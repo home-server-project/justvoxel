@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"strings"
 	"testing"
 
@@ -120,7 +119,7 @@ func TestDiscordApprovalActionsUseExistingPrimarySurface(t *testing.T) {
 }
 
 func TestDiscordAdministratorAccessUsesCompactExistingSurface(t *testing.T) {
-	header, err := os.ReadFile("templates/header.html")
+	header, err := englishPresentationAsset("templates/header.html")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +175,7 @@ func TestDiscordAdministratorAccessUsesCompactExistingSurface(t *testing.T) {
 	if telegramGlobal < 0 || discordGlobal < 0 || discordGlobal <= telegramGlobal {
 		t.Fatal("Discord global control must follow Telegram global control")
 	}
-	script, err := os.ReadFile("static/discord.js")
+	script, err := englishPresentationAsset("static/discord.js")
 	if err != nil {
 		t.Fatal(err)
 	}
