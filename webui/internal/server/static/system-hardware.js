@@ -1,16 +1,25 @@
 (() => {
   const menu = document.querySelector("[data-control-center]");
+  const power = document.querySelector("[data-system-power]");
   const open = document.querySelector("[data-display-open]");
   const dialog = document.querySelector("[data-display-dialog]");
   const indicators = document.querySelector("[data-power-indicators]");
-  if (!menu || !open || !dialog || !indicators) return;
+  if (!menu || !power || !open || !dialog || !indicators) return;
   const delay = dialog.querySelector("[data-display-delay]");
+  const timer = dialog.querySelector("[data-display-timer]");
+  const display = dialog.querySelector("[data-display-command]");
   const lid = dialog.querySelector("[data-lid-ignore]");
   const lidOption = dialog.querySelector("[data-lid-option]");
   const message = dialog.querySelector("[data-display-status]");
-  const buttons = [...dialog.querySelectorAll("[data-display-action]")];
+  const apply = dialog.querySelector("[data-display-apply]");
+  const cancel = dialog.querySelector("[data-display-cancel]");
   let snapshot = null;
   let busy = false;
+  let opening = false;
+  let refreshRequest = 0;
+  let displayDirty = false;
+  // Session-only desired command. This is deliberately not physical readback.
+  let displaySelection = true;
 
   const get = async (path) => {
     const response = await fetch(path, { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } });
@@ -22,14 +31,13 @@
     item.className = "control-battery-indicator";
     const name = document.createElement("span");
     name.textContent = label;
-    const icon = document.createElement("span");
+    const charge = document.createElement("span");
     const allowed = ["online", "on_battery", "low_battery", "bypass", "unknown"];
-    icon.className = "control-battery-icon system-ups-status system-ups-status-" + (allowed.includes(state) ? state : "unknown");
+    charge.className = "system-ups-status system-ups-status-" + (allowed.includes(state) ? state : "unknown");
     const valid = typeof percentage === "number" && Number.isFinite(percentage) && percentage >= 0 && percentage <= 100;
-    icon.textContent = valid ? Math.round(percentage) + "%" : "";
-    icon.setAttribute("aria-label", valid ? Math.round(percentage) + "%" : "Battery percentage unavailable");
+    charge.textContent = valid ? Math.round(percentage) + "%" : "";
     item.title = status || state || label;
-    item.append(name, icon);
+    item.append(name, charge);
     return item;
   };
   const renderIndicators = (hardware, ups) => {
@@ -45,64 +53,104 @@
     }
     indicators.hidden = indicators.childElementCount === 0;
   };
-  const renderControls = () => {
-    const hws = snapshot && snapshot.hws === true;
-    // Role visibility uses the existing nav-admin-only parent; the API also authorizes.
-    open.hidden = !(hws && snapshot.display_available);
-    lidOption.hidden = !(hws && snapshot.lid_available);
-    lid.checked = !!(hws && snapshot.lid_ignored);
-  };
   const refresh = async () => {
+    const request = ++refreshRequest;
+    power.dataset.hardwareSettled = "false";
     open.hidden = true;
     indicators.hidden = true;
+    let hardware;
     try {
-      snapshot = await get("/api/system-hardware");
-      renderControls();
-      let ups = null;
-      if (snapshot.hws === true) {
-        try { ups = await get("/api/ups"); } catch (_) { /* Onboard status remains useful independently. */ }
-      }
-      renderIndicators(snapshot, ups);
-    } catch (_) { snapshot = null; lidOption.hidden = true; }
-  };
-  const submit = async (action) => {
-    if (busy) return;
-    const body = new URLSearchParams();
-    body.set("csrf", document.querySelector("[data-system-actions-csrf]")?.value || "");
-    body.set("action", action);
-    if (action === "display-delay") {
-      if (!delay.reportValidity()) return;
-      body.set("delay_seconds", delay.value);
+      hardware = await get("/api/system-hardware");
+      if (request !== refreshRequest) return;
+      snapshot = hardware;
+      open.hidden = !(hardware.hws === true && hardware.display_available);
+    } catch (_) {
+      if (request === refreshRequest) snapshot = null;
+      return;
+    } finally {
+      if (request === refreshRequest) power.dataset.hardwareSettled = "true";
     }
+    let ups = null;
+    if (hardware.hws === true) {
+      try { ups = await get("/api/ups"); } catch (_) { /* Onboard status remains useful independently. */ }
+    }
+    if (request === refreshRequest) renderIndicators(hardware, ups);
+  };
+  const setInputs = () => {
+    const available = snapshot?.hws === true && snapshot.display_available;
+    timer.disabled = busy || !available;
+    delay.disabled = busy || !available || !timer.checked;
+    display.disabled = busy || !available;
+    lid.disabled = busy || !(snapshot?.hws === true && snapshot.lid_available);
+    apply.disabled = busy || !available;
+    cancel.disabled = busy;
+  };
+  const submit = async () => {
+    if (busy || !snapshot?.hws || !snapshot.display_available) return;
+    if (timer.checked && !delay.reportValidity()) return;
+    const actions = [];
+    const immediateOff = displayDirty && !display.checked;
+    if (displayDirty) actions.push(display.checked ? "display-on" : "display-off");
+    if (timer.checked && !immediateOff) actions.push("display-delay");
+    if (snapshot.lid_available && lid.checked !== snapshot.lid_ignored) actions.push(lid.checked ? "lid-enable" : "lid-disable");
     busy = true;
-    buttons.forEach((button) => { button.disabled = true; });
-    lid.disabled = true;
-    message.textContent = "Applying…";
+    setInputs();
+    message.textContent = "";
     try {
-      const response = await fetch("/api/system-actions/display", { method: "POST", credentials: "same-origin", headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" }, body: body.toString() });
-      if (!response.ok) throw new Error("The display or lid action could not be applied.");
-      snapshot = await response.json();
-      renderControls();
-      message.textContent = action === "display-delay" ? "Display off scheduled in " + delay.value + " seconds." : "Applied.";
+      for (const action of actions) {
+        const body = new URLSearchParams();
+        body.set("csrf", document.querySelector("[data-system-actions-csrf]")?.value || "");
+        body.set("action", action);
+        if (action === "display-delay") body.set("delay_seconds", delay.value);
+        const response = await fetch("/api/system-actions/display", { method: "POST", credentials: "same-origin", headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" }, body: body.toString() });
+        if (!response.ok) throw new Error("The display or lid action could not be applied.");
+        snapshot = await response.json();
+        // Clear each successful command before attempting the next one.
+        if (action === "display-on" || action === "display-off") {
+          displaySelection = action === "display-on";
+          displayDirty = false;
+          if (action === "display-off") timer.checked = false;
+        }
+        if (action === "display-delay") timer.checked = false;
+      }
+      snapshot = await get("/api/system-hardware");
+      lid.checked = !!snapshot.lid_ignored;
     } catch (error) {
       message.textContent = error.message;
-      // Read the owned policy again after a failure; never guess its state.
-      try { snapshot = await get("/api/system-hardware"); renderControls(); } catch (_) { lid.checked = !!snapshot?.lid_ignored; }
+      // Reconcile owned policy after partial failure; never infer display state.
+      try { snapshot = await get("/api/system-hardware"); } catch (_) { /* Keep the last authoritative response. */ }
+      lid.checked = !!snapshot?.lid_ignored;
     } finally {
       busy = false;
-      buttons.forEach((button) => { button.disabled = false; });
-      lid.disabled = false;
+      setInputs();
     }
   };
   menu.addEventListener("toggle", () => { if (menu.open) refresh(); });
-  open.addEventListener("click", () => {
-    if (!snapshot?.hws || !snapshot.display_available) return;
-    delay.value = "10";
+  open.addEventListener("click", async () => {
+    if (opening || busy || open.hidden) return;
+    opening = true;
     message.textContent = "";
-    renderControls();
+    try {
+      snapshot = await get("/api/system-hardware");
+      if (!snapshot.hws || !snapshot.display_available) { open.hidden = true; return; }
+    } catch (error) {
+      snapshot = null;
+      message.textContent = error.message;
+    } finally {
+      opening = false;
+    }
+    delay.value = "10";
+    timer.checked = false;
+    display.checked = displaySelection;
+    displayDirty = false;
+    lidOption.hidden = !(snapshot?.hws === true && snapshot.lid_available);
+    lid.checked = !!snapshot?.lid_ignored;
+    setInputs();
     dialog.showModal();
   });
-  buttons.forEach((button) => button.addEventListener("click", () => submit(button.dataset.displayAction)));
-  lid.addEventListener("change", () => submit(lid.checked ? "lid-enable" : "lid-disable"));
-  dialog.querySelector("[data-display-cancel]").addEventListener("click", () => dialog.close());
+  timer.addEventListener("change", setInputs);
+  display.addEventListener("change", () => { displayDirty = true; });
+  apply.addEventListener("click", submit);
+  cancel.addEventListener("click", () => { if (!busy) dialog.close(); });
+  dialog.addEventListener("cancel", (event) => { if (busy) event.preventDefault(); });
 })();

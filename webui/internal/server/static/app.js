@@ -1033,7 +1033,10 @@ if (systemPower && systemDialog) {
     });
   };
 
+  let systemActionsRequest = 0;
   const loadSystemActionsStatus = async () => {
+    const request = ++systemActionsRequest;
+    systemPower.dataset.actionsSettled = "false";
     setMenuAvailable(false);
     if (menuError) menuError.hidden = true;
     if (firmwareButton) firmwareButton.hidden = true;
@@ -1053,7 +1056,9 @@ if (systemPower && systemDialog) {
         return false;
       }
       if (!response.ok) throw new Error("status unavailable");
-      latestStatus = await response.json();
+      const status = await response.json();
+      if (request !== systemActionsRequest) return false;
+      latestStatus = status;
       const firmwareAvailable =
         latestStatus.variant === "hws" &&
         latestStatus.firmware &&
@@ -1064,8 +1069,10 @@ if (systemPower && systemDialog) {
       });
       return true;
     } catch (_) {
-      if (menuError) menuError.hidden = false;
+      if (request === systemActionsRequest && menuError) menuError.hidden = false;
       return false;
+    } finally {
+      if (request === systemActionsRequest) systemPower.dataset.actionsSettled = "true";
     }
   };
 

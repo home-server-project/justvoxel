@@ -43,8 +43,8 @@ func (a *App) systemHardwareAction(w http.ResponseWriter, r *http.Request) {
 	switch request.Action {
 	case "display-delay":
 		delay, err := strconv.Atoi(r.FormValue("delay_seconds"))
-		if err != nil || delay < 1 || delay > 3600 {
-			http.Error(w, "Delay must be 1–3600 seconds", http.StatusBadRequest)
+		if err != nil || delay < 1 || delay > 999 {
+			http.Error(w, "Delay must be 1–999 seconds", http.StatusBadRequest)
 			return
 		}
 		request.DelaySeconds = delay

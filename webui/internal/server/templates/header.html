@@ -24,9 +24,12 @@
       </div>
 
       <section class="control-section control-session">
-        <span class="control-section-label">Session &amp; power</span>
+        <div class="control-session-heading">
+          <span class="control-section-label">Session &amp; power</span>
+          <span class="control-battery-indicators control-section-label" data-power-indicators hidden></span>
+        </div>
         <div class="control-quick-actions">
-          <div class="control-power-actions nav-admin-only" data-system-power>
+          <div class="control-power-actions nav-admin-only" data-system-power data-actions-settled="false" data-hardware-settled="false">
             <button class="control-icon-button" type="button" data-system-action="reboot" aria-label="Reboot" data-tooltip="Reboot" disabled>
               <svg class="control-action-icon" viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M20 11a8 8 0 1 1-2.34-5.66L20 7"></path>
@@ -52,7 +55,6 @@
             </button>
             <p class="system-power-error" data-system-action-error hidden>System power controls are unavailable.</p>
           </div>
-          <span class="control-battery-indicators" data-power-indicators hidden></span>
           <form class="nav-logout" method="post" action="/logout">
             <input type="hidden" name="csrf" value="{{.CSRF}}">
             <button class="secondary control-icon-button" type="submit" aria-label="Log out" data-tooltip="Log out">
@@ -876,17 +878,25 @@
   <dialog class="system-action-dialog" data-display-dialog aria-labelledby="display-power-title">
     <div class="system-action-dialog-content">
       <h2 id="display-power-title">Display power</h2>
-      <label>Delay in seconds <input type="number" min="1" max="3600" step="1" value="10" data-display-delay></label>
-      <label class="system-update-option system-ups-shutdown-switch" data-lid-option hidden>
-        <span><strong>Ignore laptop lid close</strong></span>
-        <input type="checkbox" role="switch" data-lid-ignore>
-      </label>
+      <div class="display-setting-row">
+        <label for="display-delay"><span aria-hidden="true">⏱</span> Delay in seconds</label>
+        <div class="display-setting-controls">
+          <input id="display-delay" type="number" min="1" max="999" step="1" value="10" data-display-delay disabled>
+          <input type="checkbox" role="switch" aria-label="Enable delayed display off" data-display-timer>
+        </div>
+      </div>
+      <div class="display-setting-row">
+        <label for="display-command"><span aria-hidden="true">▣</span> Display power</label>
+        <input id="display-command" type="checkbox" role="switch" title="Desired display command, sent only when Apply is pressed" data-display-command>
+      </div>
+      <div class="display-setting-row" data-lid-option hidden>
+        <label for="display-lid-ignore"><span aria-hidden="true">💻</span> Ignore laptop lid close</label>
+        <input id="display-lid-ignore" type="checkbox" role="switch" data-lid-ignore>
+      </div>
       <p data-display-status role="status"></p>
       <div class="action-row">
-        <button class="secondary" type="button" data-display-action="display-off">Turn OFF now</button>
-        <button class="secondary" type="button" data-display-action="display-on">Turn ON now</button>
         <button class="secondary" type="button" data-display-cancel>Cancel</button>
-        <button type="button" data-display-action="display-delay">Apply</button>
+        <button type="button" data-display-apply>Apply</button>
       </div>
     </div>
   </dialog>

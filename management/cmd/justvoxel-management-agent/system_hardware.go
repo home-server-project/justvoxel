@@ -118,7 +118,7 @@ func validHardwareRequest(request systemHardwareRequest) bool {
 	case "display-off", "display-on", "lid-enable", "lid-disable":
 		return request.DelaySeconds == 0
 	case "display-delay":
-		return request.DelaySeconds >= 1 && request.DelaySeconds <= 3600
+		return request.DelaySeconds >= 1 && request.DelaySeconds <= 999
 	default:
 		return false
 	}
@@ -199,7 +199,7 @@ func (s *server) systemHardwareAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !validHardwareRequest(request) {
-		writeError(w, http.StatusBadRequest, "invalid display or lid action; delay must be 1–3600 seconds")
+		writeError(w, http.StatusBadRequest, "invalid display or lid action; delay must be 1–999 seconds")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)

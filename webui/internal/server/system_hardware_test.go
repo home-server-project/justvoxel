@@ -35,10 +35,12 @@ func TestHardwareWebMutationAuthorizationCSRFAndValidation(t *testing.T) {
 		{"administrator", "action=display-on", 403},
 		{"administrator", "csrf=token&action=display-delay&delay_seconds=10%3Breboot", 400},
 		{"administrator", "csrf=token&action=display-delay&delay_seconds=0", 400},
-		{"administrator", "csrf=token&action=display-delay&delay_seconds=3601", 400},
+		{"administrator", "csrf=token&action=display-delay&delay_seconds=1000", 400},
 		{"administrator", "csrf=token&action=shell", 400},
 		{"administrator", "csrf=token&action=display-off&delay_seconds=20", 400},
+		{"administrator", "csrf=token&action=display-delay&delay_seconds=1", 200},
 		{"administrator", "csrf=token&action=display-delay&delay_seconds=10", 200},
+		{"administrator", "csrf=token&action=display-delay&delay_seconds=999", 200},
 		{"administrator", "csrf=token&action=display-off", 200},
 		{"administrator", "csrf=token&action=display-on", 200},
 		{"administrator", "csrf=token&action=lid-enable", 200},
@@ -84,17 +86,30 @@ func TestHardwareDialogTemplateContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`data-display-open aria-label="Display" data-tooltip="Display" hidden`, `data-display-dialog`, `Display power`, `min="1" max="3600" step="1" value="10"`, `Turn OFF now`, `Turn ON now`, `data-display-cancel>Cancel`, `data-display-action="display-delay">Apply`, `Ignore laptop lid close`, `role="switch" data-lid-ignore`, `data-lid-option hidden`, `data-power-indicators hidden`, `/static/system-hardware.js`} {
+	for _, want := range []string{`data-display-open aria-label="Display" data-tooltip="Display" hidden`, `data-display-dialog`, `Display power`, `min="1" max="999" step="1" value="10" data-display-delay disabled`, `data-display-timer`, `data-display-command`, `data-display-cancel>Cancel`, `data-display-apply>Apply`, `Ignore laptop lid close`, `role="switch" data-lid-ignore`, `data-lid-option hidden`, `data-power-indicators hidden`, `data-actions-settled="false" data-hardware-settled="false"`, `/static/system-hardware.js`} {
 		if !strings.Contains(string(header), want) {
 			t.Fatalf("template missing %q", want)
 		}
 	}
-	poweroff := strings.Index(string(header), `data-system-action="poweroff"`)
-	display := strings.Index(string(header), `data-display-open`)
-	indicators := strings.Index(string(header), `data-power-indicators`)
-	logout := strings.Index(string(header), `class="nav-logout"`)
-	if !(poweroff < display && display < indicators && indicators < logout) {
-		t.Fatal("approved action order lost")
+	text := string(header)
+	reboot := strings.Index(text, `data-system-action="reboot"`)
+	firmware := strings.Index(text, `data-system-action="firmware-reboot"`)
+	poweroff := strings.Index(text, `data-system-action="poweroff"`)
+	display := strings.Index(text, `data-display-open`)
+	indicators := strings.Index(text, `data-power-indicators`)
+	logout := strings.Index(text, `class="nav-logout"`)
+	if !(indicators < reboot && reboot < firmware && firmware < poweroff && poweroff < display && display < logout) {
+		t.Fatal("approved heading placement or action order lost")
+	}
+	_, popup, _ := strings.Cut(text, `<dialog class="system-action-dialog" data-display-dialog`)
+	popup, _, _ = strings.Cut(popup, `</dialog>`)
+	if strings.Count(popup, `class="display-setting-row"`) != 3 || strings.Count(popup, `<button `) != 2 {
+		t.Fatal("display popup must contain three matching rows and only Cancel/Apply buttons")
+	}
+	for _, forbidden := range []string{`Turn OFF now`, `Turn ON now`, `data-display-action=`, `control-battery-icon`} {
+		if strings.Contains(popup, forbidden) {
+			t.Fatalf("old display control remains: %q", forbidden)
+		}
 	}
 }
 

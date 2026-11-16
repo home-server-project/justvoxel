@@ -116,13 +116,19 @@ Display detection is advisory because KVM switches, EDID behavior, firmware and 
 
 ## HWS local display and laptop power
 
-Control Center → Display controls only the Linux console panel. Turn OFF now and
-Turn ON now run fixed `setterm` actions on `/dev/tty0`, without stopping Minecraft.
-Apply schedules display off in 1–3600 seconds (default 10) using a transient
-systemd timer. Closing the dialog does not cancel an already submitted action.
-Turn ON now is available regardless of the last requested display state.
+Control Center → Display controls only the Linux console panel. The display-power
+switch stages a desired command, not a measured physical display state. Apply runs
+changed display commands using fixed `setterm` actions on `/dev/tty0`, without
+stopping Minecraft. The optional one-shot timer defaults off, with a delay of 10
+seconds; enable it to schedule display off in 1–999 seconds using a transient
+systemd timer. Immediate display off skips a redundant delayed off. Display on can
+be combined with a delayed off. Closing the dialog does not cancel an already
+submitted action.
 
-The Ignore laptop lid close switch immediately applies the JustVoxel-owned
+Display and lid switches only stage changes until Apply; Cancel discards unsaved
+changes without sending actions. Opening the dialog reloads hardware/lid status.
+The Ignore laptop lid close switch reflects the authoritative JustVoxel-owned
+policy and appears only when an actual Lid Switch is detected. Apply updates the
 `/etc/systemd/logind.conf.d/90-justvoxel-lid.conf` policy. Disabling removes only
 that file, restoring the remaining vendor and administrator configuration. The
 switch reports the owned policy, not an inferred hardware state. Other administrator

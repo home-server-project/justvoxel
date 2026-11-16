@@ -241,12 +241,12 @@ func TestDisplayOnlyUsesFixedCommands(t *testing.T) {
 
 func TestHardwareDelayAndActionValidation(t *testing.T) {
 	hardwareFixture(t)
-	for _, request := range []systemHardwareRequest{{"display-delay", 0}, {"display-delay", -1}, {"display-delay", 3601}, {"display-off;reboot", 0}, {"display-on", 10}, {"lid-enable", 10}} {
+	for _, request := range []systemHardwareRequest{{"display-delay", 0}, {"display-delay", -1}, {"display-delay", 1000}, {"display-off;reboot", 0}, {"display-on", 10}, {"lid-enable", 10}} {
 		if err := applySystemHardware(context.Background(), request); err == nil {
 			t.Fatalf("accepted invalid request %+v", request)
 		}
 	}
-	for _, delay := range []int{1, 3600} {
+	for _, delay := range []int{1, 999} {
 		if !validHardwareRequest(systemHardwareRequest{"display-delay", delay}) {
 			t.Fatalf("rejected valid delay %d", delay)
 		}
@@ -335,7 +335,7 @@ func TestHardwareAPIRejectsUnauthorizedAndInvalidInputs(t *testing.T) {
 		}
 	}
 	s := adminServerForTest()
-	for _, body := range []string{`{"action":"display-delay","delay_seconds":"10;reboot"}`, `{"action":"display-off","path":"/dev/tty1"}`, `{"action":"display-delay","delay_seconds":1.5}`, `{"action":"display-delay","delay_seconds":3601}`} {
+	for _, body := range []string{`{"action":"display-delay","delay_seconds":"10;reboot"}`, `{"action":"display-off","path":"/dev/tty1"}`, `{"action":"display-delay","delay_seconds":1.5}`, `{"action":"display-delay","delay_seconds":1000}`} {
 		rr := httptest.NewRecorder()
 		s.systemHardwareAction(rr, authorizedRequest(http.MethodPost, "http://unix/v1/admin/system/display", body))
 		if rr.Code != http.StatusBadRequest {
