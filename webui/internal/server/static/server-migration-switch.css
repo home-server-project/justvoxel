@@ -1,0 +1,14 @@
+/* Scoped Switch states use Setup's existing software cards and local artwork. */
+.migration-switch .migration-switch-catalogue{display:grid;grid-template-columns:1fr;gap:.8rem;min-width:0}
+.migration-switch .setup-server-types{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(170px,100%),1fr));gap:.55rem;min-width:0;border:0;margin:0;padding:0}
+.migration-switch .setup-server-types legend{margin-bottom:.5rem;color:var(--jv-muted);font-weight:800}
+.migration-switch .server-software-card{grid-template-columns:40px minmax(0,1fr);align-items:start;align-content:start;min-height:104px}
+.migration-switch .server-software-icon{width:40px;min-width:40px;height:40px}
+.migration-switch .server-software-copy{overflow-wrap:anywhere}
+.migration-switch .server-software-copy>.migration-switch-sticker{justify-self:start;border-radius:5px;padding:.12rem .4rem;background:var(--jv-accent);color:var(--jv-surface);font-weight:700}
+.migration-switch .is-current{border-color:#e5bb40;background:color-mix(in srgb,#e5bb40 12%,var(--jv-surface-sunken));opacity:1}
+.migration-switch .is-current .server-software-copy>.migration-switch-sticker{background:#e5bb40;color:#241f10}
+.migration-switch .is-unsupported{filter:brightness(.82);opacity:.72;cursor:default}
+.migration-switch .is-unsupported .server-software-copy>.migration-switch-sticker{background:#555b61;color:#fff}
+.migration-switch .server-software-card:disabled:hover{border-color:var(--jv-border-strong);background:var(--jv-surface-sunken)}
+.migration-switch .is-current:disabled:hover{border-color:#e5bb40;background:color-mix(in srgb,#e5bb40 12%,var(--jv-surface-sunken))}

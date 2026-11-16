@@ -3,9 +3,9 @@
 Add Server Simple Setup uses three states in the existing card: family, software,
 then server name and game mode. It leads to the shared Review page. Advanced Setup
 retains Server, Cross-play, Memory, Storage, Backups and Review, with software
-grouped by capability. All eight Java server types and native Bedrock are selectable.
+grouped by capability. All ten Java server types and native Bedrock are selectable.
 
-Add Server offers three family lanes: Plugins (Paper, Purpur, Spigot), Mods
+Add Server offers three family lanes: Plugins (Paper, Purpur, Spigot, Pufferfish, Leaf), Mods
 (Fabric, NeoForge, Forge, Quilt), and Vanilla Java · Bedrock. Advanced Setup uses
 these same three software lanes in its Server step.
 
@@ -142,3 +142,55 @@ records and recovery journals but are not used to generate new runtimes.
 Upstream contracts:
 [Bedrock image configuration](https://github.com/itzg/docker-minecraft-bedrock-server#nethernet),
 [official release metadata](https://net.web.minecraft-services.net/api/v1.0/download/links).
+
+
+## Software conversion in Server Migration
+
+**Server Migration → Switch** replaces Minecraft Update's former Switch tab.
+Minecraft Update contains Container and Version only. Switch shares Setup's
+catalogue and artwork, keeping all eleven cards visible: Paper, Purpur, Spigot,
+Pufferfish, Leaf, Fabric, NeoForge, Forge, Quilt, Vanilla Java and native Bedrock.
+Current is yellow and not selectable; Available offers a review of at least one
+implemented action; Not Supported is dimmed, disabled and remains visible.
+
+The supported structural family is **Paper / Purpur / Pufferfish / Leaf**, in all
+directions where the exact game/runtime and required cross-play can be verified.
+Software conversion never upgrades or downgrades Minecraft. An unavailable exact
+target build blocks conversion. The target remains at the reviewed exact pin;
+Minecraft Version is the separate operation for release and policy changes.
+
+Convert preserves the same immutable instance and its normal placement, ports
+and backup destination. Clone and convert creates a separate immutable instance
+with a new data directory under the same root, the same backup destination and
+safe new ports allocated automatically. It preserves the original, uses a
+consistent cold source copy and meaningful exact-runtime verification, and leaves
+a successful clone stopped. Clone names derive from source name and target
+software and can be renamed normally. Failures use existing transaction recovery
+and cannot become successful merely because a container started.
+
+Incompatible and unknown/unverified content blocks in-place Convert. Review
+lists named blockers and links to the selected server's Plugins & Mods workspace.
+Provider/catalogue failure does not mean compatible. No plugins or mods are
+automatically removed, disabled, replaced, updated or downloaded by Switch.
+Reopening or refreshing Switch re-evaluates current inventory. An experimental
+clone may remain available inside the supported structural family when Convert
+is blocked, while preserving the original.
+
+Other structural conversions remain unsupported until their transformations and
+verification are implemented:
+
+- Spigot is outside the safe Paper family. Paper-to-Spigot can lose data; direct
+  Spigot-to-Paper is unsupported from 26.1 because world layouts diverged.
+- Vanilla-to-Paper and Paper-to-Vanilla require exact-version world-layout handling.
+  No automatic Vanilla intermediary is implemented. Plugins cannot silently stay
+  active on Vanilla, and Switch never removes them to make a conversion pass.
+- Fabric/Quilt and Forge/NeoForge compatibility must be proven per installed mod,
+  exact Minecraft version, target loader and required dependencies. Loader names
+  alone do not establish compatibility. Cross-family plugins and mods are not
+  interchangeable. Historic modded world safety cannot be inferred from an empty
+  current mods directory.
+- Java and native Bedrock have no supported world/runtime conversion in either
+  direction; the Bedrock card stays visible.
+
+Upstream world-layout reference:
+[Paper migration guidance](https://docs.papermc.io/paper/migration/).

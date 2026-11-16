@@ -14,8 +14,10 @@ source /usr/libexec/justvoxel/mjust/instance-context.sh
 jv_load_instance "$2" || exit 1
 instance_args=(--instance "$2")
 shift 2
+switch_exact=${JUSTVOXEL_SWITCH_EXACT:-no}
+switch_preserve_content=${switch_exact}
 write_main_config() {
-    /usr/libexec/justvoxel/management-agent instance-version-publish "${JV_INSTANCE_ID}" "${MINECRAFT_SERVER_TYPE}" "${MINECRAFT_IMAGE_TAG}" "${MINECRAFT_VERSION}" "${MINECRAFT_VERSION_MODE}" "${JV_UPDATE_IMAGE_DIGEST:-${JV_INSTANCE_IMAGE_DIGEST}}"
+    JUSTVOXEL_SWITCH_PRESERVE_CONTENT="${switch_preserve_content}" /usr/libexec/justvoxel/management-agent instance-version-publish "${JV_INSTANCE_ID}" "${MINECRAFT_SERVER_TYPE}" "${MINECRAFT_IMAGE_TAG}" "${MINECRAFT_VERSION}" "${MINECRAFT_VERSION_MODE}" "${JV_UPDATE_IMAGE_DIGEST:-${JV_INSTANCE_IMAGE_DIGEST}}"
 }
 render_runtime() { :; } # publication above uses the authoritative Go renderer
 
@@ -81,6 +83,9 @@ case "${stack_state}" in
     *) echo 'ERROR: compatible server update information is unavailable; Minecraft was left untouched.' >&2; exit 1 ;;
 esac
 latest_mc="$(jq -r '.selected_candidate' <<< "${stack_plan}")"
+if [[ ${switch_exact} == yes ]]; then
+    [[ ${target_policy} == pinned && ${target_version} == "${latest_mc}" && ${latest_mc} == "$(jq -r '.installed' <<< "${stack_plan}")" ]] || { echo 'ERROR: Switch must preserve the exact installed Minecraft version; review again.' >&2; exit 1; }
+fi
 latest_image_release=''
 repin_game=no
 old_game_mode="${MINECRAFT_VERSION_MODE}"
@@ -210,7 +215,12 @@ cleanup() {
             JV_UPDATE_IMAGE_DIGEST="${JV_INSTANCE_IMAGE_DIGEST}"
             MINECRAFT_VERSION_MODE="${old_game_mode}"
             MINECRAFT_VERSION="${old_game_version}"
-            if [[ ${game_config_changed} == yes ]] && ! write_main_config; then recovery_ok=no; fi
+            # A failed Switch must restart the original at the same game version
+            # and preserve content even if failure preceded target publication.
+            if [[ ${switch_exact} == yes ]]; then MINECRAFT_VERSION="${latest_mc}"; fi
+            if [[ ${game_config_changed} == yes || ${switch_exact} == yes ]]; then
+                if write_main_config; then game_config_changed=yes; else recovery_ok=no; fi
+            fi
             if ! render_runtime; then recovery_ok=no; fi
             if [[ -n ${old_running_id:-${old_local_id}} && $(podman image inspect "${old_image}" --format '{{.Id}}' 2>/dev/null || true) != "${old_running_id:-${old_local_id}}" ]]; then recovery_ok=no; fi
             if [[ ${was_active} != yes ]] && systemctl is-active --quiet "${JV_INSTANCE_UNIT}"; then recovery_ok=no; fi
@@ -229,6 +239,10 @@ cleanup() {
         if [[ ${recovery_ok} != yes ]]; then
             echo "ERROR: previous runtime recovery is incomplete; operation requires attention. Recovery files: ${component_staging}" >&2
         fi
+    fi
+    if [[ ${switch_exact} == yes && ${game_config_changed} == yes && ${recovery_ok} == yes ]]; then
+        switch_preserve_content=no
+        if ! write_main_config; then recovery_ok=no; result=1; fi
     fi
     if [[ ${recovery_ok} == yes ]]; then rm -rf -- "${component_staging}"; fi
     exit "${result}"
@@ -288,7 +302,7 @@ if [[ ${reviewed} != yes ]] && ! confirm 'Create a cold backup and apply the sel
 fi
 
 # Resolve and verify downloads while the good runtime is still untouched.
-if [[ ${BEDROCK_ENABLED} == yes ]]; then
+if [[ ${BEDROCK_ENABLED} == yes && ${switch_exact} != yes ]]; then
     jv_crossplay_prepare "${component_staging}"
     for project in geyser floodgate; do
         [[ $(jq -cS ".managed_artifacts.${project}" <<< "${stack_plan}") == "$(jq -cS . "${component_staging}/${project}.json")" ]] || {
@@ -326,7 +340,14 @@ fi
 
 maintenance_started=yes
 echo 'Creating pre-update cold backup.'
-/usr/libexec/justvoxel/management-agent instance-version-backup "${JV_INSTANCE_ID}"
+if [[ ${switch_exact} == yes ]]; then
+    JUSTVOXEL_SWITCH_BACKUP_VERSION="${latest_mc}" /usr/libexec/justvoxel/management-agent instance-version-backup "${JV_INSTANCE_ID}"
+else
+    /usr/libexec/justvoxel/management-agent instance-version-backup "${JV_INSTANCE_ID}"
+fi
+if [[ ${switch_exact} == yes ]]; then
+    /usr/libexec/justvoxel/management-agent instance-switch-content-verify "${JV_INSTANCE_ID}" "${target_server_type}" "${latest_mc}" "${JUSTVOXEL_SWITCH_CONTENT:-}"
+fi
 
 if [[ ${state} == update_available || ${state} == image_missing ]]; then
     echo "Pulling ${image}"
@@ -360,7 +381,7 @@ fi
 if [[ ${BEDROCK_ENABLED} == yes ]]; then BEDROCK_MANAGED_PLUGINS=yes; fi
 game_config_changed=yes
 write_main_config
-if [[ ${BEDROCK_ENABLED} == yes ]]; then
+if [[ ${BEDROCK_ENABLED} == yes && ${switch_exact} != yes ]]; then
     jv_crossplay_install "${component_staging}"
     jv_crossplay_verify "${component_staging}"
 fi

@@ -58,10 +58,13 @@ func TestMigrationWorkspaceRecoveryAttentionWithoutTransactions(t *testing.T) {
 	migrationRequest := authenticatedAdminRequest(http.MethodGet, "http://example/workspace/migration", "")
 	migrationRequest.Header.Set(migrationWorkspaceFragmentHeader, "1")
 	migrationPage := httptestResponse(app, migrationRequest)
-	for _, want := range []string{"Open Server Export", "Open Server Import", "Open Migration Recovery"} {
+	for _, want := range []string{"Open Server Export", "Open Server Import", "Open Switch"} {
 		if migrationPage.Code != http.StatusOK || !strings.Contains(migrationPage.Body.String(), want) {
 			t.Fatalf("released operation still blocks Migration: %d %s", migrationPage.Code, migrationPage.Body.String())
 		}
+	}
+	if strings.Contains(migrationPage.Body.String(), "Open Migration Recovery") {
+		t.Fatal("normal Migration shows empty Recovery choice")
 	}
 	recoveryRequest := authenticatedAdminRequest(http.MethodGet, "http://example/workspace/migration/recovery", "")
 	recoveryRequest.Header.Set(migrationWorkspaceFragmentHeader, "1")

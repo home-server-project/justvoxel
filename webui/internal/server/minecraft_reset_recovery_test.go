@@ -112,12 +112,17 @@ func TestDashboardCanonicalBrowserURL(t *testing.T) {
 	if end < 0 {
 		t.Fatal("selection URL handling missing")
 	}
-	if !strings.Contains(source, `if (workspace === "version" && tab === "switch") tab = "software";`) {
-		t.Fatal("canonical Switch tab does not open the existing control")
+	redirectStart := strings.Index(source, `  if (workspace === "version" && ["switch", "software"].includes(destination.get("tab"))) {`)
+	if redirectStart < 0 {
+		t.Fatal("legacy Switch canonicalization missing")
+	}
+	redirectEnd := strings.Index(source[redirectStart:], ` else if (Object.hasOwn(launchers, workspace))`)
+	if redirectEnd < 0 {
+		t.Fatal("legacy Switch canonicalization boundary missing")
 	}
 	program := `
 const assert = require("node:assert/strict");
-const canonical = "/?result=started&tab=switch&workspace=version";
+const canonical = "/?result=started&tab=switch&workspace=migration";
 const location = new URL("http://example/?server=jv-stale1&workspace=version&tab=software&result=started#saved");
 const dashboard = {dataset:{dashboardUrl:canonical,selectedMinecraftId:""}};
 const document = {querySelector:selector => selector.startsWith("#dashboard") ? dashboard : null, querySelectorAll:() => []};
@@ -139,6 +144,19 @@ justVoxelSelectServer("jv-family1", "minecraft");
 const selected = new URL(justVoxelSelectedURL("/api/dashboard-status"),location);
 assert.equal(selected.searchParams.get("server"),"jv-family1");
 assert.equal(selected.searchParams.has("selection"),false);
+for (const tab of ["switch", "software"]) {
+ const original = new URL("http://example/?workspace=version&tab="+tab+"&server=jv-family1&result=started");
+ let redirects=0;
+ const window={location:{href:original.href,assign(target){redirects++;this.target=target;}}};
+ const workspace="version", destination=original.searchParams;
+` + source[redirectStart:redirectStart+redirectEnd] + `
+ assert.equal(redirects,1);
+ const migrated=new URL(window.location.target,original);
+ assert.equal(migrated.searchParams.get("workspace"),"migration");
+ assert.equal(migrated.searchParams.get("tab"),"switch");
+ assert.equal(migrated.searchParams.get("server"),"jv-family1");
+ assert.equal(migrated.searchParams.get("result"),"started");
+}
 `
 	cmd := exec.Command("node")
 	cmd.Stdin = strings.NewReader(program)

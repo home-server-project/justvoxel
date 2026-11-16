@@ -3,8 +3,13 @@
 set -Eeuo pipefail
 umask 0077
 fail() { echo 'ERROR: independent restore validation or storage operation failed.' >&2; exit 1; }
-[[ $EUID == 0 && $# == 5 && $2 =~ ^jv-[a-z0-9]{6,12}$ ]] || fail
+[[ $EUID == 0 && ( $# == 5 || $# == 6 ) && $2 =~ ^jv-[a-z0-9]{6,12}$ ]] || fail
 action=$1 id=$2 archive=$3 fingerprint=$4 running=$5
+clone_source=${6:-}
+if [[ -n ${clone_source} ]]; then
+    [[ ${clone_source} =~ ^jv-[a-z0-9]{6,12}$ && ${clone_source} != "${id}" && ( ${action} == plan || ${action} == prepare ) && ${running} == false ]] || fail
+    /usr/libexec/justvoxel/mjust/validate-instance-runtime-commit "${clone_source}" >/dev/null 2>&1 || fail
+fi
 case ${action} in plan|prepare|activate|rollback|shutdown|verifying|rollback-verifying|completed|rolled-back|recovery-required) ;; *) fail ;; esac
 [[ ${running} == true || ${running} == false ]] || fail
 # Recovery must work with backup storage disconnected and even when data has
@@ -16,9 +21,9 @@ mapfile -t fields < <(jq -er '[.runtime.id,.storage.root,.storage.data_path,.sto
 if [[ ${action} == plan || ${action} == prepare ]]; then
     /usr/libexec/justvoxel/mjust/validate-instance-runtime-commit "${id}" >/dev/null 2>&1 || fail
     source /usr/libexec/justvoxel/mjust/backup-common.sh
-    jv_instance_backup_load_target "${id}" || fail
+    jv_instance_backup_load_target "${clone_source:-${id}}" || fail
 fi
-python3 - "${action}" "${id}" "${archive}" "${fingerprint}" "${running}" <<'PY'
+python3 - "${action}" "${id}" "${archive}" "${fingerprint}" "${running}" "${clone_source}" <<'PY'
 import ctypes, datetime, gzip, hashlib, io, json, os, re, secrets, shutil, stat, struct, sys, tarfile, unicodedata
 
 CONFIG_ROOT = '/etc/justvoxel/instances'
@@ -164,6 +169,7 @@ def inspect_archive(raw, m, destination=None):
     raw.seek(0)
     stream = BoundedGzip(raw)
     seen = {}; parents = set(); total = 0; count = 0; worlds = 0
+    clone_private_ownership = {}
     # Streaming parsing bounds both tar headers and gzip output. No extractall,
     # archive links, supplied ownership, or unchecked host-path concatenation.
     with tarfile.open(fileobj=stream, mode='r|') as tf:
@@ -176,6 +182,10 @@ def inspect_archive(raw, m, destination=None):
             if path in seen or not (member.isdir() or member.isfile()) or member.linkname or member.sparse is not None: raise ValueError('entry type or duplicate')
             if member.uid not in (0, runtime['uid']) or member.gid not in (0, runtime['gid']) or member.mode & ~0o777 or member.mode & 0o002: raise ValueError('ownership or mode')
             if member.size < 0 or (member.isdir() and member.size): raise ValueError('size')
+            if clone_source and len(parts)>1 and parts[1]=='.justvoxel':
+                # Preserve existing root-private Plugins & Mods ownership evidence
+                # on the new clone; normal Restore keeps its deployed behavior.
+                clone_private_ownership[path]=(member.uid,member.gid,member.mode & 0o770)
             for n in range(1,len(parts)):
                 if seen.get('/'.join(parts[:n])) == 'file': raise ValueError('conflict')
             if member.isfile() and path in parents: raise ValueError('conflict')
@@ -226,7 +236,12 @@ def inspect_archive(raw, m, destination=None):
         for parent, dirs, files in os.walk(destination, topdown=False):
             for name in files + dirs:
                 p = os.path.join(parent,name)
-                os.chown(p, runtime['uid'], runtime['gid'], follow_symlinks=False)
+                relative=os.path.relpath(p,destination)
+                if relative in clone_private_ownership:
+                    uid,gid,mode=clone_private_ownership[relative]
+                    os.chown(p,uid,gid,follow_symlinks=False); os.chmod(p,mode)
+                else:
+                    os.chown(p, runtime['uid'], runtime['gid'], follow_symlinks=False)
             fd = directory(parent); os.fsync(fd); os.close(fd)
     return {'expanded_bytes':total, 'entries':count}
 
@@ -237,7 +252,7 @@ def metadata(fd, name):
     m = json.loads(read(fd,name+'.meta.json','metadata',16384))
     if not isinstance(m,dict): raise ValueError('metadata')
     expected_keys = KEYS | ({'loader_version'} if m.get('software') in ('forge','neoforge','fabric','quilt') else set())
-    if set(m) != expected_keys or type(m['schema']) != int or m['schema'] != 1 or m['id'] != identity or m['archive'] != name: raise ValueError('metadata identity')
+    if set(m) != expected_keys or type(m['schema']) != int or m['schema'] != 1 or m['id'] != (clone_source or identity) or m['archive'] != name: raise ValueError('metadata identity')
     if m['software'] not in ('paper','purpur','pufferfish','leaf','vanilla','spigot','forge','neoforge','fabric','quilt','bedrock') or not isinstance(m['version'],str) or not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?' if m['software'] == 'bedrock' else r'[0-9]+\.[0-9]+(?:\.[0-9]+)?',m['version']): raise Refusal('unverified_version')
     if 'loader_version' in expected_keys and (not isinstance(m['loader_version'],str) or len(m['loader_version']) > 64 or not re.fullmatch(r'[0-9]+(?:\.[0-9]+){1,3}(?:-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*)?',m['loader_version']) or m['loader_version'] != runtime.get('loader_version')): raise Refusal('incompatible_software_version')
     if not isinstance(m['name'],str) or len(m['name'])>64 or any(ord(c)<32 for c in m['name']): raise ValueError('name')
@@ -246,7 +261,10 @@ def metadata(fd, name):
         raise ValueError('archive metadata binding')
     datetime.datetime.strptime(m['created'],'%Y-%m-%dT%H:%M:%SZ')
     if not SHA.fullmatch(m['sha256']) or not SHA.fullmatch(m['configuration_sha256']) or type(m['size']) != int or not 0<m['size']<=MAX_BYTES: raise ValueError('metadata')
-    if (m['software'],m['version']) != (runtime['software'],runtime['version']): raise Refusal('incompatible_software_version')
+    if clone_source:
+        family = ('paper','purpur','pufferfish','leaf')
+        if m['software'] not in family or runtime['software'] not in family or m['version'] != runtime['version'] or m['software'] != source_record['runtime']['software'] or m['version'] != source_record['runtime']['version'] or m['configuration_sha256'] != digest(source_raw): raise Refusal('incompatible_software_version')
+    elif (m['software'],m['version']) != (runtime['software'],runtime['version']): raise Refusal('incompatible_software_version')
     return m
 
 def inspect():
@@ -254,7 +272,7 @@ def inspect():
     if 'backups' in record and (record['backups']['root'] != root or record['backups']['path'] != root + '/' + identity):
         raise ValueError('backup placement changed')
     if root == data or root.startswith(data+'/') or data.startswith(root+'/'): raise ValueError('overlap')
-    backup = directory(root + '/' + identity)
+    backup = directory(root + '/' + (clone_source or identity))
     try:
         m = metadata(backup,archive)
         with open_archive(backup,archive) as raw:
@@ -294,11 +312,16 @@ def move(src, name, dst, target):
     os.fsync(src); os.fsync(dst)
 
 try:
-    action, identity, archive, fingerprint, running = sys.argv[1:]
+    action, identity, archive, fingerprint, running, clone_source = sys.argv[1:]
     if os.geteuid()!=0 or not re.fullmatch(r'jv-[a-z0-9]{6,12}',identity): raise ValueError('identity')
     record_raw = private(CONFIG_ROOT+'/'+identity+'/config.json')
     record = json.loads(record_raw); runtime = record['runtime']; storage = record['storage']
     if runtime['id'] != identity or json.loads(private(REGISTRY+'/'+identity+'.json')) != {'id':identity}: raise ValueError('identity')
+    if clone_source:
+        source_raw = private(CONFIG_ROOT+'/'+clone_source+'/config.json')
+        source_record = json.loads(source_raw)
+        if json.loads(private(REGISTRY+'/'+clone_source+'.json')) != {'id':clone_source} or source_record['runtime']['id'] != clone_source or source_record['storage']['root'] != storage['root'] or source_record['runtime']['uid'] != runtime['uid'] or source_record['runtime']['gid'] != runtime['gid'] or runtime['start_on_boot'] or record.get('network_member',False): raise ValueError('clone identity')
+        if source_record.get('backups',{}).get('root',os.environ['JV_INSTANCE_BACKUP_ROOT']) != os.environ['JV_INSTANCE_BACKUP_ROOT']: raise ValueError('source backup placement')
     data = storage['root']+'/minecraft-instances/'+identity+'/data'
     if storage['data_path'] != data: raise ValueError('data path')
     parent = directory(os.path.dirname(data)); cfg = directory(CONFIG_ROOT+'/'+identity)

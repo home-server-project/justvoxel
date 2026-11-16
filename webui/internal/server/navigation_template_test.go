@@ -107,11 +107,38 @@ func TestMinecraftWorkspaceMigrationContract(t *testing.T) {
 		`data-minecraft-tab="players"`,
 		`data-minecraft-tab="crossplay"`,
 		`data-version-open`,
-		`data-version-tab="software"`,
+		`data-version-tab="container"`,
 		`data-version-tab="minecraft"`,
 	} {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("Minecraft workspace migration contract missing %q", want)
+		}
+	}
+	for _, want := range []string{`data-migration-tab="export"`, `data-migration-tab="import"`, `data-migration-tab="switch"`} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("Server Migration missing %q", want)
+		}
+	}
+	for _, contract := range []struct {
+		workspace string
+		labels    string
+	}{
+		{"version", "Container,Version"},
+		{"migration", "Export,Import,Switch"},
+	} {
+		nav := regexp.MustCompile(`(?s)<nav class="` + contract.workspace + `-workspace-tabs".*?</nav>`).FindString(markup)
+		matches := regexp.MustCompile(`data-`+contract.workspace+`-tab="[^"]+"[^>]*>([^<]+)</button>`).FindAllStringSubmatch(nav, -1)
+		labels := make([]string, 0, len(matches))
+		for _, match := range matches {
+			labels = append(labels, match[1])
+		}
+		if strings.Join(labels, ",") != contract.labels {
+			t.Fatalf("%s normal tabs = %v, want %s", contract.workspace, labels, contract.labels)
+		}
+	}
+	for _, retired := range []string{`data-version-tab="software"`, `data-version-tab="switch"`, `data-migration-tab="recovery"`} {
+		if strings.Contains(markup, retired) {
+			t.Fatalf("normal navigation contains retired tab %q", retired)
 		}
 	}
 	if strings.Contains(markup, `data-minecraft-tab="whitelist"`) {
@@ -381,7 +408,7 @@ func TestMigrationWorkspaceUsesIndependentWorkspaceRoutes(t *testing.T) {
 		`data-workspace-window="migration"`,
 		`data-migration-tab="export"`,
 		`data-migration-tab="import"`,
-		`data-migration-tab="recovery"`,
+		`data-migration-tab="switch"`,
 	} {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("Migration workspace markup missing %q", want)

@@ -63,6 +63,11 @@ func instanceVersionCommand(ctx context.Context, args []string) error {
 		args = []string{"instance-version-publish", id, previous.Runtime.Software, previous.Runtime.ImageTag, previous.Runtime.Version, previous.Runtime.VersionPolicy, args[2]}
 	}
 	switch args[0] {
+	case "instance-switch-content-verify":
+		if len(args) != 5 || !validSetupServerType(args[2]) || !instanceRuntimeVersionPattern.MatchString(args[3]) || args[3] == "LATEST" {
+			return errInstanceID
+		}
+		return verifySwitchContent(ctx, id, args[2], args[3], args[4])
 	case "instance-version-backup":
 		if len(args) != 2 {
 			return errInstanceID
@@ -93,6 +98,7 @@ func instanceVersionCommand(ctx context.Context, args []string) error {
 				return err
 			}
 		}
+		next.Runtime.PreserveContent = os.Getenv("JUSTVOXEL_SWITCH_PRESERVE_CONTENT") == "yes"
 		next.Runtime.Software = args[2]
 		next.Runtime.ImageTag = args[3]
 		next.Runtime.Version = args[4]
@@ -113,6 +119,10 @@ func instanceVersionCommand(ctx context.Context, args []string) error {
 // instanceMaintenanceColdBackup leaves only the selected instance stopped for maintenance.
 func instanceMaintenanceColdBackup(ctx context.Context, id string) error {
 	if !instanceIDPattern.MatchString(id) {
+		return errInstanceID
+	}
+	switchVersion := os.Getenv("JUSTVOXEL_SWITCH_BACKUP_VERSION")
+	if switchVersion != "" && (switchVersion == "LATEST" || !instanceRuntimeVersionPattern.MatchString(switchVersion)) {
 		return errInstanceID
 	}
 	b := instanceRuntimes
@@ -136,6 +146,14 @@ func instanceMaintenanceColdBackup(ctx context.Context, id string) error {
 		}
 	} else if state.State != "stopped" {
 		return errInstanceBusy
+	}
+	// Switch's backup records the verified fixed game version, even when the
+	// source normally follows releases. Ordinary version/container maintenance
+	// keeps its established backup behavior.
+	if switchVersion != "" {
+		if err = b.prepareSwitchSourceCopy(ctx, id, switchVersion); err != nil {
+			return err
+		}
 	}
 	_, err = b.backupStorage(ctx, "create", id)
 	return err

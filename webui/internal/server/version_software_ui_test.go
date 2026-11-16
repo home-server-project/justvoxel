@@ -7,131 +7,80 @@ import (
 	"testing"
 )
 
-func TestVersionSoftwareCardsAndReviewedSwitch(t *testing.T) {
-	script, err := assets.ReadFile("static/version-workspace.js")
+func TestMigrationSwitchCardsAndReviewedActions(t *testing.T) {
+	script, err := assets.ReadFile("static/server-migration-switch.js")
 	if err != nil {
 		t.Fatal(err)
 	}
 	program := `
 const assert = require("node:assert/strict");
 const vm = require("node:vm");
-const source = ` + fmt.Sprintf("%q", strings.Replace(string(script), `let currentTab = "container"`, `let currentTab = "software"`, 1)) + `;
+const source = ` + fmt.Sprintf("%q", string(script)) + `;
 class Element {
-  constructor(tag) { this.dataset = {}; this.tagName = tag; this.children = []; this.events = {}; this.attributes = {}; this.disabled = false; this.checked = false; this.value = ""; this.ownText = ""; }
-  set textContent(value) { this.ownText = String(value); this.children = []; }
-  get textContent() { return this.ownText + this.children.map(child => child.textContent).join(" "); }
-  append(...children) { for (const child of children) { child.parent = this; this.children.push(child); } }
-  appendChild(child) { this.append(child); return child; }
-  insertBefore(child, reference) { const index = this.children.indexOf(reference); assert.ok(index >= 0); child.parent = this; this.children.splice(index, 0, child); }
-  replaceChildren(...children) { this.children = []; this.append(...children); }
-  remove() { this.parent.children = this.parent.children.filter(child => child !== this); }
-  setAttribute(name, value) { this.attributes[name] = value; }
-  addEventListener(name, fn) { this.events[name] = fn; }
-  all() { return this.children.flatMap(child => [child, ...child.all()]); }
-  querySelector(selector) {
-    if (selector === "[data-version-custom]") return this.custom;
-    if (selector === ".version-channel-row") return this.channelRow;
-    if (selector === "[data-version-operation]") return this.all().find(node => "versionOperation" in node.dataset);
-    return null;
-  }
-  set innerHTML(value) {
-    // Model the integrated channel form and its native controls.
-    assert.match(value, /select name="channel"/);
-    this.elements = { channel: new Element("select"), custom_tag: new Element("input") };
-    this.custom = new Element("label");
-    this.custom.append(this.elements.custom_tag);
-    this.channelRow = new Element("div");
-    const channelLabel = new Element("label");
-    channelLabel.append(this.elements.channel);
-    this.channelRow.append(channelLabel, this.custom);
-    this.append(this.channelRow);
-  }
+ constructor(tag="div") { this.tagName=tag; this.dataset={}; this.children=[]; this.events={}; this.disabled=false; this.hidden=false; this.checked=false; this.isConnected=true; this.attributes={}; this.ownText=""; this.classes=new Set(); this.classList={toggle:(key,value)=>value?this.classes.add(key):this.classes.delete(key)}; }
+ set textContent(value) {this.ownText=String(value);this.children=[];}
+ get textContent() {return this.ownText+this.children.map(child=>child.textContent).join(" ");}
+ append(...nodes) {this.children.push(...nodes);}
+ appendChild(node) {this.append(node);return node;}
+ replaceChildren(...nodes) {this.children=[];this.ownText="";this.append(...nodes);}
+ setAttribute(key,value) {this.attributes[key]=value;}
+ addEventListener(key,fn) {
+  const listeners=this.eventListeners ||= {};
+  (listeners[key] ||= []).push(fn);
+  this.events[key]=(...args)=>Promise.all(listeners[key].map(listener=>listener(...args)));
+ }
+ all() {return this.children.flatMap(child=>[child,...child.all()]);}
+ querySelectorAll(selector) {if(selector==="[data-switch-target]") return this.cards;return this.all().filter(node=>node.tagName===selector);}
+ querySelector(selector) {return this.selectors?.[selector];}
+ matches(selector) {return selector==="[data-migration-switch]";}
 }
-async function open(currentSoftware, imageState = "up_to_date") {
-  const content = new Element("div"), state = new Element("span"), launcher = new Element("button");
-  const dialog = new Element("dialog");
-  const close = new Element("button"), refresh = new Element("button");
-  dialog.querySelector = selector => ({ "[data-version-content]": content, "[data-version-state]": state, "[data-version-close]": close, "[data-version-refresh]": refresh })[selector];
-  dialog.querySelectorAll = () => [];
-  const document = {
-    querySelector: selector => ({ "[data-version-open]": launcher, "[data-version-workspace-dialog]": dialog, "[data-minecraft-workspace-csrf]": { value: "csrf-token" } })[selector],
-    createElement: tag => new Element(tag),
-    createTextNode: text => { const node = new Element("text"); node.textContent = text; return node; }
-  };
-  const calls = [];
-  let openWindow;
-  async function fetch(url, options) {
-    calls.push({ url, options });
-    const parsed = new URL(url, "http://example");
-    let payload;
-    if (parsed.pathname === "/api/minecraft/workspace/settings") payload = { minecraft: { id: "jv-family1", server_type: currentSoftware, image_tag: "stable" } };
-    else if (parsed.pathname === "/api/version/workspace/status") {
-      const target = parsed.searchParams.get("server_type");
-      payload = { server_software: (target || currentSoftware).replace(/^./, c => c.toUpperCase()), selected_candidate: "1.21.8", stack_state: "updates_available", installed: "1.21.8", update_available: true, runtime_update_required: true, server_supported: true, crossplay_enabled: true, crossplay_compatible: true, plan_fingerprint: "reviewed-" + target, image_state: imageState, managed_image_digest: "private-digest" };
-    } else if (parsed.pathname === "/api/minecraft/workspace/snapshot") payload = { players: { online: 3 } };
-    else if (parsed.pathname === "/api/version/workspace/update") {
-      assert.equal(options.method, "POST");
-      currentSoftware = options.body.get("server_type");
-      payload = { operation: { operation_id: "switch-operation" } };
-    } else if (parsed.pathname === "/api/version/workspace/update-operation") {
-      payload = parsed.searchParams.has("id") ? { operation: { state: "succeeded", status: "Software switched." } } : {};
-    } else throw new Error("Unexpected request: " + url);
-    return { ok: true, json: async () => payload };
-  }
-  vm.runInNewContext(source, {
-    location: {origin: "http://example", search: "?server=jv-family1"},
-    justVoxelServerSelection: async () => {},
-    justVoxelSelectionGeneration: {version:0},
-    justVoxelSelectedURL: value => {const u=new URL(value,"http://example");u.searchParams.set("server","jv-family1");return u.pathname+u.search;},
-    window: new EventTarget(),
-    document, fetch, URLSearchParams, setTimeout,
-    setupWorkspaceWindow: (_, options) => { openWindow = options.onOpen; return { open: options.onOpen }; },
-    readWorkspaceWindowState: () => ({ open: false })
-  });
-  await openWindow();
-  assert.equal(state.textContent, "");
-  return { content, state, calls };
+const identities=["paper","purpur","spigot","pufferfish","leaf","fabric","neoforge","forge","quilt","vanilla","bedrock"];
+const flush=()=>new Promise(resolve=>setImmediate(resolve));
+async function open(fail=false) {
+ const root=new Element();root.dataset.serverId="jv-family1";
+ const state=new Element(),review=new Element(),progress=new Element(),csrf=new Element("input");csrf.value="csrf-token";
+ root.selectors={"[data-switch-state]":state,"[data-switch-review]":review,"[data-switch-operation]":progress,"[data-switch-csrf]":csrf};
+ root.cards=identities.map(id=>{const node=new Element("button");node.dataset.switchTarget=id;node.disabled=true;node.selectors={"[data-switch-sticker]":new Element("span")};return node;});
+ const calls=[];let applied=null;
+ const fetch=async(raw,options)=>{
+  const url=new URL(raw,"http://example");calls.push({url,options});assert.equal(url.searchParams.get("server"),"jv-family1");
+  let result;
+  if(url.pathname.endsWith("/operation")) result=applied?{operation:{operation_id:"switch1",state:fail?"needs_attention":"succeeded",status:fail?"Switch did not complete.":"Switch completed."}}:{};
+  else if(url.pathname.endsWith("/plan")) {const target=url.searchParams.get("target");result={instance_id:"jv-family1",current:"paper",target,version:"1.21.4",convert:target==="purpur",clone:["purpur","pufferfish"].includes(target),plan_fingerprint:"reviewed-"+target,content:target==="pufferfish"?[{name:"FamilyTools",filename:"family.jar",compatibility:"unknown",reason:"Unverified provenance"}]:[]};}
+  else if(url.pathname.endsWith("/apply")) {applied=options.body;result={operation:{operation_id:"switch1"}};}
+  else throw Error("Unexpected Switch request: "+url);
+  return {ok:true,json:async()=>result};
+ };
+ const window={};vm.runInNewContext(source,{window,document:{createElement:tag=>new Element(tag)},justVoxelSelectionGeneration:{migration:0},fetch,URLSearchParams,setTimeout:()=>{}});
+ window.JustVoxelServerMigrationSwitch.init(root);await flush();await flush();
+ return {root,state,review,progress,calls};
 }
-function cards(page) { return page.content.all().filter(node => node.className?.split(" ").includes("version-software-choice")); }
-function button(root, text) { return root.all().find(node => node.tagName === "button" && node.textContent === text); }
-async function review(page) {
-  const form = page.content.all().find(node => node.tagName === "form");
-  form.events.submit({ preventDefault() {} });
-  // Submit does not return preview's Promise. All fetch/json mocks resolve
-  // through microtasks, which finish before this next event-loop turn.
-  await new Promise(resolve => setImmediate(resolve));
-}
-(async () => {
-  for (const current of ["paper", "purpur", "pufferfish", "leaf"]) {
-    const page = await open(current);
-    const choices = cards(page);
-    assert.deepEqual(choices.map(choice => choice.children[1].children[0].textContent), ["Paper", "Purpur", "Pufferfish", "Leaf"]);
-    assert.ok(!page.content.textContent.includes("Vanilla"));
-    assert.ok(!page.content.textContent.includes("Container channel"));
-    assert.ok(!page.content.textContent.includes("Check for updates"));
-    assert.equal(page.content.all().filter(node => node.tagName === "select").length, 0);
-    const target = current === "paper" ? "purpur" : "paper";
-    const selectable = choices.find(choice => choice.children[1].children[0].textContent.toLowerCase() === target);
-    await selectable.events.click(); await review(page);
-    const consent = page.content.all().find(node => node.tagName === "input" && node.type === "checkbox");
-    const apply = button(page.content, "Apply changes");
-    assert.equal(consent.checked, false); assert.equal(apply.disabled, true);
-    assert.ok(page.content.textContent.includes("cold backup"));
-    consent.checked = true; consent.events.change();
-    await apply.events.click();
-    const posts = page.calls.filter(call => call.options.method === "POST");
-    assert.equal(posts.length, 1);
-    assert.equal(posts[0].options.body.get("server_type"), target);
-    assert.equal(posts[0].options.body.has("image_tag"), false);
-    assert.equal(posts[0].options.body.get("confirm_players"), "yes");
-    assert.equal(posts[0].options.body.get("csrf"), "csrf-token");
-  }
-})().catch(error => { console.error(error); process.exitCode = 1; });
+(async()=>{
+ const page=await open();const cards=page.root.cards;
+ assert.equal(cards.length,11);
+ assert.equal(cards[0].querySelector("[data-switch-sticker]").textContent,"Current");assert.equal(cards[0].disabled,true);
+ assert.equal(cards[1].querySelector("[data-switch-sticker]").textContent,"Available");assert.equal(cards[1].disabled,false);
+ for(const id of ["spigot","fabric","neoforge","forge","quilt","vanilla","bedrock"]) {const card=cards.find(node=>node.dataset.switchTarget===id);assert.equal(card.disabled,true);assert.equal(card.querySelector("[data-switch-sticker]").textContent,"Not Supported");}
+ cards[3].events.click();await flush();assert.match(page.review.textContent,/FamilyTools.*Unknown \/ unverified/);
+ const buttons=page.review.all().filter(node=>node.tagName==="button");const consent=page.review.all().find(node=>node.tagName==="input");consent.checked=true;consent.events.change();
+ assert.equal(buttons.find(node=>node.textContent==="Convert existing server").disabled,true);assert.equal(buttons.find(node=>node.textContent==="Clone and convert").disabled,false);
+ cards[1].events.click();await flush();const confirm=page.review.all().find(node=>node.tagName==="input");
+ const convert=page.review.all().find(node=>node.tagName==="button"&&node.textContent==="Convert existing server");
+ const clone=page.review.all().find(node=>node.tagName==="button"&&node.textContent==="Clone and convert");
+ assert.equal(confirm.checked,false);assert.equal(convert.disabled,true);assert.equal(clone.disabled,true);
+ await convert.events.click();assert.equal(page.calls.filter(call=>call.options.method==="POST").length,0);
+ confirm.checked=true;await confirm.events.change();assert.equal(convert.disabled,false);assert.equal(clone.disabled,false);
+ await convert.events.click();await convert.events.click();await clone.events.click();await flush();
+ const posts=page.calls.filter(call=>call.options.method==="POST");assert.equal(posts.length,1);assert.equal(posts[0].url.pathname,"/api/migration/switch/apply");assert.equal(posts[0].options.body.get("target"),"purpur");assert.equal(posts[0].options.body.get("plan_fingerprint"),"reviewed-purpur");assert.equal(posts[0].options.body.get("action"),"convert");assert.equal(posts[0].options.body.get("confirm"),"yes");assert.equal(posts[0].options.body.has("version"),false);
+ const failure=await open(true);failure.root.cards[3].events.click();await flush();const c=failure.review.all().find(node=>node.tagName==="input");c.checked=true;c.events.change();await failure.review.all().find(node=>node.textContent==="Clone and convert").events.click();await flush();
+ const clonePosts=failure.calls.filter(call=>call.options.method==="POST");assert.equal(clonePosts.length,1);assert.equal(clonePosts[0].url.pathname,"/api/migration/switch/apply");assert.equal(clonePosts[0].options.body.get("action"),"clone");assert.equal(clonePosts[0].options.body.get("target"),"pufferfish");assert.equal(clonePosts[0].options.body.get("plan_fingerprint"),"reviewed-pufferfish");assert.equal(clonePosts[0].options.body.get("confirm"),"yes");assert.equal(clonePosts[0].options.body.has("version"),false);
+ assert.match(failure.progress.textContent,/Switch did not complete/);assert.doesNotMatch(failure.progress.textContent,/Clone created and verified/);assert.match(failure.progress.textContent,/Recover Switch/);
+})().catch(error=>{console.error(error);process.exitCode=1;});
 `
 	cmd := exec.Command("node")
 	cmd.Stdin = strings.NewReader(program)
 	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("server software card behavior: %v\n%s", err, output)
+		t.Fatalf("Migration Switch behavior: %v\n%s", err, output)
 	}
 }
 

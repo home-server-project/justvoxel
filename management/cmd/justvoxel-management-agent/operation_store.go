@@ -24,6 +24,7 @@ const (
 	operationTypeDataMigration     = "data_migration"
 	operationTypeMinecraftReset    = "minecraft_reset"
 	operationTypeMinecraftUpdate   = "minecraft_update"
+	operationTypeMinecraftSwitch   = "minecraft_switch"
 	operationTypePluginInstall     = "plugin_install"
 	operationTypePluginEnable      = "plugin_enable"
 	operationTypePluginDisable     = "plugin_disable"
@@ -478,7 +479,7 @@ func (s *operationStore) loadAndRecover() error {
 					return errors.New("multiple active data migration operation journals require attention")
 				}
 				activeDataMigration = journal.OperationID
-			case operationTypeMinecraftReset, operationTypeMinecraftUpdate, operationTypeMinecraftContainerUpdate, operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove, operationTypePluginAddonInstall:
+			case operationTypeMinecraftReset, operationTypeMinecraftSwitch, operationTypeMinecraftUpdate, operationTypeMinecraftContainerUpdate, operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove, operationTypePluginAddonInstall:
 				if activeMinecraftReset != "" {
 					return errors.New("multiple active Minecraft reset operation journals require attention")
 				}
@@ -518,7 +519,7 @@ func (s *operationStore) loadAndRecover() error {
 			if journal.OperationType == operationTypeMinecraftReset && journal.InstanceID == "" {
 				journal.Status = "Minecraft removal stopped before completion. Continue removal to finish removing the remaining servers."
 			}
-			if journal.OperationType == operationTypeMinecraftUpdate || journal.OperationType == operationTypeMinecraftContainerUpdate {
+			if journal.OperationType == operationTypeMinecraftSwitch || journal.OperationType == operationTypeMinecraftUpdate || journal.OperationType == operationTypeMinecraftContainerUpdate {
 				journal.Status = "Server update was interrupted. Review Minecraft state before continuing."
 			}
 			if journal.OperationType == operationTypePluginInstall {
@@ -751,7 +752,7 @@ func validateOperationJournal(journal operationJournal) error {
 	if !validOperationID(journal.OperationID) {
 		return errors.New("invalid operation id")
 	}
-	if journal.OperationType != operationTypeSetup && journal.OperationType != operationTypeRestore && journal.OperationType != operationTypeDataMigration && journal.OperationType != operationTypeMinecraftReset && journal.OperationType != operationTypeMinecraftUpdate && journal.OperationType != operationTypeMinecraftContainerUpdate && !isPluginOperationType(journal.OperationType) && journal.OperationType != operationTypeFactoryReset && journal.OperationType != operationTypeMigrationExport && journal.OperationType != operationTypeMigrationImport && journal.OperationType != operationTypeMigrationRecovery {
+	if journal.OperationType != operationTypeSetup && journal.OperationType != operationTypeRestore && journal.OperationType != operationTypeDataMigration && journal.OperationType != operationTypeMinecraftReset && journal.OperationType != operationTypeMinecraftUpdate && journal.OperationType != operationTypeMinecraftSwitch && journal.OperationType != operationTypeMinecraftContainerUpdate && !isPluginOperationType(journal.OperationType) && journal.OperationType != operationTypeFactoryReset && journal.OperationType != operationTypeMigrationExport && journal.OperationType != operationTypeMigrationImport && journal.OperationType != operationTypeMigrationRecovery {
 		return errors.New("unsupported operation type")
 	}
 	if !operationFingerprintPattern.MatchString(journal.PlanFingerprint) {
@@ -1148,7 +1149,7 @@ func (s *operationStore) beginMinecraftReset(planFingerprint string) (operationJ
 
 // Update, reset and plugin installation share the existing maintenance locks.
 func (s *operationStore) beginMinecraftMaintenance(planFingerprint, kind string, instanceID ...string) (operationJournal, bool, error) {
-	if kind != operationTypeMinecraftReset && kind != operationTypeMinecraftUpdate && kind != operationTypeMinecraftContainerUpdate && !isPluginOperationType(kind) {
+	if kind != operationTypeMinecraftReset && kind != operationTypeMinecraftUpdate && kind != operationTypeMinecraftSwitch && kind != operationTypeMinecraftContainerUpdate && !isPluginOperationType(kind) {
 		return operationJournal{}, false, errors.New("invalid Minecraft maintenance type")
 	}
 	if !operationFingerprintPattern.MatchString(planFingerprint) {
@@ -1181,7 +1182,7 @@ func (s *operationStore) beginMinecraftMaintenance(planFingerprint, kind string,
 	}
 	now := s.now().UTC().Format(time.RFC3339Nano)
 	status := "Minecraft reset operation queued."
-	if kind == operationTypeMinecraftUpdate || kind == operationTypeMinecraftContainerUpdate {
+	if kind == operationTypeMinecraftSwitch || kind == operationTypeMinecraftUpdate || kind == operationTypeMinecraftContainerUpdate {
 		status = "Server update operation queued."
 	}
 	if kind == operationTypePluginInstall {
@@ -1547,7 +1548,7 @@ func (s *operationStore) transition(id string, next operationState, stage, statu
 			if err := s.releaseDataMigrationLock(); err != nil {
 				return operationJournal{}, err
 			}
-		case operationTypeMinecraftReset, operationTypeMinecraftUpdate, operationTypeMinecraftContainerUpdate, operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove, operationTypePluginAddonInstall:
+		case operationTypeMinecraftReset, operationTypeMinecraftSwitch, operationTypeMinecraftUpdate, operationTypeMinecraftContainerUpdate, operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove, operationTypePluginAddonInstall:
 			s.currentMinecraftResetID = ""
 			if err := s.releaseMinecraftResetLocks(); err != nil {
 				return operationJournal{}, err

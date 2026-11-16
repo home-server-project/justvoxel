@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -39,7 +40,12 @@ var runMinecraftStackUpdate = func(ctx context.Context, fingerprint string, conf
 		args = append([]string{"--instance", id}, args...)
 	}
 	// Output stays privileged; the operation journal exposes appliance messages.
-	output, err := exec.CommandContext(ctx, "/usr/libexec/justvoxel/mjust/update-minecraft-backend", args...).CombinedOutput()
+	command := exec.CommandContext(ctx, "/usr/libexec/justvoxel/mjust/update-minecraft-backend", args...)
+	if exact, _ := ctx.Value(switchWorkerKey{}).(bool); exact {
+		content, _ := ctx.Value(switchContentKey{}).(string)
+		command.Env = append(os.Environ(), "JUSTVOXEL_SWITCH_EXACT=yes", "JUSTVOXEL_SWITCH_CONTENT="+content)
+	}
+	output, err := command.CombinedOutput()
 	if err == nil {
 		return nil
 	}
@@ -113,6 +119,10 @@ func (s *server) adminMinecraftStackUpdate(w http.ResponseWriter, r *http.Reques
 	}
 	if request.Version != "" && (len(request.Version) > 64 || !versionInputPattern.MatchString(request.Version)) {
 		writeError(w, 400, "Invalid Minecraft version")
+		return
+	}
+	if request.ServerType != "" && request.ServerType != record.Runtime.Software {
+		writeError(w, http.StatusConflict, "Review software conversion in Server Migration → Switch.")
 		return
 	}
 	data, err := runAdminVersionStatus(ctx, request.Policy, request.Version, request.ServerType, request.ImageTag)

@@ -102,6 +102,9 @@ type minecraftWorkspaceErrorResponse struct {
 }
 
 func (a *App) registerMinecraftWorkspaceRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /workspace/migration/switch", a.migrationSwitchPage)
+	mux.HandleFunc("GET /api/migration/switch/{action}", a.migrationSwitchAPI)
+	mux.HandleFunc("POST /api/migration/switch/{action}", a.migrationSwitchAPI)
 	mux.HandleFunc("GET /api/minecraft/workspace/selection", a.minecraftSelection)
 	mux.HandleFunc("POST /api/minecraft/workspace/console", a.selectedMinecraftConsole)
 	mux.HandleFunc("GET /api/minecraft/workspace/snapshot", a.selectedMinecraftSnapshot)

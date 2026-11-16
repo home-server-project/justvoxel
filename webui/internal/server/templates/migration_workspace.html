@@ -18,7 +18,7 @@
     <div class="action-row"><a class="button-link" href="/?workspace=migration&amp;tab=import&amp;server={{.ServerID}}">Open Server Import</a></div>
   </section>
 
-  <section class="panel">
+  {{if .Recovery.Transactions}}<section class="panel">
     <div class="section-heading"><div><p class="eyebrow">Recovery</p><h2>Migration Recovery</h2></div>{{if .Recovery.Transactions}}<span class="badge">Attention available</span>{{else}}<span class="badge">No retained recovery</span>{{end}}</div>
     <p>Finalize retained Import rollback or recovery state when a previous Import needs attention.</p>
     {{if .Recovery.Transactions}}
@@ -29,7 +29,9 @@
       <div class="notice">No retained migration recovery transaction is currently reported.</div>
     {{end}}
     <div class="action-row"><a class="button-link" href="/?workspace=migration&amp;tab=recovery&amp;server={{.ServerID}}">Open Migration Recovery</a></div>
-  </section>
+  </section>{{end}}
+
+  <section class="panel"><h2>Switch server software</h2><p>Review conversion at the same Minecraft version.</p><a class="button-link" href="/?workspace=migration&amp;tab=switch&amp;server={{.ServerID}}">Open Switch</a></section>
 
   <div class="notice">Server Export and Server Import use the same JustVoxel safety checks. If a migration operation is already active, this page reconnects directly to its persistent progress record.</div>
 </div>{{end}}

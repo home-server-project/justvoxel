@@ -183,21 +183,21 @@ func TestCombinedStackSelectionValidationAndWorkerBinding(t *testing.T) {
 	reads, starts := 0, 0
 	runAdminVersionStatus = func(_ context.Context, policy, version, software, tag string) ([]byte, error) {
 		reads++
-		if policy != "" || version != "" || software != "purpur" || tag != "release_1.2-3" {
+		if policy != "" || version != "" || software != "paper" || tag != "release_1.2-3" {
 			t.Fatalf("combined proposal lost: %q %q %q %q", policy, version, software, tag)
 		}
 		return []byte(`{"stack_state":"updates_available","update_available":true,"server_supported":true,"plan_fingerprint":"` + testMinecraftResetFingerprint + `"}`), nil
 	}
 	startMinecraftStackUpdateWorker = func(_ *server, _ string, request minecraftStackUpdateRequest, _ session) {
 		starts++
-		if request.ServerType != "purpur" || request.ImageTag != "release_1.2-3" || request.PlanFingerprint != testMinecraftResetFingerprint || !request.ConfirmPlayers {
+		if request.ServerType != "paper" || request.ImageTag != "release_1.2-3" || request.PlanFingerprint != testMinecraftResetFingerprint || !request.ConfirmPlayers {
 			t.Fatalf("worker did not receive reviewed selections: %#v", request)
 		}
 	}
 	s := surfaceTestServer(t, roleAdministrator)
 	s.operations = openTestOperationStore(t)
 	for _, tag := range []string{"../bad", "-bad", "tag:other", strings.Repeat("a", 129)} {
-		body, err := json.Marshal(minecraftStackUpdateRequest{InstanceID: "jv-a1b2c3", ServerType: "purpur", ImageTag: tag, PlanFingerprint: testMinecraftResetFingerprint})
+		body, err := json.Marshal(minecraftStackUpdateRequest{InstanceID: "jv-a1b2c3", ServerType: "paper", ImageTag: tag, PlanFingerprint: testMinecraftResetFingerprint})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -207,7 +207,7 @@ func TestCombinedStackSelectionValidationAndWorkerBinding(t *testing.T) {
 			t.Fatalf("invalid tag reached maintenance: %q %d", tag, rr.Code)
 		}
 	}
-	body, err := json.Marshal(minecraftStackUpdateRequest{InstanceID: "jv-a1b2c3", ServerType: "purpur", ImageTag: "release_1.2-3", PlanFingerprint: testMinecraftResetFingerprint, ConfirmPlayers: true})
+	body, err := json.Marshal(minecraftStackUpdateRequest{InstanceID: "jv-a1b2c3", ServerType: "paper", ImageTag: "release_1.2-3", PlanFingerprint: testMinecraftResetFingerprint, ConfirmPlayers: true})
 	if err != nil {
 		t.Fatal(err)
 	}

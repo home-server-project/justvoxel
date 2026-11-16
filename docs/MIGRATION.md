@@ -14,7 +14,7 @@ handoff are shared through the Management Agent.
 
 ### WebUI Server Migration
 
-Administrators can open **Storage & Backups → Server Migration** in the WebUI. Export, Import, and Recovery use the same Agent discovery, reviewed planning, fingerprints, Apply endpoints, persistent operation journal, rollback semantics, and needs-attention state used by `mjust`.
+Administrators can open **Storage & Backups → Server Migration** in the WebUI. Its normal tabs are **Export**, **Import**, and **Switch**. Recovery is contextual through existing operation links when Export or Import needs attention. Export, Import, and Recovery use the same Agent discovery, reviewed planning, fingerprints, Apply endpoints, persistent operation journal, rollback semantics, and needs-attention state used by `mjust`.
 
 The WebUI does not mount filesystems, manipulate Minecraft data, execute migration
 helpers, or implement storage policy directly. Temporary SMB credentials are
@@ -433,3 +433,57 @@ mjust backup
 ```
 
 Also test the real clients you use, including Java and Bedrock when enabled, and reboot once to confirm normal persistence before decommissioning the source server.
+
+
+## Switch server software
+
+Software Switch moved from Minecraft Update into **Server Migration → Switch**.
+Minecraft Update now owns Container and Version only. Switch reuses the selected
+instance and Setup's eleven software cards and local artwork. It does not change
+Export/Import transports or archive formats. All cards remain visible:
+
+- **Current**: yellow, identifies current software, not selectable.
+- **Available**: at least one supported structural action can be reviewed.
+- **Not Supported**: dimmed and disabled; JustVoxel has no verified conversion path.
+
+Switch holds the exact installed Minecraft game version fixed. Runtime, image and
+managed cross-play evidence must be available for that exact version. Review
+binds Apply to selected-instance configuration, runtime evidence and current
+plugin/mod inventory and hashes. Changing Minecraft version is a separate
+Version operation. Target software remains pinned to the reviewed game version.
+
+The implemented structural path is the existing Paper, Purpur, Pufferfish and
+Leaf family. A fully verified target offers **Convert existing server** and
+**Clone and convert**. Incompatible or unknown/unverified plugin/mod releases
+block Convert and are listed by name when identified. Provider failures stay
+unverified. The Plugins & Mods link opens that existing workspace for the same
+server. Resolve content manually, then return or refresh to review again. Switch
+never deletes, disables, replaces, updates or downloads plugins or mods.
+
+Convert keeps the immutable instance ID, configured data location, ports, backup
+destination and ordinary settings, using reviewed maintenance, player-aware
+shutdown, a cold backup, exact-runtime verification and rollback. Clone creates
+a new ID through normal instance creation, uses a separate directory under the
+source's configured Minecraft root and the same backup destination, allocates
+new ports with existing reservation/binding checks, and derives its name from
+the source and target software. No path, backup destination or port choice is
+required. A running source stops only for a consistent backup/copy and resumes
+its previous state before clone conversion/verification. Original settings are
+restored after the copy. Verified clones are left stopped and support normal rename.
+
+A clone may be experimental when installed content cannot be proven compatible,
+but only inside the implemented structural family. Runtime failure never counts
+as success. Existing creation/runtime/restore cleanup and recovery preserve the
+original; retained Switch attention is handled in Switch, without routing an
+ordinary conversion through Export/Import Recovery. Recovery never retries the
+conversion automatically. Minecraft Network members must first leave Network
+before standalone conversion can be reviewed.
+
+Spigot, Vanilla world transformations and mod-loader conversions currently remain
+Not Supported. In particular, Bukkit support does not make Spigot a safe member
+of the Paper family. Paper-to-Spigot is unsupported; direct Spigot-to-Paper
+migration is unsafe from 26.1 without the necessary verified world transformation.
+No automatic Vanilla intermediary is attempted. Fabric/Quilt and Forge/NeoForge
+names do not establish exact-version mod/dependency or historic world safety;
+removing installed mods does not establish it either. Java and native Bedrock
+world/runtime conversion is unsupported in both directions.

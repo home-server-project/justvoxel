@@ -94,10 +94,46 @@ If setup needs attention during storage rollback, the Administrator can select *
 
 ## Server software and container updates
 
-In Version → Server Software, the cards show Paper and Purpur. An installed Paper
-or Purpur server can select the other as a reviewed switch; for any other installed
-software, both choices are unavailable. Software conversion beyond the existing
-Paper/Purpur boundary remains roadmap work.
+Minecraft Update contains **Container** and **Version** only. Software switching
+is under **Server Migration → Switch**, beside Export and Import. It uses the
+existing selected server and the same catalogue/artwork as Setup: Paper, Purpur,
+Spigot, Pufferfish, Leaf, Fabric, NeoForge, Forge, Quilt, Vanilla Java and native
+Bedrock. All eleven cards remain visible and reflow with the workspace width.
+**Current** marks the selected server's software in yellow and is not selectable.
+**Available** means at least one verified structural action can be reviewed.
+**Not Supported** cards are dimmed and disabled, with an incompatibility explanation.
+Migration Recovery remains contextual through existing failed Export/Import links;
+it is not a normal workspace tab.
+
+Switch fixes the exact installed Minecraft version; a missing exact target build
+never selects another game version. Review shows current/target software, that
+version, Convert and Clone availability, and named compatibility blockers.
+**Convert existing server** retains its immutable ID, placement, ports and backup
+destination and uses the existing cold-backup maintenance/rollback transaction.
+**Clone and convert** creates a new immutable ID, separate data directory under the
+same storage root, the same backup destination and automatically allocated ports.
+It briefly stops a running original for a consistent backup/copy, then restores
+its previous state. A verified clone is left stopped, with normal rename available.
+Failed clones are never reported as successful; existing creation, restore and
+runtime recovery mechanisms clean up or retain a contextual Switch recovery action.
+No conversion is automatically retried.
+
+The implemented structural family is Paper/Purpur/Pufferfish/Leaf in every
+direction where the exact target runtime is available. Incompatible and
+unknown/unverified plugin/mod evidence blocks Convert. Review links to the
+selected server's **Plugins & Mods** workspace; no plugin or mod is automatically
+removed, disabled, replaced, updated or downloaded. Returning to Switch or
+refreshing rechecks the authoritative inventory. A separate experimental clone
+can remain available within that implemented family, and must pass exact runtime
+verification. Normal startup content management is temporarily suppressed during
+Switch, then restored. Switch keeps the target at an exact version pin; Version
+remains the separate place to change Minecraft release policy.
+
+Spigot is outside this safe family. Vanilla transformations and mod-loader
+conversions are not implemented and remain Not Supported. Removing mods does not
+prove historic world data safe. Native Bedrock and Java cannot be converted into
+each other. Missing provider data or catalogue/network failures never prove
+compatibility. See [server-software.md](server-software.md) for these boundaries.
 
 The Minecraft Update workspace's Container tab shows the selected server, image,
 and status together. Previous container images use single selection; **Restore

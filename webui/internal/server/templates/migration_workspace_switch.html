@@ -1,0 +1,15 @@
+{{define "migration_workspace_switch.html"}}<div class="migration-workspace-content migration-switch" data-migration-workspace-root data-migration-switch data-server-id="{{.ServerID}}">
+<input type="hidden" data-switch-csrf value="{{.CSRF}}">
+<p class="muted">Switch server software at the same Minecraft version. Review compatibility before converting this server or creating a separate clone.</p>
+<div data-switch-operation role="status"></div>
+<div class="setup-software-lanes migration-switch-catalogue">
+{{range .Groups}}<fieldset class="setup-server-types"><legend>{{.Name}}</legend>
+{{range .Choices}}<button type="button" class="server-software-card migration-switch-card is-unsupported" data-switch-target="{{.ID}}" disabled>
+<span class="server-software-icon" aria-hidden="true"><img src="/static/server-software/{{.ID}}.svg" alt="" width="40" height="40"></span>
+<span class="server-software-copy"><strong>{{if eq .ID "vanilla"}}Vanilla Java{{else if eq .ID "bedrock"}}native Bedrock{{else}}{{.Name}}{{end}}</strong><span class="migration-switch-sticker" data-switch-sticker>Not Supported</span><small>{{.Description}}</small><small data-switch-reason hidden></small></span>
+</button>{{end}}
+</fieldset>{{end}}
+</div>
+<p data-switch-state role="status">Checking the selected server…</p>
+<section class="panel" data-switch-review hidden></section>
+</div>{{end}}

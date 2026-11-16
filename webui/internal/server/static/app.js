@@ -2572,6 +2572,7 @@ if (migrationOpen && migrationDialog) {
   const tabURLs = {
     export: "/workspace/migration/export",
     import: "/workspace/migration/import",
+    switch: "/workspace/migration/switch",
     recovery: "/workspace/migration/recovery",
   };
   const migrationDestination = new URLSearchParams(window.location.search);
@@ -2700,6 +2701,7 @@ if (migrationOpen && migrationDialog) {
     await loadMigrationScript("/static/server-migration-export.js", () => Boolean(window.JustVoxelServerMigrationExport?.init));
     await loadMigrationScript("/static/server-migration-import.js", () => Boolean(window.JustVoxelServerMigrationImport?.init));
     await loadMigrationScript("/static/server-migration-operation.js", () => Boolean(window.JustVoxelServerMigrationOperation?.init));
+    await loadMigrationScript("/static/server-migration-switch.js", () => Boolean(window.JustVoxelServerMigrationSwitch?.init));
   };
 
   const syncMigrationTabs = () => {
@@ -2720,6 +2722,7 @@ if (migrationOpen && migrationDialog) {
     if (pathname.includes("/migration/export")) return "export";
     if (pathname.includes("/migration/import")) return "import";
     if (pathname.includes("/migration/recovery")) return "recovery";
+    if (pathname.includes("/migration/switch")) return "switch";
     const operationName = root?.querySelector("#server-migration-operation-name")?.textContent || "";
     if (operationName.includes("Export")) return "export";
     if (operationName.includes("Import")) return "import";
@@ -2759,6 +2762,7 @@ if (migrationOpen && migrationDialog) {
     window.JustVoxelServerMigrationExport?.init(root);
     window.JustVoxelServerMigrationImport?.init(root);
     window.JustVoxelServerMigrationOperation?.init(root);
+    window.JustVoxelServerMigrationSwitch?.init(root);
   };
 
   const renderMigrationMarkup = (markup, responseURL, preserveLocation = false) => {
@@ -8413,7 +8417,12 @@ if (dashboard) {
     version: "[data-version-open]",
     plugins: "[data-plugins-open]",
   };
-  if (Object.hasOwn(launchers, workspace)) {
+  if (workspace === "version" && ["switch", "software"].includes(destination.get("tab"))) {
+    const migrated = new URL(window.location.href);
+    migrated.searchParams.set("workspace", "migration");
+    migrated.searchParams.set("tab", "switch");
+    window.location.assign(migrated.pathname + migrated.search);
+  } else if (Object.hasOwn(launchers, workspace)) {
     const launch = () => {
       if (document.body.classList.contains("role-pending")) return false;
       const button = document.querySelector(launchers[workspace]);
@@ -8424,14 +8433,12 @@ if (dashboard) {
         if (window.location.hash === "#whitelist") tab = "players";
         if (window.location.hash === "#minecraft-logs") tab = "logs";
       }
-      // The Switch tab retains its existing internal control name.
-      if (workspace === "version" && tab === "switch") tab = "software";
       const allowedTabs = {
         minecraft: ["overview", "logs", "memory", "gameplay", "players", "crossplay", "rcon"],
-        version: ["software", "minecraft"],
+        version: ["container", "minecraft"],
         plugins: ["discover", "installed", "addons"],
         system: ["health", "history", "users", "security", "logs", "date-time", "wallpaper", "reset", "ups", "about"],
-        migration: ["export", "import", "recovery"],
+        migration: ["export", "import", "switch"],
       };
       if (workspace !== "migration" && allowedTabs[workspace]?.includes(tab)) {
         const tabButton = document.querySelector(`[data-${workspace}-tab="${tab}"]`);

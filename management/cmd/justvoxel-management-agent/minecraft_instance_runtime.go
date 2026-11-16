@@ -25,6 +25,8 @@ import (
 // and a fresh trusted snapshot of appliance storage and physical RAM.
 // Runtime secrets never enter the Phase 1 identity/name store.
 type minecraftInstanceRuntimeConfig struct {
+	// Internal Switch startup guard; never accepted from public settings.
+	PreserveContent  bool   `json:"preserve_content,omitempty"`
 	ID               string `json:"id"`
 	JavaPort         int    `json:"java_port"`
 	BedrockEnabled   bool   `json:"bedrock_enabled"`
@@ -445,7 +447,7 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 		if c.Software != "paper" {
 			source = regexp.MustCompile(`(?m)^PAPER_CHANNEL=.*\n`).ReplaceAllString(source, "")
 		}
-		if !javaServerManagedViaVersion(c.Software) {
+		if c.PreserveContent || !javaServerManagedViaVersion(c.Software) {
 			source = regexp.MustCompile(`(?m)^MODRINTH_PROJECTS=.*\n`).ReplaceAllString(source, "")
 		}
 		f.Environment, err = instanceRuntimeTemplate([]byte(source), values)

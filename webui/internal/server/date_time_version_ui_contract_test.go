@@ -19,7 +19,7 @@ func TestDateTimeAndVersionWorkspaceContracts(t *testing.T) {
 	for _, want := range []string{
 		`data-system-tab="date-time"`, `data-date-time-panel`, `data-timezone-search`, `data-date-time-automatic`,
 		`data-date-time-manual`, `data-version-open`, `data-version-workspace-dialog`,
-		`data-version-tab="software"`, `data-version-tab="minecraft"`, `Minecraft Settings`,
+		`data-version-tab="container"`, `data-version-tab="minecraft"`, `Minecraft Settings`,
 	} {
 		if !strings.Contains(header, want) {
 			t.Fatalf("header missing %q", want)
@@ -39,7 +39,7 @@ func TestDateTimeAndVersionWorkspaceContracts(t *testing.T) {
 		}
 	}
 	version := read("static/version-workspace.js")
-	for _, want := range []string{"Container", "Paper", "Purpur", "Installed", "Available", "Recommended", "Latest", "Specific version", "Geyser/Floodgate", "/api/minecraft/workspace/settings/plan", "compatibility_blocked"} {
+	for _, want := range []string{"Container", "Installed", "Available", "Recommended", "Latest", "Specific version", "Geyser/Floodgate", "/api/minecraft/workspace/settings/plan", "compatibility_blocked"} {
 		if !strings.Contains(version, want) {
 			t.Fatalf("Version missing %q", want)
 		}
@@ -142,10 +142,14 @@ func TestDateTimeAndVersionWorkspaceContracts(t *testing.T) {
 	for _, label := range []string{
 		`data-version-tab="container" aria-selected="true">Container</button>`,
 		`data-version-tab="minecraft" aria-selected="false">Version</button>`,
-		`data-version-tab="software" aria-selected="false">Switch</button>`,
 	} {
 		if !strings.Contains(header, label) {
 			t.Fatalf("Update tab contract missing %q", label)
+		}
+	}
+	for _, retired := range []string{`data-version-tab="software"`, `data-version-tab="switch"`} {
+		if strings.Contains(header, retired) {
+			t.Fatalf("Minecraft Update contains retired tab %q", retired)
 		}
 	}
 	for _, forbidden := range []string{`data-version-custom`, `name="channel"`, `Check for updates`} {

@@ -20,6 +20,9 @@ if jq -e '.network_member == true' "${config}" >/dev/null || [[ -e /etc/justvoxe
     /usr/libexec/justvoxel/mjust/minecraft-network-runtime backend "${id}" || fail
     if jq -e '.network_member == true' "${config}" >/dev/null; then exit 0; fi
 fi
+# Switch verifies the installed content separately. Its temporary, committed
+# guard prevents startup from adding, deleting or updating plugin/mod files.
+if jq -e '.runtime.preserve_content == true' "${config}" >/dev/null; then exit 0; fi
 source /usr/libexec/justvoxel/mjust/managed-crossplay.sh
 # Preserve independent volumes' established Podman :Z labeling model.
 jv_crossplay_label() { :; }

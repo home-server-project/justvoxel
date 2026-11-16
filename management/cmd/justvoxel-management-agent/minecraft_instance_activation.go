@@ -736,6 +736,7 @@ func (b *instanceRuntimeBackend) applyVersion(ctx context.Context, previous inst
 		before.VersionPolicy = after.VersionPolicy
 		before.Version = after.Version
 		before.PaperChannel = after.PaperChannel
+		before.PreserveContent = after.PreserveContent
 		channelOnly = reflect.DeepEqual(before, after)
 		if channelOnly && state.State == "running" && !containerOnly {
 			oldImage := instanceRuntimeImage(previous.Runtime)

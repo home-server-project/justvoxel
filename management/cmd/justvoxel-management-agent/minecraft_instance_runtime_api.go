@@ -49,6 +49,7 @@ func registerInstanceRuntimeRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("GET /v1/minecraft/instances/deletions", s.instanceDeletionInventory)
 	mux.HandleFunc("POST /v1/minecraft/instances/{id}/delete", s.instanceDelete)
 	registerInstanceMaintenanceRoutes(mux, s)
+	registerMinecraftSwitchRoutes(mux, s)
 	registerInstanceBackupRoutes(mux, s)
 	mux.HandleFunc("POST /v1/minecraft/instances", s.instanceRuntimeCreate)
 	mux.HandleFunc("GET /v1/minecraft/instances/runtime", s.instanceRuntimeList)

@@ -165,8 +165,6 @@ test('persistent polling updates the frame, keeps journal messages once, and ren
   assert.equal(content.all().filter(node => node.textContent === 'Creating cold backup.').length, 1);
   assert.equal(context.updateOperation, 'operation-1');
   assert.match(content.children[0].className, /is-running/);
-  context.operationKinds.set('operation-1', 'switch');
-  // A known switch is still running until the journal confirms success.
   assert.equal(context.operationFrame(result.operation).children[0].textContent, 'Server update in progress');
   result = { operation: { operation_id: 'operation-1', state: 'succeeded', status: 'Server update completed.' } };
   await nextPoll();
@@ -174,7 +172,7 @@ test('persistent polling updates the frame, keeps journal messages once, and ren
   assert.equal(messages[0].message, '');
   assert.equal(messages[0].operation, result.operation);
   assert.match(content.children[0].className, /is-succeeded/);
-  assert.equal(content.children[0].children[0].textContent, 'Switch succeeded');
+  assert.equal(content.children[0].children[0].textContent, 'Server update succeeded');
   context.operationKinds.set('operation-1', 'container');
   assert.equal(context.operationFrame(result.operation).children[0].textContent, 'Container update succeeded.');
   context.operationKinds.clear();
@@ -186,90 +184,6 @@ test('persistent polling updates the frame, keeps journal messages once, and ren
   }
 });
 
-// Extract the entire Software branch using stable enclosing branch boundaries.
-const softwareStart = source.indexOf('        const software = card("");');
-const softwareEnd = source.indexOf('      } else {\n        const panel = card("Minecraft Version");', softwareStart);
-assert.ok(softwareStart >= 0 && softwareEnd > softwareStart, 'Software branch boundaries must exist');
-const softwareSource = source.slice(softwareStart, softwareEnd);
-function softwareWorkspace({ current = 'paper', tag = 'stable', online = 0, overrides = {}, planning, operation, failApply = false } = {}) {
-  const calls = [];
-  const previewPlans = [];
-  const root = new Element('div');
-  const context = vm.createContext({
-    location: {origin: 'https://example.test', search: '?server=jv-family1'},
-    Boolean, String, Number, URLSearchParams, csrf: 'csrf', state: {}, root, ticket: 1, sequence: 1,
-    selection: 0, justVoxelSelectionGeneration: {version: 0},
-    pending: { operation }, updateOperation: '', operationKinds: new Map(),
-    minecraft: { id: 'jv-family1', server_type: current, image_tag: tag },
-    status: { server_software: current[0].toUpperCase() + current.slice(1), image_state: 'up_to_date', ...overrides },
-    document: { createElement: (tag) => new Element(tag) },
-    card: (title) => Object.assign(new Element('section'), { textContent: title }),
-    line: (label, value) => {
-      const row = Object.assign(new Element('div'), { textContent: `${label}: ${value}` });
-      row.append(Object.assign(new Element('span'), { textContent: label }), Object.assign(new Element('strong'), { textContent: value }));
-      return row;
-    },
-    stackLabel: (value) => value,
-    statusURL: (policy, version, target, imageTag) => '/api/version/workspace/status?' + new URLSearchParams({ server_type: target, image_tag: imageTag }),
-    request: async (url, options) => {
-      calls.push({ url, body: options?.body });
-      if (url.startsWith('/api/version/workspace/status?')) {
-        const params = new URLSearchParams(url.split('?')[1]);
-        const target = params.get('server_type');
-        const plan = { ...statusFor('26.2'), server_supported: true, runtime_update_required: true,
-          server_software: target[0].toUpperCase() + target.slice(1), image_state: 'up_to_date', ...overrides };
-        const response = Promise.resolve(planning ? planning(plan) : plan);
-        previewPlans.push(response);
-        return response;
-      }
-      if (url === '/api/minecraft/workspace/snapshot') return { players: { online } };
-      if (url === '/api/version/workspace/update') {
-        if (failApply) throw new Error('Response lost');
-        return { operation: { operation_id: 'software-1' } };
-      }
-      throw new Error(`Unexpected request: ${url}`);
-    },
-    render: async (message) => { calls.push({ message }); },
-    watchUpdate: (id) => { calls.push({ watch: id }); },
-  });
-  vm.runInContext(softwareSource, context);
-  const cards = root.all().filter(node => node.className?.split(' ').includes('version-software-choice'));
-  const choice = target => cards.find(node => node.children[1].children[0].textContent.toLowerCase() === target);
-  const find = text => root.all().find(node => node.textContent === text);
-  const form = root.all().find(node => node.tag === 'form');
-  return {
-    root, calls, cards, choice, find, form, state: context.state, operationKinds: context.operationKinds,
-    click: target => choice(target).listeners.click(),
-    review: async () => {
-      const firstPlan = previewPlans.length;
-      // Submit starts preview without returning its Promise. Wait for this
-      // submission's plan (including deferred/rejected stale plans), then let
-      // the request and Promise.all continuations finish before inspecting DOM.
-      form.listeners.submit({ preventDefault() {} });
-      await Promise.allSettled(previewPlans.slice(firstPlan));
-      await new Promise(resolve => setImmediate(resolve));
-    },
-    warning: root.all().find(node => node.className === 'notice warning' && !('versionCompatibility' in node.dataset)),
-    reviews: () => root.all().filter(node => 'versionReview' in node.dataset),
-    consent: () => root.all().find(node => node.tag === 'input' && node.type === 'checkbox'),
-  };
-}
-async function softwareReview(overrides = {}, options = {}) {
-  const page = softwareWorkspace({ overrides, ...options });
-  page.click('purpur');
-  await page.review();
-  return { ...page, apply: page.find('Apply changes'), cancel: page.find('Cancel review'), consent: page.consent() };
-}
-function assertSoftwareSelection(page, selected, installed) {
-  for (const node of page.cards) {
-    const type = node.children[1].children[0].textContent.toLowerCase();
-    assert.equal(node.className.includes('is-selected'), type === selected);
-    assert.equal(node.className.includes('is-current'), type === installed);
-    assert.equal(node['aria-pressed'], String(type === selected));
-    assert.equal(node.children[1].children[1].textContent,
-      type === installed ? 'Current' : installed !== 'vanilla' && type !== 'vanilla' ? 'Switch Available' : 'Switch Unavailable');
-  }
-}
 function operationPresentation(operationKinds = new Map()) {
   const context = vm.createContext({
     operationKinds, document: { createElement: tag => new Element(tag) },
@@ -285,18 +199,18 @@ function operationPresentation(operationKinds = new Map()) {
 }
 test('unknown operation after reconnect uses generic success without inferring its kind', () => {
   // Even a remembered kind for a different operation is not evidence for this one.
-  const context = operationPresentation(new Map([['previous-operation', 'switch']]));
+  const context = operationPresentation(new Map([['previous-operation', 'container']]));
   Object.assign(context, {
     root: new Element('div'), pending: {}, confirmedOperation: { operation_id: 'reconnected', state: 'succeeded', status: 'Server update completed.' },
     updateOperation: '', watchUpdate: () => assert.fail('A successful operation must not restart polling'),
   });
   const start = source.indexOf('      const operation = pending.operation || confirmedOperation;');
-  vm.runInContext(source.slice(start, source.indexOf('      if (currentTab === "software")', start)), context);
+  vm.runInContext(source.slice(start, source.indexOf('      {\n        const panel = card("Minecraft Version");', start)), context);
   assert.equal(context.root.children[0].children[0].textContent, 'Server update succeeded');
   assert.equal(context.operationKinds.has('reconnected'), false);
 });
 test('resolved operations use normal-user keep-current success wording', () => {
-  for (const kind of [undefined, 'switch', 'container']) {
+  for (const kind of [undefined, 'container']) {
     const context = operationPresentation(kind ? new Map([['resolved-operation', kind]]) : new Map());
     const frame = context.operationFrame({operation_id:'resolved-operation',state:'resolved',status:''});
     assert.equal(frame.children[0].textContent, kind === 'container' ? 'Container update stopped — current runtime kept.' : 'Current version kept');
@@ -364,7 +278,7 @@ test('operation framing and state accents are scoped to Version Workspace', () =
 
 test('failed operation keeps recovery acknowledgement and reconnect polling stays intact', async () => {
   const start = source.indexOf('      const operation = pending.operation || confirmedOperation;');
-  const end = source.indexOf('      if (currentTab === "software")', start);
+  const end = source.indexOf('      {\n        const panel = card("Minecraft Version");', start);
   for (const failure of [false, true]) {
     const calls = [];
     const root = new Element('div');
@@ -424,48 +338,12 @@ test('selection generation detaches scheduled update watching without cancelling
   assert.ok(requests.every(url=>url.startsWith('/api/version/workspace/update-operation?')));
 });
 
- test('Switch exposes only reviewed Paper-family changes without image controls', async () => {
-  const page = await softwareReview({}, { online: 3 });
-  assert.deepEqual(page.cards.map(node => node.children[1].children[0].textContent), ['Paper', 'Purpur', 'Pufferfish', 'Leaf']);
-  assert.equal(page.form.all().some(node => node.tag === 'select'), false);
-  assert.doesNotMatch(softwareSource, /Vanilla|vanilla|Check for updates|custom_tag|name="channel"|image_tag:|Container channel/);
-  assert.equal(page.consent.checked, false); assert.equal(page.apply.disabled, true);
-  assert.deepEqual(page.apply.parent.children, [page.cancel, page.apply]);
-  page.consent.checked = true; page.consent.listeners.change(); await page.apply.listeners.click();
-  const posts = page.calls.filter(call => call.body);
-  assert.equal(posts.length, 1);
-  assert.equal(posts[0].body.get('server_type'), 'purpur');
-  assert.equal(posts[0].body.has('image_tag'), false);
-  assert.equal(posts[0].body.get('confirm_players'), 'yes');
- });
- test('Switch unsafe plans cannot apply and Cancel restores installed software', async () => {
-  for (const overrides of [{stack_state:'unavailable'}, {server_supported:false}, {crossplay_enabled:true,crossplay_compatible:false}, {plan_fingerprint:''}]) {
-    const page = await softwareReview(overrides);
-    assert.equal(page.apply.disabled,true); assert.equal(page.consent,undefined);
-    await page.apply.listeners.click(); assert.equal(page.calls.filter(call=>call.body).length,0);
-    page.cancel.listeners.click(); assertSoftwareSelection(page,'paper','paper');
-    assert.equal(page.reviews().length,0);
-  }
- });
- test('Switch rejects stale previews and reconnects a lost Apply response without retry', async () => {
-  const plans=[];
-  const page=softwareWorkspace({planning:plan=>new Promise(resolve=>plans.push(()=>resolve(plan)))});
-  page.click('purpur'); const old=page.review();
-  page.click('paper'); page.click('purpur'); const fresh=page.review();
-  plans[1](); await fresh; const reviewed=page.reviews()[0];
-  plans[0](); await old; assert.deepEqual(page.reviews(),[reviewed]);
-  const failed=await softwareReview({}, {failApply:true});
-  failed.consent.checked=true; failed.consent.listeners.change();
-  await failed.apply.listeners.click(); await failed.apply.listeners.click();
-  assert.equal(failed.calls.filter(call=>call.body).length,1);
-  assert.equal(failed.calls.at(-1).message,'Response lost');
- });
- test('Version tabs are exactly Container, Version, Switch in order', () => {
+test('Version contains only Container and Version tabs and no software switching branch', () => {
   const html=readFileSync(path.join(__dirname,'../webui/internal/server/templates/header.html'),'utf8');
-  assert.deepEqual([...html.matchAll(/data-version-tab="[^"]+"[^>]*>([^<]+)<\/button>/g)].map(match=>match[1]),['Container','Version','Switch']);
-  assert.deepEqual([...html.matchAll(/data-version-tab="([^"]+)"/g)].map(match=>match[1]),['container','minecraft','software']);
-  assert.doesNotMatch(html,/>Server Software<\/button>/);
- });
+  assert.deepEqual([...html.matchAll(/data-version-tab="[^"]+"[^>]*>([^<]+)<\/button>/g)].map(match=>match[1]),['Container','Version']);
+  assert.deepEqual([...html.matchAll(/data-version-tab="([^"]+)"/g)].map(match=>match[1]),['container','minecraft']);
+  assert.doesNotMatch(source, /currentTab === "software"|version-software-choice|Switch Available/);
+});
 
 class ContainerElement extends Element {
   set textContent(value) { this.ownText = String(value); this.children = []; }
@@ -831,26 +709,6 @@ test('Old container restore selection and retention callbacks cannot submit for 
  await restore.listeners.click();await apply.listeners.click();select.listeners.change();
  assert.ok(!page.calls.some(call=>call.url==='/api/version/container/update'||call.url==='/api/version/container/retention'));
 });
-
- test('all four Paper-compatible types can select each other and Spigot stays blocked', async () => {
-  const family = ['paper', 'purpur', 'pufferfish', 'leaf'];
-  for (const current of family) {
-    for (const target of family.filter(value => value !== current)) {
-      const page = softwareWorkspace({current});
-      page.click(target); await page.review();
-      const apply = page.find('Apply changes');
-      const consent = page.consent();
-      assert.ok(consent, `${current} -> ${target} can be reviewed`);
-      consent.checked = true; consent.listeners.change();
-      await apply.listeners.click();
-      assert.equal(page.calls.find(call => call.body).body.get('server_type'), target);
-    }
-  }
-  for (const current of ['spigot', 'vanilla', 'fabric', 'forge', 'neoforge', 'quilt', 'bedrock']) {
-    const page = softwareWorkspace({current});
-    assert.ok(page.cards.every(node => node.disabled));
-  }
- });
 
 test('Container rebuild preserves submitted switches only for the same unresolved operation and selection',async()=>{
  for (const submittedBackup of [false,true]) {

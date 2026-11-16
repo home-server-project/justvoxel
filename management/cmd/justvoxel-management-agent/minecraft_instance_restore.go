@@ -65,6 +65,7 @@ type instanceRestoreInspection struct {
 	Fingerprint                     string                 `json:"fingerprint"`
 }
 type instanceRestorePlan struct {
+	CloneSourceID string `json:"-"`
 	instanceRestoreInspection
 	PlanID                      string          `json:"plan_id"`
 	RuntimeState                string          `json:"runtime_state"`
@@ -478,7 +479,12 @@ func (s *server) runInstanceRestore(ctx context.Context, id string, plan instanc
 	b := instanceRuntimes
 	running := plan.RuntimeState == "running"
 	step := func(action string) error {
-		_, e := b.restoreStorage(ctx, action, id, plan.Metadata.Archive, plan.Fingerprint, running)
+		var e error
+		if action == "prepare" && plan.CloneSourceID != "" {
+			_, e = b.switchCloneRestoreStorage(ctx, action, id, plan.CloneSourceID, plan.Metadata.Archive, plan.Fingerprint)
+		} else {
+			_, e = b.restoreStorage(ctx, action, id, plan.Metadata.Archive, plan.Fingerprint, running)
+		}
 		return e
 	}
 	// Preparation errors never stop Minecraft. A journal, if created, retains
