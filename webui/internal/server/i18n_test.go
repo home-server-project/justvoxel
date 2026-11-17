@@ -114,6 +114,144 @@ func TestLoginFirstRenderLocaleAndActionOrder(t *testing.T) {
 		if !strings.Contains(lane, "<svg ") || strings.Contains(lane, "🌐") {
 			t.Fatal("missing inline globe")
 		}
+		assertLanguageDialog(t, body, locale, "/login?oauth_request=example")
+	}
+}
+
+// Inspect the rendered dialog in both locales alongside the existing login
+// action-order contract; preference persistence and safe returns are tested below.
+func assertLanguageDialog(t *testing.T, body, locale, returnPath string) {
+	t.Helper()
+	dialog := regexp.MustCompile(`(?s)<dialog[^>]*id="language-picker"[^>]*>.*?</dialog>`).FindString(body)
+	for _, want := range []string{
+		`class="system-action-dialog language-dialog"`,
+		`aria-labelledby="language-heading"`,
+		`<div class="system-action-dialog-content">`,
+		`<h2 id="language-heading" class="language-dialog-title"><span class="eyebrow">JUSTVOXEL</span><span aria-hidden="true">·</span><span>` + html.EscapeString(translate(locale, "language.choose")) + `</span></h2>`,
+		`<form method="post" action="/language">`,
+		`<input type="hidden" name="return" value="` + html.EscapeString(returnPath) + `">`,
+		`<select name="language" aria-label="` + html.EscapeString(translate(locale, "language.choose")) + `">`,
+	} {
+		if !strings.Contains(dialog, want) {
+			t.Fatalf("language dialog missing %q", want)
+		}
+	}
+	if strings.Count(dialog, "<select ") != 1 || strings.Count(dialog, "<option ") != 2 || strings.Count(dialog, " selected") != 1 {
+		t.Fatal("language picker must have one select, two options and one selected locale")
+	}
+	for _, option := range []struct{ value, label string }{{"en", "English"}, {"fr-CA", "Français (Canada)"}} {
+		selected := ""
+		if option.value == locale {
+			selected = " selected"
+		}
+		want := `<option value="` + option.value + `" lang="` + option.value + `"` + selected + `>` + option.label + `</option>`
+		if !strings.Contains(dialog, want) {
+			t.Fatalf("language option missing or wrong selection: %s", want)
+		}
+	}
+	actions := regexp.MustCompile(`(?s)<div class="action-row">(.*?)</div>`).FindString(dialog)
+	cancel := `<button class="secondary" type="button" data-language-close>` + html.EscapeString(translate(locale, sourceKeys["Cancel"])) + `</button>`
+	apply := `<button type="submit">` + html.EscapeString(translate(locale, sourceKeys["Apply"])) + `</button>`
+	if !strings.Contains(actions, cancel) || !strings.Contains(actions, apply) || strings.Index(actions, cancel) > strings.Index(actions, apply) {
+		t.Fatal("language actions must be secondary Cancel followed by primary Apply")
+	}
+	if strings.Count(dialog, "<button ") != 2 || strings.Count(dialog, `type="submit"`) != 1 || regexp.MustCompile(`<button[^>]*name="language"`).MatchString(dialog) {
+		t.Fatal("only Apply may submit; language options must not be buttons")
+	}
+	if strings.Index(dialog, "</select>") > strings.Index(dialog, actions) || !strings.Contains(dialog, actions+"\n    </form>") {
+		t.Fatal("language actions must be at the bottom of the form")
+	}
+	if strings.Contains(dialog, "onchange") || strings.Contains(dialog, "oninput") {
+		t.Fatal("language selection must wait for Apply")
+	}
+}
+
+func TestLanguageDialogUsesCompactSharedStyles(t *testing.T) {
+	data, err := assets.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(data)
+	for _, want := range []string{
+		`.language-dialog{width:max-content;max-width:calc(100% - 2rem)}`,
+		`.system-action-dialog-content{padding:1.4rem}`,
+		`.system-action-dialog .action-row{justify-content:flex-end}`,
+		`.language-dialog .language-dialog-title{display:flex;flex-wrap:wrap;align-items:baseline;gap:.32rem;margin:0;font-size:.98rem;line-height:normal}`,
+		`.language-dialog-title .eyebrow{margin:0;font-size:.68rem;font-weight:400;white-space:nowrap}`,
+		`.language-dialog-field{margin-top:1rem}`,
+		`.language-dialog select{width:auto;max-width:100%;margin-top:0}`,
+	} {
+		if !strings.Contains(css, want) {
+			t.Fatalf("missing compact language dialog style: %s", want)
+		}
+	}
+	// Language styles must leave button dimensions and action alignment to the
+	// existing shared rules, and must not reintroduce a full-width select.
+	for _, rule := range regexp.MustCompile(`([^{}]+)\{([^{}]*)\}`).FindAllStringSubmatch(css, -1) {
+		if !strings.Contains(rule[1], ".language-dialog") {
+			continue
+		}
+		if strings.Contains(rule[1], "button") || strings.Contains(rule[1], ".secondary") || strings.Contains(rule[1], ".action-row") {
+			t.Fatalf("language actions must use shared button and action-row styles: %s", rule[0])
+		}
+		if strings.Contains(rule[1], "select") && regexp.MustCompile(`(?:^|;)\s*width\s*:\s*100%`).MatchString(rule[2]) {
+			t.Fatal("language select must retain intrinsic sizing")
+		}
+	}
+}
+
+func TestLanguageDialogWaitsForApply(t *testing.T) {
+	script, err := assets.ReadFile("static/i18n.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	program := `
+const assert = require("node:assert/strict");
+const vm = require("node:vm");
+const listeners = new Map();
+let submissions = 0, opens = 0, closes = 0;
+const field = {value: "/login"};
+const select = {value: "en", closest: () => null};
+const form = {submit() { submissions++; }, requestSubmit() { submissions++; }};
+const dialog = {
+  querySelector(selector) {
+    if (selector === '[name="return"]') return field;
+    if (selector === 'select[name="language"]') return select;
+    if (selector === 'form') return form;
+    throw new Error("unexpected selector: " + selector);
+  },
+  showModal() { opens++; }, close() { closes++; }
+};
+const context = {
+  justVoxelLanguage: {messages: {}, source: {}},
+  location: {pathname: "/", search: "?workspace=backups&server=jv-family1"},
+  document: {
+    addEventListener(type, callback) {
+      if (!listeners.has(type)) listeners.set(type, []);
+      listeners.get(type).push(callback);
+    },
+    querySelector(selector) { assert.equal(selector, '[data-language-dialog]'); return dialog; }
+  }
+};
+vm.runInNewContext(` + strconv.Quote(string(script)) + `, context);
+function dispatch(type, target) {
+  for (const callback of listeners.get(type) || []) callback({target});
+}
+dispatch('click', {closest: selector => selector === '[data-language-open]' ? {} : null});
+assert.equal(opens, 1);
+assert.equal(field.value, "/?workspace=backups&server=jv-family1");
+select.value = "fr-CA";
+dispatch('input', select); dispatch('change', select); dispatch('click', select);
+assert.equal(submissions, 0, "changing language must wait for Apply");
+assert.equal(closes, 0);
+dispatch('click', {closest: selector => selector === '[data-language-close]' ? {} : selector === 'dialog' ? dialog : null});
+assert.equal(closes, 1);
+assert.equal(submissions, 0, "Cancel must not submit");
+`
+	command := nodeTestCommand()
+	command.Stdin = strings.NewReader(program)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("language dialog behavior: %v\n%s", err, output)
 	}
 }
 

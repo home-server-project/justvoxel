@@ -1881,7 +1881,11 @@ body:not(.primary-administrator) .nav-admin-only[data-primary-admin-only]{displa
 .language-control button:hover{background:#313c46;border-color:#4a5965}
 .language-control button:focus-visible{outline:2px solid #78c99d;outline-offset:2px}
 @media(prefers-color-scheme:light){.language-control button:hover{background:#dce4e8;border-color:#aab8c1}}
-.language-dialog form{display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:1rem}
+.language-dialog{width:max-content;max-width:calc(100% - 2rem)}
+.language-dialog .language-dialog-title{display:flex;flex-wrap:wrap;align-items:baseline;gap:.32rem;margin:0;font-size:.98rem;line-height:normal}
+.language-dialog-title .eyebrow{margin:0;font-size:.68rem;font-weight:400;white-space:nowrap}
+.language-dialog-field{margin-top:1rem}
+.language-dialog select{width:auto;max-width:100%;margin-top:0}
 
 /* Compact Minecraft Network presentation; shared Players rules stay unchanged. */
 .minecraft-network{display:grid;gap:.65rem;min-width:0}

@@ -1,2 +1,21 @@
 {{define "language-button"}}<button class="secondary control-icon-button language-button" type="button" data-language-open aria-haspopup="dialog" aria-controls="language-picker" aria-label="{{t "language.choose"}}" title="{{t "language.choose"}}"><svg class="control-action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18M5 6h14M5 18h14"/></svg></button>{{end}}
-{{define "language-dialog"}}<dialog id="language-picker" class="system-action-dialog language-dialog" data-language-dialog aria-labelledby="language-heading"><h2 id="language-heading">{{t "language.choose"}}</h2><form method="post" action="/language"><input type="hidden" name="return" value="{{languageReturn}}"><button type="submit" name="language" value="en" lang="en">English</button><button type="submit" name="language" value="fr-CA" lang="fr-CA">Français (Canada)</button></form><button class="secondary" type="button" data-language-close>{{t "language.close"}}</button></dialog>{{end}}
+{{define "language-dialog"}}
+<dialog id="language-picker" class="system-action-dialog language-dialog" data-language-dialog aria-labelledby="language-heading">
+  <div class="system-action-dialog-content">
+    <h2 id="language-heading" class="language-dialog-title"><span class="eyebrow">JUSTVOXEL</span><span aria-hidden="true">·</span><span>{{t "language.choose"}}</span></h2>
+    <form method="post" action="/language">
+      <input type="hidden" name="return" value="{{languageReturn}}">
+      <div class="language-dialog-field">
+        <select name="language" aria-label="{{t "language.choose"}}">
+          <option value="en" lang="en"{{if eq locale "en"}} selected{{end}}>English</option>
+          <option value="fr-CA" lang="fr-CA"{{if eq locale "fr-CA"}} selected{{end}}>Français (Canada)</option>
+        </select>
+      </div>
+      <div class="action-row">
+        <button class="secondary" type="button" data-language-close>{{t "ui.19766ed6ccb2"}}</button>
+        <button type="submit">{{t "ui.31e392d1c037"}}</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+{{end}}
