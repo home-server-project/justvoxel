@@ -28,19 +28,11 @@ func (a *App) migrationSwitchPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Share Setup's catalogue, including its order, copy and artwork identities.
-	groups := []struct {
-		Name    string
-		Choices []setupSoftwareChoice
-	}{
-		{ui(w, "ui.53e5b3cbd2f4"), simpleSoftware("plugins")},
-		{ui(w, "ui.2e43190a6798"), simpleSoftware("mods")},
-		{"Original", simpleSoftware("original")},
-	}
 	a.renderMigrationWorkspace(w, "migration_workspace_switch.html", 200, struct {
 		ServerID string
 		CSRF     string
-		Groups   any
-	}{selected.ID, csrfFromRequest(r), groups})
+		Groups   []setupSoftwareGroup
+	}{selected.ID, csrfFromRequest(r), setupSoftwareGroups()})
 }
 func (a *App) migrationSwitchAPI(w http.ResponseWriter, r *http.Request) {
 	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator")

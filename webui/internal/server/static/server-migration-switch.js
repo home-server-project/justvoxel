@@ -40,8 +40,6 @@
         node.disabled = active || !available || busy;
         node.querySelector("[data-switch-sticker]").textContent = active ? "Current" : available ? jvT("ui.e674447337e8") : jvT("ui.120d1307d24e");
         node.title = plan.reason || (active ? jvT("ui.7d4f12e4405b") : jvT("ui.a195a363286b", {v0: (plan.version)}));
-        const reason = node.querySelector("[data-switch-reason]");
-        if (reason) { reason.textContent = plan.reason || ""; reason.hidden = active || available || !plan.reason; }
       };
       const reconnect = async (id = "") => {
         const result = await request("operation", { operation_id: id });

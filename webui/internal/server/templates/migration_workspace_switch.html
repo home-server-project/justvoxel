@@ -2,11 +2,12 @@
 <input type="hidden" data-switch-csrf value="{{.CSRF}}">
 <p class="muted">{{t "ui.8e50b76ef001"}}</p>
 <div data-switch-operation role="status"></div>
-<div class="setup-software-lanes migration-switch-catalogue">
-{{range .Groups}}<fieldset class="setup-server-types"><legend>{{ts .Name}}</legend>
-{{range .Choices}}<button type="button" class="server-software-card migration-switch-card is-unsupported" data-switch-target="{{.ID}}" disabled>
+<div class="setup-software-groups setup-software-lanes migration-switch-catalogue">
+{{range .Groups}}<fieldset class="setup-server-types setup-server-types-compact"><legend>{{ts .Name}}</legend>
+{{range .Software}}<button type="button" class="setup-server-type server-software-card migration-switch-card is-unsupported" data-switch-target="{{.ID}}" disabled>
 <span class="server-software-icon" aria-hidden="true"><img src="/static/server-software/{{.ID}}.svg" alt="" width="40" height="40"></span>
-<span class="server-software-copy"><strong>{{if eq .ID "vanilla"}}{{t "ui.f191561ca152"}}{{else if eq .ID "bedrock"}}{{t "ui.e74aa936a406"}}{{else}}{{ts .Name}}{{end}}</strong><span class="migration-switch-sticker" data-switch-sticker>{{t "ui.120d1307d24e"}}</span><small>{{ts .Description}}</small><small data-switch-reason hidden></small></span>
+<span class="server-software-copy"><strong>{{ts .Name}}</strong><small>{{ts .Description}}</small></span>
+<span class="migration-switch-sticker" data-switch-sticker>{{t "ui.120d1307d24e"}}</span>
 </button>{{end}}
 </fieldset>{{end}}
 </div>
