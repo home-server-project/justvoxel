@@ -34,6 +34,7 @@
       const showCard = (node, plan) => {
         const active = plan.current === node.dataset.switchTarget;
         const available = !active && Boolean(plan.convert || plan.clone);
+        node.classList.toggle("is-pending", false);
         node.classList.toggle("is-current", active);
         node.classList.toggle("is-available", available);
         node.classList.toggle("is-unsupported", !active && !available);

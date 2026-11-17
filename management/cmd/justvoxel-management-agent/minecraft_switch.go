@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -12,14 +13,47 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
 
-// Switch deliberately supports only implemented world/runtime paths. Loader
-// names, an empty mods directory, or Bukkit support never prove world safety.
+// Structural eligibility is separate from exact runtime, world and content proof.
+// Spigot stays unsupported until its own source layout has a verified path.
 func switchStructuralPath(from, to string) bool {
-	return from != to && javaServerPaperFamily(from) && javaServerPaperFamily(to)
+	a, aok := javaServerSoftware(from)
+	b, bok := javaServerSoftware(to)
+	if !aok || !bok || from == to || from == "spigot" || to == "spigot" {
+		return false
+	}
+	return (javaServerPaperFamily(from) || from == "vanilla" || a.ModLoader) &&
+		(javaServerPaperFamily(to) || to == "vanilla" || b.ModLoader)
+}
+
+func switchNeedsWorldMove(from, to string) bool {
+	c, _ := javaServerSoftware(to)
+	return javaServerPaperFamily(from) && (to == "vanilla" || c.ModLoader)
+}
+
+// An empty mods folder does not prove that a modded world is Vanilla-safe.
+func switchWorldRisk(from, to string) bool {
+	c, _ := javaServerSoftware(from)
+	return c.ModLoader && (to == "vanilla" || javaServerPaperFamily(to))
+}
+
+// runtimeAvailable means the exact game release, target loader pin and image
+// have all been verified. layoutVerified is required only for leaving Paper.
+func switchTransitionActions(from, to string, runtimeAvailable, layoutVerified bool, content []switchContent) (convert, clone bool) {
+	if !runtimeAvailable || !switchStructuralPath(from, to) || switchNeedsWorldMove(from, to) && !layoutVerified {
+		return false, false
+	}
+	convert, clone = !switchWorldRisk(from, to), true
+	for _, item := range content {
+		if item.Compatibility != "verified" {
+			convert = false
+		}
+	}
+	return
 }
 
 type switchContent struct {
@@ -48,6 +82,7 @@ type minecraftSwitchPlan struct {
 	Runtime            adminVersionStatus `json:"-"`
 	RuntimeDigest      string             `json:"-"`
 	ContentFingerprint string             `json:"-"`
+	WorldFingerprint   string             `json:"-"`
 }
 
 func switchUnsupportedReason(from, to string) string {
@@ -57,10 +92,7 @@ func switchUnsupportedReason(from, to string) string {
 	if from == "spigot" || to == "spigot" {
 		return "No verified Spigot world transformation is implemented. Paper-family to Spigot is unsafe; direct Spigot to Paper-family is unsupported for Minecraft 26.1 and newer."
 	}
-	if from == "vanilla" || to == "vanilla" {
-		return "The required Vanilla/Paper world-layout transformation is not implemented and verified by JustVoxel."
-	}
-	return "Loader compatibility and historic modded world data cannot be verified for this conversion. Removing current mods does not prove world safety."
+	return "No verified direct conversion is implemented for this software pair."
 }
 
 // Read the existing inventory and ownership manifest. No files are changed and
@@ -200,8 +232,8 @@ func switchContentEvidence(ctx context.Context, record instanceRuntimeRecord, ta
 					}
 				}
 			}
-		} else if kind == "plugins" && entry != nil && pluginTarget(entry.Target) == "plugins" && pluginSource(entry.Source) == "Modrinth" && modrinthPluginID.MatchString(entry.VersionID) {
-			root, e := openPluginDirectory(data)
+		} else if entry != nil && pluginTarget(entry.Target) == kind && pluginSource(entry.Source) == "Modrinth" && modrinthPluginID.MatchString(entry.VersionID) {
+			root, e := openContentDirectory(data, kind)
 			if e == nil {
 				hash, hashErr := hashPluginAt(root, entry.Filename)
 				root.Close()
@@ -221,6 +253,56 @@ func switchContentEvidence(ctx context.Context, record instanceRuntimeRecord, ta
 					}
 				}
 			}
+		}
+		if kind == "mods" && entry == nil && pluginHashPattern.MatchString(hash) {
+			var v pluginCatalogVersion
+			if modrinthPluginJSON(ctx, "/version_file/"+hash, map[string][]string{"algorithm": {"sha512"}}, &v) == nil && modrinthPluginID.MatchString(v.ID) && modrinthPluginID.MatchString(v.ProjectID) && slices.ContainsFunc(v.Files, func(f pluginArtifactFile) bool { return f.Hashes.SHA512 == hash }) {
+				if !pluginVersionCompatible(v, pluginServerContext{ServerType: target, MinecraftVersion: version}) || !modrinthContentEnvironment(v.Environment, target) {
+					evidence.Compatibility, evidence.Reason = "incompatible", "The exact installed mod release does not support this target loader and Minecraft version."
+				} else if v.Dependencies != nil {
+					evidence.Compatibility, evidence.Reason = "verified", "Installed mod bytes and target loader/version verified by publisher hash."
+					proofs[index] = v
+				}
+			}
+		}
+		if entry != nil && pluginTarget(entry.Target) == kind && pluginSource(entry.Source) == "CurseForge" && hash == entry.SHA512 && pluginHashPattern.MatchString(hash) {
+			release, lookupErr := exactCurseForgeFile(ctx, entry.ProjectID, entry.VersionID)
+			if lookupErr == nil {
+				if !curseForgeCompatible(release, pluginServerContext{ServerType: target, MinecraftVersion: version}) {
+					evidence.Compatibility, evidence.Reason = "incompatible", "The installed CurseForge release does not support this exact target loader and Minecraft version."
+				} else if release.Dependencies != nil && release.Game == 432 && release.Available && len(release.Dependencies) <= 128 {
+					directory, openErr := openContentDirectory(data, kind)
+					if openErr == nil {
+						jar, jarErr := openPluginAt(directory, item.Filename)
+						if jarErr == nil {
+							digest := sha1.New()
+							_, hashErr := io.Copy(digest, io.LimitReader(jar, pluginMaxJar+1))
+							jar.Close()
+							matches := 0
+							for _, published := range release.Hashes {
+								if published.Algo == 1 && curseForgeSHA1.MatchString(published.Value) && published.Value == hex.EncodeToString(digest.Sum(nil)) {
+									matches++
+								}
+							}
+							if hashErr == nil && matches == 1 {
+								evidence.Compatibility, evidence.Reason = "verified", "Installed bytes and exact target compatibility verified by CurseForge."
+								proof := pluginCatalogVersion{ID: "curseforge:" + entry.VersionID, ProjectID: "curseforge:" + entry.ProjectID, Dependencies: []pluginDependency{}}
+								for _, d := range release.Dependencies {
+									if d.Relation == 3 {
+										proof.Dependencies = append(proof.Dependencies, pluginDependency{ProjectID: "curseforge:" + strconv.FormatInt(d.ModID, 10), Type: "required"})
+									}
+								}
+								proofs[index] = proof
+							}
+						}
+						directory.Close()
+					}
+				}
+			}
+		}
+		if javaServerContentKind(target) != kind {
+			evidence.Compatibility, evidence.Reason = "incompatible", "This executable content is not supported by the target software. Handle it manually in Plugins & Mods."
+			delete(proofs, index)
 		}
 		result = append(result, evidence)
 	}
@@ -308,8 +390,9 @@ func planMinecraftSwitch(ctx context.Context, id, target string) (minecraftSwitc
 		p.Reason = "Installed Minecraft evidence disagrees with the configured exact version. Switch cannot safely choose a game version."
 		return p, nil
 	}
+	legacyRuntime := javaServerPaperFamily(p.Current) && javaServerPaperFamily(target)
 	imageTag := record.Runtime.ImageTag
-	if target == "pufferfish" || target == "leaf" {
+	if legacyRuntime && (target == "pufferfish" || target == "leaf") {
 		bedrock := "no"
 		if record.Runtime.BedrockEnabled {
 			bedrock = "yes"
@@ -321,6 +404,9 @@ func planMinecraftSwitch(ctx context.Context, id, target string) (minecraftSwitc
 			return p, nil
 		}
 		imageTag = selection.ImageTag
+	}
+	if !legacyRuntime {
+		ctx = context.WithValue(ctx, switchRuntimeKey{}, true)
 	}
 	raw, err = runAdminVersionStatus(ctx, "pinned", p.Version, target, imageTag)
 	if err != nil || json.Unmarshal(raw, &p.Runtime) != nil || p.Runtime.ServerType != target || p.Runtime.SelectedCandidate != p.Version || p.Runtime.Installed != p.Version || !p.Runtime.ServerSupported || !operationFingerprintPattern.MatchString(p.Runtime.PlanFingerprint) || p.Runtime.StackState != "updates_available" || !p.Runtime.UpdateAvailable || (p.Runtime.CrossplayEnabled && !p.Runtime.CrossplayCompatible) {
@@ -334,6 +420,16 @@ func planMinecraftSwitch(ctx context.Context, id, target string) (minecraftSwitc
 	if json.Unmarshal(raw, &managed) != nil {
 		return p, errInstanceRecovery
 	}
+	if !legacyRuntime {
+		caps, _ := javaServerSoftware(target)
+		if caps.ModLoader && !javaLoaderVersionPattern.MatchString(p.Runtime.LoaderVersion) || validateJavaServerSelection(target, "pinned", p.Version, p.Runtime.LoaderVersion, p.Runtime.ImageTag, p.Runtime.CrossplayEnabled) != nil {
+			p.Reason = "An exact target loader version could not be verified."
+			return p, nil
+		}
+		if record.Runtime.BedrockEnabled && !p.Runtime.CrossplayEnabled {
+			p.Warnings = append(p.Warnings, "The target uses Java connections. Existing cross-play executable files are preserved and must be handled manually in Plugins & Mods.")
+		}
+	}
 	p.RuntimeDigest = managed.Digest
 	if !operationFingerprintPattern.MatchString(p.RuntimeDigest) {
 		p.Reason = "The exact target runtime image could not be verified."
@@ -344,24 +440,27 @@ func planMinecraftSwitch(ctx context.Context, id, target string) (minecraftSwitc
 		p.Reason = "Plugins & Mods inventory could not be verified. Refresh Switch after resolving inventory access."
 		return p, nil
 	}
-	p.Clone, p.Convert = true, true
-	if record.NetworkMember {
-		p.Clone = false
-		p.Reason = "Remove this server from Minecraft Network before cloning its standalone settings."
-	}
-	for _, content := range p.Content {
-		if content.Compatibility != "verified" {
-			p.Convert = false
+	layoutVerified := true
+	if switchNeedsWorldMove(p.Current, target) {
+		if moves, layoutErr := inspectSwitchWorld(record.Storage.DataPath, p.Version); layoutErr != nil {
+			layoutVerified = false
+			p.Reason = "The Paper world layout is missing or ambiguous. A verified world transformation is required before conversion."
+		} else {
+			p.WorldFingerprint = instanceHash(mustSwitchJSON(moves))
 		}
 	}
+	if switchWorldRisk(p.Current, target) {
+		p.Warnings = append(p.Warnings, "Mod-added blocks, items, entities and other world data may not survive. An empty mods folder does not establish world safety; only a protected experimental clone is available.")
+	}
+	p.Convert, p.Clone = switchTransitionActions(p.Current, target, true, layoutVerified, p.Content)
 	p.Warnings = append(p.Warnings, "No plugins or mods are removed, disabled, replaced, updated or downloaded by Switch.")
-	if !p.Convert {
-		p.Reason = "Convert is blocked by incompatible or unverified plugins/mods. Review the named items in Plugins & Mods. An experimental clone preserves the original; its runtime must still pass verification."
+	if !p.Convert && p.Reason == "" {
+		p.Reason = "Convert is blocked by world safety or incompatible or unverified plugins/mods. Review the named items in Plugins & Mods. An experimental clone preserves the original; its runtime must still pass verification."
 	}
 	raw, err = json.Marshal(struct {
-		ID, Target, Version, Runtime, Content, Record string
-		Convert, Clone                                bool
-	}{id, target, p.Version, p.Runtime.PlanFingerprint, p.ContentFingerprint, instanceHash(mustSwitchJSON(record)), p.Convert, p.Clone})
+		ID, Target, Version, Runtime, Content, Record, World string
+		Convert, Clone                                       bool
+	}{id, target, p.Version, p.Runtime.PlanFingerprint, p.ContentFingerprint, instanceHash(mustSwitchJSON(record)), p.WorldFingerprint, p.Convert, p.Clone})
 	if err != nil {
 		return p, err
 	}
@@ -404,19 +503,22 @@ type minecraftSwitchRequest struct {
 // This private orchestration evidence composes existing runtime creation,
 // restore and maintenance transactions; it never replaces their journals.
 type minecraftSwitchEvidence struct {
-	Schema               int                    `json:"schema"`
-	OperationID          string                 `json:"operation_id"`
-	Source               string                 `json:"source"`
-	Target               string                 `json:"target"`
-	CloneID              string                 `json:"clone_id,omitempty"`
-	CloneRecord          *instanceRuntimeRecord `json:"clone_record,omitempty"`
-	Version              string                 `json:"version"`
-	Action               string                 `json:"action"`
-	OriginallyRunning    bool                   `json:"originally_running"`
-	SourceStopped        bool                   `json:"source_stopped"`
-	SourceRecord         *instanceRuntimeRecord `json:"source_record,omitempty"`
-	SourceContentChanged bool                   `json:"source_content_changed,omitempty"`
-	Stage                string                 `json:"stage"`
+	Schema               int                     `json:"schema"`
+	OperationID          string                  `json:"operation_id"`
+	Source               string                  `json:"source"`
+	Target               string                  `json:"target"`
+	CloneID              string                  `json:"clone_id,omitempty"`
+	CloneRecord          *instanceRuntimeRecord  `json:"clone_record,omitempty"`
+	Version              string                  `json:"version"`
+	Action               string                  `json:"action"`
+	OriginallyRunning    bool                    `json:"originally_running"`
+	SourceStopped        bool                    `json:"source_stopped"`
+	SourceRecord         *instanceRuntimeRecord  `json:"source_record,omitempty"`
+	SourceContentChanged bool                    `json:"source_content_changed,omitempty"`
+	SourceRestoreJournal *instanceRestoreJournal `json:"source_restore_journal,omitempty"`
+	ColdArchive          string                  `json:"cold_archive,omitempty"`
+	WorldChanged         bool                    `json:"world_changed,omitempty"`
+	Stage                string                  `json:"stage"`
 }
 
 func switchEvidencePath(operation string) string {
@@ -446,6 +548,9 @@ func switchStructuralPathFromEvidence(e minecraftSwitchEvidence) bool {
 		return false
 	}
 	if e.CloneID != "" && (!instanceIDPattern.MatchString(e.CloneID) || e.CloneID == e.Source || e.CloneRecord == nil || e.CloneRecord.Runtime.ID != e.CloneID || e.CloneRecord.Storage.Root != e.SourceRecord.Storage.Root || e.CloneRecord.Storage.DataPath != filepath.Join(e.SourceRecord.Storage.Root, "minecraft-instances", e.CloneID, "data")) {
+		return false
+	}
+	if e.WorldChanged && (e.Action != "convert" || !validInstanceRestoreArchive(e.ColdArchive)) {
 		return false
 	}
 	return true
@@ -560,6 +665,17 @@ func (s *server) runMinecraftSwitch(ctx context.Context, j operationJournal, p m
 			err = readErr
 		} else {
 			e.SourceRecord = &source
+			if prior, journalErr := instanceRuntimes.restoreJournal(j.InstanceID); journalErr == nil {
+				// Completed journals may predate ordinary configuration edits.
+				// Capture their identity; never treat a terminal binding as active recovery.
+				if !restoreTerminal(prior.Stage) {
+					err = errInstanceRecovery
+				} else {
+					e.SourceRestoreJournal = &prior
+				}
+			} else if !errors.Is(journalErr, os.ErrNotExist) {
+				err = journalErr
+			}
 		}
 		if err == nil {
 			state, stateErr := instanceRuntimes.observe(ctx, j.InstanceID)
@@ -582,7 +698,9 @@ func (s *server) runMinecraftSwitch(ctx context.Context, j operationJournal, p m
 		if err == nil {
 			_, err = s.operations.transition(j.OperationID, operationRunning, "converting", "Creating a consistent copy or cold backup and verifying the exact target runtime.")
 		}
-		if err == nil && r.Action == "convert" {
+		if err == nil && r.Action == "convert" && !(javaServerPaperFamily(p.Current) && javaServerPaperFamily(p.Target)) {
+			err = s.convertMinecraftSwitch(ctx, &e, p, lock)
+		} else if err == nil && r.Action == "convert" {
 			// The mature worker owns the maintenance flock itself and rechecks the
 			// underlying runtime fingerprint immediately before destructive work.
 			err = lock.Close()

@@ -254,7 +254,7 @@ def metadata(fd, name):
     expected_keys = KEYS | ({'loader_version'} if m.get('software') in ('forge','neoforge','fabric','quilt') else set())
     if set(m) != expected_keys or type(m['schema']) != int or m['schema'] != 1 or m['id'] != (clone_source or identity) or m['archive'] != name: raise ValueError('metadata identity')
     if m['software'] not in ('paper','purpur','pufferfish','leaf','vanilla','spigot','forge','neoforge','fabric','quilt','bedrock') or not isinstance(m['version'],str) or not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?' if m['software'] == 'bedrock' else r'[0-9]+\.[0-9]+(?:\.[0-9]+)?',m['version']): raise Refusal('unverified_version')
-    if 'loader_version' in expected_keys and (not isinstance(m['loader_version'],str) or len(m['loader_version']) > 64 or not re.fullmatch(r'[0-9]+(?:\.[0-9]+){1,3}(?:-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*)?',m['loader_version']) or m['loader_version'] != runtime.get('loader_version')): raise Refusal('incompatible_software_version')
+    if 'loader_version' in expected_keys and (not isinstance(m['loader_version'],str) or len(m['loader_version']) > 64 or not re.fullmatch(r'[0-9]+(?:\.[0-9]+){1,3}(?:-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*)?',m['loader_version']) or m['loader_version'] != (source_record['runtime'].get('loader_version') if clone_source else runtime.get('loader_version'))): raise Refusal('incompatible_software_version')
     if not isinstance(m['name'],str) or len(m['name'])>64 or any(ord(c)<32 for c in m['name']): raise ValueError('name')
     match = archive_pattern.fullmatch(name)
     if match['software'] != m['software'] or (match['name'] != 'instance' and match['name'] != m['name']):
@@ -262,8 +262,8 @@ def metadata(fd, name):
     datetime.datetime.strptime(m['created'],'%Y-%m-%dT%H:%M:%SZ')
     if not SHA.fullmatch(m['sha256']) or not SHA.fullmatch(m['configuration_sha256']) or type(m['size']) != int or not 0<m['size']<=MAX_BYTES: raise ValueError('metadata')
     if clone_source:
-        family = ('paper','purpur','pufferfish','leaf')
-        if m['software'] not in family or runtime['software'] not in family or m['version'] != runtime['version'] or m['software'] != source_record['runtime']['software'] or m['version'] != source_record['runtime']['version'] or m['configuration_sha256'] != digest(source_raw): raise Refusal('incompatible_software_version')
+        eligible = ('paper','purpur','pufferfish','leaf','vanilla','fabric','quilt','forge','neoforge')
+        if m['software'] not in eligible or runtime['software'] not in eligible or m['software'] == runtime['software'] or m['version'] != runtime['version'] or m['software'] != source_record['runtime']['software'] or m['version'] != source_record['runtime']['version'] or m['configuration_sha256'] != digest(source_raw): raise Refusal('incompatible_software_version')
     elif (m['software'],m['version']) != (runtime['software'],runtime['version']): raise Refusal('incompatible_software_version')
     return m
 

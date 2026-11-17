@@ -46,7 +46,7 @@ func TestMigrationSwitchUsesCompleteSetupCatalogueAndArtwork(t *testing.T) {
 	cards := regexp.MustCompile(`(?s)<button[^>]+data-switch-target="([^"]+)"[^>]*>(.*?)</button>`).FindAllStringSubmatch(markup, -1)
 	var names []string
 	for _, card := range cards {
-		copy := regexp.MustCompile(`<span class="server-software-copy"><strong>([^<]+)</strong><small>([^<]+)</small></span>`).FindStringSubmatch(card[2])
+		copy := regexp.MustCompile(`<span class="server-software-copy"><span class="migration-switch-title-row"><strong>([^<]+)</strong><span class="migration-switch-sticker" data-switch-sticker>Not Supported</span></span><small>([^<]+)</small></span>`).FindStringSubmatch(card[2])
 		if copy == nil {
 			t.Fatalf("software name/description presentation changed: %s", card[1])
 		}
@@ -61,9 +61,8 @@ func TestMigrationSwitchUsesCompleteSetupCatalogueAndArtwork(t *testing.T) {
 				}
 			}
 		}
-		if !strings.Contains(card[2], copy[0]+`
-<span class="migration-switch-sticker" data-switch-sticker>Not Supported</span>`) {
-			t.Fatalf("status sticker must be outside the software copy: %s", card[1])
+		if !strings.Contains(card[0], "is-pending") || strings.Count(card[2], "data-switch-sticker") != 1 {
+			t.Fatalf("permanent pending title badge missing: %s", card[1])
 		}
 		if strings.Contains(card[2], "<p") || strings.Count(card[2], "<small") != 1 {
 			t.Fatalf("unexpected per-card paragraph or reason: %s", card[1])
@@ -104,7 +103,7 @@ func TestMigrationSwitchUsesCompleteSetupCatalogueAndArtwork(t *testing.T) {
 	for _, rule := range []string{
 		"grid-template-columns:1fr;grid-auto-rows:auto;align-content:start;align-items:start",
 		"grid-template-columns:repeat(5,minmax(0,1fr));grid-auto-rows:1fr;align-content:start;min-width:0;margin:0",
-		"grid-template-columns:40px minmax(0,1fr);gap:.7rem;min-height:104px;padding:.65rem .75rem;box-sizing:border-box;align-items:start;align-content:start",
+		"padding:.65rem .75rem;box-sizing:border-box;align-items:start;align-content:start",
 		"width:40px;min-width:40px;height:40px",
 		".server-software-copy strong{font-size:1rem}",
 		".server-software-copy small{font-size:.82rem}",
@@ -123,10 +122,14 @@ func TestMigrationSwitchUsesCompleteSetupCatalogueAndArtwork(t *testing.T) {
 	if strings.Contains(css, "auto-fit") {
 		t.Fatal("Switch lanes must retain empty desktop tracks")
 	}
-	for _, want := range []string{".is-current", ".is-unsupported", ".migration-switch-sticker{position:absolute;top:", "background:#e5bb40", "background:#555b61"} {
+	for _, want := range []string{".is-current", ".is-unsupported", ".migration-switch-title-row{display:flex;", "height:104px;min-height:104px;max-height:104px", "is-pending .migration-switch-sticker{visibility:hidden}", "text-overflow:ellipsis;white-space:nowrap", "background:#e5bb40", "background:#555b61"} {
 		if !strings.Contains(css, want) {
 			t.Fatalf("Switch overlay state missing: %s", want)
 		}
+	}
+	stickerRule := regexp.MustCompile(`\.migration-switch \.migration-switch-sticker\{[^}]+\}`).FindString(css)
+	if strings.Contains(stickerRule, "position:absolute") || strings.Contains(stickerRule, "display:none") || !strings.Contains(stickerRule, "white-space:nowrap") {
+		t.Fatal("badge must stay in the title row and reserve its slot")
 	}
 	script, err := englishPresentationAsset("static/server-migration-switch.js")
 	if err != nil {
@@ -135,6 +138,16 @@ func TestMigrationSwitchUsesCompleteSetupCatalogueAndArtwork(t *testing.T) {
 	if strings.Contains(string(script), "data-switch-reason") || !strings.Contains(string(script), "node.title = plan.reason") || !strings.Contains(string(script), `review.appendChild(paragraph(plan.reason, "notice warning"))`) {
 		t.Fatal("compatibility reasons belong in tooltips and selected-target review only")
 	}
+	showCard := regexp.MustCompile(`(?s)const showCard = .*?const reconnect`).FindString(string(script))
+	for _, mutation := range []string{"createElement", "appendChild", "replaceChildren", "innerHTML", "style.height", "<small"} {
+		if strings.Contains(showCard, mutation) {
+			t.Fatalf("compatibility response changes card structure: %s", mutation)
+		}
+	}
+	if !strings.Contains(showCard, `node.classList.toggle("is-pending", false)`) || !strings.Contains(showCard, `Boolean(plan.convert || plan.clone)`) {
+		t.Fatal("pending badges or protected-clone card semantics regressed")
+	}
+
 }
 
 func TestMigrationAndVersionNavigationBoundaries(t *testing.T) {

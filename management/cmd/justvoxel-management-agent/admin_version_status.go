@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+type switchRuntimeKey struct{}
+
 type adminVersionStatus struct {
 	BedrockTCPPort            int    `json:"bedrock_tcp_port,omitempty"`
 	BedrockUDPStart           int    `json:"bedrock_udp_start,omitempty"`
@@ -57,6 +59,9 @@ func versionCommandOutput(ctx context.Context, executable string, args ...string
 
 var runAdminVersionStatus = func(ctx context.Context, policy, version, serverType, imageTag string) ([]byte, error) {
 	args := []string{policy, version}
+	if exact, _ := ctx.Value(switchRuntimeKey{}).(bool); exact {
+		args = append([]string{"--switch-preview", "yes"}, args...)
+	}
 	if imageTag != "" {
 		args = append([]string{"--image-tag", imageTag}, args...)
 	}

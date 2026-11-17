@@ -160,6 +160,12 @@ func (s *server) cloneMinecraftSwitch(ctx context.Context, e *minecraftSwitchEvi
 			backupErr = readErr
 		} else {
 			_, contentHash, contentErr := switchContentEvidence(ctx, stoppedRecord, "", p.Version)
+			if switchNeedsWorldMove(p.Current, p.Target) {
+				moves, layoutErr := inspectSwitchWorld(stoppedRecord.Storage.DataPath, p.Version)
+				if layoutErr != nil || instanceHash(mustSwitchJSON(moves)) != p.WorldFingerprint {
+					contentErr = errInstanceRecovery
+				}
+			}
 			if contentErr != nil || contentHash != p.ContentFingerprint {
 				backupErr = instanceRuntimeFailure("Plugins & Mods changed before the consistent copy. Review Switch again.")
 			}
@@ -194,6 +200,10 @@ func (s *server) cloneMinecraftSwitch(ctx context.Context, e *minecraftSwitchEvi
 	c.PreserveContent = true
 	c.Software = p.Target
 	c.Version = p.Version
+	c.LoaderVersion = p.Runtime.LoaderVersion
+	if !(javaServerPaperFamily(p.Current) && javaServerPaperFamily(p.Target)) {
+		c.BedrockEnabled = p.Runtime.CrossplayEnabled
+	}
 	c.VersionPolicy = "pinned"
 	c.StartOnBoot = false
 	channel, channelErr := b.command(ctx, instanceRuntimeHelper, "channel", p.Target, p.Version, "pinned")
@@ -251,6 +261,15 @@ func (s *server) cloneMinecraftSwitch(ctx context.Context, e *minecraftSwitchEvi
 	if err != nil {
 		return err
 	}
+	if switchNeedsWorldMove(p.Current, p.Target) {
+		clone, readErr := b.readRecord(e.CloneID)
+		if readErr != nil {
+			return readErr
+		}
+		if err = transformSwitchWorld(clone.Storage.DataPath, p.Version); err != nil {
+			return err
+		}
+	}
 	e.Stage = "verifying_clone"
 	if err = saveSwitchEvidence(*e); err != nil {
 		return err
@@ -276,8 +295,10 @@ func (s *server) cloneMinecraftSwitch(ctx context.Context, e *minecraftSwitchEvi
 	if err = b.actionWithWarnings(ctx, e.CloneID, "stop", true); err != nil {
 		return err
 	}
-	if err = b.finishSwitchClone(ctx, e.CloneID); err != nil {
-		return err
+	if javaServerPaperFamily(p.Current) && javaServerPaperFamily(p.Target) {
+		if err = b.finishSwitchClone(ctx, e.CloneID); err != nil {
+			return err
+		}
 	}
 	if err = s.clearSwitchSourceContent(ctx, e); err != nil {
 		return err
@@ -346,7 +367,7 @@ func (s *server) recoverMinecraftSwitch(ctx context.Context, e *minecraftSwitchE
 		if observeErr != nil {
 			return observeErr
 		}
-		if current.Runtime.Software != e.SourceRecord.Runtime.Software || current.Runtime.PreserveContent || state.State == "stopped" && e.OriginallyRunning {
+		if e.WorldChanged || current.Runtime.Software != e.SourceRecord.Runtime.Software || current.Runtime.PreserveContent || state.State == "stopped" && e.OriginallyRunning {
 			state, err := b.observeRaw(ctx, e.Source)
 			if err != nil {
 				return err
@@ -367,9 +388,17 @@ func (s *server) recoverMinecraftSwitch(ctx context.Context, e *minecraftSwitchE
 			if err != nil {
 				return err
 			}
-			if err = b.applyVersion(ctx, current, instanceReplaceRecord(records, previous), snapshot, true); err != nil {
+			if e.WorldChanged && current.Runtime.Software != previous.Runtime.Software {
+				err = b.applySwitchRuntime(ctx, current, instanceReplaceRecord(records, previous), snapshot, *e, nil)
+			} else {
+				err = b.applyVersion(ctx, current, instanceReplaceRecord(records, previous), snapshot, true)
+			}
+			if err != nil {
 				return err
 			}
+		}
+		if err = s.restoreSwitchWorld(ctx, e, lock); err != nil {
+			return err
 		}
 		e.SourceStopped = e.OriginallyRunning
 		if err = saveSwitchEvidence(*e); err != nil {
@@ -579,6 +608,9 @@ func (s *server) clearSwitchSourceContent(ctx context.Context, e *minecraftSwitc
 		return err
 	}
 	if err = b.applyVersion(ctx, current, instanceReplaceRecord(records, next), snapshot, true); err != nil {
+		return err
+	}
+	if err = rebindSwitchSourceRestore(ctx, e); err != nil {
 		return err
 	}
 	e.SourceContentChanged = false

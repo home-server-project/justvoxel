@@ -98,7 +98,9 @@ Minecraft Update contains **Container** and **Version** only. Software switching
 is under **Server Migration → Switch**, beside Export and Import. It uses the
 existing selected server and the same catalogue/artwork as Setup: Paper, Purpur,
 Spigot, Pufferfish, Leaf, Fabric, NeoForge, Forge, Quilt, Vanilla Java and native
-Bedrock. All eleven cards remain visible and reflow with the workspace width.
+Bedrock. All eleven cards remain visible and reflow with the workspace width. Switch cards
+stay 104px tall, with a permanent status slot beside the software name, including
+while verification is pending.
 **Current** marks the selected server's software in yellow and is not selectable.
 **Available** means at least one verified structural action can be reviewed.
 **Not Supported** cards are dimmed and disabled, with an incompatibility explanation.
@@ -118,22 +120,33 @@ Failed clones are never reported as successful; existing creation, restore and
 runtime recovery mechanisms clean up or retain a contextual Switch recovery action.
 No conversion is automatically retried.
 
-The implemented structural family is Paper/Purpur/Pufferfish/Leaf in every
-direction where the exact target runtime is available. Incompatible and
-unknown/unverified plugin/mod evidence blocks Convert. Review links to the
-selected server's **Plugins & Mods** workspace; no plugin or mod is automatically
-removed, disabled, replaced, updated or downloaded. Returning to Switch or
-refreshing rechecks the authoritative inventory. A separate experimental clone
-can remain available within that implemented family, and must pass exact runtime
-verification. Normal startup content management is temporarily suppressed during
-Switch, then restored. Switch keeps the target at an exact version pin; Version
-remains the separate place to change Minecraft release policy.
+Switch supports Paper/Purpur/Pufferfish/Leaf in every direction with an exact
+available runtime, Vanilla to that family or a supported Java mod loader, and
+verified Paper-to-Vanilla layout conversion (also used before Paper-to-loader).
+The configured `level-name` is used. Paper 26.1+ relocates the documented
+Overworld data files; supported older versions relocate Nether and End directories.
+Missing, conflicting or unverified layouts block those actions.
 
-Spigot is outside this safe family. Vanilla transformations and mod-loader
-conversions are not implemented and remain Not Supported. Removing mods does not
-prove historic world data safe. Native Bedrock and Java cannot be converted into
-each other. Missing provider data or catalogue/network failures never prove
-compatibility. See [server-software.md](server-software.md) for these boundaries.
+Fabric, Quilt, Forge and NeoForge transitions require exact installed mod hashes,
+target-loader/game metadata and verified required dependencies for Convert.
+Incompatible or unknown evidence blocks Convert but can leave a protected
+experimental Clone available. Removing current mods does not prove a modded world
+safe for Vanilla or Paper: that direction offers only Clone and warns about lost
+mod-added world content. Every clone must pass target runtime verification.
+Review links to the selected server's **Plugins & Mods** workspace; Switch never
+removes, replaces, disables or downloads executable content. Returning to Switch
+or refreshing rechecks inventory. Across the new conversion directions, automatic
+startup content downloads stay suppressed. Supported target cross-play settings are preserved; review warns when the
+target requires Java connections. Same-family Switch retains
+its established cross-play handling.
+
+Convert keeps a cold archive before world changes. Failure and interrupted recovery
+restore through the existing backup/restore and runtime recovery paths, with no
+automatic retry of conversion. Switch keeps the exact game pin; Version remains
+the separate place to change release policy. Spigot stays unsupported, including
+direct Spigot-to-Paper from 26.1. Java and native Bedrock remain separate. See
+[server-software.md](server-software.md) and the
+[Paper world-layout guidance](https://docs.papermc.io/paper/migration/).
 
 The Minecraft Update workspace's Container tab shows the selected server, image,
 and status together. Previous container images use single selection; **Restore

@@ -13,6 +13,7 @@ if [[ ${1:-} == --instance ]]; then
     shift 2
 fi
 
+switch_preview=no
 configured_type="${MINECRAFT_SERVER_TYPE-paper}"
 target_type="${configured_type}"
 configured_image_tag="${MINECRAFT_IMAGE_TAG:-stable}"
@@ -20,6 +21,7 @@ target_image_tag="${configured_image_tag}"
 while [[ ${1:-} == --* ]]; do
     (( $# >= 2 )) || exit 1
     case "$1" in
+        --switch-preview) [[ $2 == yes && ${#instance_args[@]} != 0 ]] || exit 1; switch_preview=yes ;;
         --server-type) target_type="$2" ;;
         --image-tag) target_image_tag="$2" ;;
         *) exit 1 ;;
@@ -43,9 +45,14 @@ if (( $# != 3 )); then
 fi
 MINECRAFT_IMAGE_TAG="${target_image_tag}"
 validate_server_type "${target_type}" || exit 1
-if (( $# != 3 )); then server_allows_in_place_switch "${configured_type}" "${target_type}" || exit 1; fi
+if (( $# != 3 )) && [[ ${switch_preview} != yes ]]; then server_allows_in_place_switch "${configured_type}" "${target_type}" || exit 1; fi
 MINECRAFT_SERVER_TYPE="${target_type}"
 if (( $# == 3 )); then BEDROCK_ENABLED="$3"; fi
+if [[ ${switch_preview} == yes ]]; then
+    # Preserve a supported source cross-play choice; target software without
+    # that capability uses Java, without touching any installed executable.
+    case "${target_type}" in paper|purpur|pufferfish|leaf|fabric|neoforge) ;; *) BEDROCK_ENABLED=no ;; esac
+fi
 validate_server_capabilities || exit 1
 software_changed=false
 [[ ${configured_type} == "${target_type}" ]] || software_changed=true
@@ -57,6 +64,27 @@ if (( $# != 3 )); then
     if [[ -r ${latest_log} ]]; then
         installed="$(grep -Eo 'Starting minecraft server version [0-9A-Za-z._-]+' "${latest_log}" 2>/dev/null | tail -n1 | awk '{print $5}' || true)"
     fi
+fi
+# Read-only Switch resolution uses the normal exact setup resolver, including
+# loader pins. It does not relax the ordinary Version update software gate.
+if [[ ${switch_preview} == yes ]]; then
+    [[ $# == 2 && $1 == pinned && $2 == "${installed}" && ${target_type} != bedrock && ${target_type} != spigot ]] || exit 1
+    resolved="$(resolve_setup_java_runtime "${target_type}" pinned "$2")" || exit 1
+    candidate="$(jq -er .game <<< "${resolved}")"
+    [[ ${candidate} == "$2" ]] || exit 1
+    image="$(jq -er .image <<< "${resolved}")"
+    digest="$(jv_remote_platform_digest "${JV_MINECRAFT_IMAGE_REPO}:${image}")" || exit 1
+    crossplay_compatible=true
+    if [[ ${BEDROCK_ENABLED} == yes ]]; then
+        geyser="$(resolve_geyser_supported_java_version || true)"
+        if [[ -z ${geyser} ]] || ! server_crossplay_version_compatible "${candidate}" "${geyser}"; then crossplay_compatible=false; fi
+    fi
+    fingerprint="sha256:$(printf '%s' "${target_type}:${resolved}:${digest}:${BEDROCK_ENABLED}:${crossplay_compatible}" | sha256sum | cut -d ' ' -f1)"
+    jq -n --arg type "${target_type}" --arg game "${candidate}" --arg image "${image}" \
+        --arg loader "$(jq -r '.loader // empty' <<< "${resolved}")" --arg digest "${digest}" --arg fingerprint "${fingerprint}" \
+        --argjson enabled "$([[ ${BEDROCK_ENABLED} == yes ]] && printf true || printf false)" --argjson compatible "${crossplay_compatible}" \
+        '{server_type:$type,installed:$game,selected_candidate:$game,image_tag:$image,loader_version:$loader,server_supported:true,stack_state:"updates_available",update_available:true,plan_fingerprint:$fingerprint,managed_image_digest:$digest,crossplay_enabled:$enabled,crossplay_compatible:$compatible}'
+    exit 0
 fi
 if (( $# == 3 )) && [[ ${target_type} == bedrock ]]; then
     candidate="$(resolve_bedrock_release || true)"

@@ -153,8 +153,13 @@ Pufferfish, Leaf, Fabric, NeoForge, Forge, Quilt, Vanilla Java and native Bedroc
 Current is yellow and not selectable; Available offers a review of at least one
 implemented action; Not Supported is dimmed, disabled and remains visible.
 
-The supported structural family is **Paper / Purpur / Pufferfish / Leaf**, in all
+The supported Paper family is **Paper / Purpur / Pufferfish / Leaf**, in all
 directions where the exact game/runtime and required cross-play can be verified.
+Vanilla-to-Paper-family and Vanilla-to-loader use the target runtime's normal
+world loading. Paper-to-Vanilla and Paper-to-loader use verified, version-aware
+layout relocation under the configured `level-name`: Overworld data files on
+26.1+, and Nether/End directories on supported pre-26.1 releases. Unverifiable
+or conflicting layouts block those actions.
 Software conversion never upgrades or downgrades Minecraft. An unavailable exact
 target build blocks conversion. The target remains at the reviewed exact pin;
 Minecraft Version is the separate operation for release and policy changes.
@@ -173,24 +178,28 @@ lists named blockers and links to the selected server's Plugins & Mods workspace
 Provider/catalogue failure does not mean compatible. No plugins or mods are
 automatically removed, disabled, replaced, updated or downloaded by Switch.
 Reopening or refreshing Switch re-evaluates current inventory. An experimental
-clone may remain available inside the supported structural family when Convert
-is blocked, while preserving the original.
+clone may remain available when Convert is blocked, while preserving the original.
+A target is Available whenever Convert or protected Clone is available.
 
-Other structural conversions remain unsupported until their transformations and
-verification are implemented:
+Fabric/Quilt, Forge/NeoForge and other Java loader transitions require verified
+installed bytes, exact game/target-loader metadata and verified required
+dependencies for Convert. Unknown or incompatible content blocks Convert but
+leaves a protected experimental clone available when its exact runtime exists.
+Plugins never become mods, and mods never become plugins. Blockers must be handled
+manually in Plugins & Mods. Leaving a mod loader for Vanilla or Paper offers only
+a clone: historic mod-added blocks/items/entities may not survive, even if the
+current mods folder is empty. Meaningful target runtime verification is required.
 
-- Spigot is outside the safe Paper family. Paper-to-Spigot can lose data; direct
-  Spigot-to-Paper is unsupported from 26.1 because world layouts diverged.
-- Vanilla-to-Paper and Paper-to-Vanilla require exact-version world-layout handling.
-  No automatic Vanilla intermediary is implemented. Plugins cannot silently stay
-  active on Vanilla, and Switch never removes them to make a conversion pass.
-- Fabric/Quilt and Forge/NeoForge compatibility must be proven per installed mod,
-  exact Minecraft version, target loader and required dependencies. Loader names
-  alone do not establish compatibility. Cross-family plugins and mods are not
-  interchangeable. Historic modded world safety cannot be inferred from an empty
-  current mods directory.
-- Java and native Bedrock have no supported world/runtime conversion in either
-  direction; the Bedrock card stays visible.
+Spigot remains unsupported in this scope: Paper-to-Spigot is unsafe, and direct
+Spigot-to-Paper from 26.1 has a different world layout. No intermediary conversion
+is attempted. Java and native Bedrock remain unsupported in both directions.
+
+The new conversion directions retain the startup content guard to avoid
+unrequested downloads. Supported target cross-play settings are preserved; review warns when the
+target requires Java connections. Existing same-Paper-family cross-play behavior is
+preserved. Failed in-place conversions restore their cold archive through the
+existing restore transaction before restarting the original. Interrupted recovery
+retains the same archive authority and never retries conversion.
 
 Upstream world-layout reference:
 [Paper migration guidance](https://docs.papermc.io/paper/migration/).

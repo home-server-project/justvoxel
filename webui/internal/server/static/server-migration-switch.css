@@ -3,14 +3,17 @@
 .migration-switch .setup-software-lanes .setup-server-types{grid-template-columns:repeat(5,minmax(0,1fr));grid-auto-rows:1fr;align-content:start;min-width:0;margin:0}
 .migration-switch .setup-server-types{display:grid;gap:.35rem;border:0;padding:0}
 .migration-switch .setup-server-types legend{margin-bottom:.2rem;color:#c8d0d6;font-size:.9rem;font-weight:800}
-.migration-switch .server-software-card{grid-template-columns:40px minmax(0,1fr);gap:.7rem;min-height:104px;padding:.65rem .75rem;box-sizing:border-box;align-items:start;align-content:start;margin:0}
+.migration-switch .server-software-card{grid-template-columns:40px minmax(0,1fr);gap:.7rem;height:104px;min-height:104px;max-height:104px;padding:.65rem .75rem;box-sizing:border-box;align-items:start;align-content:start;margin:0}
 .migration-switch .server-software-icon,.migration-switch .server-software-icon img{width:40px;min-width:40px;height:40px}
-.migration-switch .server-software-copy{overflow-wrap:anywhere;gap:var(--jv-space-xs)}
+.migration-switch .server-software-copy{min-width:0;overflow-wrap:anywhere;gap:var(--jv-space-xs)}
 .migration-switch .server-software-copy strong{font-size:1rem}
 .migration-switch .server-software-copy small{font-size:.82rem}
 .migration-switch .server-software-icon img[src$="/paper.svg"]{transform:scale(.82);transform-origin:center}
 .migration-switch .server-software-icon img[src$="/purpur.svg"]{transform:scale(.90);transform-origin:center}
-.migration-switch .migration-switch-sticker{position:absolute;top:0;right:.25rem;transform:translateY(-50%);border-radius:5px;padding:.12rem .4rem;background:var(--jv-accent);color:var(--jv-surface);font-size:.65rem;line-height:1;font-weight:700;pointer-events:none}
+.migration-switch .migration-switch-title-row{display:flex;align-items:center;gap:.3rem;min-width:0;white-space:nowrap}
+.migration-switch .migration-switch-title-row strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.migration-switch .is-pending .migration-switch-sticker{visibility:hidden}
+.migration-switch .migration-switch-sticker{flex:0 0 auto;box-sizing:content-box;inline-size:13ch;text-align:center;white-space:nowrap;border-radius:5px;padding:.12rem .4rem;background:var(--jv-accent);color:var(--jv-surface);font-size:.65rem;line-height:1;font-weight:700;pointer-events:none}
 .migration-switch .is-current{border-color:#e5bb40;background:color-mix(in srgb,#e5bb40 12%,var(--jv-surface-sunken));opacity:1}
 .migration-switch .is-current .migration-switch-sticker{background:#e5bb40;color:#241f10}
 .migration-switch .is-unsupported{filter:brightness(.82);opacity:.72;cursor:default}

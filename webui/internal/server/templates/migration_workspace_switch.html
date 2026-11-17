@@ -4,10 +4,9 @@
 <div data-switch-operation role="status"></div>
 <div class="setup-software-groups setup-software-lanes migration-switch-catalogue">
 {{range .Groups}}<fieldset class="setup-server-types setup-server-types-compact"><legend>{{ts .Name}}</legend>
-{{range .Software}}<button type="button" class="setup-server-type server-software-card migration-switch-card is-unsupported" data-switch-target="{{.ID}}" disabled>
+{{range .Software}}<button type="button" class="setup-server-type server-software-card migration-switch-card is-unsupported is-pending" data-switch-target="{{.ID}}" disabled>
 <span class="server-software-icon" aria-hidden="true"><img src="/static/server-software/{{.ID}}.svg" alt="" width="40" height="40"></span>
-<span class="server-software-copy"><strong>{{ts .Name}}</strong><small>{{ts .Description}}</small></span>
-<span class="migration-switch-sticker" data-switch-sticker>{{t "ui.120d1307d24e"}}</span>
+<span class="server-software-copy"><span class="migration-switch-title-row"><strong>{{ts .Name}}</strong><span class="migration-switch-sticker" data-switch-sticker>{{t "ui.120d1307d24e"}}</span></span><small>{{ts .Description}}</small></span>
 </button>{{end}}
 </fieldset>{{end}}
 </div>

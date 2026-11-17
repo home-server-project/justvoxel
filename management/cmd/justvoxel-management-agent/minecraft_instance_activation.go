@@ -768,7 +768,8 @@ func (b *instanceRuntimeBackend) applyVersion(ctx context.Context, previous inst
 			return instanceRuntimeFailure("Version changes on existing data require independent backup/migration support in Phase 4. No version was changed.")
 		}
 	}
-	if previous.EnvironmentSHA256 != "" && previous.Runtime.LoaderVersion != next.Runtime.LoaderVersion {
+	switchApply := maintenance && switchRuntimeApplyAuthorized(ctx, previous, next)
+	if previous.EnvironmentSHA256 != "" && previous.Runtime.LoaderVersion != next.Runtime.LoaderVersion && !switchApply {
 		if err = b.storage(ctx, "version-empty", previous); err != nil {
 			return instanceRuntimeFailure("Loader changes on existing data require separate compatibility support. No loader was changed.")
 		}
@@ -787,7 +788,7 @@ func (b *instanceRuntimeBackend) applyVersion(ctx context.Context, previous inst
 		}
 		defer heldUDP.Close()
 	}
-	if previous.EnvironmentSHA256 != "" && previous.Runtime.Software != next.Runtime.Software && !(maintenance && javaServerAllowsSwitch(previous.Runtime.Software, next.Runtime.Software)) {
+	if previous.EnvironmentSHA256 != "" && previous.Runtime.Software != next.Runtime.Software && !(maintenance && javaServerAllowsSwitch(previous.Runtime.Software, next.Runtime.Software)) && !switchApply {
 		return instanceRuntimeFailure("Changing software on an existing instance is outside Phase 3A.")
 	}
 	var held []net.Listener

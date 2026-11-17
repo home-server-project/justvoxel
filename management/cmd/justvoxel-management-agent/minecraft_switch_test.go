@@ -14,27 +14,93 @@ import (
 	"testing"
 )
 
-func TestSwitchStructuralPathsPreservePaperForkFamily(t *testing.T) {
-	software := []string{"paper", "purpur", "spigot", "pufferfish", "leaf", "fabric", "neoforge", "forge", "quilt", "vanilla", "bedrock"}
-	for _, from := range software {
-		for _, to := range software {
-			want := from != to && javaServerPaperFamily(from) && javaServerPaperFamily(to)
-			if switchStructuralPath(from, to) != want {
-				t.Fatalf("unsafe structural path %s -> %s", from, to)
-			}
-			if want && !javaServerAllowsSwitch(from, to) {
-				t.Fatalf("existing maintenance path lost %s -> %s", from, to)
-			}
-		}
+func TestSwitchTransitionMatrix(t *testing.T) {
+	cases := []struct {
+		name, from, to, content         string
+		runtime, layout, convert, clone bool
+	}{
+		{"paper purpur", "paper", "purpur", "", true, true, true, true},
+		{"purpur leaf", "purpur", "leaf", "", true, true, true, true},
+		{"vanilla paper", "vanilla", "paper", "", true, true, true, true},
+		{"vanilla purpur", "vanilla", "purpur", "", true, true, true, true},
+		{"vanilla fabric", "vanilla", "fabric", "", true, true, true, true},
+		{"vanilla quilt", "vanilla", "quilt", "", true, true, true, true},
+		{"vanilla forge", "vanilla", "forge", "", true, true, true, true},
+		{"vanilla neoforge", "vanilla", "neoforge", "", true, true, true, true},
+		{"paper vanilla", "paper", "vanilla", "", true, true, true, true},
+		{"paper missing layout", "paper", "vanilla", "", true, false, false, false},
+		{"fabric quilt compatible", "fabric", "quilt", "verified", true, true, true, true},
+		{"fabric quilt incompatible", "fabric", "quilt", "incompatible", true, true, false, true},
+		{"fabric quilt unknown", "fabric", "quilt", "unknown", true, true, false, true},
+		{"quilt only mod", "quilt", "fabric", "incompatible", true, true, false, true},
+		{"forge neo compatible", "forge", "neoforge", "verified", true, true, true, true},
+		{"forge neo incompatible", "forge", "neoforge", "incompatible", true, true, false, true},
+		{"forge neo unknown", "forge", "neoforge", "unknown", true, true, false, true},
+		{"neo forge compatible", "neoforge", "forge", "verified", true, true, true, true},
+		{"neo forge incompatible", "neoforge", "forge", "incompatible", true, true, false, true},
+		{"fabric forge compatible", "fabric", "forge", "verified", true, true, true, true},
+		{"fabric forge unknown", "fabric", "forge", "unknown", true, true, false, true},
+		{"empty modded world", "fabric", "paper", "", true, true, false, true},
+		{"modded vanilla", "neoforge", "vanilla", "", true, true, false, true},
+		{"paper loader layout", "paper", "fabric", "", true, true, true, true},
+		{"paper loader no layout", "paper", "fabric", "", true, false, false, false},
+		{"paper loader plugins", "paper", "fabric", "incompatible", true, true, false, true},
+		{"paper spigot", "paper", "spigot", "", true, true, false, false},
+		{"spigot paper 26.1+", "spigot", "paper", "", true, true, false, false},
+		{"java bedrock", "paper", "bedrock", "", true, true, false, false},
+		{"bedrock java", "bedrock", "paper", "", true, true, false, false},
+		{"missing exact runtime", "paper", "pufferfish", "", false, true, false, false},
 	}
-	if switchStructuralPath("spigot", "paper") || switchStructuralPath("paper", "spigot") || switchStructuralPath("bedrock", "paper") || switchStructuralPath("paper", "bedrock") {
-		t.Fatal("unimplemented world conversion allowed")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var content []switchContent
+			if tc.content != "" {
+				content = []switchContent{{Name: "Named blocker", Filename: "mod.jar", Compatibility: tc.content}}
+			}
+			convert, clone := switchTransitionActions(tc.from, tc.to, tc.runtime, tc.layout, content)
+			if convert != tc.convert || clone != tc.clone {
+				t.Fatalf("got convert=%v clone=%v", convert, clone)
+			}
+			if tc.clone && !tc.convert && !(clone || convert) {
+				t.Fatal("protected clone must remain Available")
+			}
+		})
 	}
 }
 
-func switchPlannerFixture(t *testing.T) *instanceActivationFixture {
+func switchSourceFixture(t *testing.T, from string) *instanceActivationFixture {
 	t.Helper()
-	f := whitelistSurfaceFixture(t)
+	f := newInstanceActivationFixtureFor(t, from, "1.21.4")
+	// Configure the source before its first activation; this is fixture creation,
+	// not an ordinary Version operation on an existing server.
+	record, err := f.backend.readRecord("jv-a1b2c3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.Runtime.VersionPolicy, record.Runtime.BedrockEnabled = "pinned", false
+	if caps, _ := javaServerSoftware(from); caps.ModLoader {
+		record.Runtime.LoaderVersion, record.Runtime.ImageTag = "0.16.10", "java21"
+	}
+	if err = f.backend.writeJSON(filepath.Join(f.backend.root, record.Runtime.ID, "config.json"), record, true); err != nil {
+		t.Fatal(err)
+	}
+	oldBackend := instanceRuntimes
+	instanceRuntimes = f.backend
+	t.Cleanup(func() { instanceRuntimes = oldBackend })
+	if err = f.apply(record.Runtime.ID); err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+func switchPlannerFixture(t *testing.T, software ...string) *instanceActivationFixture {
+	t.Helper()
+	var f *instanceActivationFixture
+	if len(software) == 0 {
+		f = whitelistSurfaceFixture(t)
+	} else {
+		f = switchSourceFixture(t, software[0])
+	}
 	previous := runAdminVersionStatus
 	previousClient := pluginCatalogClient
 	pluginCatalogClient = &http.Client{Transport: pluginTestTransport(func(*http.Request) (*http.Response, error) { return nil, errors.New("catalogue unavailable") })}
@@ -49,7 +115,12 @@ func switchPlannerFixture(t *testing.T) *instanceActivationFixture {
 		if policy != "pinned" || version != "1.21.4" {
 			t.Fatalf("Switch changed game version: %s %s", policy, version)
 		}
-		return []byte(`{"server_type":"` + target + `","installed":"1.21.4","selected_candidate":"1.21.4","image_tag":"stable","server_supported":true,"stack_state":"updates_available","update_available":true,"plan_fingerprint":"` + testMinecraftResetFingerprint + `","managed_image_digest":"` + testMinecraftResetFingerprint + `"}`), nil
+		caps, _ := javaServerSoftware(target)
+		loader, tag := "", "stable"
+		if caps.ModLoader {
+			loader, tag = "0.16.10", "java21"
+		}
+		return []byte(`{"server_type":"` + target + `","installed":"1.21.4","selected_candidate":"1.21.4","image_tag":"` + tag + `","loader_version":"` + loader + `","server_supported":true,"stack_state":"updates_available","update_available":true,"plan_fingerprint":"` + testMinecraftResetFingerprint + `","managed_image_digest":"` + testMinecraftResetFingerprint + `"}`), nil
 	}
 	return f
 }
@@ -392,165 +463,406 @@ func TestSwitchRuntimeGuardPreservesNormalRendering(t *testing.T) {
 }
 
 func TestSwitchFailedCloneRuntimeVerificationPreservesOriginal(t *testing.T) {
-	f := switchPlannerFixture(t)
-	oldStorage, oldCommand, oldLock := instanceBackupStorageCommand, pluginInstallCommand, pluginRuntimeLockPath
-	t.Cleanup(func() {
-		instanceBackupStorageCommand = oldStorage
-		pluginInstallCommand = oldCommand
-		pluginRuntimeLockPath = oldLock
-	})
-	pluginRuntimeLockPath = filepath.Join(t.TempDir(), "maintenance.lock")
-	f.players = "There are 0 of a max of 20 players online:"
-	sourceID := "jv-a1b2c3"
-	cloneID := ""
-	cleanupCalls, verificationCalls := 0, 0
-	base := f.backend.command
-	f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
-		if command == "podman" && len(args) > 0 && args[0] == "rm" {
-			if cloneID == "" || cloneID == sourceID || !reflect.DeepEqual(args, []string{"rm", "--ignore", "--", "minecraft-" + cloneID}) {
-				t.Fatal("cleanup did not target the expected failed clone", args)
+	for _, target := range []string{"purpur", "vanilla", "fabric"} {
+		t.Run(target, func(t *testing.T) {
+
+			f := switchPlannerFixture(t)
+			oldStorage, oldCommand, oldLock := instanceBackupStorageCommand, pluginInstallCommand, pluginRuntimeLockPath
+			t.Cleanup(func() {
+				instanceBackupStorageCommand = oldStorage
+				pluginInstallCommand = oldCommand
+				pluginRuntimeLockPath = oldLock
+			})
+			pluginRuntimeLockPath = filepath.Join(t.TempDir(), "maintenance.lock")
+			f.players = "There are 0 of a max of 20 players online:"
+			sourceID := "jv-a1b2c3"
+			sourceRecord, readErr := f.backend.readRecord(sourceID)
+			if readErr != nil {
+				t.Fatal(readErr)
 			}
-			if verificationCalls != 1 || f.states[cloneID] != "inactive" {
-				t.Fatal("clone cleanup occurred before failed verification and normal shutdown")
-			}
-			cleanupCalls++
-			delete(f.containers, cloneID)
-			return nil, nil
-		}
-		if command == "nsenter" && len(args) > 4 && args[2] == instanceDeleteHelper && (cloneID == "" || args[4] != cloneID || args[4] == sourceID) {
-			t.Fatal("storage cleanup did not target the expected failed clone", args)
-		}
-		if command == "systemctl" && len(args) > 0 {
-			if args[0] == "show" && strings.Contains(strings.Join(args, " "), "--property=Job") {
-				return nil, nil
-			}
-			if strings.Contains(strings.Join(args, " "), "backup-") {
-				if args[0] == "show" {
-					return []byte("LoadState=not-found\nActiveState=inactive\nJob=\n"), nil
+			switchWorldFixture(t, sourceRecord.Storage.DataPath, "1.21.4", "Family")
+			originalWorld := switchWorldSnapshot(t, sourceRecord.Storage.DataPath)
+			cloneID := ""
+			cleanupCalls, verificationCalls := 0, 0
+			base := f.backend.command
+			f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+				if command == "podman" && len(args) > 0 && args[0] == "rm" {
+					if cloneID == "" || cloneID == sourceID || !reflect.DeepEqual(args, []string{"rm", "--ignore", "--", "minecraft-" + cloneID}) {
+						t.Fatal("cleanup did not target the expected failed clone", args)
+					}
+					if verificationCalls != 1 || f.states[cloneID] != "inactive" {
+						t.Fatal("clone cleanup occurred before failed verification and normal shutdown")
+					}
+					cleanupCalls++
+					delete(f.containers, cloneID)
+					return nil, nil
 				}
-				return nil, nil
-			}
-		}
-		return base(ctx, command, args...)
-	}
-	created := false
-	archive := instanceBackupMetadata{Schema: 1, ID: sourceID, Software: "paper", Version: "1.21.4", Archive: "JV Paper-backup-paper-2026-03-06-0015.tar.gz"}
-	instanceBackupStorageCommand = func(ctx context.Context, command string, args ...string) ([]byte, error) {
-		if command != "nsenter" || len(args) < 5 {
-			t.Fatal("unexpected storage call", command, args)
-		}
-		action, id := args[3], args[4]
-		if args[2] == instanceBackupHelper {
-			if id != sourceID {
-				t.Fatal("source backup identity changed")
-			}
-			switch action {
-			case "preflight":
-				return nil, nil
-			case "create":
-				created = true
-				return nil, nil
-			case "inventory":
-				if created {
-					return json.Marshal([]instanceBackupMetadata{archive})
+				if command == "nsenter" && len(args) > 4 && args[2] == instanceDeleteHelper && (cloneID == "" || args[4] != cloneID || args[4] == sourceID) {
+					t.Fatal("storage cleanup did not target the expected failed clone", args)
 				}
-				return []byte("[]"), nil
+				if command == "systemctl" && len(args) > 0 {
+					if args[0] == "show" && strings.Contains(strings.Join(args, " "), "--property=Job") {
+						return nil, nil
+					}
+					if strings.Contains(strings.Join(args, " "), "backup-") {
+						if args[0] == "show" {
+							return []byte("LoadState=not-found\nActiveState=inactive\nJob=\n"), nil
+						}
+						return nil, nil
+					}
+				}
+				return base(ctx, command, args...)
 			}
-		}
-		if args[2] != instanceRestoreHelper || id == sourceID {
-			t.Fatal("clone restore touched the source", args)
-		}
-		if action == "plan" {
-			if cloneID != "" || !instanceIDPattern.MatchString(id) {
-				t.Fatal("unexpected clone identity or automatic retry", id)
+			created := false
+			archive := instanceBackupMetadata{Schema: 1, ID: sourceID, Software: "paper", Version: "1.21.4", Archive: "JV Paper-backup-paper-2026-03-06-0015.tar.gz"}
+			instanceBackupStorageCommand = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+				if command != "nsenter" || len(args) < 5 {
+					t.Fatal("unexpected storage call", command, args)
+				}
+				action, id := args[3], args[4]
+				if args[2] == instanceBackupHelper {
+					if id != sourceID {
+						t.Fatal("source backup identity changed")
+					}
+					switch action {
+					case "preflight":
+						return nil, nil
+					case "create":
+						created = true
+						return nil, nil
+					case "inventory":
+						if created {
+							return json.Marshal([]instanceBackupMetadata{archive})
+						}
+						return []byte("[]"), nil
+					}
+				}
+				if args[2] != instanceRestoreHelper || id == sourceID {
+					t.Fatal("clone restore touched the source", args)
+				}
+				if action == "plan" {
+					if cloneID != "" || !instanceIDPattern.MatchString(id) {
+						t.Fatal("unexpected clone identity or automatic retry", id)
+					}
+					cloneID = id
+					return json.Marshal(instanceRestoreInspection{Metadata: archive, Integrity: "verified", Fingerprint: instanceHash([]byte("clone-copy"))})
+				}
+				if action == "prepare" {
+					raw, err := f.backend.readPrivate(filepath.Join(f.backend.root, id, "config.json"))
+					if err != nil {
+						return nil, err
+					}
+					journal := instanceRestoreJournal{Schema: 1, ID: id, Transaction: strings.Repeat("b", 32), ConfigSHA256: instanceHash(raw), Parent: []uint64{1, 2}, Original: []uint64{1, 3}, Replacement: []uint64{1, 4}, Stage: "ready_to_apply", Archive: archive.Archive, Fingerprint: args[6]}
+					return nil, f.backend.writeJSON(filepath.Join(f.backend.root, id, "restore-journal.json"), journal, true)
+				}
+				journal, err := f.backend.restoreJournal(id)
+				if err != nil {
+					return nil, err
+				}
+				if action == "activate" {
+					clone, readErr := f.backend.readRecord(id)
+					if readErr != nil {
+						return nil, readErr
+					}
+					if copyErr := os.CopyFS(clone.Storage.DataPath, os.DirFS(sourceRecord.Storage.DataPath)); copyErr != nil {
+						return nil, copyErr
+					}
+				}
+				journal.Stage = map[string]string{"shutdown": "shutdown", "activate": "replacement_activated", "verifying": "runtime_verification", "completed": "completed"}[action]
+				if journal.Stage == "" {
+					t.Fatal("unexpected restore stage", action)
+				}
+				return nil, f.backend.writeJSON(filepath.Join(f.backend.root, id, "restore-journal.json"), journal, true)
 			}
-			cloneID = id
-			return json.Marshal(instanceRestoreInspection{Metadata: archive, Integrity: "verified", Fingerprint: instanceHash([]byte("clone-copy"))})
-		}
-		if action == "prepare" {
-			raw, err := f.backend.readPrivate(filepath.Join(f.backend.root, id, "config.json"))
+			verified := false
+			pluginInstallCommand = func(_ context.Context, command string, args ...string) ([]byte, error) {
+				if command == "systemctl" {
+					id := strings.TrimSuffix(strings.TrimPrefix(args[len(args)-1], "minecraft-"), ".service")
+					if args[0] == "start" {
+						if id == sourceID {
+							t.Fatal("stopped source started for clone")
+						}
+						f.states[id] = "active"
+						f.containers[id] = "running"
+						return nil, nil
+					}
+					if args[0] == "is-active" {
+						return []byte(f.states[id]), nil
+					}
+				}
+				if command == "podman" {
+					if cloneID == "" || !reflect.DeepEqual(args, []string{"exec", "minecraft-" + cloneID, "rcon-cli", "list"}) {
+						t.Fatal("unexpected clone readiness command", command, args)
+					}
+					return []byte(f.players), nil
+				}
+				if strings.HasSuffix(command, "verify-minecraft-stack") {
+					if cloneID == "" || !reflect.DeepEqual(args, []string{"--instance", cloneID, "1.21.4"}) {
+						t.Fatal("runtime verification did not target the exact-version clone", args)
+					}
+					if switchNeedsWorldMove("paper", target) {
+						clone, readErr := f.backend.readRecord(cloneID)
+						if readErr != nil {
+							t.Fatal(readErr)
+						}
+						relocated := filepath.Join(clone.Storage.DataPath, "Family", "DIM-1", "region", "r.0.0.mca")
+						raw, readErr := os.ReadFile(relocated)
+						if readErr != nil || string(raw) != "nether chunks" {
+							t.Fatal("target readiness ran before verified relocation", readErr)
+						}
+						if writeErr := os.WriteFile(relocated, []byte("failed target changed chunks"), 0644); writeErr != nil {
+							t.Fatal(writeErr)
+						}
+					}
+					verificationCalls++
+					verified = true
+					return nil, errors.New("target software failed exact verification")
+				}
+				t.Fatal("unexpected runtime command", command, args)
+				return nil, nil
+			}
+			plan, err := planMinecraftSwitch(context.Background(), sourceID, target)
 			if err != nil {
-				return nil, err
+				t.Fatal(err)
 			}
-			journal := instanceRestoreJournal{Schema: 1, ID: id, Transaction: strings.Repeat("b", 32), ConfigSHA256: instanceHash(raw), Parent: []uint64{1, 2}, Original: []uint64{1, 3}, Replacement: []uint64{1, 4}, Stage: "ready_to_apply", Archive: archive.Archive, Fingerprint: args[6]}
-			return nil, f.backend.writeJSON(filepath.Join(f.backend.root, id, "restore-journal.json"), journal, true)
-		}
-		journal, err := f.backend.restoreJournal(id)
-		if err != nil {
-			return nil, err
-		}
-		journal.Stage = map[string]string{"shutdown": "shutdown", "activate": "replacement_activated", "verifying": "runtime_verification", "completed": "completed"}[action]
-		if journal.Stage == "" {
-			t.Fatal("unexpected restore stage", action)
-		}
-		return nil, f.backend.writeJSON(filepath.Join(f.backend.root, id, "restore-journal.json"), journal, true)
+			source, _ := f.backend.readRecord(sourceID)
+			sourceContainer := f.containers[sourceID]
+			s := surfaceTestServer(t, roleAdministrator)
+			s.operations = openTestOperationStore(t)
+			request := minecraftSwitchRequest{Target: target, Action: "clone", Fingerprint: plan.Fingerprint, Confirm: true}
+			journal, _, err := s.operations.beginMinecraftMaintenance(switchActionFingerprint(request), operationTypeMinecraftSwitch, sourceID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.runMinecraftSwitch(context.Background(), journal, plan, request)
+			result, err := s.operations.get(journal.OperationID)
+			if err != nil || !verified || result.State == operationSucceeded || result.State == operationRunning {
+				t.Fatalf("failed verification reported success: %+v verified=%v err=%v", result, verified, err)
+			}
+			if cleanupCalls != 1 || verificationCalls != 1 || result.State != operationResolved {
+				t.Fatalf("failed clone was not cleaned up and recovered exactly once: cleanup=%d verification=%d result=%+v", cleanupCalls, verificationCalls, result)
+			}
+			evidence, err := readSwitchEvidence(journal)
+			if err != nil || evidence.CloneID != cloneID || evidence.Stage != "recovered" {
+				t.Fatalf("clone recovery evidence was not completed: %+v %v", evidence, err)
+			}
+			if err := f.backend.verifyCommittedSwitchState(context.Background(), sourceID); err != nil {
+				t.Fatal("original was not left verified", err)
+			}
+			if _, err := f.backend.readRecord(cloneID); !errors.Is(err, os.ErrNotExist) && !errors.Is(err, errInstanceNotFound) {
+				t.Fatal("failed clone runtime record remains", err)
+			}
+			after, _ := f.backend.readRecord(sourceID)
+			if !reflect.DeepEqual(source, after) || f.states[sourceID] != "inactive" || f.containers[sourceID] != sourceContainer {
+				t.Fatal("failed clone changed original configuration or stopped state")
+			}
+
+			if !reflect.DeepEqual(originalWorld, switchWorldSnapshot(t, sourceRecord.Storage.DataPath)) {
+				t.Fatal("failed converted clone changed original world paths or bytes")
+			}
+		})
 	}
-	verified := false
-	pluginInstallCommand = func(_ context.Context, command string, args ...string) ([]byte, error) {
-		if command == "systemctl" {
-			id := strings.TrimSuffix(strings.TrimPrefix(args[len(args)-1], "minecraft-"), ".service")
-			if args[0] == "start" {
-				if id == sourceID {
-					t.Fatal("stopped source started for clone")
+}
+
+func TestSwitchPlannerResolvesApprovedDirections(t *testing.T) {
+	cases := []struct {
+		from, to                                 string
+		plugins, layout, runtime, convert, clone bool
+	}{
+		{"vanilla", "paper", false, false, true, true, true},
+		{"vanilla", "purpur", false, false, true, true, true},
+		{"vanilla", "fabric", false, false, true, true, true},
+		{"paper", "vanilla", false, true, true, true, true},
+		{"paper", "fabric", false, true, true, true, true},
+		{"paper", "fabric", true, true, true, false, true},
+		{"paper", "fabric", false, false, true, false, false},
+		{"fabric", "paper", false, false, true, false, true},
+		{"fabric", "quilt", false, false, true, true, true},
+		{"forge", "neoforge", false, false, true, true, true},
+		{"neoforge", "forge", false, false, true, true, true},
+		{"vanilla", "fabric", false, false, false, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.from+"/"+tc.to, func(t *testing.T) {
+			f := switchPlannerFixture(t, tc.from)
+			record, err := f.backend.readRecord("jv-a1b2c3")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.layout {
+				switchWorldFixture(t, record.Storage.DataPath, "1.21.4", "Family")
+			}
+			if tc.plugins {
+				if err = os.MkdirAll(filepath.Join(record.Storage.DataPath, "plugins"), 0755); err != nil {
+					t.Fatal(err)
 				}
-				f.states[id] = "active"
-				f.containers[id] = "running"
-				return nil, nil
+				pluginTestJar(t, filepath.Join(record.Storage.DataPath, "plugins", "Family.jar"), map[string]string{"plugin.yml": "name: Family\nversion: 1\nmain: example.Family\n"})
 			}
-			if args[0] == "is-active" {
-				return []byte(f.states[id]), nil
+			resolver := runAdminVersionStatus
+			runAdminVersionStatus = func(ctx context.Context, policy, version, target, image string) ([]byte, error) {
+				if target != "" {
+					exact, _ := ctx.Value(switchRuntimeKey{}).(bool)
+					if !exact {
+						t.Fatal("new direction did not use exact runtime resolver")
+					}
+					if !tc.runtime {
+						return nil, errors.New("no exact target release")
+					}
+				}
+				return resolver(ctx, policy, version, target, image)
 			}
-		}
-		if command == "podman" {
-			if cloneID == "" || !reflect.DeepEqual(args, []string{"exec", "minecraft-" + cloneID, "rcon-cli", "list"}) {
-				t.Fatal("unexpected clone readiness command", command, args)
+			plan, err := planMinecraftSwitch(context.Background(), record.Runtime.ID, tc.to)
+			if err != nil || plan.Convert != tc.convert || plan.Clone != tc.clone {
+				t.Fatalf("wrong approved plan: %+v %v", plan, err)
 			}
-			return []byte(f.players), nil
-		}
-		if strings.HasSuffix(command, "verify-minecraft-stack") {
-			if cloneID == "" || !reflect.DeepEqual(args, []string{"--instance", cloneID, "1.21.4"}) {
-				t.Fatal("runtime verification did not target the exact-version clone", args)
+			if tc.clone && plan.Fingerprint == "" {
+				t.Fatal("Available target has no reviewed fingerprint")
 			}
-			verificationCalls++
-			verified = true
-			return nil, errors.New("target software failed exact verification")
-		}
-		t.Fatal("unexpected runtime command", command, args)
-		return nil, nil
+			if tc.plugins && (len(plan.Content) != 1 || plan.Content[0].Filename != "Family.jar" || plan.Content[0].Compatibility == "verified") {
+				t.Fatal("plugin blocker not named", plan.Content)
+			}
+		})
 	}
-	plan, err := planMinecraftSwitch(context.Background(), sourceID, "purpur")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source, _ := f.backend.readRecord(sourceID)
-	sourceContainer := f.containers[sourceID]
-	s := surfaceTestServer(t, roleAdministrator)
-	s.operations = openTestOperationStore(t)
-	request := minecraftSwitchRequest{Target: "purpur", Action: "clone", Fingerprint: plan.Fingerprint, Confirm: true}
-	journal, _, err := s.operations.beginMinecraftMaintenance(switchActionFingerprint(request), operationTypeMinecraftSwitch, sourceID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.runMinecraftSwitch(context.Background(), journal, plan, request)
-	result, err := s.operations.get(journal.OperationID)
-	if err != nil || !verified || result.State == operationSucceeded || result.State == operationRunning {
-		t.Fatalf("failed verification reported success: %+v verified=%v err=%v", result, verified, err)
-	}
-	if cleanupCalls != 1 || verificationCalls != 1 || result.State != operationResolved {
-		t.Fatalf("failed clone was not cleaned up and recovered exactly once: cleanup=%d verification=%d result=%+v", cleanupCalls, verificationCalls, result)
-	}
-	evidence, err := readSwitchEvidence(journal)
-	if err != nil || evidence.CloneID != cloneID || evidence.Stage != "recovered" {
-		t.Fatalf("clone recovery evidence was not completed: %+v %v", evidence, err)
-	}
-	if err := f.backend.verifyCommittedSwitchState(context.Background(), sourceID); err != nil {
-		t.Fatal("original was not left verified", err)
-	}
-	if _, err := f.backend.readRecord(cloneID); !errors.Is(err, os.ErrNotExist) && !errors.Is(err, errInstanceNotFound) {
-		t.Fatal("failed clone runtime record remains", err)
-	}
-	after, _ := f.backend.readRecord(sourceID)
-	if !reflect.DeepEqual(source, after) || f.states[sourceID] != "inactive" || f.containers[sourceID] != sourceContainer {
-		t.Fatal("failed clone changed original configuration or stopped state")
+}
+
+func TestSwitchPublicationKeepsOrdinaryVersionSoftwareGuard(t *testing.T) {
+	for _, pair := range [][2]string{{"paper", "vanilla"}, {"vanilla", "fabric"}, {"fabric", "quilt"}} {
+		t.Run(pair[0]+"/"+pair[1], func(t *testing.T) {
+			f := switchPlannerFixture(t, pair[0])
+			ctx := context.Background()
+			source, err := f.backend.readRecord("jv-a1b2c3")
+			if err != nil {
+				t.Fatal(err)
+			}
+			next := source
+			next.Runtime.Software, next.Runtime.LoaderVersion, next.Runtime.ImageTag = pair[1], "", "stable"
+			if caps, _ := javaServerSoftware(pair[1]); caps.ModLoader {
+				next.Runtime.LoaderVersion, next.Runtime.ImageTag = "0.16.11", "java21"
+			}
+			records, err := f.backend.records()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, maintenance := range []bool{false, true} {
+				err = f.backend.applyVersion(ctx, source, instanceReplaceRecord(records, next), f.snapshot, maintenance)
+				if err == nil || !strings.Contains(err.Error(), "Changing software on an existing instance is outside Phase 3A.") {
+					t.Fatalf("ordinary Version accepted software change (maintenance=%v): %v", maintenance, err)
+				}
+			}
+			// Keep existing data nonempty and change loader pins too: only the
+			// reviewed Switch publication may cross either generic restriction.
+			if pair[0] == "paper" {
+				switchWorldFixture(t, source.Storage.DataPath, "1.21.4", "Family")
+			} else if err = os.WriteFile(filepath.Join(source.Storage.DataPath, "level.dat"), []byte("original world"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			if pair[0] == "fabric" {
+				loaderOnly := source
+				loaderOnly.Runtime.LoaderVersion = "0.16.11"
+				err = f.backend.applyVersion(ctx, source, instanceReplaceRecord(records, loaderOnly), f.snapshot, true)
+				if err == nil || !strings.Contains(err.Error(), "Loader changes on existing data require separate compatibility support.") {
+					t.Fatal("ordinary Version bypassed the existing-data loader protection", err)
+				}
+			}
+			resolver := runAdminVersionStatus
+			runAdminVersionStatus = func(ctx context.Context, policy, version, target, image string) ([]byte, error) {
+				raw, err := resolver(ctx, policy, version, target, image)
+				if target != "" && err == nil {
+					raw = []byte(strings.ReplaceAll(string(raw), "0.16.10", "0.16.11"))
+				}
+				return raw, err
+			}
+			plan, err := planMinecraftSwitch(ctx, source.Runtime.ID, pair[1])
+			if err != nil || !plan.Convert {
+				t.Fatal("fixture did not reach reviewed Convert", plan, err)
+			}
+			if err = f.backend.prepareSwitchSourceCopy(ctx, source.Runtime.ID, plan.Version); err != nil {
+				t.Fatal(err)
+			}
+			previous, err := f.backend.readRecord(source.Runtime.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			next = previous
+			next.Runtime.Software, next.Runtime.VersionPolicy, next.Runtime.Version = plan.Target, "pinned", plan.Version
+			next.Runtime.LoaderVersion, next.Runtime.ImageTag, next.Runtime.ImageDigest = plan.Runtime.LoaderVersion, plan.Runtime.ImageTag, plan.RuntimeDigest
+			next.Runtime.BedrockEnabled = plan.Runtime.CrossplayEnabled
+			records, err = f.backend.records()
+			if err != nil {
+				t.Fatal(err)
+			}
+			e := minecraftSwitchEvidence{Schema: 1, OperationID: "12345678-1234-4123-8123-123456789abc", Source: source.Runtime.ID, SourceRecord: &source, Target: plan.Target, Version: plan.Version, Action: "convert", WorldChanged: true, ColdArchive: "Family-backup-" + pair[0] + "-2026-11-16-1200.tar.gz", Stage: "converting_world"}
+			publish := func(evidence minecraftSwitchEvidence, reviewed minecraftSwitchPlan, target instanceRuntimeRecord) error {
+				return f.backend.applySwitchRuntime(ctx, previous, instanceReplaceRecord(records, target), f.snapshot, evidence, &reviewed)
+			}
+			if err = publish(e, plan, next); err == nil {
+				t.Fatal("publication accepted missing durable Switch evidence")
+			}
+			if err = saveSwitchEvidence(e); err != nil {
+				t.Fatal(err)
+			}
+			for _, mutation := range []string{"version", "loader", "software", "convert", "backup", "content"} {
+				target, reviewed, evidence := next, plan, e
+				switch mutation {
+				case "version":
+					target.Runtime.Version = "1.21.5"
+				case "loader":
+					target.Runtime.LoaderVersion = "0.16.12"
+				case "software":
+					target.Runtime.Software = "purpur"
+				case "convert":
+					reviewed.Convert = false
+				case "backup":
+					evidence.ColdArchive = ""
+				case "content":
+					reviewed.Content = []switchContent{{Compatibility: "unknown"}}
+				}
+				if err = publish(evidence, reviewed, target); err == nil {
+					t.Fatal("Switch publication accepted unreviewed mutation", mutation)
+				}
+			}
+			// The private capability remains maintenance-only,
+			// and binds the exact pair instead of opening subsequent Version calls.
+			authorized := context.WithValue(ctx, switchRuntimeApplyKey{}, switchRuntimeApplyAuthorization{previous: previous, next: next})
+			if switchRuntimeApplyAuthorized(authorized, previous, source) {
+				t.Fatal("private authorization accepted a different publication")
+			}
+			if err = f.backend.applyVersion(authorized, previous, instanceReplaceRecord(records, next), f.snapshot, false); err == nil {
+				t.Fatal("private authorization bypassed maintenance requirement")
+			}
+			if err = publish(e, plan, next); err != nil {
+				t.Fatal("reviewed Switch publication failed", err)
+			}
+			published, err := f.backend.readRecord(source.Runtime.ID)
+			if err != nil || published.Runtime.Software != plan.Target || published.Runtime.LoaderVersion != plan.Runtime.LoaderVersion || published.Runtime.Version != source.Runtime.Version {
+				t.Fatal("Switch did not publish exact reviewed runtime", published, err)
+			}
+			rollback := source
+			rollback.Runtime.Version, rollback.Runtime.PreserveContent = e.Version, true
+			records, err = f.backend.records()
+			if err != nil {
+				t.Fatal(err)
+			}
+			restore := func(evidence minecraftSwitchEvidence, original instanceRuntimeRecord) error {
+				return f.backend.applySwitchRuntime(ctx, published, instanceReplaceRecord(records, original), f.snapshot, evidence, nil)
+			}
+			missing := e
+			missing.WorldChanged = false
+			if err = restore(missing, rollback); err == nil {
+				t.Fatal("recovery accepted missing cold rollback authority")
+			}
+			wrongSource := rollback
+			wrongSource.Runtime.LoaderVersion = "0.16.12"
+			if err = restore(e, wrongSource); err == nil {
+				t.Fatal("recovery accepted an unrecorded source runtime")
+			}
+			if err = restore(e, rollback); err != nil {
+				t.Fatal("durable Switch evidence could not restore original software/loader", err)
+			}
+			recovered, err := f.backend.readRecord(source.Runtime.ID)
+			if err != nil || !reflect.DeepEqual(recovered.Runtime, rollback.Runtime) {
+				t.Fatal("Switch recovery did not restore exact original runtime", recovered, err)
+			}
+		})
 	}
 }
