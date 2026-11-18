@@ -260,6 +260,46 @@ func (c *Client) AdminPluginInstallAcknowledge(ctx context.Context, session stri
 	return out, err
 }
 
+// PluginRuntimeRecovery contains only the browser-safe part of a conflict.
+type PluginRuntimeRecovery struct {
+	ID                   string   `json:"id"`
+	RecoveryRequired     bool     `json:"recovery_required"`
+	RecoveryKind         string   `json:"recovery_kind"`
+	RecoveryOperationID  string   `json:"recovery_operation_id"`
+	RecoveryAction       string   `json:"recovery_action"`
+	Message              string   `json:"message"`
+	ConfirmationRequired bool     `json:"confirmation_required,omitempty"`
+	Online               int      `json:"online,omitempty"`
+	Players              []string `json:"players,omitempty"`
+}
+
+type PluginInstallRestoreRuntimeRequest struct {
+	OperationID    string `json:"operation_id"`
+	RestoreRuntime bool   `json:"restore_runtime"`
+	ConfirmPlayers bool   `json:"confirm_players,omitempty"`
+}
+
+func (c *Client) AdminPluginInstallRestoreRuntime(ctx context.Context, session string, request PluginInstallRestoreRuntimeRequest) (PersistentOperationResponse, error) {
+	var out PersistentOperationResponse
+	path, err := selectedMaintenancePath(ctx, "/v1/admin/plugins/install/restore-runtime")
+	if err != nil {
+		return out, err
+	}
+	if !request.RestoreRuntime || !persistentOperationIDPattern.MatchString(request.OperationID) {
+		return out, errors.New("Invalid Minecraft runtime recovery request")
+	}
+	client := *c.http
+	client.Timeout = 19 * time.Minute
+	caller := &Client{http: &client}
+	if err := caller.do(ctx, http.MethodPost, path, session, request, &out); err != nil {
+		return out, err
+	}
+	if out.Operation == nil || out.Operation.OperationID != request.OperationID || out.Operation.OperationType != "plugin_install" || out.Operation.State != "resolved" {
+		return PersistentOperationResponse{}, errors.New("Minecraft runtime recovery could not be verified")
+	}
+	return out, validateMaintenanceResponse(ctx, &out)
+}
+
 // PluginIcon carries only Agent-verified bytes, never an upstream URL.
 type PluginIcon struct {
 	Data        []byte

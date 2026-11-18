@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -673,6 +674,32 @@ func TestNetworkMemberEffectiveBootControlsPreservePreference(t *testing.T) {
 		}
 		if f.runtimes[id].StartOnBoot {
 			t.Fatal("display rewrote saved preference")
+		}
+	}
+}
+
+func TestMinecraftCardLifecycleOnlyForwardsSelectedPluginRecovery(t *testing.T) {
+	const operationID = "12345678-1234-4123-8123-123456789abc"
+	for _, id := range []string{"jv-kids001", "jv-family1"} {
+		app, client := newServerInventoryApp(t)
+		client.actionError = &api.ResponseError{StatusCode: 409, PluginRecovery: &api.PluginRuntimeRecovery{
+			ID: id, RecoveryRequired: true, RecoveryKind: "plugin_install",
+			RecoveryOperationID: operationID, RecoveryAction: "start", Message: "Restore the original running state.",
+		}}
+		rr := httptestResponse(app, authenticatedAdminRequest("POST", "/api/minecraft/servers/lifecycle?server=jv-kids001", "csrf=csrf-token&action=start"))
+		if rr.Code != 409 || !reflect.DeepEqual(client.actions, []string{"jv-kids001:start"}) {
+			t.Fatal("wrong lifecycle request", rr.Code, rr.Body.String(), client.actions)
+		}
+		if id != "jv-kids001" {
+			if strings.Contains(rr.Body.String(), operationID) || strings.Contains(rr.Body.String(), "recovery_action") {
+				t.Fatal("another server's recovery leaked", rr.Body.String())
+			}
+			continue
+		}
+		var result api.PluginRuntimeRecovery
+		if json.Unmarshal(rr.Body.Bytes(), &result) != nil || result.ID != id || !result.RecoveryRequired ||
+			result.RecoveryAction != "start" || result.RecoveryOperationID != operationID {
+			t.Fatal("recovery response lost", rr.Body.String())
 		}
 	}
 }

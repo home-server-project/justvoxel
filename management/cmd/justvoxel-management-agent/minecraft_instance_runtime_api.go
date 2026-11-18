@@ -362,6 +362,38 @@ func (s *server) instanceRuntimeList(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"instances": states})
 }
+
+// A refused normal lifecycle request may explain the reserved recovery.
+// The transaction is independently verified by the explicit recovery endpoint.
+func (s *server) instanceLifecycleMaintenanceRefusal(w http.ResponseWriter, r *http.Request, id string, actor session) bool {
+	if s.operations == nil {
+		return false
+	}
+	journal, err := s.operations.currentMinecraftMaintenance()
+	if err != nil || journal == nil || journal.State != operationNeedsAttention {
+		return false
+	}
+	if actor.Role == roleAdministrator && journal.OperationType == operationTypePluginInstall && journal.InstanceID == id {
+		tx, err := s.pluginRecoveryTransaction(*journal)
+		if err == nil {
+			if _, _, ok := s.pluginRecoveryContext(r, tx); ok {
+				ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+				defer cancel()
+				if active, err := pluginServiceActive(ctx, id); err == nil && active != tx.OriginallyRunning {
+					current, err := s.operations.currentMinecraftMaintenance()
+					if err == nil && current != nil && current.OperationID == journal.OperationID && current.State == operationNeedsAttention {
+						writeJSON(w, http.StatusConflict, pluginRuntimeRecovery(tx))
+						return true
+					}
+					return false
+				}
+			}
+		}
+	}
+	writeError(w, http.StatusConflict, "JustVoxel maintenance requires attention before normal server controls are available.")
+	return true
+}
+
 func (s *server) instanceRuntimeAction(w http.ResponseWriter, r *http.Request, action string) {
 	var actor session
 	var ok bool
@@ -404,6 +436,9 @@ func (s *server) instanceRuntimeAction(w http.ResponseWriter, r *http.Request, a
 	}
 	release, err := s.lockInstanceRuntime()
 	if err != nil {
+		if errors.Is(err, errInstanceBusy) && s.instanceLifecycleMaintenanceRefusal(w, r, id, actor) {
+			return
+		}
 		instanceRuntimeError(w, err, id)
 		return
 	}

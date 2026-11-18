@@ -94,6 +94,7 @@ type operationJournal struct {
 type operationStore struct {
 	mu                      sync.Mutex
 	traceMu                 sync.Mutex
+	pluginRecoveryMu        sync.Mutex
 	diagnosticMu            sync.Mutex
 	baseDir                 string
 	operationsDir           string

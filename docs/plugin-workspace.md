@@ -570,11 +570,19 @@ only all expected installed files with exact hashes and ownership, or all
 transaction-created files absent with no manifest claim on those artifacts.
 Running Minecraft must pass the existing stack verifier; an installed state must
 also prove the expected active plugin identities from the current startup log
-using the same inventory-plus-enable checks. Originally stopped
-Minecraft must remain stopped; re-check does not start it. Unproven states return
-conflict and retain maintenance exclusion and evidence. Re-check never changes
-plugin files, retries installation or restores backups. Proven states become
-`resolved`, release the normal maintenance exclusion and record an audit event.
+using the same inventory-plus-enable checks. If Minecraft is in a different
+running or stopped state than before the installation, the re-check offers
+**Start Minecraft and re-check** or **Stop Minecraft and re-check**. The
+Running switches in Minecraft Servers and the selected Minecraft Overview open
+the same recovery when a matching installation blocks normal controls. If
+players are online, an administrator must confirm the stop before Minecraft
+warns and disconnects them.
+
+Recovery uses the recorded state for that server. Evidence saved before the
+original runtime state was recorded supports re-check only. Neither action
+changes plugin files, retries installation, or restores a backup. Proven states
+become `resolved`, release maintenance exclusion and record an audit event.
+Unproven states retain their evidence and maintenance exclusion.
 
 Private transaction staging is removed after persisted success, verified clean
 rollback, or a safe untouched terminal failure. It is preserved for

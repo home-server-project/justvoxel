@@ -99,6 +99,93 @@
   updateBounds();
   initializeLiveMemory(list, cards);
   };
+  const matchesRecovery = (response, payload, id, operationID) =>
+    response.status === 409 && !response.redirected && payload?.recovery_required === true &&
+    payload.recovery_kind === 'plugin_install' && payload.id === id &&
+    typeof payload.recovery_operation_id === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(payload.recovery_operation_id) &&
+    (!operationID || payload.recovery_operation_id === operationID) &&
+    (payload.recovery_action === 'start' || payload.recovery_action === 'stop');
+
+  const openRecovery = ({recovery, id, csrf, selected, request, refresh, isCurrent = () => true}) => {
+    const operationID = recovery.recovery_operation_id;
+    const dialog = document.createElement('dialog');
+    dialog.className = 'minecraft-server-invitation';
+    dialog.setAttribute('aria-label', jvT("plugins.recovery.title"));
+    const title = document.createElement('h2');
+    title.textContent = jvT("plugins.recovery.title");
+    const description = document.createElement('p');
+    const status = document.createElement('p');
+    status.setAttribute('role', 'status');
+    const actions = document.createElement('div');
+    actions.className = 'action-row';
+    const apply = document.createElement('button');
+    apply.type = 'button';
+    const details = document.createElement('a');
+    details.className = 'button-link secondary';
+    details.href = selected('/?workspace=plugins');
+    details.textContent = jvT("plugins.recovery.details");
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'secondary';
+    close.textContent = jvT("ui.7d9eb7acb13e");
+    close.addEventListener('click', () => dialog.close());
+    const render = () => {
+      const start = recovery.recovery_action === 'start';
+      description.textContent = start ? jvT("plugins.recovery.card_start") : jvT("plugins.recovery.card_stop");
+      const confirmPlayers = !start && recovery.confirmation_required === true;
+      apply.textContent = start ? jvT("plugins.recovery.start") :
+        confirmPlayers ? jvT("plugins.recovery.confirm_stop") : jvT("plugins.recovery.stop");
+      status.textContent = confirmPlayers
+        ? jvT("plugins.recovery.players", {count: (recovery.online)}) + (recovery.players?.length ? ' ' + recovery.players.join(', ') : '')
+        : '';
+    };
+    const dismissIfStale = () => {
+      if (isCurrent()) return false;
+      if (dialog.open) dialog.close();
+      return true;
+    };
+    let busy = false;
+    apply.addEventListener('click', async () => {
+      if (!dialog.open || busy || dismissIfStale()) return;
+      busy = apply.disabled = close.disabled = true;
+      status.textContent = jvT("ui.76811ca2ebdb");
+      try {
+        const body = new URLSearchParams({csrf, operation_id: operationID, restore_runtime: 'true'});
+        if (recovery.recovery_action === 'stop' && recovery.confirmation_required === true) body.set('confirm_players', 'true');
+        const result = await request('/api/plugins/workspace/install/restore-runtime', {method: "POST", body}, operationID);
+        if (dismissIfStale()) return;
+        if (result?.recovery) {
+          recovery = result.recovery;
+          render();
+          return;
+        }
+        if (result?.operation?.operation_id !== operationID || result.operation.instance_id !== id || result.operation.state !== 'resolved') {
+          throw new Error(jvT("ui.1f3344e99b38"));
+        }
+        await refresh();
+        if (dialog.open) dialog.close();
+      } catch (error) {
+        if (!dismissIfStale()) status.textContent = error.message;
+      } finally {
+        busy = apply.disabled = close.disabled = false;
+      }
+    });
+    details.addEventListener('click', event => { if (busy || dismissIfStale()) event.preventDefault(); });
+    dialog.addEventListener('cancel', event => { if (busy) event.preventDefault(); });
+    dialog.addEventListener('close', () => {
+      window.removeEventListener('justvoxel:server-selection-changed', dismissIfStale);
+      dialog.remove();
+    });
+    window.addEventListener('justvoxel:server-selection-changed', dismissIfStale);
+    actions.append(apply, details, close);
+    dialog.append(title, description, status, actions);
+    render();
+    document.body.appendChild(dialog);
+    dialog.showModal();
+  };
+  globalThis.justVoxelPluginRuntimeRecovery = {matches: matchesRecovery, open: openRecovery};
+
   function initializeLiveMemory(list, cards) {
     const history = new Map();
     const validBytes = value => typeof value === 'number' && Number.isFinite(value) && value >= 0;
@@ -203,11 +290,12 @@
         node.appendChild(link);
       }
     };
-    const request = async (path, options = {}) => {
+    const request = async (path, options = {}, recoveryOperationID = null) => {
       const response = await fetch(selected(path), {credentials: 'same-origin', cache: 'no-store', ...options, headers: {Accept: 'application/json'}});
       let payload;
       try { payload = await response.json(); } catch (_) { throw new Error(jvT("ui.a3a82b87d0eb")); }
-      if (!response.ok || response.redirected) throw new Error(payload.error || jvT("ui.4d5161e70e99"));
+      if (recoveryOperationID !== null && matchesRecovery(response, payload, id, recoveryOperationID)) return {recovery: payload};
+      if (!response.ok || response.redirected) throw new Error(payload.error || (recoveryOperationID !== null && payload.message) || jvT("ui.4d5161e70e99"));
       return payload;
     };
     const refresh = async () => {
@@ -243,15 +331,20 @@
         feedback(jvT("ui.ceadef34e4b9"), false, false, true);
         return;
       }
-      operation(() => mutate(async () => {
-        const status = card.querySelector('.minecraft-server-state');
-        if (status) {
-          status.textContent = requested ? jvT("ui.aeed4d26bb5f") : jvT("ui.a71ee1d4ac5c");
-          status.className = 'minecraft-server-state warning';
-        }
-        const result = await request('/api/minecraft/servers/lifecycle', {method: "POST", body: new URLSearchParams({csrf, action: requested ? 'start' : 'stop'})});
-        if (!result.ok) throw new Error(jvT("ui.bd44764996e3"));
-      }));
+      operation(async () => {
+        let recovery;
+        await mutate(async () => {
+          const status = card.querySelector('.minecraft-server-state');
+          if (status) {
+            status.textContent = requested ? jvT("ui.aeed4d26bb5f") : jvT("ui.a71ee1d4ac5c");
+            status.className = 'minecraft-server-state warning';
+          }
+          const result = await request('/api/minecraft/servers/lifecycle', {method: "POST", body: new URLSearchParams({csrf, action: requested ? 'start' : 'stop'})}, '');
+          if (result.recovery) recovery = result.recovery;
+          else if (!result.ok) throw new Error(jvT("ui.bd44764996e3"));
+        });
+        if (recovery) openRecovery({recovery, id, csrf, selected, request, refresh});
+      });
     });
     const requiresReview = plan => Object.entries(plan).some(([key, value]) => key.endsWith('_required') && value === true);
     const boot = card.querySelector('[data-server-boot]');

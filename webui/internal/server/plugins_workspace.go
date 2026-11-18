@@ -32,6 +32,7 @@ func (a *App) registerPluginsWorkspaceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/plugins/workspace/install/plan", a.selectedPluginRequest(a.pluginsWorkspaceInstallPlan))
 	mux.HandleFunc("POST /api/plugins/workspace/install", a.selectedPluginRequest(a.pluginsWorkspaceInstall))
 	mux.HandleFunc("POST /api/plugins/workspace/install/acknowledge", a.selectedPluginRequest(a.pluginsWorkspaceInstallAcknowledge))
+	mux.HandleFunc("POST /api/plugins/workspace/install/restore-runtime", a.selectedPluginRequest(a.pluginsWorkspaceInstallRestoreRuntime))
 	mux.HandleFunc("GET /api/plugins/workspace/install-operation", a.selectedPluginRequest(a.pluginsWorkspaceInstallOperation))
 	mux.HandleFunc("GET /api/plugins/workspace/operation", a.selectedPluginRequest(a.pluginsWorkspaceInstallOperation))
 	mux.HandleFunc("POST /api/plugins/workspace/manage/plan", a.selectedPluginRequest(a.pluginsWorkspaceManagePlan))
@@ -238,10 +239,73 @@ func (a *App) pluginsWorkspaceInstallAcknowledge(w http.ResponseWriter, r *http.
 	}
 	out, err := client.AdminPluginInstallAcknowledge(r.Context(), session, api.PluginInstallAcknowledgeRequest{OperationID: r.FormValue("operation_id")})
 	if err != nil {
+		if writePluginRuntimeRecovery(w, err, api.MinecraftMaintenanceInstance(r.Context()), r.FormValue("operation_id")) {
+			return
+		}
 		a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.465e29f52b69"))
 		return
 	}
 	writeMinecraftWorkspaceJSON(w, 200, out)
+}
+
+func (a *App) pluginsWorkspaceInstallRestoreRuntime(w http.ResponseWriter, r *http.Request) {
+	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator")
+	if !ok {
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	if r.ParseForm() != nil {
+		writeMinecraftWorkspaceError(w, 400, ui(w, "ui.c9b9443a6857"))
+		return
+	}
+	if !a.validCSRF(r) {
+		writeMinecraftWorkspaceError(w, 403, ui(w, "ui.74bccc44f472"))
+		return
+	}
+	operationID, confirm := r.PostForm.Get("operation_id"), r.PostForm.Get("confirm_players")
+	if len(r.URL.Query()) != 0 || operationID == "" || r.PostForm.Get("restore_runtime") != "true" ||
+		(r.PostForm.Has("confirm_players") && confirm != "true" && confirm != "false") {
+		writeMinecraftWorkspaceError(w, 400, ui(w, "ui.c9b9443a6857"))
+		return
+	}
+	for key, values := range r.PostForm {
+		if (key != "csrf" && key != "operation_id" && key != "restore_runtime" && key != "confirm_players") || len(values) != 1 {
+			writeMinecraftWorkspaceError(w, 400, ui(w, "ui.c9b9443a6857"))
+			return
+		}
+	}
+	client, ok := a.api.(interface {
+		AdminPluginInstallRestoreRuntime(context.Context, string, api.PluginInstallRestoreRuntimeRequest) (api.PersistentOperationResponse, error)
+	})
+	if !ok {
+		writeMinecraftWorkspaceError(w, 503, ui(w, "ui.ae6ccf7368dd"))
+		return
+	}
+	out, err := client.AdminPluginInstallRestoreRuntime(r.Context(), session, api.PluginInstallRestoreRuntimeRequest{
+		OperationID: operationID, RestoreRuntime: true, ConfirmPlayers: confirm == "true",
+	})
+	if err != nil {
+		if writePluginRuntimeRecovery(w, err, api.MinecraftMaintenanceInstance(r.Context()), operationID) {
+			return
+		}
+		a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.465e29f52b69"))
+		return
+	}
+	writeMinecraftWorkspaceJSON(w, 200, out)
+}
+
+func writePluginRuntimeRecovery(w http.ResponseWriter, err error, instanceID, operationID string) bool {
+	var response *api.ResponseError
+	if !errors.As(err, &response) || response.StatusCode != http.StatusConflict || response.PluginRecovery == nil {
+		return false
+	}
+	recovery := response.PluginRecovery
+	if recovery.ID != instanceID || (operationID != "" && recovery.RecoveryOperationID != operationID) {
+		writeMinecraftWorkspaceError(w, http.StatusConflict, ui(w, "ui.fc9a2971e8de"))
+		return true
+	}
+	writeMinecraftWorkspaceJSON(w, http.StatusConflict, recovery)
+	return true
 }
 
 var pluginIconProjectID = regexp.MustCompile(`^[A-Za-z0-9]{1,64}$`)

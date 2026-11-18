@@ -332,7 +332,10 @@ function cardHarness({member = false, responses = [], bootChecked = false, runni
   } : undefined;
   const start = source.indexOf('  function initializeCard(');
   const end = source.indexOf("  window.addEventListener?.('resize'");
-  vm.runInContext(source.slice(start, end) + '\nglobalThis.initialize = initializeCard;', context);
+  const recoveryStart = source.indexOf('  const matchesRecovery =');
+  const recoveryEnd = source.indexOf('  function initializeLiveMemory(');
+  vm.runInContext(source.slice(recoveryStart, recoveryEnd) + source.slice(start, end) +
+    '\nglobalThis.initialize = initializeCard;', context);
   let arranging = false;
   context.initialize(card, inventoryRoot, () => arranging);
   const fire = (control, type, fields = {}) => {

@@ -3779,7 +3779,7 @@ if (minecraftOpen && minecraftDialog) {
     return node;
   };
 
-  const requestWorkspaceJSON = async (url, options = {}) => {
+  const requestWorkspaceJSON = async (url, options = {}, pluginRecovery = null) => {
     if (url === "/api/dashboard-status") url = "/api/minecraft/workspace/snapshot";
     const selection = globalThis.justVoxelSelectionGeneration.minecraft;
     const boundURL = options.method && options.method !== "GET" ? globalThis.justVoxelSelectedURL(url, "minecraft") : null;
@@ -3809,8 +3809,11 @@ if (minecraftOpen && minecraftDialog) {
       window.location.assign("/password");
       return null;
     }
+    if (pluginRecovery && globalThis.justVoxelPluginRuntimeRecovery.matches(response, payload, pluginRecovery.id, pluginRecovery.operationID)) {
+      return {recovery: payload};
+    }
     if (!response.ok) {
-      throw new Error(payload.error || jvT("ui.4d5161e70e99"));
+      throw new Error(payload.error || (pluginRecovery && payload.message) || jvT("ui.4d5161e70e99"));
     }
     return payload;
   };
@@ -3822,6 +3825,7 @@ if (minecraftOpen && minecraftDialog) {
   });
 
   const renderOverview = async (sequence, message = "") => {
+    const selection = globalThis.justVoxelSelectionGeneration.minecraft;
     const snapshot = await requestWorkspaceJSON("/api/dashboard-status");
     if (!snapshot || sequence !== loadSequence || !content) return;
 
@@ -3894,35 +3898,43 @@ if (minecraftOpen && minecraftDialog) {
       if (settings.network_member) boot.closest('label').querySelector('span').textContent = jvT("ui.be81bb8c89a0");
       boot.disabled = Boolean(settings.network_member) || !payload.configured || !["running", "stopped"].includes(runtimeState);
       const selectedID = context.selected.id;
-      const selectedRequest = (path, body) => requestWorkspaceJSON(path + "?" + new URLSearchParams({server: selectedID}), {method: "POST", body});
+      const selectedURL = path => path + (path.includes("?") ? "&" : "?") + new URLSearchParams({server: selectedID});
+      const selectedRequest = (path, body, operationID = null) => requestWorkspaceJSON(
+        selectedURL(path), {method: "POST", body}, operationID === null ? null : {id: selectedID, operationID}
+      );
+      const isCurrent = expectedSequence => currentTab === "overview" && expectedSequence === loadSequence &&
+        selection === globalThis.justVoxelSelectionGeneration.minecraft;
       const requiresCondition = plan => plan.compatibility_blocked || Object.entries(plan).some(([key, value]) => key.endsWith("_required") && value === true);
       const refusalReason = plan => plan.error || plan.message || (plan.warnings || []).join(" ") || jvT("ui.1952254b901b");
       let pending = false;
       const change = async (control, action) => {
         const requested = control.checked;
         control.checked = !requested;
-        if (pending || control.disabled || sequence !== loadSequence) return;
-        const selection = globalThis.justVoxelSelectionGeneration.minecraft;
+        if (pending || control.disabled || !isCurrent(sequence)) return;
         pending = true;
         running.disabled = boot.disabled = true;
         if (state) state.textContent = jvT("ui.3329a9bb48b9");
-        let failure;
-        try { await action(requested); }
+        let failure, recovery;
+        try { recovery = await action(requested); }
         catch (error) {
           if (error.staleSelection || selection !== globalThis.justVoxelSelectionGeneration.minecraft) return;
           failure = error;
-        } finally {
-          if (selection === globalThis.justVoxelSelectionGeneration.minecraft && sequence === loadSequence) {
-            // Both success and refusal reload authoritative values; never claim an optimistic change.
-            const reload = loadCurrentTab();
-            const reloadSequence = loadSequence;
-            await reload;
-            if (failure && selection === globalThis.justVoxelSelectionGeneration.minecraft && reloadSequence === loadSequence && state) state.textContent = failure.message;
-          }
         }
+        if (!isCurrent(sequence)) return;
+        // Both success and refusal reload authoritative values.
+        const reloadSequence = await loadCurrentTab();
+        if (!isCurrent(reloadSequence)) return;
+        if (failure && state) state.textContent = failure.message;
+        if (recovery) globalThis.justVoxelPluginRuntimeRecovery.open({
+          recovery, id: selectedID, csrf, selected: selectedURL,
+          request: (path, {body}, operationID) => selectedRequest(path, body, operationID),
+          isCurrent: () => isCurrent(reloadSequence),
+          refresh: () => loadCurrentTab(),
+        });
       };
       running.addEventListener("change", () => change(running, async requested => {
-        const result = await selectedRequest("/api/minecraft/servers/lifecycle", new URLSearchParams({csrf, action: requested ? "start" : "stop"}));
+        const result = await selectedRequest("/api/minecraft/servers/lifecycle", new URLSearchParams({csrf, action: requested ? "start" : "stop"}), "");
+        if (result?.recovery) return result.recovery;
         if (result && !result.ok) throw new Error(result.error || jvT("ui.bd44764996e3"));
       }));
       boot.addEventListener("change", () => change(boot, async requested => {
@@ -4644,6 +4656,7 @@ if (minecraftOpen && minecraftDialog) {
     } finally {
       if (sequence === loadSequence && refreshButton) refreshButton.disabled = false;
     }
+    return sequence;
   }
 
   const selectTab = (tab) => {
@@ -7572,6 +7585,10 @@ if (pluginsDialog && pluginsOpen) {
       if (selection !== globalThis.justVoxelSelectionGeneration.plugins) throw globalThis.justVoxelStaleSelection();
       if (response.status === 401) { window.location.assign("/login"); throw new Error(jvT("ui.e30c2ec3ce01")); }
       if (response.status === 403 && String(jvC(payload.error || "")).toLowerCase().includes("password")) { window.location.assign("/password"); throw new Error(jvT("ui.fa29ee25267e")); }
+      if (response.status === 409 && (route === "install/acknowledge" || route === "install/restore-runtime") &&
+          payload.recovery_required === true && payload.recovery_kind === "plugin_install" &&
+          payload.recovery_operation_id === body?.operation_id &&
+          (payload.recovery_action === "start" || payload.recovery_action === "stop")) return payload;
       if (!response.ok) {
         const error = new Error(payload.error || payload.message || jvT("ui.13bd544e594d"));
         if (/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(payload.diagnostic_id || "")) error.diagnosticID = payload.diagnostic_id;
@@ -7662,16 +7679,52 @@ if (pluginsDialog && pluginsOpen) {
     if (attention) {
       panelBody.append(text("p", jvT("ui.90d9a00b7a84"), "plugins-install-warning"));
       const feedback = text("p", "", "plugins-operation-feedback");
+      const finishRecovery = (payload) => {
+        if (!payload.operation || payload.operation.state !== "resolved") throw new Error(jvT("ui.1f3344e99b38"));
+        showOperation(payload.operation);
+        load();
+      };
+      const offerRuntimeRecovery = (recovery) => {
+        const start = recovery.recovery_action === "start";
+        const confirmPlayers = recovery.confirmation_required === true;
+        feedback.textContent = start ? jvT("plugins.recovery.was_running") : jvT("plugins.recovery.was_stopped");
+        if (confirmPlayers) {
+          feedback.textContent += " " + jvT("plugins.recovery.players", {count: (recovery.online)});
+          if (recovery.players?.length) feedback.textContent += " " + recovery.players.join(", ");
+        }
+        const label = start ? jvT("plugins.recovery.start") :
+          confirmPlayers ? jvT("plugins.recovery.confirm_stop") : jvT("plugins.recovery.stop");
+        const repair = panelAction(label, async () => {
+          if (repair.disabled) return;
+          repair.disabled = true;
+          feedback.textContent = jvT("ui.76811ca2ebdb");
+          const current = installGeneration;
+          try {
+            const body = {operation_id: operation.operation_id, restore_runtime: "true"};
+            if (confirmPlayers) body.confirm_players = "true";
+            const payload = await pluginRequest("install/restore-runtime", body, installController?.signal);
+            if (current !== installGeneration) return;
+            if (payload.recovery_required) offerRuntimeRecovery(payload);
+            else finishRecovery(payload);
+          } catch (error) {
+            if (current !== installGeneration || error.staleSelection || error.name === "AbortError") return;
+            feedback.textContent = error.message || jvT("ui.ead88024e125");
+            repair.disabled = false;
+          }
+        });
+        actions.replaceChildren(repair, close);
+        repair.focus();
+      };
       const recheck = panelAction(jvT("ui.137a11a338a1"), async () => {
+        if (recheck.disabled) return;
         recheck.disabled = true;
         feedback.textContent = jvT("ui.76811ca2ebdb");
         const current = installGeneration;
         try {
           const payload = await pluginRequest(lifecycle ? "manage/acknowledge" : "install/acknowledge", { operation_id: operation.operation_id }, installController?.signal);
           if (current !== installGeneration) return;
-          if (!payload.operation || payload.operation.state !== "resolved") throw new Error(jvT("ui.1f3344e99b38"));
-          showOperation(payload.operation);
-          load();
+          if (!lifecycle && payload.recovery_required) offerRuntimeRecovery(payload);
+          else finishRecovery(payload);
         } catch (error) { if (error.staleSelection) return;
           if (current === installGeneration && error.name !== "AbortError") {
             feedback.textContent = error.message || jvT("ui.ead88024e125");
@@ -7679,7 +7732,8 @@ if (pluginsDialog && pluginsOpen) {
           }
         }
       });
-      overlayActions(recheck, panelAction(jvT("ui.7d9eb7acb13e"), closePanel, true));
+      const close = panelAction(jvT("ui.7d9eb7acb13e"), closePanel, true);
+      const actions = overlayActions(recheck, close);
       panelBody.append(feedback);
     } else if (terminal && !success) overlayActions(panelAction(jvT("ui.11a6767d5674"), () => { closePanel(); load(); }, true));
     else if (!terminal) overlayActions(panelAction(jvT("ui.7d9eb7acb13e"), closePanel, true));

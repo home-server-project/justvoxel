@@ -153,6 +153,7 @@ func registerAdminPluginRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("POST /v1/minecraft/instances/{id}/plugins/install/plan", s.selectedPluginHandler(s.adminPluginInstallPlan))
 	mux.HandleFunc("POST /v1/minecraft/instances/{id}/plugins/install", s.selectedPluginHandler(s.adminPluginInstall))
 	mux.HandleFunc("POST /v1/minecraft/instances/{id}/plugins/install/acknowledge", s.selectedPluginHandler(s.adminPluginInstallAcknowledge))
+	mux.HandleFunc("POST /v1/minecraft/instances/{id}/plugins/install/restore-runtime", s.selectedPluginHandler(s.adminPluginInstallRestoreRuntime))
 	mux.HandleFunc("GET /v1/minecraft/instances/{id}/plugins/install-operation", s.selectedPluginHandler(s.adminPluginInstallCurrent))
 	mux.HandleFunc("POST /v1/minecraft/instances/{id}/plugins/manage/plan", s.selectedPluginHandler(s.adminPluginManagePlan))
 	mux.HandleFunc("POST /v1/minecraft/instances/{id}/plugins/manage", s.selectedPluginHandler(s.adminPluginManage))

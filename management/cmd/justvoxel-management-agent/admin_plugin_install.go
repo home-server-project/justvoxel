@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -1113,21 +1114,36 @@ func (b *pluginBoundedOutput) Write(p []byte) (int, error) {
 }
 
 var pluginRuntimeLockPath = "/run/justvoxel-minecraft-maintenance.lock"
+var errPluginRuntimeLockBusy = errors.New("Minecraft maintenance lock is busy")
+
+// The lock is shared with maintenance workers whose errors can become
+// operation status. Keep syscall details behind a safe error message.
+type pluginRuntimeLockError struct{ cause error }
+
+func (*pluginRuntimeLockError) Error() string   { return "Minecraft maintenance lock could not be used" }
+func (e *pluginRuntimeLockError) Unwrap() error { return e.cause }
 
 func acquirePluginRuntimeLock() (*os.File, error) {
 	fd, err := unix.Open(pluginRuntimeLockPath, unix.O_RDWR|unix.O_CREAT|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0600)
 	if err != nil {
-		return nil, err
+		return nil, &pluginRuntimeLockError{cause: err}
 	}
 	f := os.NewFile(uintptr(fd), "minecraft-maintenance")
 	stat, err := f.Stat()
-	if err != nil || !stat.Mode().IsRegular() {
+	if err != nil {
 		f.Close()
-		return nil, errors.New("Unsafe Minecraft maintenance lock")
+		return nil, &pluginRuntimeLockError{cause: err}
+	}
+	if !stat.Mode().IsRegular() {
+		f.Close()
+		return nil, &pluginRuntimeLockError{cause: errors.New("lock object is not a regular file")}
 	}
 	if err := unix.Flock(fd, unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		f.Close()
-		return nil, errors.New("Minecraft maintenance lock is busy")
+		if errors.Is(err, unix.EWOULDBLOCK) {
+			return nil, errPluginRuntimeLockBusy
+		}
+		return nil, &pluginRuntimeLockError{cause: err}
 	}
 	return f, nil
 }
@@ -2481,7 +2497,60 @@ func (s *server) acknowledgePluginPreflight(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, 200, adminOperationResponse{Operation: &resolved})
 }
 
+type pluginRuntimeRecoveryResponse struct {
+	ID                   string   `json:"id"`
+	RecoveryRequired     bool     `json:"recovery_required"`
+	RecoveryKind         string   `json:"recovery_kind"`
+	RecoveryOperationID  string   `json:"recovery_operation_id"`
+	RecoveryAction       string   `json:"recovery_action"`
+	Message              string   `json:"message"`
+	ConfirmationRequired bool     `json:"confirmation_required,omitempty"`
+	Online               int      `json:"online,omitempty"`
+	Players              []string `json:"players,omitempty"`
+}
+
+func pluginRuntimeRecovery(tx pluginTransaction) pluginRuntimeRecoveryResponse {
+	out := pluginRuntimeRecoveryResponse{
+		ID: tx.InstanceID, RecoveryRequired: true, RecoveryKind: operationTypePluginInstall,
+		RecoveryOperationID: tx.OperationID, RecoveryAction: "stop",
+		Message: "Minecraft was stopped before this operation but is currently running.",
+	}
+	if tx.OriginallyRunning {
+		out.RecoveryAction = "start"
+		out.Message = "Minecraft was running before this operation but is currently stopped."
+	}
+	return out
+}
+
+func (s *server) pluginRecoveryTransaction(journal operationJournal) (pluginTransaction, error) {
+	tx, err := readPluginTransaction(s.operations.baseDir, journal.OperationID)
+	if err == nil && (tx.PlanFingerprint != journal.PlanFingerprint || tx.InstanceID != journal.InstanceID) {
+		err = errors.New("Transaction identity does not match the operation")
+	}
+	return tx, err
+}
+
+func (s *server) pluginRecoveryContext(r *http.Request, tx pluginTransaction) (pluginServerContext, string, bool) {
+	serverContext, dataPath, ok := s.pluginContext(&pluginContextSink{header: make(http.Header)}, r)
+	// Earlier v1 evidence has no path/version fields. Use authoritative appliance
+	// context, still requiring every recorded artifact and the exact fingerprint.
+	ok = ok && serverContext.InstanceID == tx.InstanceID && serverContext.Supported &&
+		javaServerContentKind(serverContext.ServerType) == pluginTarget(tx.Target) && filepath.IsAbs(dataPath) &&
+		(!tx.OriginallyRunning || serverContext.MinecraftVersion != "" || tx.MinecraftVersion != "") &&
+		(tx.DataPath == "" || tx.DataPath == dataPath) &&
+		(tx.MinecraftVersion == "" || serverContext.MinecraftVersion == "" || tx.MinecraftVersion == serverContext.MinecraftVersion)
+	return serverContext, dataPath, ok
+}
+
 func (s *server) adminPluginInstallAcknowledge(w http.ResponseWriter, r *http.Request) {
+	s.adminPluginInstallRecovery(w, r, false)
+}
+
+func (s *server) adminPluginInstallRestoreRuntime(w http.ResponseWriter, r *http.Request) {
+	s.adminPluginInstallRecovery(w, r, true)
+}
+
+func (s *server) adminPluginInstallRecovery(w http.ResponseWriter, r *http.Request, restore bool) {
 	actor, ok := s.requireAdministrator(w, r)
 	if !ok {
 		return
@@ -2489,7 +2558,24 @@ func (s *server) adminPluginInstallAcknowledge(w http.ResponseWriter, r *http.Re
 	var request struct {
 		OperationID string `json:"operation_id"`
 	}
-	if !decodePluginInstallJSON(w, r, &request) {
+	confirmPlayers := false
+	timeout := 90 * time.Second
+	if restore {
+		var recovery struct {
+			OperationID    string `json:"operation_id"`
+			RestoreRuntime bool   `json:"restore_runtime"`
+			ConfirmPlayers bool   `json:"confirm_players"`
+		}
+		if !decodePluginInstallJSON(w, r, &recovery) {
+			return
+		}
+		if !recovery.RestoreRuntime {
+			writeError(w, 400, "Explicit Minecraft runtime recovery confirmation is required")
+			return
+		}
+		request.OperationID, confirmPlayers = recovery.OperationID, recovery.ConfirmPlayers
+		timeout = 18 * time.Minute
+	} else if !decodePluginInstallJSON(w, r, &request) {
 		return
 	}
 	if !validOperationID(request.OperationID) {
@@ -2500,32 +2586,47 @@ func (s *server) adminPluginInstallAcknowledge(w http.ResponseWriter, r *http.Re
 		writeError(w, 503, "Plugin operation tracking unavailable")
 		return
 	}
-	journal, err := s.operations.currentMinecraftMaintenance()
-	if err != nil || journal == nil || journal.OperationType != operationTypePluginInstall || journal.OperationID != request.OperationID || journal.State != operationNeedsAttention {
-		writeError(w, 409, "No matching plugin installation requires attention")
-		return
-	}
-	lock, err := acquirePluginRuntimeLock()
-	if err != nil {
+	// The process guard spans the flock handoff, so another recovery request
+	// cannot borrow the same durable reservation while ExecStartPre runs.
+	if !s.operations.pluginRecoveryMu.TryLock() {
 		writeError(w, 409, "Minecraft maintenance is busy; evidence was preserved")
 		return
 	}
-	defer lock.Close()
-	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
-	defer cancel()
-	tx, err := readPluginTransaction(s.operations.baseDir, journal.OperationID)
-	if errors.Is(err, errPluginEvidenceAbsent) {
-		s.acknowledgePluginPreflight(w, r.WithContext(ctx), *journal, actor)
+	defer s.operations.pluginRecoveryMu.Unlock()
+	selectedID := pluginInstanceID(r.Context())
+	journal, err := s.operations.currentMinecraftMaintenance()
+	if err != nil || journal == nil || journal.OperationType != operationTypePluginInstall ||
+		journal.OperationID != request.OperationID || journal.State != operationNeedsAttention ||
+		journal.InstanceID != selectedID || (r.PathValue("id") != "" && r.PathValue("id") != selectedID) {
+		writeError(w, 409, "No matching plugin installation requires attention")
 		return
 	}
-	if err != nil || tx.PlanFingerprint != journal.PlanFingerprint || tx.InstanceID != journal.InstanceID {
+	lock, err := acquirePluginMaintenanceLock()
+	if err != nil {
+		if errors.Is(err, errPluginRuntimeLockBusy) {
+			writeError(w, 409, "Minecraft maintenance is busy; evidence was preserved")
+		} else {
+			log.Printf("Plugin recovery %s could not acquire the maintenance lock: %v", journal.OperationID, errors.Unwrap(err))
+			writeError(w, 409, "Minecraft maintenance state could not be verified; evidence was preserved")
+		}
+		return
+	}
+	defer lock.Close()
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
+	r = r.WithContext(ctx)
+	tx, err := s.pluginRecoveryTransaction(*journal)
+	if errors.Is(err, errPluginEvidenceAbsent) && !restore {
+		s.acknowledgePluginPreflight(w, r, *journal, actor)
+		return
+	}
+	if err != nil {
 		writeError(w, 409, "Transaction evidence could not be verified; keep this operation for review")
 		return
 	}
-	serverContext, dataPath, ok := s.pluginContext(&pluginContextSink{header: make(http.Header)}, r.WithContext(ctx))
-	// Earlier v1 evidence has no path/version fields. Use authoritative appliance
-	// context, still requiring every recorded artifact and the exact fingerprint.
-	if !ok || !serverContext.Supported || javaServerContentKind(serverContext.ServerType) != pluginTarget(tx.Target) || !filepath.IsAbs(dataPath) || (tx.OriginallyRunning && serverContext.MinecraftVersion == "" && tx.MinecraftVersion == "") || (tx.DataPath != "" && tx.DataPath != dataPath) || (tx.MinecraftVersion != "" && serverContext.MinecraftVersion != "" && tx.MinecraftVersion != serverContext.MinecraftVersion) {
+	id := tx.InstanceID
+	serverContext, dataPath, ok := s.pluginRecoveryContext(r, tx)
+	if !ok {
 		writeError(w, 409, "Transaction server context could not be verified")
 		return
 	}
@@ -2534,17 +2635,48 @@ func (s *server) adminPluginInstallAcknowledge(w http.ResponseWriter, r *http.Re
 		writeError(w, 409, "Plugin state is not coherent; repair and re-check. Evidence was preserved")
 		return
 	}
-	active, err := pluginServiceActive(ctx, pluginInstanceID(ctx))
-	if err != nil || active != tx.OriginallyRunning {
-		writeError(w, 409, "Minecraft must match its original running or stopped state before re-check")
+	active, err := pluginServiceActive(ctx, id)
+	if err != nil {
+		writeError(w, 409, "Minecraft service state could not be verified; evidence was preserved")
 		return
 	}
-	if active {
+	if active != tx.OriginallyRunning {
+		if !restore {
+			writeJSON(w, http.StatusConflict, pluginRuntimeRecovery(tx))
+			return
+		}
+		if tx.OriginallyRunning {
+			err = lock.start(ctx, id)
+		} else {
+			// Share the selected-instance cold backup's player checks and graceful shutdown.
+			err = instanceRuntimes.actionWithWarnings(ctx, id, "stop", confirmPlayers)
+		}
+		var confirmation *instancePlayersConfirmation
+		if errors.As(err, &confirmation) {
+			out := pluginRuntimeRecovery(tx)
+			out.ConfirmationRequired, out.Online, out.Players = true, confirmation.Players.Online, confirmation.Names
+			writeJSON(w, http.StatusConflict, out)
+			return
+		}
+		if err != nil {
+			recordPluginFailure(s.operations, journal.OperationID, "runtime_recovery", err)
+			var startErr *pluginStartError
+			if errors.As(err, &startErr) {
+				recordPluginCommandEvidence(s.operations, journal.OperationID, journal.OperationType, "systemctl_start", []byte(startErr.output))
+			}
+			writeError(w, 409, "Minecraft could not return to its original state. Review the recovery details and re-check. Evidence was preserved.")
+			return
+		}
+	}
+	if tx.OriginallyRunning {
 		version := serverContext.MinecraftVersion
 		if version == "" {
 			version = tx.MinecraftVersion
 		}
-		if err := verifyPluginRuntime(ctx, pluginInstanceID(ctx), version); err != nil {
+		if err := verifyPluginRuntime(ctx, id, version); err != nil {
+			if restore {
+				recordPluginFailure(s.operations, journal.OperationID, "runtime_recovery_verification", err)
+			}
 			writeError(w, 409, "Minecraft runtime could not be verified")
 			return
 		}
@@ -2553,7 +2685,10 @@ func (s *server) adminPluginInstallAcknowledge(w http.ResponseWriter, r *http.Re
 			for _, a := range tx.Artifacts {
 				expected = append(expected, a.PluginName)
 			}
-			if err := verifyContentStartup(ctx, pluginInstanceID(ctx), dataPath, expected, pluginTarget(tx.Target), serverContext); err != nil {
+			if err := verifyContentStartup(ctx, id, dataPath, expected, pluginTarget(tx.Target), serverContext); err != nil {
+				if restore {
+					recordPluginFailure(s.operations, journal.OperationID, "runtime_recovery_startup", err)
+				}
 				writeError(w, 409, "Installed plugin runtime state could not be verified")
 				return
 			}
@@ -2561,8 +2696,13 @@ func (s *server) adminPluginInstallAcknowledge(w http.ResponseWriter, r *http.Re
 	}
 	// Runtime probing can take time; re-check the file proof and final state.
 	finalInstalled, proofErr := provePluginTransactionFiles(dataPath, tx)
-	active, stateErr := pluginServiceActive(ctx, pluginInstanceID(ctx))
-	if proofErr != nil || finalInstalled != installed || stateErr != nil || active != tx.OriginallyRunning {
+	finalTx, txErr := s.pluginRecoveryTransaction(*journal)
+	finalContext, finalPath, contextOK := s.pluginRecoveryContext(r, tx)
+	active, stateErr := pluginServiceActive(ctx, id)
+	if txErr != nil || !reflect.DeepEqual(finalTx, tx) || !contextOK || finalContext != serverContext || finalPath != dataPath || proofErr != nil || finalInstalled != installed || stateErr != nil || active != tx.OriginallyRunning {
+		if restore {
+			recordPluginFailure(s.operations, journal.OperationID, "runtime_recovery_final_proof", errors.New("Plugin, transaction, or service state changed during verification"))
+		}
 		writeError(w, 409, "Plugin or service state changed during re-check")
 		return
 	}

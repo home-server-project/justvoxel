@@ -194,3 +194,24 @@ func TestInstanceConsoleClientBindsIdentityAndRequest(t *testing.T) {
 		}
 	}
 }
+
+func TestPluginRuntimeRecoverySurvivesSelectedLifecycleConflict(t *testing.T) {
+	const operationID = "12345678-1234-4123-8123-123456789abc"
+	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/v1/minecraft/instances/jv-family1/start" {
+			t.Fatal("lifecycle target changed", r.URL.Path)
+		}
+		body := `{"id":"jv-family1","recovery_required":true,"recovery_kind":"plugin_install","recovery_operation_id":"` + operationID + `","recovery_action":"start","message":"Minecraft was running before this operation but is currently stopped.","private_path":"/private/transaction.json"}`
+		return &http.Response{StatusCode: 409, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})}}
+	err := client.MinecraftInstanceAction(context.Background(), "session-token", "jv-family1", "start")
+	var refusal *ResponseError
+	if !errors.As(err, &refusal) || refusal.PluginRecovery == nil || refusal.PluginRecovery.ID != "jv-family1" ||
+		refusal.PluginRecovery.RecoveryOperationID != operationID || refusal.PluginRecovery.RecoveryAction != "start" {
+		t.Fatal("lifecycle discarded recovery", err)
+	}
+	raw, err := json.Marshal(refusal.PluginRecovery)
+	if err != nil || strings.Contains(string(raw), "/private/") {
+		t.Fatal("private response field retained", err)
+	}
+}

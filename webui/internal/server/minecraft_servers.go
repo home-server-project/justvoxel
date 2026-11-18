@@ -381,6 +381,9 @@ func (a *App) minecraftServersLifecycle(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err := client.MinecraftInstanceAction(r.Context(), session, selected.ID, action); err != nil {
+		if writePluginRuntimeRecovery(w, err, selected.ID, "") {
+			return
+		}
 		a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.51a972887b0f"))
 		return
 	}
