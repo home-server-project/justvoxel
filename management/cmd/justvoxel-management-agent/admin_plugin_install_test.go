@@ -231,22 +231,58 @@ func newPluginInstallFixtureFor(t *testing.T, software, version string) *pluginI
 		return nil, nil
 	}
 	runtime := instanceRuntimes.command
+	const selected = "jv-a1b2c3"
+	const unit = "minecraft-" + selected + ".service"
+	const containerName = "minecraft-" + selected
+	signalArgs := []string{"kill", "--signal", "SIGUSR1", containerName}
 	gracefulSignalRequested := false
+	stopQueued := false
+	var warnings []string
+	var countdown time.Duration
+	pause := instanceRuntimes.pause
+	instanceRuntimes.pause = func(ctx context.Context, d time.Duration) error {
+		if len(warnings) > 0 {
+			countdown += d
+		}
+		return pause(ctx, d)
+	}
+	checkCountdown := func() {
+		if f.players > 0 && (!slices.Equal(warnings, []string{
+			"60 seconds", "30 seconds", "15 seconds", "10 seconds", "5 seconds",
+			"4 seconds", "3 seconds", "2 seconds", "1 second",
+		}) || countdown != time.Minute) {
+			t.Fatal("Java shutdown preceded the complete player countdown", warnings, countdown)
+		}
+	}
+	verifyStopped := func(ctx context.Context) {
+		warnings, countdown = nil, 0
+		state, stateErr := instanceRuntimes.command(ctx, "systemctl", "show", "--property=LoadState,ActiveState,SubState", unit)
+		container, containerErr := instanceRuntimes.command(ctx, "podman", "inspect", "--type", "container", "--format", "{{.State.Status}} {{.State.ExitCode}}", containerName)
+		if f.active || stateErr != nil || !strings.Contains(string(state), "ActiveState=inactive\n") || containerErr != nil || string(container) != "exited 0" {
+			t.Fatalf("Java shutdown did not leave the selected runtime inactive/exited: active=%t service=%q (%v) container=%q (%v)", f.active, state, stateErr, container, containerErr)
+		}
+	}
 	instanceRuntimes.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
-		selected := "jv-a1b2c3"
-		unit := "minecraft-" + selected + ".service"
-		if command == "systemctl" && slices.Equal(args, []string{"--no-block", "stop", "--", unit}) {
+		if stopQueued && (command != "podman" || !slices.Equal(args, signalArgs)) {
+			t.Fatal("NeoForge stop job was not immediately followed by the selected SIGUSR1", command, args)
+		}
+		if command == "systemctl" && len(args) > 1 && args[0] == "--no-block" && args[1] == "stop" {
+			if !slices.Equal(args, []string{"--no-block", "stop", "--", unit}) {
+				t.Fatal("unexpected Java service stop target", args)
+			}
+			if f.software == "neoforge" {
+				checkCountdown()
+				stopQueued = true
+				f.commands = append(f.commands, command+" "+strings.Join(args, " "))
+				return nil, nil
+			}
 			if !gracefulSignalRequested {
 				t.Fatal("Java service stopped without the selected instance's SIGUSR1 request")
 			}
 			gracefulSignalRequested = false
 			f.commands = append(f.commands, command+" "+strings.Join(args, " "))
 			_, err := pluginInstallCommand(ctx, "systemctl", "stop", unit)
-			state, stateErr := instanceRuntimes.command(ctx, "systemctl", "show", "--property=LoadState,ActiveState,SubState", unit)
-			container, containerErr := instanceRuntimes.command(ctx, "podman", "inspect", "--type", "container", "--format", "{{.State.Status}} {{.State.ExitCode}}", "minecraft-"+selected)
-			if f.active || stateErr != nil || !strings.Contains(string(state), "ActiveState=inactive\n") || containerErr != nil || string(container) != "exited 0" {
-				t.Fatalf("Java shutdown did not leave the selected runtime inactive/exited: active=%t service=%q (%v) container=%q (%v)", f.active, state, stateErr, container, containerErr)
-			}
+			verifyStopped(ctx)
 			return nil, err
 		}
 		if command == "systemctl" && len(args) > 0 && args[len(args)-1] == unit {
@@ -264,10 +300,20 @@ func newPluginInstallFixtureFor(t *testing.T, software, version string) *pluginI
 		}
 		if command == "podman" {
 			if len(args) > 0 && args[0] == "kill" {
-				if !slices.Equal(args, []string{"kill", "--signal", "SIGUSR1", "minecraft-" + selected}) {
+				if !slices.Equal(args, signalArgs) {
 					t.Fatalf("unexpected Java shutdown signal or target: %s %v", command, args)
 				}
 				f.commands = append(f.commands, command+" "+strings.Join(args, " "))
+				if f.software == "neoforge" {
+					if !stopQueued || !f.active {
+						t.Fatal("NeoForge SIGUSR1 did not follow a queued stop for the running instance")
+					}
+					stopQueued = false
+					f.active = false
+					verifyStopped(ctx)
+					return nil, nil
+				}
+				checkCountdown()
 				gracefulSignalRequested = true
 				return nil, nil
 			}
@@ -282,6 +328,16 @@ func newPluginInstallFixtureFor(t *testing.T, software, version string) *pluginI
 				return []byte(state), nil
 			}
 			if len(args) > 0 && args[0] == "exec" {
+				if warning, ok := strings.CutPrefix(args[len(args)-1], "say Server shutting down in "); ok {
+					if len(args) < 2 || args[1] != containerName || gracefulSignalRequested {
+						t.Fatal("unexpected shutdown warning target or timing", args)
+					}
+					warnings = append(warnings, warning)
+					return nil, nil
+				}
+				if f.players > 0 && slices.Equal(args, []string{"exec", containerName, "rcon-cli", "list"}) {
+					return []byte("There are 1 of a max of 20 players online: Alex"), nil
+				}
 				return []byte("There are 0 of a max of 20 players online:"), nil
 			}
 		}

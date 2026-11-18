@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -30,6 +31,10 @@ class StartupMemory(unittest.TestCase):
         exec(compile(DEFINITIONS, str(REPO / 'mjust/libexec/validate-instance-start-memory'), 'exec'), self.ns)
         self.network = base / 'network' / 'state.json'
         self.ns.update(NETWORK=self.network, ROOT=self.root, QUADLETS=self.quadlets, MEMINFO=meminfo, command=self.command)
+        self.ns['podman'] = self.podman
+        self.container_names = ''
+        self.container_state = ''
+        self.container_calls = []
         self.states = {}
         self.config('jv-aaaaaa', '6G')
         self.config('jv-bbbbbb', '6G')
@@ -51,6 +56,18 @@ class StartupMemory(unittest.TestCase):
 
     def admit(self):
         self.ns['admit']('jv-bbbbbb')
+
+    def podman(self, *args):
+        self.container_calls.append(args)
+        name = 'minecraft-jv-aaaaaa'
+        if args == ('ps', '--all', '--filter', 'name=^' + name + '$', '--format', '{{.Names}}'):
+            result = self.container_names
+        else:
+            self.assertEqual(args, ('inspect', '--type', 'container', '--format', '{{.State.Status}}', name))
+            result = self.container_state
+        if isinstance(result, Exception):
+            raise result
+        return result
 
     def network_state(self, enabled):
         self.network.parent.mkdir(mode=0o700, exist_ok=True)
@@ -132,12 +149,53 @@ class StartupMemory(unittest.TestCase):
         self.config('jv-cccccc', '6G')
         self.config('jv-dddddd', '6G')
         self.admit()
+        self.assertEqual(self.container_calls, [])
 
     def test_active_and_activating_limits_count(self):
         for state in ('active', 'activating', 'reloading'):
             self.states['jv-aaaaaa'] = state
             with self.assertRaises(ValueError):
                 self.admit()
+        self.assertEqual(self.container_calls, [])
+
+    def test_failed_sibling_with_no_live_container_has_no_reservation(self):
+        self.states['jv-aaaaaa'] = 'failed'
+        self.admit()
+        self.assertEqual([args[0] for args in self.container_calls], ['ps'])
+        self.container_names = 'minecraft-jv-aaaaaa\n'
+        self.container_state = 'exited\n'
+        self.admit()
+        self.assertEqual([args[0] for args in self.container_calls], ['ps', 'ps', 'inspect'])
+
+    def test_failed_sibling_with_live_container_fails_closed(self):
+        self.states['jv-aaaaaa'] = 'failed'
+        self.container_names = 'minecraft-jv-aaaaaa\n'
+        for state in ('running', 'paused', 'stopping'):
+            with self.subTest(state=state):
+                self.container_state = state + '\n'
+                with self.assertRaises(ValueError):
+                    self.admit()
+
+    def test_failed_sibling_with_container_observation_error_fails_closed(self):
+        self.states['jv-aaaaaa'] = 'failed'
+        for observation in ('ps', 'inspect'):
+            with self.subTest(observation=observation):
+                error = subprocess.CalledProcessError(1, ['podman', observation])
+                self.container_names = error if observation == 'ps' else 'minecraft-jv-aaaaaa\n'
+                self.container_state = error
+                with self.assertRaises(subprocess.CalledProcessError):
+                    self.admit()
+
+    def test_failed_sibling_with_invalid_container_evidence_fails_closed(self):
+        self.states['jv-aaaaaa'] = 'failed'
+        exact = 'minecraft-jv-aaaaaa\n'
+        for names, state in ((exact + exact, 'exited\n'), ('minecraft-jv-bbbbbb\n', 'exited\n'),
+                             ('invalid name\n', 'exited\n'), (exact, ''), (exact, 'unknown\n'),
+                             (exact, 'exited\nexited\n')):
+            with self.subTest(names=names, state=state):
+                self.container_names, self.container_state = names, state
+                with self.assertRaises(ValueError):
+                    self.admit()
 
     def test_candidate_exactly_once_even_activating(self):
         self.states['jv-bbbbbb'] = 'activating'
@@ -169,9 +227,11 @@ class StartupMemory(unittest.TestCase):
             self.admit()
 
     def test_unknown_runtime_state_fails_closed(self):
-        self.states['jv-aaaaaa'] = 'deactivating'
-        with self.assertRaises(ValueError):
-            self.admit()
+        for state in ('deactivating', 'unknown'):
+            with self.subTest(state=state):
+                self.states['jv-aaaaaa'] = state
+                with self.assertRaises(ValueError):
+                    self.admit()
 
     def test_provisional_candidate_requires_no_published_identity(self):
         # Runtime-commit validates the existing operation-bound permit first;

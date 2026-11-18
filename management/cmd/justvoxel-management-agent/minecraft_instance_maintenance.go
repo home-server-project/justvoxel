@@ -142,8 +142,7 @@ func (b *instanceRuntimeBackend) shutdownAnnouncement(ctx context.Context, id st
 	return nil
 }
 
-// Request the selected software's graceful save/stop before systemd can send
-// SIGTERM. Existing committed environment/Quadlet files remain unchanged.
+// NeoForge needs the systemd stop job queued before the graceful signal.
 func (b *instanceRuntimeBackend) stopGracefully(ctx context.Context, id string) error {
 	if !instanceIDPattern.MatchString(id) {
 		return errInstanceID
@@ -152,16 +151,42 @@ func (b *instanceRuntimeBackend) stopGracefully(ctx context.Context, id string) 
 	if err != nil {
 		return err
 	}
-	if record.Runtime.Software == "bedrock" {
+	neoForge := record.Runtime.Software == "neoforge"
+	signal := func() error {
+		_, err := b.command(ctx, "podman", "kill", "--signal", "SIGUSR1", "minecraft-"+id)
+		return err
+	}
+	signalFailure := instanceRuntimeFailure("Instance graceful stop signal failed.")
+	switch {
+	case record.Runtime.Software == "bedrock":
 		if _, err = b.rcon(ctx, id, "stop"); err != nil {
 			return err
 		}
-	} else if _, err = b.command(ctx, "podman", "kill", "--signal", "SIGUSR1", "minecraft-"+id); err != nil {
-		return instanceRuntimeFailure("Instance graceful stop signal failed.")
+	case !neoForge:
+		if err = signal(); err != nil {
+			return signalFailure
+		}
 	}
 	unit := "minecraft-" + id + ".service"
 	if _, err = b.command(ctx, "systemctl", "--no-block", "stop", "--", unit); err != nil {
 		return instanceRuntimeFailure("Instance graceful stop request failed.")
+	}
+	if neoForge && signal() != nil {
+		// The stop job may have finished before the signal could be delivered.
+		state, err := b.observeRaw(ctx, id)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		if err != nil {
+			return signalFailure
+		}
+		if state.State == "stopped" {
+			return nil
+		}
+		if state.resettableFailure {
+			return b.normalizeStoppedFailure(ctx, state)
+		}
+		return signalFailure
 	}
 	for {
 		if ctx.Err() != nil {
@@ -175,30 +200,38 @@ func (b *instanceRuntimeBackend) stopGracefully(ctx context.Context, id string) 
 			return nil
 		}
 		if state.State == "failed" {
-			// observeRaw rejects failed units that still have a live container.
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			_, stopErr := b.command(ctx, "systemctl", "stop", "--", unit)
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			if stopErr != nil {
-				return instanceRuntimeFailure("Failed instance unit could not be stopped.")
-			}
-			stopped, err := b.observeRaw(ctx, id)
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return ctxErr
-			}
-			if err != nil || stopped.State != "stopped" {
-				return instanceRuntimeFailure("Instance graceful shutdown could not be confirmed.")
-			}
-			return nil
+			return b.normalizeStoppedFailure(ctx, state)
 		}
 		if err = b.waitMaintenance(ctx, time.Second); err != nil {
 			return err
 		}
 	}
+}
+
+func (b *instanceRuntimeBackend) normalizeStoppedFailure(ctx context.Context, observed instanceRuntimeStatus) error {
+	unconfirmed := instanceRuntimeFailure("Instance graceful shutdown could not be confirmed.")
+	if !observed.resettableFailure {
+		return unconfirmed
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	id := observed.ID
+	_, err := b.command(ctx, "systemctl", "reset-failed", "--", "minecraft-"+id+".service")
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	if err != nil {
+		return instanceRuntimeFailure("Failed instance unit could not be stopped.")
+	}
+	state, err := b.observeRaw(ctx, id)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	if err != nil || state.State != "stopped" {
+		return unconfirmed
+	}
+	return nil
 }
 
 func (b *instanceRuntimeBackend) stopWithWarnings(ctx context.Context, id string) error {

@@ -63,12 +63,13 @@ def validate(instance):
                       ('quadlet_sha256', '/etc/containers/systemd/minecraft-' + instance + '.container')]:
         if hashlib.sha256(read(path)).hexdigest() != record.get(key):
             raise ValueError('commitment')
+    return record['runtime'].get('software', 'paper')
 
 def native_bedrock(instance):
     return json.loads(read(root + '/' + instance + '/config.json'))['runtime'].get('software','paper') == 'bedrock'
 
-def graceful_request(instance):
-    if native_bedrock(instance):
+def graceful_request(instance, software):
+    if software == 'bedrock':
         run('podman', 'exec', 'minecraft-' + instance, 'send-command', 'stop')
     else:
         # Java mc-server-runner's graceful announcement-delay bypass.
@@ -121,14 +122,14 @@ def player_state(instance):
 
 def prepare(instance):
     try:
-        validate(instance)
+        software = validate(instance)
         container = 'minecraft-' + instance
         if run('podman', 'inspect', '--type', 'container', '--format', '{{.State.Running}}', container) != 'true':
             return True
         online, names = player_state(instance)
         if online:
             return True
-        graceful_request(instance)
+        graceful_request(instance, software)
         return True
     except Exception:
         return False
@@ -163,17 +164,48 @@ def discover():
                     raise ValueError('coverage')
     return instances
 
-def running(instance, draining=False):
+def running(instance):
     unit = 'minecraft-' + instance + '.service'
     state = run('systemctl', 'show', '--property=ActiveState', '--value', unit)
     containers = run('podman', 'ps', '--filter', 'name=^minecraft-' + instance + '$', '--format', '{{.Names}}')
-    if draining and state in ('active', 'activating', 'deactivating', 'inactive', 'failed'):
-        return state not in ('inactive', 'failed') or bool(containers)
     if state == 'active' and containers == 'minecraft-' + instance:
         return True
     if state in ('inactive', 'failed') and not containers:
         return False
     raise ValueError('runtime state')
+
+def stop_state(instance):
+    # A terminal unit still needs container evidence. Include paused and
+    # stopping containers when checking the exact name.
+    unit = 'minecraft-' + instance + '.service'
+    properties = run('systemctl', 'show', '--property=LoadState,ActiveState', '--', unit).splitlines()
+    if len(properties) != 2 or 'LoadState=loaded' not in properties:
+        raise ValueError('stop unit state')
+    active = next(prop for prop in properties if prop != 'LoadState=loaded')
+    if active in ('ActiveState=active', 'ActiveState=activating', 'ActiveState=deactivating'):
+        return None
+    if active not in ('ActiveState=inactive', 'ActiveState=failed'):
+        raise ValueError('stop unit state')
+    name = 'minecraft-' + instance
+    containers = run('podman', 'ps', '--all', '--filter', 'name=^' + name + '$', '--format', '{{.Names}}')
+    if containers:
+        if containers != name:
+            raise ValueError('stop container identity')
+        state = run('podman', 'inspect', '--type', 'container', '--format', '{{.State.Status}}', name)
+        if state in ('running', 'paused', 'stopping'):
+            return None
+        if state not in ('created', 'stopped', 'exited'):
+            raise ValueError('stop container state')
+    return active.split('=', 1)[1]
+
+def drained(instance):
+    state = stop_state(instance)
+    if state == 'failed':
+        run('systemctl', 'reset-failed', '--', 'minecraft-' + instance + '.service')
+        if stop_state(instance) != 'inactive':
+            raise ValueError('stop normalization')
+        return True
+    return state == 'inactive'
 
 def snapshot(query_players):
     instances = discover()
@@ -226,8 +258,17 @@ def stop(saved):
     empty = [s for s in active if not s['online']]
     occupied = [s for s in active if s['online']]
     def begin_stop(state):
-        graceful_request(state['id'])
-        run('systemctl', '--no-block', 'stop', 'minecraft-' + state['id'] + '.service')
+        instance = state['id']
+        software = validate(instance)
+        if software != 'neoforge':
+            graceful_request(instance, software)
+        run('systemctl', '--no-block', 'stop', 'minecraft-' + instance + '.service')
+        if software == 'neoforge':
+            try:
+                graceful_request(instance, software)
+            except (OSError, ValueError, subprocess.SubprocessError):
+                if not drained(instance):
+                    raise
     for state in empty:
         begin_stop(state)
     if occupied:
@@ -244,7 +285,7 @@ def stop(saved):
             previous = point
         for state in occupied:
             begin_stop(state)
-    while any(running(state['id'], draining=True) for state in active):
+    while not all(drained(state['id']) for state in active):
         if time.monotonic() >= deadline:
             raise ValueError('stop timeout')
         time.sleep(1)

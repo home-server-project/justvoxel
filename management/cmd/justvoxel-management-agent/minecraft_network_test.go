@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -768,13 +769,24 @@ func TestMinecraftNetworkLaterEnrollmentImportsExactlyOnce(t *testing.T) {
 	}
 }
 
+var networkShutdownWarnings = []string{
+	"say Server shutting down in 60 seconds",
+	"say Server shutting down in 30 seconds",
+	"say Server shutting down in 15 seconds",
+	"say Server shutting down in 10 seconds",
+	"say Server shutting down in 5 seconds",
+	"say Server shutting down in 4 seconds",
+	"say Server shutting down in 3 seconds",
+	"say Server shutting down in 2 seconds",
+	"say Server shutting down in 1 second",
+}
+
 // Serialize mock host state while allowing independent lifecycle countdowns.
 // No real timer or host service is used by these tests.
 type networkLifecycleFixture struct {
 	mu                     sync.Mutex
 	queued                 map[string]bool
 	signaled               map[string]bool
-	lastWarning            map[string]bool
 	warnings               map[string][]string
 	events                 map[string][]string
 	stops, starts          []string
@@ -783,8 +795,18 @@ type networkLifecycleFixture struct {
 }
 
 func networkLifecycleControls(f *instanceActivationFixture) *networkLifecycleFixture {
-	h := &networkLifecycleFixture{queued: map[string]bool{}, signaled: map[string]bool{}, lastWarning: map[string]bool{}, warnings: map[string][]string{}, events: map[string][]string{}}
+	h := &networkLifecycleFixture{queued: map[string]bool{}, signaled: map[string]bool{}, warnings: map[string][]string{}, events: map[string][]string{}}
 	original := f.backend.command
+	isNeoForge := func(id string) bool {
+		record, err := f.backend.readRuntimeConfig(id)
+		if err != nil {
+			f.t.Fatal("invalid shutdown target", id, err)
+		}
+		return record.Runtime.Software == "neoforge"
+	}
+	countdownIncomplete := func(id string) bool {
+		return len(h.warnings[id]) > 0 && !reflect.DeepEqual(h.warnings[id], networkShutdownWarnings)
+	}
 	f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
 		h.mu.Lock()
 		defer h.mu.Unlock()
@@ -796,16 +818,17 @@ func networkLifecycleControls(f *instanceActivationFixture) *networkLifecycleFix
 				h.published = true
 			}
 		}
-		if command == "podman" && len(args) == 4 && args[0] == "exec" && strings.HasPrefix(args[3], "say ") {
+		if command == "podman" && len(args) >= 4 && args[0] == "exec" && strings.HasPrefix(args[len(args)-1], "say ") {
 			id := strings.TrimPrefix(args[1], "minecraft-")
+			warning := args[len(args)-1]
+			if !instanceIDPattern.MatchString(id) || args[1] != "minecraft-"+id || f.containers[id] != "running" {
+				f.t.Fatal("invalid shutdown warning target", args)
+			}
 			if h.signaled[id] || h.queued[id] {
 				f.t.Fatal("warning after graceful shutdown began", id, args)
 			}
-			h.warnings[id] = append(h.warnings[id], args[3])
-			h.events[id] = append(h.events[id], args[3])
-			if args[3] == "say Server shutting down in 1 second" {
-				h.lastWarning[id] = true
-			}
+			h.warnings[id] = append(h.warnings[id], warning)
+			h.events[id] = append(h.events[id], warning)
 			return nil, nil
 		}
 		if command == "podman" && len(args) > 0 && args[0] == "kill" {
@@ -813,7 +836,7 @@ func networkLifecycleControls(f *instanceActivationFixture) *networkLifecycleFix
 				f.t.Fatal("unexpected Java graceful signal", args)
 			}
 			id := strings.TrimPrefix(args[3], "minecraft-")
-			if !instanceIDPattern.MatchString(id) || (len(h.warnings[id]) > 0 && !h.lastWarning[id]) || h.signaled[id] || h.queued[id] {
+			if !instanceIDPattern.MatchString(id) || countdownIncomplete(id) || h.signaled[id] || h.queued[id] != isNeoForge(id) {
 				f.t.Fatal("invalid or premature Java graceful signal", id, args)
 			}
 			// The underlying fixture also verifies the selected managed Java runtime.
@@ -827,17 +850,29 @@ func networkLifecycleControls(f *instanceActivationFixture) *networkLifecycleFix
 		if command == "systemctl" {
 			id := strings.TrimSuffix(strings.TrimPrefix(args[len(args)-1], "minecraft-"), ".service")
 			if instanceIDPattern.MatchString(id) {
-				if args[0] == "show" && h.queued[id] && (f.states[id] != "inactive" || f.containers[id] != "exited") {
-					f.states[id], f.containers[id] = "inactive", "exited"
-					h.events[id] = append(h.events[id], "inactive")
+				if args[0] == "show" && h.queued[id] {
+					if !h.signaled[id] {
+						f.t.Fatal("queued stop observed before the selected Java graceful signal", id)
+					}
+					if f.states[id] != "inactive" || f.containers[id] != "exited" {
+						f.states[id], f.containers[id] = "inactive", "exited"
+						h.events[id] = append(h.events[id], "inactive")
+					}
 				}
 				if args[0] == "stop" {
 					h.stops = append(h.stops, id)
 				}
 				if len(args) > 1 && args[0] == "--no-block" {
 					if args[1] == "stop" {
-						if !reflect.DeepEqual(args, []string{"--no-block", "stop", "--", "minecraft-" + id + ".service"}) || !h.signaled[id] || (len(h.warnings[id]) > 0 && !h.lastWarning[id]) {
-							f.t.Fatal("service stop before selected Java graceful signal or final warning", id, args)
+						if !slices.Equal(args, []string{"--no-block", "stop", "--", "minecraft-" + id + ".service"}) || countdownIncomplete(id) {
+							f.t.Fatal("invalid service stop target or incomplete player warnings", id, args)
+						}
+						if isNeoForge(id) {
+							if h.queued[id] || h.signaled[id] {
+								f.t.Fatal("NeoForge must queue one stop before sending SIGUSR1", id)
+							}
+						} else if !h.signaled[id] {
+							f.t.Fatal("service stop before selected Java graceful signal", id)
 						}
 						if !h.queued[id] {
 							h.stops = append(h.stops, id)
@@ -854,7 +889,6 @@ func networkLifecycleControls(f *instanceActivationFixture) *networkLifecycleFix
 						h.events[id] = append(h.events[id], "start")
 						delete(h.queued, id)
 						delete(h.signaled, id)
-						delete(h.lastWarning, id)
 						if h.failStart {
 							return nil, errors.New("mock start failure")
 						}
@@ -901,17 +935,20 @@ func TestMinecraftNetworkOccupiedNormalCountdownAndRestart(t *testing.T) {
 	h := networkLifecycleControls(f)
 	var paused time.Duration
 	f.backend.pause = func(_ context.Context, d time.Duration) error { paused += d; return nil }
+	original := f.backend.command
+	f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+		if command == "podman" && slices.Equal(args, []string{"kill", "--signal", "SIGUSR1", "minecraft-" + id}) && paused != time.Minute {
+			t.Error("occupied server signaled before the full countdown", paused)
+		}
+		return original(ctx, command, args...)
+	}
 	if err := networkApply(context.Background(), f.backend, c); err != nil {
 		t.Fatal(err)
 	}
-	var want []string
-	for _, seconds := range []string{"60 seconds", "30 seconds", "15 seconds", "10 seconds", "5 seconds", "4 seconds", "3 seconds", "2 seconds", "1 second"} {
-		want = append(want, "say Server shutting down in "+seconds)
-	}
-	if !reflect.DeepEqual(h.warnings[id], want) || paused != time.Minute || !reflect.DeepEqual(h.starts, []string{id}) {
+	if !reflect.DeepEqual(h.warnings[id], networkShutdownWarnings) || paused != time.Minute || !reflect.DeepEqual(h.starts, []string{id}) {
 		t.Fatal("normal countdown changed", h.warnings, paused, h.starts)
 	}
-	want = append(want, "SIGUSR1", "stop", "inactive", "start")
+	want := append(slices.Clone(networkShutdownWarnings), "SIGUSR1", "stop", "inactive", "start")
 	if !reflect.DeepEqual(h.events, map[string][]string{id: want}) || !reflect.DeepEqual(h.stops, []string{id}) {
 		t.Fatal("occupied graceful lifecycle order changed", h.events, h.stops)
 	}
@@ -1678,8 +1715,23 @@ func TestMinecraftNetworkPreflightBeforeDowntime(t *testing.T) {
 				prepared, disrupted := false, false
 				checked := map[string]bool{}
 				var mu sync.Mutex
+				var countdown time.Duration
+				occupiedID := ""
+				if software == "neoforge" && failure == "" {
+					occupiedID = c.Members[0]
+					f.backend.pause = func(_ context.Context, d time.Duration) error {
+						mu.Lock()
+						defer mu.Unlock()
+						countdown += d
+						return nil
+					}
+				}
 				f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
 					mu.Lock()
+					if occupiedID != "" && command == "podman" && slices.Equal(args, []string{"exec", "minecraft-" + occupiedID, "rcon-cli", "list"}) {
+						mu.Unlock()
+						return []byte("There are 1 of a max of 20 players online: Alex"), nil
+					}
 					if command == minecraftNetworkHelper {
 						switch args[0] {
 						case "backend-availability-key":
@@ -1715,6 +1767,11 @@ func TestMinecraftNetworkPreflightBeforeDowntime(t *testing.T) {
 							t.Error("Minecraft shutdown preceded complete preflight")
 						}
 					}
+					if occupiedID != "" && countdown != time.Minute &&
+						(command == "systemctl" && slices.Equal(args, []string{"--no-block", "stop", "--", "minecraft-" + occupiedID + ".service"}) ||
+							command == "podman" && slices.Equal(args, []string{"kill", "--signal", "SIGUSR1", "minecraft-" + occupiedID})) {
+						t.Error("occupied NeoForge interrupted before the full countdown", countdown)
+					}
 					mu.Unlock()
 					return original(ctx, command, args...)
 				}
@@ -1732,6 +1789,20 @@ func TestMinecraftNetworkPreflightBeforeDowntime(t *testing.T) {
 				if failure == "" {
 					if err != nil || len(h.stops) != len(c.Members) || len(h.starts) != len(c.Members) {
 						t.Fatal("prepared transaction failed", err)
+					}
+					want := make(map[string][]string, len(c.Members))
+					for _, id := range c.Members {
+						order := []string{"SIGUSR1", "stop", "inactive", "start"}
+						if software == "neoforge" {
+							order = []string{"stop", "SIGUSR1", "inactive", "start"}
+						}
+						if id == occupiedID {
+							order = append(slices.Clone(networkShutdownWarnings), order...)
+						}
+						want[id] = order
+					}
+					if !reflect.DeepEqual(h.events, want) {
+						t.Fatal("unexpected selected-instance lifecycle", h.events)
 					}
 				} else if err == nil || len(h.stops) != 0 || len(h.starts) != 0 || len(h.signaled) != 0 || h.published {
 					t.Fatal("failed preflight disrupted Minecraft", err)

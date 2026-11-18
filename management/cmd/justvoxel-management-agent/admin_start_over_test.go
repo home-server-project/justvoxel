@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -63,6 +64,30 @@ func newStartOverFixture(t *testing.T, n int) *startOverFixture {
 			f.x.calls = append(f.x.calls, call)
 			return []byte(x.players), nil
 		}
+		if command == "systemctl" && args[0] == "reset-failed" {
+			id := strings.TrimSuffix(strings.TrimPrefix(args[len(args)-1], "minecraft-"), ".service")
+			if !slices.Equal(args, []string{"reset-failed", "--", "minecraft-" + id + ".service"}) ||
+				f.x.states[id] != "failed" || !f.removed[id] {
+				t.Fatal("reset-failed must target the exact failed participant with no container", args)
+			}
+			observations := []string{
+				"systemctl show --property=LoadState,ActiveState,SubState -- minecraft-" + id + ".service",
+				"podman ps --all --filter name=^minecraft-" + id + "$ --format {{.Names}}",
+			}
+			if len(f.x.calls) < len(observations) || !slices.Equal(f.x.calls[len(f.x.calls)-len(observations):], observations) {
+				t.Fatal("reset-failed preceded the exact failed-unit and container observations", f.x.calls)
+			}
+			f.x.states[id] = "stopped"
+			f.x.calls = append(f.x.calls, call)
+			return nil, nil
+		}
+		if command == "systemctl" && (args[0] == "stop" || (args[0] == "--no-block" && args[1] == "stop")) {
+			id := strings.TrimSuffix(strings.TrimPrefix(args[len(args)-1], "minecraft-"), ".service")
+			if f.x.states[id] == "failed" {
+				f.x.calls = append(f.x.calls, call)
+				return nil, nil // Stopping an already failed unit leaves it failed.
+			}
+		}
 		if command == "systemctl" && args[0] == "--no-block" && args[1] == "stop" {
 			id := strings.TrimSuffix(strings.TrimPrefix(args[len(args)-1], "minecraft-"), ".service")
 			f.x.states[id] = "stopped"
@@ -73,13 +98,15 @@ func newStartOverFixture(t *testing.T, n int) *startOverFixture {
 			id := strings.TrimSuffix(strings.TrimPrefix(args[len(args)-1], "minecraft-"), ".service")
 			state := f.x.states[id]
 			if state == "failed" || state == "activating" || state == "deactivating" {
+				f.x.calls = append(f.x.calls, call)
 				return []byte("LoadState=loaded\nActiveState=" + state + "\n"), nil
 			}
 		}
 		if command == "podman" && args[0] == "inspect" {
 			id := strings.TrimPrefix(args[len(args)-1], "minecraft-")
 			if f.x.states[id] == "failed" {
-				return []byte("exited 1"), nil
+				f.x.calls = append(f.x.calls, call)
+				return []byte("running 0"), nil
 			}
 		}
 		return base(ctx, command, args...)
@@ -106,7 +133,7 @@ func (x *startOverFixture) apply(t *testing.T, p startOverPlan, confirm, backup 
 func startOverMutations(calls []string) []string {
 	out := []string{}
 	for _, c := range calls {
-		if strings.HasPrefix(c, "podman rm ") || strings.Contains(c, " stop ") || strings.Contains(c, " disable ") || strings.Contains(c, "--remove-port=") || strings.Contains(c, "instance-delete remove ") {
+		if strings.HasPrefix(c, "podman rm ") || strings.HasPrefix(c, "systemctl reset-failed ") || strings.Contains(c, " stop ") || strings.Contains(c, " disable ") || strings.Contains(c, "--remove-port=") || strings.Contains(c, "instance-delete remove ") {
 			out = append(out, c)
 		}
 	}
@@ -297,9 +324,15 @@ func TestStartOverParticipantSetsAndPreservation(t *testing.T) {
 			x := newStartOverFixture(t, len(states))
 			b := x.f.x.b
 			identities := map[string]syscall.Stat_t{}
+			var wantResets []string
 			for i, state := range states {
 				r := x.f.x.records[i]
 				x.f.x.states[r.Runtime.ID] = state
+				if state == "failed" {
+					// The failed unit remains loaded after its container has gone.
+					x.f.removed[r.Runtime.ID] = true
+					wantResets = append(wantResets, "systemctl reset-failed -- minecraft-"+r.Runtime.ID+".service")
+				}
 				var st syscall.Stat_t
 				if err := syscall.Stat(r.Storage.DataPath, &st); err != nil {
 					t.Fatal(err)
@@ -367,14 +400,45 @@ func TestStartOverParticipantSetsAndPreservation(t *testing.T) {
 			if len(x.f.removals) != 0 {
 				t.Fatal("data deletion invoked")
 			}
-			for _, call := range x.f.x.calls {
+			var resets []string
+			for i, call := range x.f.x.calls {
+				if unit, ok := strings.CutPrefix(call, "systemctl reset-failed -- "); ok {
+					resets = append(resets, call)
+					id := strings.TrimSuffix(strings.TrimPrefix(unit, "minecraft-"), ".service")
+					want := []string{
+						"systemctl show --property=LoadState,ActiveState,SubState -- " + unit,
+						"podman ps --all --filter name=^minecraft-" + id + "$ --format {{.Names}}",
+					}
+					if i+len(want) >= len(x.f.x.calls) || !slices.Equal(x.f.x.calls[i+1:i+1+len(want)], want) {
+						t.Fatal("failed-unit reset was not followed by authoritative stopped-state checks", x.f.x.calls)
+					}
+				}
 				if strings.Contains(call, "prune") || strings.Contains(call, "systemctl start") || strings.Contains(call, "podman rm --ignore -- minecraft ") {
 					t.Fatal("unrelated mutation", call)
 				}
 			}
+			if !slices.Equal(resets, wantResets) {
+				t.Fatal("unexpected failed-unit normalization", resets)
+			}
 		})
 	}
 }
+
+func TestStartOverRefusesFailedUnitWithLiveContainer(t *testing.T) {
+	x := newStartOverFixture(t, 1)
+	id := x.f.x.records[0].Runtime.ID
+	x.f.x.states[id] = "failed"
+	x.f.removed[id] = true
+	plan := x.plan(t)
+	delete(x.f.removed, id) // A live container appears after the plan was reviewed.
+	x.f.x.calls = nil
+	w := x.apply(t, plan, false, false)
+	inspect := "podman inspect --type container --format {{.State.Status}} {{.State.ExitCode}} minecraft-" + id
+	if w.Code != http.StatusConflict || !slices.Contains(x.f.x.calls, inspect) || len(startOverMutations(x.f.x.calls)) != 0 || x.f.x.states[id] != "failed" {
+		t.Fatal("Start Over did not preserve the failed participant with a live container", w.Code, w.Body.String(), x.f.x.calls)
+	}
+}
+
 func TestStartOverPlayersAndStaleReviewBlockBeforeMutation(t *testing.T) {
 	for _, scenario := range []string{"online", "unknown", "stale", "activation", "transition", "backup", "private"} {
 		t.Run(scenario, func(t *testing.T) {

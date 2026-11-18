@@ -22,6 +22,9 @@ type instanceRuntimeStatus struct {
 	State       string `json:"state"`
 	StartOnBoot bool   `json:"start_on_boot"`
 	Message     string `json:"message,omitempty"`
+
+	// State can also be "failed" for a service that systemd still considers active.
+	resettableFailure bool
 }
 
 func (b *instanceRuntimeBackend) observeRaw(ctx context.Context, id string) (instanceRuntimeStatus, error) {
@@ -36,9 +39,10 @@ func (b *instanceRuntimeBackend) observeRaw(ctx context.Context, id string) (ins
 	props := map[string]string{}
 	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
 		key, value, ok := strings.Cut(line, "=")
-		if ok {
-			props[key] = value
+		if _, duplicate := props[key]; !ok || duplicate {
+			return result, instanceRuntimeFailure("Systemd instance state is invalid.")
 		}
+		props[key] = value
 	}
 	switch props["LoadState"] {
 	case "not-found":
@@ -90,6 +94,9 @@ func (b *instanceRuntimeBackend) observeRaw(ctx context.Context, id string) (ins
 			return result, instanceRuntimeFailure("Instance container exit status is invalid.")
 		}
 		containerState = stateFields[0]
+		if containerState == "absent" {
+			return result, instanceRuntimeFailure("Instance container inspection is invalid.")
+		}
 	}
 	if props["LoadState"] == "not-found" {
 		if containerState != "absent" {
@@ -103,6 +110,10 @@ func (b *instanceRuntimeBackend) observeRaw(ctx context.Context, id string) (ins
 			return result, instanceRuntimeFailure("Failed service still has a live container.")
 		}
 		result.State = "failed"
+		switch containerState {
+		case "absent", "exited", "stopped", "created":
+			result.resettableFailure = true
+		}
 		return result, nil
 	}
 	if props["ActiveState"] == "active" {
@@ -355,13 +366,8 @@ func (b *instanceRuntimeBackend) actionWithVerifiedRecordWarnings(ctx context.Co
 				return instanceRuntimeFailure("Instance graceful shutdown could not be confirmed.")
 			}
 		case "failed":
-			// observeRaw verified that no live container remains behind the failed unit.
-			if _, err = b.command(ctx, "systemctl", "stop", "--", unit); err != nil {
-				return instanceRuntimeFailure("Failed instance unit could not be stopped.")
-			}
-			stopped, err := b.observeRaw(ctx, id)
-			if err != nil || stopped.State != "stopped" {
-				return instanceRuntimeFailure("Instance graceful shutdown could not be confirmed.")
+			if err = b.normalizeStoppedFailure(ctx, state); err != nil {
+				return err
 			}
 		case "stopped":
 		default:

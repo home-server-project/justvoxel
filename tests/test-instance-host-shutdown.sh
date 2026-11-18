@@ -31,25 +31,66 @@ from pathlib import Path
 r=Path(os.environ['FIXTURE']); tool=Path(sys.argv[0]).name; a=sys.argv[1:]
 with (r/'calls').open('a') as f: f.write(json.dumps([tool]+a)+'\\n')
 p=r/'state'; d=json.loads(p.read_text())
+units=d.setdefault('units', {})
+pending=d.setdefault('pending_stops', [])
+def finish_stop(identity):
+    d['running'].remove(identity)
+    units[identity]=d.get('after_stop', {}).get(identity, 'inactive')
+    p.write_text(json.dumps(d))
+def container(identity):
+    return 'running' if identity in d['running'] else d.get('stopped_containers', {}).get(identity, '')
 if tool=='systemctl':
     if a==['is-system-running']: print('stopping')
-    elif a[0]=='show': print('active' if a[-1][10:-8] in d['running'] else 'inactive')
+    elif a[0]=='show':
+        identity=a[-1][10:-8]
+        active=units.get(identity, 'active' if identity in d['running'] else 'inactive')
+        if a[1:-1]==['--property=LoadState,ActiveState','--']:
+            print('LoadState=loaded')
+            print('ActiveState='+active)
+        else:
+            assert a[1:-1]==['--property=ActiveState','--value']
+            print(active)
     elif a[0]=='is-active': sys.exit(3)
     elif a[:2]==['--no-block','stop']:
         identity=a[-1][10:-8]
         if d.get('stop_fail')==identity: sys.exit(1)
-        d['running'].remove(identity); p.write_text(json.dumps(d))
+        if identity in d.get('stop_on_signal', []):
+            units[identity]='deactivating'
+            pending.append(identity)
+            p.write_text(json.dumps(d))
+        else:
+            finish_stop(identity)
+    elif a[0]=='reset-failed':
+        assert len(a)==3 and a[1]=='--'
+        identity=a[-1][10:-8]
+        assert units.get(identity)=='failed' and container(identity) not in ('running','paused','stopping')
+        if d.get('reset_fail')==identity: sys.exit(1)
+        units[identity]=d.get('after_reset', {}).get(identity,'inactive')
+        p.write_text(json.dumps(d))
     elif a[0]=='start':
         identity=a[-1][10:-8]
         if identity not in d['running']: d['running'].append(identity)
+        units.pop(identity, None)
+        if identity in pending: pending.remove(identity)
         p.write_text(json.dumps(d))
     elif a==['reboot']: sys.exit(1 if d['reboot_fail'] else 0)
     else: sys.exit(2)
 elif tool=='podman':
     if a[0]=='ps':
-        identity=a[2][16:-1]
-        if identity in d['running']: print('minecraft-'+identity)
-    elif a[0]=='inspect': print('true' if a[-1][10:] in d['running'] else 'false')
+        all_containers=a[1]=='--all'
+        options=a[2:] if all_containers else a[1:]
+        assert options[0]=='--filter' and options[2:]==['--format','{{.Names}}']
+        identity=options[1][16:-1]
+        state=container(identity)
+        if state and (all_containers or state in ('running','paused','stopping')): print('minecraft-'+identity)
+    elif a[0]=='inspect':
+        state=container(a[-1][10:])
+        if a[-2]=='{{.State.Status}}':
+            if not state: sys.exit(1)
+            print(state)
+        else:
+            assert a[-2]=='{{.State.Running}}'
+            print('true' if state=='running' else 'false')
     elif a[0]=='logs': print('[INFO] There are '+str(d.get('native_online',{}).get(a[-1][10:],0))+'/20 players online')
     elif a[0]=='exec':
         bounded = a[2:5]==['timeout','--kill-after=0.1s','0.25s']
@@ -65,8 +106,13 @@ elif tool=='podman':
             if value is None: sys.exit(1)
             print(value)
     elif len(a)==4 and a[:3]==['kill','--signal','SIGUSR1']:
-        record=json.loads((r/'instances'/a[3][10:]/'config.json').read_text())
+        identity=a[3][10:]
+        record=json.loads((r/'instances'/identity/'config.json').read_text())
         if record['runtime'].get('software')=='bedrock': sys.exit(2)
+        if identity in d.get('signal_fail', []): sys.exit(1)
+        if identity in pending:
+            pending.remove(identity)
+            finish_stop(identity)
     else: sys.exit(2)
 elif tool=='systemd-run': sys.exit(1 if d['queue_fail'] else 0)
 elif tool=='management-agent':
@@ -104,7 +150,7 @@ else: sys.exit(2)
             source = source.replace('info.st_uid != 0 or info.st_gid != 0',
                                     'info.st_uid != os.getuid() or info.st_gid != os.getgid()')
             source = source.replace('time.sleep(', 'fixture_sleep(')
-            source = source.replace("root = '", "def fixture_sleep(seconds):\n    with open(os.environ['FIXTURE'] + '/sleeps', 'a') as output:\n        output.write(str(seconds) + '\\n')\n    with open(os.environ['FIXTURE'] + '/calls', 'a') as output:\n        output.write(json.dumps(['sleep', seconds]) + '\\n')\n\nroot = '", 1)
+            source = source.replace("root = '", "def fixture_sleep(seconds):\n    global deadline\n    with open(os.environ['FIXTURE'] + '/sleeps', 'a') as output:\n        output.write(str(seconds) + '\\n')\n    with open(os.environ['FIXTURE'] + '/calls', 'a') as output:\n        output.write(json.dumps(['sleep', seconds]) + '\\n')\n    if os.getenv('FIXTURE_DRAIN_TIMEOUT'):\n        deadline = time.monotonic()\n\nroot = '", 1)
             source = source.replace('[[ -d /sys/firmware/efi ]]', '[[ -d ' + str(self.root) + ' ]]')
             source = source.replace('busctl call org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager CanRebootToFirmwareSetup', "printf 's \\\"yes\\\"'")
             self.write(self.root / 'helpers' / Path(relative).name, source, 0o700)
@@ -116,7 +162,7 @@ else: sys.exit(2)
     def save(self):
         (self.root / 'state').write_text(json.dumps(self.data))
 
-    def instances(self, running, players=None):
+    def instances(self, running, players=None, software=None):
         for identity in IDS:
             directory = self.root / 'instances' / identity
             directory.mkdir(mode=0o700)
@@ -124,6 +170,8 @@ else: sys.exit(2)
             record = dict(schema_version=1, runtime=dict(id=identity),
                           environment_sha256=hashlib.sha256(env.encode()).hexdigest(),
                           quadlet_sha256=hashlib.sha256(quadlet.encode()).hexdigest())
+            if software and identity in software:
+                record['runtime']['software'] = software[identity]
             for path, text in ((directory / 'config.json', json.dumps(record)),
                                (directory / 'minecraft.env', env),
                                (self.root / 'quadlets' / ('minecraft-' + identity + '.container'), quadlet),
@@ -360,11 +408,9 @@ else: sys.exit(2)
                 self.assertIn(['systemctl','reboot'], self.calls())
 
     def test_mixed_reboot_stops_empty_before_countdown_and_occupied_after(self):
-        self.instances(IDS, {IDS[1]: 'There are 1 of a max of 20 players online: Alex\n\x1b[0m\n'})
-        path = self.root / 'instances' / IDS[2] / 'config.json'
-        record = json.loads(path.read_text())
-        record['runtime']['software'] = 'bedrock'
-        self.write(path, json.dumps(record), 0o600)
+        self.instances(IDS, {IDS[1]: 'There are 1 of a max of 20 players online: Alex\n\x1b[0m\n'},
+                       software={IDS[1]: 'neoforge', IDS[2]: 'bedrock'})
+        self.data['stop_on_signal'] = [IDS[1]]
         for warning, points in (('10', [10,5,4,3,2,1]), ('60', [60,30,15,10,5,4,3,2,1])):
             with self.subTest(warning=warning):
                 self.data['running'] = IDS[:]
@@ -385,10 +431,101 @@ else: sys.exit(2)
                     self.assertLess(calls.index(stop), calls.index(warnings[0]))
                 signal = ['podman','kill','--signal','SIGUSR1','minecraft-'+IDS[1]]
                 stop = ['systemctl','--no-block','stop','minecraft-'+IDS[1]+'.service']
-                self.assertGreater(calls.index(signal), sleeps[-1])
-                self.assertGreater(calls.index(stop), calls.index(signal))
-                self.assertGreater(calls.index(['systemctl','reboot']), calls.index(stop))
+                self.assertGreater(calls.index(stop), sleeps[-1])
+                self.assertEqual(calls.index(stop) + 1, calls.index(signal))
+                self.assertGreater(calls.index(['systemctl','reboot']), calls.index(signal))
                 self.assert_running([])
+
+    def test_empty_neoforge_and_other_java_stop_order(self):
+        self.instances(IDS[:2], software={IDS[0]: 'neoforge'})
+        path = self.root / 'instances' / IDS[1] / 'config.json'
+        record = json.loads(path.read_text())
+        for other in ('forge', 'paper', 'fabric'):
+            with self.subTest(other=other):
+                record['runtime']['software'] = other
+                self.write(path, json.dumps(record), 0o600)
+                self.data.update(running=IDS[:2], stop_on_signal=[IDS[0]])
+                self.save()
+                (self.root / 'calls').unlink(missing_ok=True)
+                self.run_helper('system-update-reboot-worker', JV_UPDATE_REBOOT_BACKUP='yes')
+                calls = self.calls()
+                reboot = calls.index(['systemctl', 'reboot'])
+                for identity in IDS[:2]:
+                    name = 'minecraft-' + identity
+                    signal = ['podman', 'kill', '--signal', 'SIGUSR1', name]
+                    stop = ['systemctl', '--no-block', 'stop', name + '.service']
+                    first, second = (stop, signal) if identity == IDS[0] else (signal, stop)
+                    self.assertEqual(calls.index(first) + 1, calls.index(second))
+                    verified = ['podman', 'ps', '--all', '--filter', 'name=^' + name + '$', '--format', '{{.Names}}']
+                    self.assertLess(calls.index(second), calls.index(verified))
+                    self.assertLess(calls.index(verified), reboot)
+                self.assertFalse((self.root / 'sleeps').exists())
+                self.assertEqual(self.changed('stop'), ['minecraft-'+identity+'.service' for identity in IDS[:2]])
+                self.assertEqual(self.changed('start'), [])
+                self.assert_running([])
+
+    def test_neoforge_signal_failure_requires_inactive_unit_without_live_container(self):
+        identity = IDS[0]
+        unit = 'minecraft-' + identity + '.service'
+        self.instances([identity], software={identity: 'neoforge'})
+        for state, live in (('inactive', False), ('failed', False), ('inactive', True)):
+            with self.subTest(state=state, live=live):
+                self.data.update(running=[identity], signal_fail=[identity],
+                                 after_stop={identity: state},
+                                 stopped_containers={identity: 'running'} if live else {})
+                self.save()
+                (self.root / 'calls').unlink(missing_ok=True)
+                self.run_helper('system-update-reboot-worker', rc=4 if live else 0)
+                calls = self.calls()
+                signal = ['podman', 'kill', '--signal', 'SIGUSR1', 'minecraft-' + identity]
+                self.assertEqual(calls.index(['systemctl', '--no-block', 'stop', unit]) + 1, calls.index(signal))
+                self.assertIn(['podman', 'ps', '--all', '--filter', 'name=^minecraft-' + identity + '$', '--format', '{{.Names}}'],
+                              calls[calls.index(signal) + 1:])
+                self.assertEqual(['systemctl', 'reboot'] in calls, not live)
+                self.assertEqual(self.changed('reset-failed'), [unit] if state == 'failed' else [])
+                self.assert_running([identity] if live else [])
+
+    def test_drained_failed_unit_is_reset_and_reverified_before_reboot(self):
+        identity, sibling = IDS[:2]
+        unit = 'minecraft-' + identity + '.service'
+        self.instances([identity], software={identity: 'neoforge'})
+        self.data.update(stop_on_signal=[identity], after_stop={identity: 'failed'}, units={sibling: 'failed'})
+        self.save()
+        for mode in ('status', 'check'):
+            result = self.run_helper('instance-host-shutdown-prepare', mode)
+            self.assertFalse(result['instances'][1]['running'])
+        self.assertEqual(self.changed('reset-failed'), [])
+        self.run_helper('system-update-reboot-worker')
+        calls = self.calls()
+        reset = calls.index(['systemctl', 'reset-failed', '--', unit])
+        show = ['systemctl', 'show', '--property=LoadState,ActiveState', '--', unit]
+        ps = ['podman', 'ps', '--all', '--filter', 'name=^minecraft-' + identity + '$', '--format', '{{.Names}}']
+        self.assertEqual(calls[reset-2:reset], [show, ps])
+        self.assertEqual(calls[reset+1:reset+3], [show, ps])
+        self.assertLess(reset+2, calls.index(['systemctl', 'reboot']))
+        self.assertEqual(self.changed('reset-failed'), [unit])
+        self.assertEqual(self.changed('start'), [])
+        self.assertEqual(json.loads((self.root / 'state').read_text())['units'], {identity: 'inactive', sibling: 'failed'})
+        self.assert_running([])
+
+    def test_shutdown_normalization_failure_cancels_reboot(self):
+        identity = IDS[0]
+        unit = 'minecraft-' + identity + '.service'
+        self.instances([identity], software={identity: 'neoforge'})
+        for failure in ('command', 'still_failed', 'live_container'):
+            with self.subTest(failure=failure):
+                self.data.update(running=[identity], stop_on_signal=[identity], after_stop={identity: 'failed'},
+                                 reset_fail=identity if failure == 'command' else '',
+                                 after_reset={identity: 'failed'} if failure == 'still_failed' else {},
+                                 stopped_containers={identity: 'paused'} if failure == 'live_container' else {})
+                self.save()
+                (self.root / 'calls').unlink(missing_ok=True)
+                self.run_helper('system-update-reboot-worker', rc=4,
+                                FIXTURE_DRAIN_TIMEOUT='yes' if failure == 'live_container' else '')
+                self.assertEqual(self.changed('reset-failed'), [] if failure == 'live_container' else [unit])
+                self.assertEqual(self.changed('start'), [unit])
+                self.assertNotIn(['systemctl', 'reboot'], self.calls())
+                self.assert_running([identity])
 
     def test_native_bedrock_empty_and_occupied_shutdown(self):
         self.instances([IDS[0]])

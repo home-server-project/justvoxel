@@ -353,9 +353,11 @@ are accepted.
 Administrator Stop/Restart holds the Phase 3A appliance locks and shared
 Minecraft maintenance lock across player checking, graceful stop, verification
 and any subsequent start request. Occupied instances remain running for the
-60/30/15/10/5/4/3/2/1-second warning sequence. Only after the countdown does
-JustVoxel request Java graceful shutdown with SIGUSR1, followed by a nonblocking
-service stop and stopped-state verification. SIGUSR1 bypasses the Java image's
+60/30/15/10/5/4/3/2/1-second warning sequence. After the countdown, JustVoxel
+normally sends SIGUSR1 before requesting a nonblocking service stop for Java instances.
+For NeoForge, JustVoxel queues the nonblocking service stop first and immediately
+sends SIGUSR1. This order also applies to managed host shutdown and update reboot.
+JustVoxel verifies the stopped state. SIGUSR1 bypasses the Java image's
 synchronous RCON announcement and additional delay while retaining world saving.
 Empty instances begin that graceful shutdown immediately, without warning sleeps. The stop uses
 the caller's context rather than a separate 150-second lifecycle deadline.

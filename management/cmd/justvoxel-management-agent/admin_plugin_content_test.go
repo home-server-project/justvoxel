@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -59,9 +60,18 @@ func TestModInstallAndInventory(t *testing.T) {
 			if len(plan.Artifacts) != 1 || plan.Artifacts[0].Target != "mods" || plan.Location != filepath.Join(f.data, "mods") {
 				t.Fatal(plan)
 			}
-			journal := f.execute(t, plan, false)
+			occupied := loader == "forge" || loader == "neoforge"
+			if occupied {
+				f.players = 1
+			}
+			journal := f.execute(t, plan, occupied)
 			if journal.State != operationSucceeded {
 				t.Fatal(journal.State, journal.Status)
+			}
+			signal := slices.Index(f.commands, "podman kill --signal SIGUSR1 minecraft-jv-a1b2c3")
+			stop := slices.Index(f.commands, "systemctl --no-block stop -- minecraft-jv-a1b2c3.service")
+			if signal < 0 || stop < 0 || (loader == "neoforge" && signal != stop+1) || (loader != "neoforge" && signal >= stop) {
+				t.Fatal("wrong selected-instance shutdown order", f.commands)
 			}
 			m, _, err := readPluginManifest(f.data)
 			if err != nil || len(m.Artifacts) != 1 || m.Artifacts[0].Target != "mods" || m.Artifacts[0].Main != "" {

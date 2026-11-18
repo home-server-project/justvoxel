@@ -159,6 +159,142 @@ func TestInstanceZeroPlayerStopUsesCallerContext(t *testing.T) {
 	}
 }
 
+func TestNeoForgeStopQueuesSystemdBeforeSignal(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		occupied    bool
+		signalFails bool
+		unitState   string
+		container   string
+		wantError   bool
+	}{
+		{name: "empty", unitState: "inactive"},
+		{name: "occupied", occupied: true, unitState: "inactive"},
+		{name: "already stopped", signalFails: true, unitState: "inactive"},
+		{name: "already failed with no container", signalFails: true, unitState: "failed"},
+		{name: "container still live", signalFails: true, unitState: "inactive", container: "running", wantError: true},
+		{name: "unit still stopping", signalFails: true, unitState: "deactivating", container: "stopping", wantError: true},
+		{name: "ambiguous container", signalFails: true, unitState: "inactive", container: "unknown", wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newInstanceActivationFixtureFor(t, "neoforge", "26.3")
+			id := f.configs[0].ID
+			record, err := f.backend.readRecord(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			record.Runtime.VersionPolicy, record.Runtime.ImageTag, record.Runtime.LoaderVersion = "pinned", "java25", "26.3.0.102"
+			dir, _, _ := f.backend.paths(id)
+			if err = f.backend.writeJSON(filepath.Join(dir, "config.json"), record, true); err != nil {
+				t.Fatal(err)
+			}
+			f.activateBoth()
+			f.states[id], f.containers[id] = "active", "running"
+			var wantElapsed time.Duration
+			var wantWarnings []string
+			if tc.occupied {
+				f.players = "There are 1 of a max of 20 players online: Alex"
+				wantElapsed = time.Minute
+				wantWarnings = []string{
+					"say Server shutting down in 60 seconds", "say Server shutting down in 30 seconds",
+					"say Server shutting down in 15 seconds", "say Server shutting down in 10 seconds",
+					"say Server shutting down in 5 seconds", "say Server shutting down in 4 seconds",
+					"say Server shutting down in 3 seconds", "say Server shutting down in 2 seconds",
+					"say Server shutting down in 1 second",
+				}
+			}
+			var elapsed time.Duration
+			var warnings, stops []string
+			observed, reset := false, false
+			f.backend.pause = func(_ context.Context, delay time.Duration) error {
+				if len(stops) != 0 {
+					t.Fatal("terminal state should already be available")
+				}
+				elapsed += delay
+				return nil
+			}
+			base := f.backend.command
+			f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+				switch {
+				case command == "podman" && len(args) == 7 && args[0] == "exec" && strings.HasPrefix(args[6], "say "):
+					warnings = append(warnings, args[6])
+					return nil, nil
+				case command == "systemctl" && reflect.DeepEqual(args, []string{"--no-block", "stop", "--", "minecraft-" + id + ".service"}):
+					if elapsed != wantElapsed || !reflect.DeepEqual(warnings, wantWarnings) {
+						t.Fatal("service stop preceded the completed player warning", elapsed, warnings)
+					}
+					stops = append(stops, "systemctl")
+					f.states[id] = "deactivating"
+					if tc.signalFails {
+						f.states[id], f.containers[id] = tc.unitState, tc.container
+					}
+					return nil, nil
+				case command == "podman" && reflect.DeepEqual(args, []string{"kill", "--signal", "SIGUSR1", "minecraft-" + id}):
+					stops = append(stops, "SIGUSR1")
+					if tc.signalFails {
+						return nil, instanceTestExit{}
+					}
+					f.states[id], f.containers[id] = tc.unitState, tc.container
+					return nil, nil
+				case len(stops) == 1:
+					t.Fatal("command intervened between NeoForge stop and signal", command, args)
+				case len(stops) == 2 && command == "podman" && args[0] == "ps":
+					observed = true
+				case command == "systemctl" && reflect.DeepEqual(args, []string{"reset-failed", "--", "minecraft-" + id + ".service"}):
+					if !observed || f.states[id] != "failed" || f.containers[id] != "" {
+						t.Fatal("reset occurred without a failed unit and absent container")
+					}
+					reset = true
+					f.states[id] = "inactive"
+					return nil, nil
+				}
+				return base(ctx, command, args...)
+			}
+			err = f.backend.actionWithWarnings(context.Background(), id, "stop", tc.occupied)
+			if (err != nil) != tc.wantError || !reflect.DeepEqual(stops, []string{"systemctl", "SIGUSR1"}) {
+				t.Fatal("unexpected shutdown result", stops, err)
+			}
+			if tc.unitState == "inactive" && !observed {
+				t.Fatal("terminal unit was accepted without observing the container")
+			}
+			if reset != (tc.unitState == "failed") || (!tc.wantError && f.states[id] != "inactive") {
+				t.Fatal("incorrect terminal state or normalization", f.states[id], reset)
+			}
+		})
+	}
+}
+
+func TestNativeBedrockGracefulStopOrder(t *testing.T) {
+	f := newInstanceActivationFixture(t)
+	id := f.configs[0].ID
+	record, err := f.backend.readRecord(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.Runtime = nativeBedrockFixture(record.Runtime)
+	dir, _, _ := f.backend.paths(id)
+	if err = f.backend.writeJSON(filepath.Join(dir, "config.json"), record, true); err != nil {
+		t.Fatal(err)
+	}
+	f.states[id], f.containers[id] = "active", "running"
+	var calls []string
+	base := f.backend.command
+	f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+		calls = append(calls, command+" "+strings.Join(args, " "))
+		if command == "podman" && reflect.DeepEqual(args, []string{"exec", "minecraft-" + id, "send-command", "stop"}) {
+			return nil, nil
+		}
+		return base(ctx, command, args...)
+	}
+	if err = f.backend.stopGracefully(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"podman exec minecraft-" + id + " send-command stop", "systemctl --no-block stop -- minecraft-" + id + ".service"}
+	if len(calls) < 2 || !reflect.DeepEqual(calls[:2], want) || f.states[id] != "inactive" {
+		t.Fatal("unexpected Bedrock shutdown", calls)
+	}
+}
+
 // Retained, activated bundles still contain the image's 60-second delay.
 // Lifecycle must bypass it without publishing new files or changing hashes.
 func TestForgeActivatedShutdownBypassesImageAnnouncement(t *testing.T) {
@@ -1093,27 +1229,29 @@ func TestGracefulStopTerminalState(t *testing.T) {
 	const unconfirmed = "Instance graceful shutdown could not be confirmed."
 	const unavailable = "Graceful shutdown state is unavailable."
 	for _, tc := range []struct {
-		name               string
-		terminalState      string
-		container          string
-		stateAfterStop     string
-		containerAfterStop string
-		stopErr            error
-		cancelDuringStop   bool
-		wantStops          int
-		wantObservations   int
-		wantErr            string
+		name                string
+		terminalState       string
+		container           string
+		stateAfterReset     string
+		containerAfterReset string
+		resetErr            error
+		cancelDuringReset   bool
+		wantResets          int
+		wantObservations    int
+		wantErr             string
 	}{
 		{name: "normal stop", terminalState: "inactive", wantObservations: 2},
-		{name: "failed unit normalized", terminalState: "failed", stateAfterStop: "inactive", wantStops: 1, wantObservations: 3},
-		{name: "stop command failed", terminalState: "failed", stopErr: instanceTestExit{}, wantStops: 1, wantObservations: 2, wantErr: "Failed instance unit could not be stopped."},
-		{name: "unit still failed", terminalState: "failed", stateAfterStop: "failed", wantStops: 1, wantObservations: 3, wantErr: unconfirmed},
-		{name: "invalid state after stop", terminalState: "failed", stateAfterStop: "invalid", wantStops: 1, wantObservations: 3, wantErr: unconfirmed},
-		{name: "inactive unit with live container after stop", terminalState: "failed", stateAfterStop: "inactive", containerAfterStop: "running", wantStops: 1, wantObservations: 3, wantErr: unconfirmed},
+		{name: "failed unit normalized", terminalState: "failed", stateAfterReset: "inactive", wantResets: 1, wantObservations: 3},
+		{name: "reset command failed", terminalState: "failed", resetErr: instanceTestExit{}, wantResets: 1, wantObservations: 2, wantErr: "Failed instance unit could not be stopped."},
+		{name: "unit still failed", terminalState: "failed", stateAfterReset: "failed", wantResets: 1, wantObservations: 3, wantErr: unconfirmed},
+		{name: "invalid state after reset", terminalState: "failed", stateAfterReset: "invalid", wantResets: 1, wantObservations: 3, wantErr: unconfirmed},
+		{name: "inactive unit with live container after reset", terminalState: "failed", stateAfterReset: "inactive", containerAfterReset: "running", wantResets: 1, wantObservations: 3, wantErr: unconfirmed},
 		{name: "failed unit with running container", terminalState: "failed", container: "running", wantObservations: 2, wantErr: unavailable},
 		{name: "failed unit with paused container", terminalState: "failed", container: "paused", wantObservations: 2, wantErr: unavailable},
 		{name: "failed unit with stopping container", terminalState: "failed", container: "stopping", wantObservations: 2, wantErr: unavailable},
-		{name: "caller canceled during normalization", terminalState: "failed", stateAfterStop: "inactive", cancelDuringStop: true, wantStops: 1, wantObservations: 2},
+		{name: "failed unit with ambiguous container", terminalState: "failed", container: "unknown", wantObservations: 2, wantErr: unconfirmed},
+		{name: "active unit missing its container", terminalState: "active", wantObservations: 2, wantErr: unconfirmed},
+		{name: "caller canceled during normalization", terminalState: "failed", stateAfterReset: "inactive", cancelDuringReset: true, wantResets: 1, wantObservations: 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newInstanceActivationFixture(t)
@@ -1125,25 +1263,30 @@ func TestGracefulStopTerminalState(t *testing.T) {
 			defer cancel()
 
 			base := f.backend.command
-			var observations, stops, waits int
+			var observations, resets, waits int
+			containerObserved := false
 			f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+				if command == "podman" && reflect.DeepEqual(args, []string{"ps", "--all", "--filter", "name=^minecraft-" + id + "$", "--format", "{{.Names}}"}) {
+					containerObserved = true
+				}
 				if command == "systemctl" {
 					switch {
 					case reflect.DeepEqual(args, []string{"--no-block", "stop", "--", unit}):
 						f.states[id] = "deactivating"
 						return nil, nil
-					case reflect.DeepEqual(args, []string{"stop", "--", unit}):
-						stops++
-						if observations != 2 || f.states[id] != "failed" || f.containers[id] != "" || ctx != parent {
+					case reflect.DeepEqual(args, []string{"reset-failed", "--", unit}):
+						resets++
+						if observations != 2 || !containerObserved || f.states[id] != "failed" || f.containers[id] != "" || ctx != parent {
 							t.Fatal("normalization did not follow observation of a failed unit with no live container")
 						}
-						if tc.cancelDuringStop {
+						if tc.cancelDuringReset {
 							cancel()
 						}
-						f.states[id], f.containers[id] = tc.stateAfterStop, tc.containerAfterStop
-						return nil, tc.stopErr
+						f.states[id], f.containers[id] = tc.stateAfterReset, tc.containerAfterReset
+						return nil, tc.resetErr
 					case args[0] == "show":
 						observations++
+						containerObserved = false
 					}
 				}
 				return base(ctx, command, args...)
@@ -1158,7 +1301,7 @@ func TestGracefulStopTerminalState(t *testing.T) {
 			}
 			err := f.backend.stopGracefully(parent, id)
 			switch {
-			case tc.cancelDuringStop:
+			case tc.cancelDuringReset:
 				if !errors.Is(err, context.Canceled) {
 					t.Fatalf("expected caller cancellation, got %v", err)
 				}
@@ -1170,8 +1313,8 @@ func TestGracefulStopTerminalState(t *testing.T) {
 			case err != nil:
 				t.Fatal(err)
 			}
-			if observations != tc.wantObservations || stops != tc.wantStops || waits != 1 {
-				t.Fatalf("got %d observations, %d checked stops, and %d waits, want %d, %d, and 1", observations, stops, waits, tc.wantObservations, tc.wantStops)
+			if observations != tc.wantObservations || resets != tc.wantResets || waits != 1 {
+				t.Fatalf("got %d observations, %d checked resets, and %d waits, want %d, %d, and 1", observations, resets, waits, tc.wantObservations, tc.wantResets)
 			}
 		})
 	}
@@ -1212,5 +1355,25 @@ func TestGracefulStopWaitsWithCallerContext(t *testing.T) {
 	}
 	if !observed {
 		t.Fatal("stopped state was not observed")
+	}
+}
+
+func TestInstanceStopClearsAlreadyFailedUnit(t *testing.T) {
+	f := newInstanceActivationFixture(t)
+	f.activateBoth()
+	id := f.configs[0].ID
+	f.states[id], f.containers[id] = "failed", ""
+	base := f.backend.command
+	reset := false
+	f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+		if command == "systemctl" && reflect.DeepEqual(args, []string{"reset-failed", "--", "minecraft-" + id + ".service"}) {
+			reset = true
+			f.states[id] = "inactive"
+			return nil, nil
+		}
+		return base(ctx, command, args...)
+	}
+	if err := f.backend.action(context.Background(), id, "stop"); err != nil || !reset || f.states[id] != "inactive" {
+		t.Fatal("stop did not normalize the already-failed unit", err)
 	}
 }
