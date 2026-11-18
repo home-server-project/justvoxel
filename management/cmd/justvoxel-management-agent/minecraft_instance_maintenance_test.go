@@ -1089,6 +1089,94 @@ func TestShutdownAnnouncementTransportScope(t *testing.T) {
 	}
 }
 
+func TestGracefulStopTerminalState(t *testing.T) {
+	const unconfirmed = "Instance graceful shutdown could not be confirmed."
+	const unavailable = "Graceful shutdown state is unavailable."
+	for _, tc := range []struct {
+		name               string
+		terminalState      string
+		container          string
+		stateAfterStop     string
+		containerAfterStop string
+		stopErr            error
+		cancelDuringStop   bool
+		wantStops          int
+		wantObservations   int
+		wantErr            string
+	}{
+		{name: "normal stop", terminalState: "inactive", wantObservations: 2},
+		{name: "failed unit normalized", terminalState: "failed", stateAfterStop: "inactive", wantStops: 1, wantObservations: 3},
+		{name: "stop command failed", terminalState: "failed", stopErr: instanceTestExit{}, wantStops: 1, wantObservations: 2, wantErr: "Failed instance unit could not be stopped."},
+		{name: "unit still failed", terminalState: "failed", stateAfterStop: "failed", wantStops: 1, wantObservations: 3, wantErr: unconfirmed},
+		{name: "invalid state after stop", terminalState: "failed", stateAfterStop: "invalid", wantStops: 1, wantObservations: 3, wantErr: unconfirmed},
+		{name: "inactive unit with live container after stop", terminalState: "failed", stateAfterStop: "inactive", containerAfterStop: "running", wantStops: 1, wantObservations: 3, wantErr: unconfirmed},
+		{name: "failed unit with running container", terminalState: "failed", container: "running", wantObservations: 2, wantErr: unavailable},
+		{name: "failed unit with paused container", terminalState: "failed", container: "paused", wantObservations: 2, wantErr: unavailable},
+		{name: "failed unit with stopping container", terminalState: "failed", container: "stopping", wantObservations: 2, wantErr: unavailable},
+		{name: "caller canceled during normalization", terminalState: "failed", stateAfterStop: "inactive", cancelDuringStop: true, wantStops: 1, wantObservations: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newInstanceActivationFixture(t)
+			f.activateBoth()
+			id := f.configs[0].ID
+			unit := "minecraft-" + id + ".service"
+			f.states[id], f.containers[id] = "active", "running"
+			parent, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			base := f.backend.command
+			var observations, stops, waits int
+			f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+				if command == "systemctl" {
+					switch {
+					case reflect.DeepEqual(args, []string{"--no-block", "stop", "--", unit}):
+						f.states[id] = "deactivating"
+						return nil, nil
+					case reflect.DeepEqual(args, []string{"stop", "--", unit}):
+						stops++
+						if observations != 2 || f.states[id] != "failed" || f.containers[id] != "" || ctx != parent {
+							t.Fatal("normalization did not follow observation of a failed unit with no live container")
+						}
+						if tc.cancelDuringStop {
+							cancel()
+						}
+						f.states[id], f.containers[id] = tc.stateAfterStop, tc.containerAfterStop
+						return nil, tc.stopErr
+					case args[0] == "show":
+						observations++
+					}
+				}
+				return base(ctx, command, args...)
+			}
+			f.backend.pause = func(_ context.Context, d time.Duration) error {
+				waits++
+				if waits != 1 || observations != 1 || f.states[id] != "deactivating" || d != time.Second {
+					t.Fatal("unexpected graceful-stop wait", waits, observations, f.states[id], d)
+				}
+				f.states[id], f.containers[id] = tc.terminalState, tc.container
+				return nil
+			}
+			err := f.backend.stopGracefully(parent, id)
+			switch {
+			case tc.cancelDuringStop:
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("expected caller cancellation, got %v", err)
+				}
+			case tc.wantErr != "":
+				var runtimeErr *instanceRuntimeSafeError
+				if !errors.As(err, &runtimeErr) || runtimeErr.Error() != tc.wantErr {
+					t.Fatalf("expected runtime failure %q, got %v", tc.wantErr, err)
+				}
+			case err != nil:
+				t.Fatal(err)
+			}
+			if observations != tc.wantObservations || stops != tc.wantStops || waits != 1 {
+				t.Fatalf("got %d observations, %d checked stops, and %d waits, want %d, %d, and 1", observations, stops, waits, tc.wantObservations, tc.wantStops)
+			}
+		})
+	}
+}
+
 func TestGracefulStopWaitsWithCallerContext(t *testing.T) {
 	f := newInstanceActivationFixture(t)
 	f.activateBoth()
