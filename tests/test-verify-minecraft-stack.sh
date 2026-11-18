@@ -32,7 +32,11 @@ podman() {
             if (( count < ${TRANSIENT_COUNT:-1} )); then printf '%s' "${TRANSIENT_RESPONSE:-Checking version, please wait...}"; return 0; fi
         fi; printf '%s' "${VERSION_RESPONSE:-This server is running Paper version 26.2-19-main (Implementing API version 26.2-R0.1-SNAPSHOT)}" ;;
         plugins) case "${MINECRAFT_SERVER_TYPE:-paper}" in paper|purpur) ;; *) echo 'Unexpected plugins command' >&2; return 1 ;; esac; printf '%s' "${PLUGIN_RESPONSE:-Plugins (3): Geyser-Spigot, floodgate, ViaVersion}" ;;
-        'geyser version') printf 'geyser\n' >> "${DATA_PATH}/geyser-probes"; printf '%s' "${GEYSER_RESPONSE:-This server is running Geyser version fixture}" ;;
+        'geyser version')
+            printf 'geyser\n' >> "${DATA_PATH}/geyser-probes"
+            printf '%s' "${GEYSER_RESPONSE-This server is running Geyser version fixture}"
+            [[ ${GEYSER_FAIL:-no} != yes ]]
+            ;;
         *) return 1 ;;
     esac
 }
@@ -198,7 +202,7 @@ for software in forge neoforge fabric quilt; do
         echo 'Wrong loader implementation accepted' >&2; exit 1
     fi
 done
-# Content installation ignores only unstable Geyser human-readable text.
+# Geyser mod commands can succeed with empty or nonstandard RCON responses.
 for software in fabric neoforge; do
     platform=Geyser-Fabric
     marker='Loading Minecraft 1.21.1 with Fabric Loader 0.16.10'
@@ -207,27 +211,34 @@ for software in fabric neoforge; do
         marker='NeoForge mod loading, version 0.16.10, for MC 1.21.1'
     fi
     mkdir -p "${DATA_PATH}/config/${platform}"
-    printf 'auth-type: floodgate\n' > "${DATA_PATH}/config/${platform}/config.yml"
-    printf '%s\n' "${marker}" > "${DATA_PATH}/logs/latest.log"
-    content_verify() {
+    verify_crossplay_mod() {
         env JV_INSTANCE_ID=jv-aaaaaa MINECRAFT_SERVER_TYPE="${software}" MINECRAFT_LOADER_VERSION=0.16.10 BEDROCK_ENABLED=yes \
-            MONITOR_RESPONSE='{"server_info":{"version":{"name":"1.21.1"}}}' GEYSER_RESPONSE='Información del puente: edición actual' "$@" bash "${fixture_dir}/verify" --content-install 1.21.1
+            MONITOR_RESPONSE='{"server_info":{"version":{"name":"1.21.1"}}}' GEYSER_RESPONSE= \
+            "$@" bash "${fixture_dir}/verify" "${verify_args[@]}" 1.21.1
     }
-    if JV_INSTANCE_ID=jv-aaaaaa MINECRAFT_SERVER_TYPE="${software}" MINECRAFT_LOADER_VERSION=0.16.10 BEDROCK_ENABLED=yes \
-        MONITOR_RESPONSE='{"server_info":{"version":{"name":"1.21.1"}}}' GEYSER_RESPONSE='Información del puente: edición actual' \
-        bash "${fixture_dir}/verify" 1.21.1 2>"${fixture_dir}/geyser-error"; then
-        echo 'Normal Geyser verification weakened' >&2; exit 1
-    fi
-    grep -Fxq 'ERROR: Geyser version response could not be verified.' "${fixture_dir}/geyser-error"
-    content_verify
-    for failure in 'OWNERSHIP_FAIL=yes' 'ACTIVE=no' 'READY=no' 'LIST_FAIL=yes' 'MINECRAFT_LOADER_VERSION=wrong' 'MONITOR_RESPONSE={"server_info":{"version":{"name":"1.21.2"}}}'; do
-        if content_verify "${failure}"; then echo "Invalid content runtime accepted: ${failure}" >&2; exit 1; fi
+    for mode in normal content-install; do
+        verify_args=()
+        if [[ ${mode} == content-install ]]; then verify_args=(--content-install); fi
+        printf 'auth-type: floodgate\n' > "${DATA_PATH}/config/${platform}/config.yml"
+        printf '%s\n' "${marker}" > "${DATA_PATH}/logs/latest.log"
+        for response in '' 'Información del puente: edición actual'; do
+            rm -f "${DATA_PATH}/geyser-probes"
+            verify_crossplay_mod "GEYSER_RESPONSE=${response}"
+            grep -Fxq 'geyser' "${DATA_PATH}/geyser-probes"
+        done
+        if verify_crossplay_mod GEYSER_FAIL=yes 2>"${fixture_dir}/geyser-error"; then
+            echo "${software} ${mode} accepted a failed Geyser command" >&2; exit 1
+        fi
+        grep -Fxq 'ERROR: Geyser version query failed.' "${fixture_dir}/geyser-error"
+        for failure in 'OWNERSHIP_FAIL=yes' 'ACTIVE=no' 'READY=no' 'LIST_FAIL=yes' 'MINECRAFT_LOADER_VERSION=wrong' 'MONITOR_RESPONSE={"server_info":{"version":{"name":"1.21.2"}}}'; do
+            if verify_crossplay_mod "${failure}"; then echo "Invalid ${software} ${mode} runtime accepted: ${failure}" >&2; exit 1; fi
+        done
+        printf 'Another Loader 0.16.10\n' > "${DATA_PATH}/logs/latest.log"
+        if verify_crossplay_mod; then echo "Wrong ${software} ${mode} loader marker accepted" >&2; exit 1; fi
+        printf '%s\n' "${marker}" > "${DATA_PATH}/logs/latest.log"
+        printf 'auth-type: online\n' > "${DATA_PATH}/config/${platform}/config.yml"
+        if verify_crossplay_mod; then echo "Wrong ${software} ${mode} auth config accepted" >&2; exit 1; fi
     done
-    printf 'Another Loader 0.16.10\n' > "${DATA_PATH}/logs/latest.log"
-    if content_verify; then echo 'Wrong content loader marker accepted' >&2; exit 1; fi
-    printf '%s\n' "${marker}" > "${DATA_PATH}/logs/latest.log"
-    printf 'auth-type: online\n' > "${DATA_PATH}/config/${platform}/config.yml"
-    if content_verify; then echo 'Wrong content auth config accepted' >&2; exit 1; fi
 done
 # Enrollment overrides saved standalone cross-play settings for Paper/Purpur.
 for software in paper purpur; do
@@ -251,6 +262,14 @@ for software in paper purpur; do
     printf 'auth-type: floodgate\n' > "${DATA_PATH}/plugins/Geyser-Spigot/config.yml"
     JV_NETWORK_MEMBER=no BEDROCK_ENABLED=yes MINECRAFT_SERVER_TYPE="${software}" \
         VERSION_RESPONSE="This server is running ${software^} version 26.2-19-main" bash "${fixture_dir}/verify" 26.2
+    for response in '' 'Información del puente: edición actual' 'Geyser version: Unknown command'; do
+        if JV_NETWORK_MEMBER=no BEDROCK_ENABLED=yes MINECRAFT_SERVER_TYPE="${software}" \
+            VERSION_RESPONSE="This server is running ${software^} version 26.2-19-main" \
+            GEYSER_RESPONSE="${response}" bash "${fixture_dir}/verify" 26.2 2>"${fixture_dir}/geyser-error"; then
+            echo "${software} accepted an invalid Geyser response" >&2; exit 1
+        fi
+        grep -Fxq 'ERROR: Geyser version response could not be verified.' "${fixture_dir}/geyser-error"
+    done
     for plugins in 'Plugins: floodgate, ViaVersion' 'Plugins: Geyser-Spigot, ViaVersion'; do
         if JV_NETWORK_MEMBER=no BEDROCK_ENABLED=yes MINECRAFT_SERVER_TYPE="${software}" \
             VERSION_RESPONSE="This server is running ${software^} version 26.2-19-main" \

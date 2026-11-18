@@ -100,11 +100,9 @@ case "${MINECRAFT_SERVER_TYPE-paper}" in
             /usr/libexec/justvoxel/mjust/managed-crossplay-mod-ownership verify "${MINECRAFT_SERVER_TYPE}" "${DATA_PATH}" "/etc/justvoxel/instances/${JV_INSTANCE_ID}/crossplay-mods.json" '' || {
                 echo 'ERROR: managed cross-play mod ownership could not be verified.' >&2; exit 1;
             }
-            geyser="$(podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli 'geyser version')" || {
+            # Geyser's mod command source logs responses for non-player senders.
+            podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli 'geyser version' >/dev/null || {
                 echo 'ERROR: Geyser version query failed.' >&2; exit 1;
-            }
-            [[ ${content_install} == yes || ( ${geyser} == *Geyser* && ${geyser,,} == *version* && ${geyser,,} != *'unknown command'* ) ]] || {
-                echo 'ERROR: Geyser version response could not be verified.' >&2; exit 1;
             }
             platform_name=Geyser-Fabric
             [[ ${MINECRAFT_SERVER_TYPE} != neoforge ]] || platform_name=Geyser-NeoForge
