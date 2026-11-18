@@ -174,28 +174,26 @@ func TestLanguageDialogUsesCompactSharedStyles(t *testing.T) {
 	css := string(data)
 	for _, want := range []string{
 		`.language-dialog{width:max-content;max-width:calc(100% - 2rem)}`,
+		`.system-action-dialog{width:min(470px,calc(100% - 2rem));padding:0;`,
 		`.system-action-dialog-content{padding:1.4rem}`,
 		`.system-action-dialog .action-row{justify-content:flex-end}`,
 		`.language-dialog .language-dialog-title{display:flex;flex-wrap:wrap;align-items:baseline;gap:.32rem;margin:0;font-size:.98rem;line-height:normal}`,
 		`.language-dialog-title .eyebrow{margin:0;font-size:.68rem;font-weight:400;white-space:nowrap}`,
 		`.language-dialog-field{margin-top:1rem}`,
-		`.language-dialog select{width:auto;max-width:100%;margin-top:0}`,
+		`.language-dialog select{width:100%;max-width:100%;margin-top:0}`,
 	} {
 		if !strings.Contains(css, want) {
 			t.Fatalf("missing compact language dialog style: %s", want)
 		}
 	}
-	// Language styles must leave button dimensions and action alignment to the
-	// existing shared rules, and must not reintroduce a full-width select.
+	// Language actions inherit width, min-width, min-height, padding, font size,
+	// and right alignment from the shared button and action-row styles.
 	for _, rule := range regexp.MustCompile(`([^{}]+)\{([^{}]*)\}`).FindAllStringSubmatch(css, -1) {
 		if !strings.Contains(rule[1], ".language-dialog") {
 			continue
 		}
 		if strings.Contains(rule[1], "button") || strings.Contains(rule[1], ".secondary") || strings.Contains(rule[1], ".action-row") {
 			t.Fatalf("language actions must use shared button and action-row styles: %s", rule[0])
-		}
-		if strings.Contains(rule[1], "select") && regexp.MustCompile(`(?:^|;)\s*width\s*:\s*100%`).MatchString(rule[2]) {
-			t.Fatal("language select must retain intrinsic sizing")
 		}
 	}
 }
