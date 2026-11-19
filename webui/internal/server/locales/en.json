@@ -1,6 +1,9 @@
 {
   "language.choose": "Choose language",
   "language.close": "Close",
+  "language.latin": "Latin",
+  "language.cyrillic": "Cyrillic",
+  "language.eastasian": "East Asian",
   "plugins.recovery.title": "Minecraft recovery required",
   "plugins.recovery.details": "Open recovery details",
   "plugins.recovery.start": "Start Minecraft and re-check",

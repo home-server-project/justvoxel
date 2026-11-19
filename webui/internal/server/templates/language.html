@@ -7,8 +7,13 @@
       <input type="hidden" name="return" value="{{languageReturn}}">
       <div class="language-dialog-field">
         <select name="language" aria-label="{{t "language.choose"}}">
-          <option value="en" lang="en"{{if eq locale "en"}} selected{{end}}>English</option>
-          <option value="fr-CA" lang="fr-CA"{{if eq locale "fr-CA"}} selected{{end}}>Français (Canada)</option>
+          {{range languageGroups}}
+          <optgroup label="{{t .Label}}">
+            {{range .Options}}
+            <option value="{{.Locale}}" lang="{{.Locale}}"{{if eq locale .Locale}} selected{{end}}>{{.Name}}</option>
+            {{end}}
+          </optgroup>
+          {{end}}
         </select>
       </div>
       <div class="action-row">

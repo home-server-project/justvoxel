@@ -19,21 +19,31 @@ import (
 )
 
 func TestEmbeddedWebUICatalogs(t *testing.T) {
-	for _, locale := range []string{"en", "fr-CA"} {
-		data, err := assets.ReadFile("locales/" + locale + ".json")
-		if err != nil {
-			t.Fatal(err)
-		}
-		var messages map[string]string
-		if err := json.Unmarshal(data, &messages); err != nil {
-			t.Fatal(err)
-		}
-		if len(messages) == 0 {
-			t.Fatalf("%s catalog is empty", locale)
-		}
-		if err := validateCatalog(catalogs["en"], messages); err != nil {
-			t.Fatalf("%s: %v", locale, err)
-		}
+	for _, locale := range supportedLocales {
+		t.Run(locale, func(t *testing.T) {
+			data, err := assets.ReadFile("locales/" + locale + ".json")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var messages map[string]string
+			if err := json.Unmarshal(data, &messages); err != nil {
+				t.Fatal(err)
+			}
+			if len(messages) == 0 {
+				t.Fatal("catalog is empty")
+			}
+			if err := validateCatalog(catalogs["en"], messages); err != nil {
+				t.Fatal(err)
+			}
+			// Source lookups may choose any canonical key with the same English text.
+			bySource := make(map[string]string, len(messages))
+			for key, source := range catalogs["en"] {
+				if previous, ok := bySource[source]; ok && previous != messages[key] {
+					t.Errorf("inconsistent translation for %q at %s", source, key)
+				}
+				bySource[source] = messages[key]
+			}
+		})
 	}
 }
 
@@ -63,62 +73,101 @@ func TestCatalogCompatibilityAndFallback(t *testing.T) {
 }
 
 func TestWebUILanguageSelection(t *testing.T) {
-	for _, tc := range []struct{ cookie, accept, want string }{
-		{"en", "fr-CA", "en"}, {"fr-CA", "en", "fr-CA"},
-		{"", "fr-CA", "fr-CA"}, {"", "fr", "fr-CA"}, {"", "fr-FR", "fr-CA"},
-		{"", "de, ja;q=0.8", "en"}, {"invalid", "fr-CA", "en"},
-		{"fr-ca", "fr", "en"}, {"", "fr;q=bogus", "en"}, {"", "fr;q=0,en;q=1", "en"},
-		{"", "en;q=0.4,fr-CA;q=0.9", "fr-CA"}, {"", "fr;q=NaN", "en"},
+	for _, locale := range supportedLocales {
+		t.Run("cookie/"+locale, func(t *testing.T) {
+			accept := "en"
+			if locale == "en" {
+				accept = "fr-CA"
+			}
+			r := httptest.NewRequest("GET", "/login", nil)
+			r.Header.Set("Accept-Language", accept)
+			r.AddCookie(&http.Cookie{Name: languageCookie, Value: locale})
+			if got := requestLocale(r); got != locale {
+				t.Fatalf("cookie %s over browser %s: got %s", locale, accept, got)
+			}
+		})
+	}
+	for _, tc := range []struct{ accept, want string }{
+		{"en-GB", "en"}, {"fr-CA", "fr-CA"}, {"fr", "fr-CA"}, {"fr-FR", "fr-CA"},
+		{"de", "de"}, {"de-DE", "de"}, {"pl-PL", "pl"}, {"uk-UA", "uk"}, {"ru-RU", "ru"},
+		{"pt-BR", "pt-BR"}, {"pt", "pt-BR"}, {"pt-PT", "pt-BR"},
+		{"es-419", "es-419"}, {"es-MX", "es-419"}, {"es-AR", "es-419"},
+		{"zh", "zh-Hans"}, {"zh-Hans", "zh-Hans"}, {"zh-Hans-CN", "zh-Hans"},
+		{"zh-CN", "zh-Hans"}, {"zh-SG", "zh-Hans"},
+		{"zh-Hant", "en"}, {"zh-Hant-CN", "en"}, {"zh-TW", "en"}, {"zh-HK", "en"}, {"zh-MO", "en"},
+		{"ja", "en"}, {"ko", "en"},
+		{"zh-TW,en;q=0.8", "en"}, {"zh-Hant,de;q=0.8", "de"},
+		{"ja,de;q=0.8", "de"}, {"ko,fr-CA;q=0.8", "fr-CA"},
+		{"de;q=0.4,pl;q=0.7,zh-Hans;q=0.9", "zh-Hans"}, {"uk;q=0.8,ru;q=0.8", "uk"},
+		{"en;q=0.4,fr-CA;q=0.9", "fr-CA"}, {"fr;q=0,en;q=1", "en"},
+		{"fr;q=bogus", "en"}, {"fr;q=NaN", "en"}, {"de,pt;q=1.01", "en"},
+		{"pl,de_DE", "en"}, {"uk,ru;q=0.8;unknown", "en"}, {"de,", "en"},
 	} {
-		t.Run(tc.cookie+"/"+tc.accept, func(t *testing.T) {
+		t.Run("browser/"+tc.accept, func(t *testing.T) {
 			r := httptest.NewRequest("GET", "/login", nil)
 			r.Header.Set("Accept-Language", tc.accept)
-			if tc.cookie != "" {
-				r.AddCookie(&http.Cookie{Name: languageCookie, Value: tc.cookie})
-			}
 			if got := requestLocale(r); got != tc.want {
 				t.Fatalf("got %s, want %s", got, tc.want)
+			}
+		})
+	}
+	for _, alias := range []string{"invalid", "fr-ca", "fr", "de-DE", "pl-PL", "pt", "es-MX", "uk-UA", "ru-RU", "zh", "zh-CN", "zh-hans", "zh-Hant", "ja", "ko"} {
+		t.Run("invalid cookie/"+alias, func(t *testing.T) {
+			r := httptest.NewRequest("GET", "/login", nil)
+			r.Header.Set("Accept-Language", "fr-CA")
+			r.AddCookie(&http.Cookie{Name: languageCookie, Value: alias})
+			if got := requestLocale(r); got != "en" || supportedLocale(alias) {
+				t.Fatalf("invalid cookie %q: got %s", alias, got)
 			}
 		})
 	}
 }
 
 func TestLoginFirstRenderLocaleAndActionOrder(t *testing.T) {
-	for _, locale := range []string{"en", "fr-CA"} {
-		app, err := New(newAuthFlowAPI(), Config{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		request := httptest.NewRequest("GET", "/login?oauth_request=example", nil)
-		request.Header.Set("Accept-Language", locale)
-		response := httptest.NewRecorder()
-		app.Handler().ServeHTTP(response, request)
-		body := response.Body.String()
-		if !strings.Contains(body, `<html lang="`+locale+`">`) {
-			t.Fatal("wrong HTML language")
-		}
-		for _, label := range []string{"Username", "Password", "Sign in"} {
-			translated := translate(locale, sourceKeys[label])
-			if !strings.Contains(body, html.EscapeString(translated)) {
-				t.Fatalf("missing translated %s", label)
+	app, err := New(newAuthFlowAPI(), Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, locale := range supportedLocales {
+		t.Run(locale, func(t *testing.T) {
+			request := httptest.NewRequest("GET", "/login?oauth_request=example", nil)
+			request.Header.Set("Accept-Language", locale)
+			response := httptest.NewRecorder()
+			app.Handler().ServeHTTP(response, request)
+			body := response.Body.String()
+			if response.Code != http.StatusOK || !strings.Contains(body, `<html lang="`+locale+`">`) {
+				t.Fatalf("unexpected login response: status %d or wrong HTML language", response.Code)
 			}
-		}
-		start := strings.Index(body, `class="login-actions"`)
-		if start < 0 {
-			t.Fatal("missing login action lane")
-		}
-		lane := strings.SplitN(body[start:], "</div>", 2)[0]
-		if strings.Index(lane, "data-language-open") < 0 || strings.Index(lane, "data-language-open") > strings.Index(lane, `type="submit"`) {
-			t.Fatal("Globe must precede Sign in")
-		}
-		if !strings.Contains(lane, "<svg ") || strings.Contains(lane, "🌐") {
-			t.Fatal("missing inline globe")
-		}
-		assertLanguageDialog(t, body, locale, "/login?oauth_request=example")
+			for _, field := range []struct{ key, suffix string }{
+				{"ui.e3b89e9d33f8", `<input name="username"`},
+				{"ui.e7cf3ef4f17c", `<input type="password" name="password"`},
+			} {
+				label := catalogs[locale][field.key]
+				if label == "" || !strings.Contains(body, "<label>"+html.EscapeString(label)+field.suffix) {
+					t.Fatalf("missing translated label for %s", field.suffix)
+				}
+			}
+			start := strings.Index(body, `class="login-actions"`)
+			if start < 0 {
+				t.Fatal("missing login action lane")
+			}
+			lane := strings.SplitN(body[start:], "</div>", 2)[0]
+			signIn := catalogs[locale]["ui.bfd402b2f6f3"]
+			submit := strings.Index(lane, `<button type="submit">`+html.EscapeString(signIn)+`</button>`)
+			globe := strings.Index(lane, "data-language-open")
+			if signIn == "" || submit < 0 || globe < 0 || globe > submit {
+				t.Fatal("Globe must precede the translated Sign in")
+			}
+			if !strings.Contains(lane[:submit], `aria-label="`+html.EscapeString(catalogs[locale]["language.choose"])+`"`) ||
+				!strings.Contains(lane[:submit], "<svg ") || strings.Contains(lane, "🌐") {
+				t.Fatal("missing inline globe or its translated label")
+			}
+			assertLanguageDialog(t, body, locale, "/login?oauth_request=example")
+		})
 	}
 }
 
-// Inspect the rendered dialog in both locales alongside the existing login
+// Inspect the rendered dialog in every locale alongside the existing login
 // action-order contract; preference persistence and safe returns are tested below.
 func assertLanguageDialog(t *testing.T, body, locale, returnPath string) {
 	t.Helper()
@@ -127,31 +176,61 @@ func assertLanguageDialog(t *testing.T, body, locale, returnPath string) {
 		`class="system-action-dialog language-dialog"`,
 		`aria-labelledby="language-heading"`,
 		`<div class="system-action-dialog-content">`,
-		`<h2 id="language-heading" class="language-dialog-title"><span class="eyebrow">JUSTVOXEL</span><span aria-hidden="true">·</span><span>` + html.EscapeString(translate(locale, "language.choose")) + `</span></h2>`,
+		`<h2 id="language-heading" class="language-dialog-title system-action-dialog-title"><span class="eyebrow">JUSTVOXEL</span><span aria-hidden="true">·</span><span>` + html.EscapeString(catalogs[locale]["language.choose"]) + `</span></h2>`,
 		`<form method="post" action="/language">`,
 		`<input type="hidden" name="return" value="` + html.EscapeString(returnPath) + `">`,
-		`<select name="language" aria-label="` + html.EscapeString(translate(locale, "language.choose")) + `">`,
+		`<select name="language" aria-label="` + html.EscapeString(catalogs[locale]["language.choose"]) + `">`,
 	} {
 		if !strings.Contains(dialog, want) {
 			t.Fatalf("language dialog missing %q", want)
 		}
 	}
-	if strings.Count(dialog, "<select ") != 1 || strings.Count(dialog, "<option ") != 2 || strings.Count(dialog, " selected") != 1 {
-		t.Fatal("language picker must have one select, two options and one selected locale")
+	if strings.Count(dialog, "<select ") != 1 || strings.Count(dialog, "<option ") != 9 || strings.Count(dialog, " selected") != 1 {
+		t.Fatal("language picker must have one select, nine options and one selected locale")
 	}
-	for _, option := range []struct{ value, label string }{{"en", "English"}, {"fr-CA", "Français (Canada)"}} {
-		selected := ""
-		if option.value == locale {
-			selected = " selected"
+	groups := regexp.MustCompile(`(?s)<optgroup label="([^"]*)">(.*?)</optgroup>`).FindAllStringSubmatch(dialog, -1)
+	wantGroups := []struct {
+		key, english string
+		options      []languageOption
+	}{
+		{"language.latin", "Latin", []languageOption{
+			{"en", "English"}, {"fr-CA", "Français (Canada)"}, {"de", "Deutsch"},
+			{"pl", "Polski"}, {"pt-BR", "Português (Brasil)"}, {"es-419", "Español (Latinoamérica)"},
+		}},
+		{"language.cyrillic", "Cyrillic", []languageOption{{"uk", "Українська"}, {"ru", "Русский"}}},
+		{"language.eastasian", "East Asian", []languageOption{{"zh-Hans", "简体中文"}}},
+	}
+	if len(groups) != len(wantGroups) || strings.Count(dialog, "<optgroup") != len(wantGroups) {
+		t.Fatal("language picker must have exactly three optgroups")
+	}
+	optionPattern := regexp.MustCompile(`<option [^>]*>[^<]*</option>`)
+	for i, group := range wantGroups {
+		if catalogs["en"][group.key] != group.english || groups[i][1] != html.EscapeString(catalogs[locale][group.key]) {
+			t.Fatalf("%s: wrong label for %s: %q", locale, group.key, groups[i][1])
 		}
-		want := `<option value="` + option.value + `" lang="` + option.value + `"` + selected + `>` + option.label + `</option>`
-		if !strings.Contains(dialog, want) {
-			t.Fatalf("language option missing or wrong selection: %s", want)
+		options := optionPattern.FindAllString(groups[i][2], -1)
+		if len(options) != len(group.options) {
+			t.Fatalf("%s: wrong number of options in %s", locale, group.key)
+		}
+		for j, option := range group.options {
+			selected := ""
+			if option.Locale == locale {
+				selected = " selected"
+			}
+			want := `<option value="` + option.Locale + `" lang="` + option.Locale + `"` + selected + `>` + option.Name + `</option>`
+			if options[j] != want {
+				t.Fatalf("language option got %q, want %q", options[j], want)
+			}
+		}
+	}
+	for _, excluded := range []string{`value="ja"`, `value="ko"`, `value="zh-Hant"`, "日本語", "한국어", "Japanese", "Korean", "繁體中文"} {
+		if strings.Contains(dialog, excluded) {
+			t.Fatalf("unsupported language in dialog: %q", excluded)
 		}
 	}
 	actions := regexp.MustCompile(`(?s)<div class="action-row">(.*?)</div>`).FindString(dialog)
-	cancel := `<button class="secondary" type="button" data-language-close>` + html.EscapeString(translate(locale, sourceKeys["Cancel"])) + `</button>`
-	apply := `<button type="submit">` + html.EscapeString(translate(locale, sourceKeys["Apply"])) + `</button>`
+	cancel := `<button class="secondary" type="button" data-language-close>` + html.EscapeString(catalogs[locale]["ui.19766ed6ccb2"]) + `</button>`
+	apply := `<button type="submit">` + html.EscapeString(catalogs[locale]["ui.31e392d1c037"]) + `</button>`
 	if !strings.Contains(actions, cancel) || !strings.Contains(actions, apply) || strings.Index(actions, cancel) > strings.Index(actions, apply) {
 		t.Fatal("language actions must be secondary Cancel followed by primary Apply")
 	}
@@ -326,12 +405,26 @@ func TestLanguagePreferenceBeforeLoginAndSafeReturn(t *testing.T) {
 				t.Fatalf("bad language cookie: %#v", cookie)
 			}
 		}
-		response := httptest.NewRecorder()
-		request := httptest.NewRequest("POST", "/language", strings.NewReader("language=fr"))
-		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		app.Handler().ServeHTTP(response, request)
-		if response.Code != 400 || len(response.Result().Cookies()) != 0 {
-			t.Fatal("invalid manual locale accepted")
+		for _, locale := range supportedLocales {
+			form := url.Values{"language": {locale}}
+			request := httptest.NewRequest("POST", "/language", strings.NewReader(form.Encode()))
+			request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			response := httptest.NewRecorder()
+			app.Handler().ServeHTTP(response, request)
+			cookies := response.Result().Cookies()
+			if response.Code != http.StatusSeeOther || len(cookies) != 1 || cookies[0].Value != locale {
+				t.Fatalf("valid manual locale %q rejected", locale)
+			}
+		}
+		for _, alias := range []string{"fr", "de-DE", "pt", "es-MX", "zh-CN", "zh-hans", "zh-Hant", "ja", "ko"} {
+			form := url.Values{"language": {alias}}
+			request := httptest.NewRequest("POST", "/language", strings.NewReader(form.Encode()))
+			request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			response := httptest.NewRecorder()
+			app.Handler().ServeHTTP(response, request)
+			if response.Code != http.StatusBadRequest || len(response.Result().Cookies()) != 0 {
+				t.Fatalf("invalid manual locale %q accepted", alias)
+			}
 		}
 	}
 }
@@ -469,16 +562,13 @@ func TestTemplateAndBrowserCatalogReferences(t *testing.T) {
 				if _, ok := catalogs["en"][key]; !ok {
 					t.Errorf("%s references unknown English key %s", entry.Name(), key)
 				}
-				if _, ok := catalogs["fr-CA"][key]; !ok {
-					t.Errorf("%s references unknown French key %s", entry.Name(), key)
-				}
 			}
 		}
 	}
 }
 
 func TestMachineGatewayContractsRemainEnglishAcrossLocales(t *testing.T) {
-	for _, locale := range []string{"en", "fr-CA"} {
+	for _, locale := range supportedLocales {
 		t.Run(locale, func(t *testing.T) {
 			app, client := newGatewayTestApp(t, 4)
 			for _, path := range []string{"/api/v1/openapi.json", "/.well-known/oauth-protected-resource/mcp"} {

@@ -16,6 +16,43 @@ import (
 
 const languageCookie = "jv_lang"
 
+type languageOption struct {
+	Locale, Name string
+}
+
+type languageGroup struct {
+	Label   string
+	Options []languageOption
+}
+
+var languageGroups = []languageGroup{
+	{"language.latin", []languageOption{
+		{"en", "English"},
+		{"fr-CA", "Français (Canada)"},
+		{"de", "Deutsch"},
+		{"pl", "Polski"},
+		{"pt-BR", "Português (Brasil)"},
+		{"es-419", "Español (Latinoamérica)"},
+	}},
+	{"language.cyrillic", []languageOption{
+		{"uk", "Українська"},
+		{"ru", "Русский"},
+	}},
+	{"language.eastasian", []languageOption{
+		{"zh-Hans", "简体中文"},
+	}},
+}
+
+var supportedLocales = func() []string {
+	var locales []string
+	for _, group := range languageGroups {
+		for _, option := range group.Options {
+			locales = append(locales, option.Locale)
+		}
+	}
+	return locales
+}()
+
 // English owns the message keys. Catalogs are embedded with the WebUI, never fetched.
 var catalogs = loadCatalogs()
 var sourceKeys = func() map[string]string {
@@ -52,7 +89,7 @@ func validateCatalog(source, translated map[string]string) error {
 
 func loadCatalogs() map[string]map[string]string {
 	result := make(map[string]map[string]string)
-	for _, locale := range []string{"en", "fr-CA"} {
+	for _, locale := range supportedLocales {
 		data, err := assets.ReadFile("locales/" + locale + ".json")
 		if err != nil {
 			if locale == "en" {
@@ -92,7 +129,30 @@ func translate(locale, key string, args ...any) string {
 	return value
 }
 
-func supportedLocale(value string) bool { return value == "en" || value == "fr-CA" }
+func supportedLocale(value string) bool {
+	for _, locale := range supportedLocales {
+		if value == locale {
+			return true
+		}
+	}
+	return false
+}
+
+func browserLocale(tag string) string {
+	primary, _, _ := strings.Cut(tag, "-")
+	// Chinese needs a script or region check before matching the primary language.
+	if primary == "zh" && tag != "zh" && tag != "zh-cn" && tag != "zh-sg" &&
+		tag != "zh-hans" && !strings.HasPrefix(tag, "zh-hans-") {
+		return ""
+	}
+	for _, locale := range supportedLocales {
+		language, _, _ := strings.Cut(locale, "-")
+		if primary == language {
+			return locale
+		}
+	}
+	return ""
+}
 
 func requestLocale(r *http.Request) string {
 	if cookie, err := r.Cookie(languageCookie); err == nil {
@@ -137,17 +197,8 @@ func requestLocale(r *http.Request) string {
 	}
 	sort.SliceStable(preferences, func(i, j int) bool { return preferences[i].quality > preferences[j].quality })
 	for _, pref := range preferences {
-		switch pref.tag {
-		case "en":
-			return "en"
-		case "fr-ca":
-			return "fr-CA"
-		}
-		if pref.tag == "fr" || strings.HasPrefix(pref.tag, "fr-") {
-			return "fr-CA"
-		}
-		if strings.HasPrefix(pref.tag, "en-") {
-			return "en"
+		if locale := browserLocale(pref.tag); locale != "" {
+			return locale
 		}
 	}
 	return "en"
@@ -219,6 +270,7 @@ func localeTemplateFuncs(locale, returnPath string) template.FuncMap {
 			return translateSource(locale, fmt.Sprint(value))
 		},
 		"locale":         func() string { return locale },
+		"languageGroups": func() []languageGroup { return languageGroups },
 		"languageReturn": func() string { return returnPath },
 	}
 }

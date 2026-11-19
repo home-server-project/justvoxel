@@ -455,17 +455,24 @@ comparisons and redacted recovery output for support or a future issue report.
 
 ## Interface languages
 
-The WebUI ships embedded `en` and `fr-CA` catalogs in
-`webui/internal/server/locales/`. English is the canonical source; templates,
-WebUI presentation messages and browser scripts share its keys. The Canadian
-French catalog is a first-pass translation open to normal corrections.
+The WebUI ships embedded catalogs in `webui/internal/server/locales/`. English
+is the canonical source for templates, WebUI messages and browser scripts.
+The language selector shows each language in its native form under a heading
+translated into the current interface language.
 
-The first page uses the browser's `Accept-Language` preference, with French
-preferences selecting Canadian French. Unsupported or malformed preferences
-fall back to English. The Globe beside Sign in or immediately before Logout
-opens the language selector for every role. A manual choice is saved in the
-non-secret `jv_lang` cookie and overrides browser preferences on future requests.
-Missing or incompatible translations fall back to the English message.
+- Latin — English (`en`), Français (Canada) (`fr-CA`), Deutsch (`de`),
+  Polski (`pl`), Português (Brasil) (`pt-BR`), Español (Latinoamérica) (`es-419`)
+- Cyrillic — Українська (`uk`), Русский (`ru`)
+- East Asian — 简体中文 (`zh-Hans`)
+
+Japanese, Korean and Traditional Chinese are not currently supported.
+
+The first page uses the browser's `Accept-Language` preferences. A valid manual
+choice is saved in the non-secret `jv_lang` cookie and takes precedence on
+future requests. English is the fallback when no supported preference can be
+used. The Globe beside Sign in or immediately before Logout opens the selector
+for every role. Missing or incompatible translations fall back to the English
+message.
 
 Only JustVoxel interface text is translated. User-selected names, filenames,
 paths, commands, versions, raw logs and Minecraft console output retain their
@@ -477,9 +484,10 @@ administration and OAuth consent HTML use the selected interface language.
 The CLI remains English.
 
 When changing interface copy, edit the English catalog and the corresponding
-French entry using the existing key. Preserve named interpolation placeholders
-and printf arguments. New browser text uses `jvT` for text and `jvH` in existing
-HTML templates; placeholder values retain the original HTML escaping contract.
+entry in every supported catalog using the existing key. Preserve named
+interpolation placeholders and printf arguments. New browser text uses `jvT` for
+text and `jvH` in existing HTML templates. Placeholder values retain the
+original HTML escaping contract.
 `uiText` provides canonical English for presentation helpers whose values also
 serve as internal state labels. Translate those labels only at their explicit
 presentation slot (`ts` / `jvS`); never apply source lookup to provider metadata,

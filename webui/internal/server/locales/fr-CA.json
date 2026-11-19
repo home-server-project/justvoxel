@@ -1,6 +1,9 @@
 {
   "language.choose": "Choisir la langue",
   "language.close": "Fermer",
+  "language.latin": "Latin",
+  "language.cyrillic": "Cyrillique",
+  "language.eastasian": "Asie de l’Est",
   "plugins.recovery.title": "Récupération de Minecraft requise",
   "plugins.recovery.details": "Ouvrir les détails de récupération",
   "plugins.recovery.start": "Démarrer Minecraft et revérifier",
