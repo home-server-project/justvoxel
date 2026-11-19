@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSwitchTransitionMatrix(t *testing.T) {
@@ -277,8 +278,14 @@ func TestSwitchCloneCreationUsesNewIdentityPlacementAndPorts(t *testing.T) {
 
 func TestSwitchCloneFailureNeverReportsSuccess(t *testing.T) {
 	f := switchPlannerFixture(t)
-	oldBackup, oldLock := instanceBackupStorageCommand, pluginRuntimeLockPath
-	t.Cleanup(func() { instanceBackupStorageCommand = oldBackup; pluginRuntimeLockPath = oldLock })
+	oldBackup, oldLock, oldDiagnostic := instanceBackupStorageCommand, pluginRuntimeLockPath, runFailedUnitCommand
+	t.Cleanup(func() {
+		instanceBackupStorageCommand, pluginRuntimeLockPath, runFailedUnitCommand = oldBackup, oldLock, oldDiagnostic
+	})
+	runFailedUnitCommand = func(context.Context, string, ...string) ([]byte, error) {
+		t.Fatal("Switch without a clone requested clone runtime evidence")
+		return nil, nil
+	}
 	pluginRuntimeLockPath = filepath.Join(t.TempDir(), "maintenance.lock")
 	instanceBackupStorageCommand = func(context.Context, string, ...string) ([]byte, error) { return nil, errors.New("unavailable backup") }
 	plan, err := planMinecraftSwitch(context.Background(), "jv-a1b2c3", "purpur")
@@ -295,12 +302,24 @@ func TestSwitchCloneFailureNeverReportsSuccess(t *testing.T) {
 	before, _ := f.backend.readRecord(plan.InstanceID)
 	s.runMinecraftSwitch(context.Background(), journal, plan, request)
 	result, err := s.operations.get(journal.OperationID)
-	if err != nil || result.State == operationSucceeded || result.State == operationRunning {
-		t.Fatalf("failed clone reported healthy: %+v %v", result, err)
+	if err != nil || result.State != operationResolved {
+		t.Fatalf("early clone failure was not recovered: %+v %v", result, err)
 	}
 	after, _ := f.backend.readRecord(plan.InstanceID)
 	if !reflect.DeepEqual(before, after) {
 		t.Fatal("failed clone modified source")
+	}
+	log := switchTestDiagnostic(t, s.operations, journal.OperationID)
+	if !strings.Contains(log, "Instance backup storage") || !strings.Contains(log, `result="succeeded"`) ||
+		strings.Contains(log, "clone_id=") || strings.Contains(result.Status, "Instance backup storage") {
+		t.Fatal("early failure detail was lost, exposed in status, or attributed to a clone")
+	}
+	response := switchTestOperation(t, s, plan.InstanceID, "")
+	if response["target"] != plan.Target || response["action"] != "clone" || response["version"] != plan.Version {
+		t.Fatal("early failed Switch lost its durable metadata", response)
+	}
+	if _, exists := response["clone_id"]; exists {
+		t.Fatal("early failed Switch invented a clone ID")
 	}
 }
 
@@ -467,11 +486,12 @@ func TestSwitchFailedCloneRuntimeVerificationPreservesOriginal(t *testing.T) {
 		t.Run(target, func(t *testing.T) {
 
 			f := switchPlannerFixture(t)
-			oldStorage, oldCommand, oldLock := instanceBackupStorageCommand, pluginInstallCommand, pluginRuntimeLockPath
+			oldStorage, oldCommand, oldLock, oldDiagnostic := instanceBackupStorageCommand, pluginInstallCommand, pluginRuntimeLockPath, runFailedUnitCommand
 			t.Cleanup(func() {
 				instanceBackupStorageCommand = oldStorage
 				pluginInstallCommand = oldCommand
 				pluginRuntimeLockPath = oldLock
+				runFailedUnitCommand = oldDiagnostic
 			})
 			pluginRuntimeLockPath = filepath.Join(t.TempDir(), "maintenance.lock")
 			f.players = "There are 0 of a max of 20 players online:"
@@ -484,6 +504,45 @@ func TestSwitchFailedCloneRuntimeVerificationPreservesOriginal(t *testing.T) {
 			originalWorld := switchWorldSnapshot(t, sourceRecord.Storage.DataPath)
 			cloneID := ""
 			cleanupCalls, verificationCalls := 0, 0
+			var diagnostics []string
+			var rcon string
+			runFailedUnitCommand = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+				if cloneID == "" || verificationCalls != 1 || cleanupCalls != 0 {
+					t.Fatal("runtime evidence must be captured for the allocated failed clone before cleanup")
+				}
+				deadline, bounded := ctx.Deadline()
+				if !bounded || time.Until(deadline) > 10*time.Second {
+					t.Fatal("runtime evidence command has no short deadline")
+				}
+				diagnostics = append(diagnostics, command)
+				unit := "minecraft-" + cloneID + ".service"
+				switch command {
+				case "systemctl":
+					if !reflect.DeepEqual(args, []string{"show", "--no-pager", "--property=LoadState,ActiveState,SubState,Result,ExecMainCode,ExecMainStatus", "--", unit}) {
+						t.Fatal("unexpected service evidence command", args)
+					}
+					if target == "vanilla" {
+						return nil, errors.New("mock command failure")
+					}
+					return []byte("LoadState=loaded\nResult=exit-code\n"), nil
+				case "journalctl":
+					if !reflect.DeepEqual(args, []string{"-b", "-u", unit, "--no-pager", "-n", "80"}) {
+						t.Fatal("unexpected journal evidence command", args)
+					}
+					if target == "vanilla" {
+						return []byte(strings.Repeat("oversized output", failedUnitOutputLimit)), nil
+					}
+					clone, err := f.backend.readRecord(cloneID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					rcon = clone.Runtime.RCONPassword
+					return []byte("clone startup diagnostic\npassword=journal-secret\nopaque " + rcon + "\n"), nil
+				default:
+					t.Fatal("unexpected evidence command", command)
+					return nil, nil
+				}
+			}
 			base := f.backend.command
 			f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
 				if command == "podman" && len(args) > 0 && args[0] == "rm" {
@@ -497,8 +556,24 @@ func TestSwitchFailedCloneRuntimeVerificationPreservesOriginal(t *testing.T) {
 					delete(f.containers, cloneID)
 					return nil, nil
 				}
-				if command == "nsenter" && len(args) > 4 && args[2] == instanceDeleteHelper && (cloneID == "" || args[4] != cloneID || args[4] == sourceID) {
-					t.Fatal("storage cleanup did not target the expected failed clone", args)
+				if command == "nsenter" && len(args) > 4 {
+					if args[2] == instanceDeleteHelper {
+						if cloneID == "" || args[4] != cloneID || args[4] == sourceID {
+							t.Fatal("storage cleanup did not target the expected failed clone", args)
+						}
+						out, err := base(ctx, command, args...)
+						if err == nil && args[3] == "remove" && os.Geteuid() != 0 {
+							// Unprivileged test runs exercise the already-absent parent path.
+							parent := filepath.Dir(args[6])
+							if _, statErr := os.Lstat(parent); statErr == nil {
+								err = os.Remove(parent)
+							}
+						}
+						return out, err
+					}
+					if args[2] == instanceRuntimeHelper && args[3] == "restore-validate" && args[4] == cloneID {
+						return nil, nil
+					}
 				}
 				if command == "systemctl" && len(args) > 0 {
 					if args[0] == "show" && strings.Contains(strings.Join(args, " "), "--property=Job") {
@@ -616,7 +691,7 @@ func TestSwitchFailedCloneRuntimeVerificationPreservesOriginal(t *testing.T) {
 					}
 					verificationCalls++
 					verified = true
-					return nil, errors.New("target software failed exact verification")
+					return []byte("verification stopped at internal-node.example\ntoken=verification-secret\n"), errors.New("target software failed exact verification")
 				}
 				t.Fatal("unexpected runtime command", command, args)
 				return nil, nil
@@ -645,6 +720,35 @@ func TestSwitchFailedCloneRuntimeVerificationPreservesOriginal(t *testing.T) {
 			evidence, err := readSwitchEvidence(journal)
 			if err != nil || evidence.CloneID != cloneID || evidence.Stage != "recovered" {
 				t.Fatalf("clone recovery evidence was not completed: %+v %v", evidence, err)
+			}
+			if !reflect.DeepEqual(diagnostics, []string{"systemctl", "journalctl"}) {
+				t.Fatal("failed clone did not attempt both bounded diagnostic commands", diagnostics)
+			}
+			log := switchTestDiagnostic(t, s.operations, journal.OperationID)
+			for _, want := range []string{"target software failed exact verification", `stage="verifying_clone"`, `target="` + target + `"`,
+				`action="clone"`, `version="1.21.4"`, `clone_id="` + cloneID + `"`, `result="succeeded"`, "<HOSTNAME-REDACTED>"} {
+				if !strings.Contains(log, want) {
+					t.Errorf("migration diagnostic missing %q", want)
+				}
+			}
+			for _, secret := range []string{"internal-node.example", "verification-secret", "journal-secret", "oversized output", rcon} {
+				if secret != "" && strings.Contains(log, secret) {
+					t.Fatal("migration diagnostic retained private or oversized evidence")
+				}
+			}
+			if target == "vanilla" {
+				if strings.Count(log, "Startup evidence command unavailable") != 2 {
+					t.Fatal("command errors were not recorded as unavailable")
+				}
+			} else if !strings.Contains(log, "Result=exit-code") || !strings.Contains(log, "clone startup diagnostic") {
+				t.Fatal("service and journal evidence were lost")
+			}
+			if _, err := os.Lstat(filepath.Dir(evidence.CloneRecord.Storage.DataPath)); !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("failed clone parent remains", err)
+			}
+			response := switchTestOperation(t, s, sourceID, "?operation_id="+journal.OperationID)
+			if response["clone_id"] != cloneID || response["target"] != target || response["action"] != "clone" || response["version"] != "1.21.4" {
+				t.Fatal("operation response lost failed clone identity", response)
 			}
 			if err := f.backend.verifyCommittedSwitchState(context.Background(), sourceID); err != nil {
 				t.Fatal("original was not left verified", err)

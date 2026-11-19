@@ -6,10 +6,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -343,12 +345,19 @@ func (s *server) restoreSwitchSource(ctx context.Context, e *minecraftSwitchEvid
 
 func (s *server) recoverMinecraftSwitch(ctx context.Context, e *minecraftSwitchEvidence) error {
 	b := instanceRuntimes
-	if e.Action == "convert" {
-		lock, err := acquirePluginMaintenanceLock()
-		if err != nil {
-			return err
+	lock, err := acquirePluginMaintenanceLock()
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	// This evidence was saved before any runtime changes were authorized.
+	if e.Stage == "validating" {
+		if e.CloneID != "" || e.SourceStopped || e.SourceContentChanged || e.WorldChanged {
+			return errInstanceRecovery
 		}
-		defer lock.Close()
+		return b.verifyCommittedSwitchState(ctx, e.Source)
+	}
+	if e.Action == "convert" {
 		if pending, pendingErr := b.pending(e.Source); pendingErr != nil {
 			return pendingErr
 		} else if pending {
@@ -427,11 +436,6 @@ func (s *server) recoverMinecraftSwitch(ctx context.Context, e *minecraftSwitchE
 		}
 		return b.verifyCommittedSwitchState(ctx, e.Source)
 	}
-	lock, err := acquirePluginMaintenanceLock()
-	if err != nil {
-		return err
-	}
-	defer lock.Close()
 	if pending, pendingErr := b.pending(e.Source); pendingErr != nil {
 		return pendingErr
 	} else if pending {
@@ -446,16 +450,31 @@ func (s *server) recoverMinecraftSwitch(ctx context.Context, e *minecraftSwitchE
 		return err
 	}
 	if e.CloneID != "" {
+		if !switchStructuralPathFromEvidence(*e) || validateInstanceRecordPlacement(*e.CloneRecord) != nil ||
+			validateInstanceRecordPlacement(*e.SourceRecord) != nil {
+			return errInstanceRecovery
+		}
+		// Resume ordinary deletion if it was already journaled before a restart.
+		if deletion, deleteErr := b.deleteJournal(e.CloneID); deleteErr == nil {
+			if deletion.Record.Storage != e.CloneRecord.Storage {
+				return errInstanceRecovery
+			}
+			if err = b.deleteInstance(ctx, e.CloneID, deletion.Name); err != nil {
+				return err
+			}
+			return b.finishSwitchCloneRecovery(ctx, e)
+		} else if !errors.Is(deleteErr, os.ErrNotExist) {
+			return deleteErr
+		}
 		// Creation/activation and restore recovery retain their own evidence. Finish
 		// rollback first, then use normal instance deletion for this failed clone.
 		record, readErr := b.readRecord(e.CloneID)
 		if errors.Is(readErr, os.ErrNotExist) || errors.Is(readErr, errInstanceNotFound) {
 			registered, regErr := b.identities().readRecord(e.CloneID + ".json")
 			if errors.Is(regErr, os.ErrNotExist) {
-				e.Stage = "recovered"
-				return saveSwitchEvidence(*e)
+				return b.finishSwitchCloneRecovery(ctx, e)
 			}
-			if regErr != nil || registered != e.CloneID || e.CloneRecord == nil {
+			if regErr != nil || registered != e.CloneID {
 				return errInstanceRecovery
 			}
 			snapshot, uid, gid, snapshotErr := b.snapshot(ctx)
@@ -475,7 +494,7 @@ func (s *server) recoverMinecraftSwitch(ctx context.Context, e *minecraftSwitchE
 			}
 			record, readErr = b.readRecord(e.CloneID)
 		}
-		if readErr != nil || record.Runtime.ID == e.Source {
+		if readErr != nil || record.Runtime.ID != e.CloneID || record.Storage != e.CloneRecord.Storage {
 			return errInstanceRecovery
 		}
 		state, stateErr := b.observeRaw(ctx, e.CloneID)
@@ -533,12 +552,98 @@ func (s *server) recoverMinecraftSwitch(ctx context.Context, e *minecraftSwitchE
 			return err
 		}
 	}
-	if err = b.verifyCommittedSwitchState(ctx, e.Source); err != nil {
+	return b.finishSwitchCloneRecovery(ctx, e)
+}
+
+func (b *instanceRuntimeBackend) finishSwitchCloneRecovery(ctx context.Context, e *minecraftSwitchEvidence) error {
+	if id := e.CloneID; id != "" {
+		if _, err := b.identities().readRecord(id + ".json"); !errors.Is(err, os.ErrNotExist) {
+			return errInstanceRecovery
+		}
+		dir, env, quadlet := b.paths(id)
+		for _, path := range []string{dir, env, quadlet, b.deletePath(id)} {
+			if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+				return errInstanceRecovery
+			}
+		}
+		// "configured" from observeRaw proves the generated unit is not found
+		// and there is no container, even a stopped one.
+		state, err := b.observeRaw(ctx, id)
+		if err != nil || state.State != "configured" {
+			return errors.Join(errInstanceRecovery, err)
+		}
+		if err := b.storage(ctx, "restore-validate", *e.CloneRecord); err != nil {
+			return err
+		}
+		if err := removeEmptySwitchCloneParent(*e); err != nil {
+			return err
+		}
+	}
+	if err := b.verifyCommittedSwitchState(ctx, e.Source); err != nil {
 		return err
 	}
 	e.Stage = "recovered"
 	return saveSwitchEvidence(*e)
 }
+
+func removeEmptySwitchCloneParent(e minecraftSwitchEvidence) error {
+	if e.CloneID == "" || !switchStructuralPathFromEvidence(e) ||
+		validateInstanceRecordPlacement(*e.CloneRecord) != nil ||
+		e.SourceRecord.Storage.DataPath == e.CloneRecord.Storage.DataPath {
+		return errInstanceRecovery
+	}
+	base := filepath.Join(e.CloneRecord.Storage.Root, "minecraft-instances")
+	parent, err := instanceOpen(base, syscall.O_RDONLY|syscall.O_DIRECTORY)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer parent.Close()
+	// Anchor the exact child to the checked, symlink-free parent directory.
+	path := filepath.Join("/proc/self/fd", strconv.FormatUint(uint64(parent.Fd()), 10), e.CloneID)
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return parent.Sync()
+	}
+	if err != nil || !rootPrivateSwitchDirectory(info) {
+		return errors.Join(errInstanceRecovery, err)
+	}
+	baseInfo, err := parent.Stat()
+	if err != nil || !rootPrivateSwitchDirectory(baseInfo) {
+		return errors.Join(errInstanceRecovery, err)
+	}
+	dir, err := os.OpenFile(path, os.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	opened, err := dir.Stat()
+	if err != nil || !os.SameFile(info, opened) || !rootPrivateSwitchDirectory(opened) {
+		return errors.Join(errInstanceRecovery, err)
+	}
+	// Any child, including data or .provision.json, makes cleanup unsafe.
+	if entries, err := dir.Readdirnames(1); err != io.EOF || len(entries) != 0 {
+		return errInstanceRecovery
+	}
+	if err := os.Remove(path); err != nil {
+		return err
+	}
+	if err := parent.Sync(); err != nil {
+		return err
+	}
+	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+		return errors.Join(errInstanceRecovery, err)
+	}
+	return nil
+}
+
+func rootPrivateSwitchDirectory(info os.FileInfo) bool {
+	owner, ok := info.Sys().(*syscall.Stat_t)
+	return ok && owner.Uid == 0 && info.Mode() == os.ModeDir|0o700
+}
+
 func (b *instanceRuntimeBackend) verifyCommittedSwitchState(ctx context.Context, id string) error {
 	record, err := b.readRecord(id)
 	if err != nil {

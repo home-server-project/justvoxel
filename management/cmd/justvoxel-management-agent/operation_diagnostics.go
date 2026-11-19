@@ -183,7 +183,7 @@ func (s *operationStore) appendOperationDiagnostic(id, operationType, category, 
 
 func validDiagnosticOperationType(value string) bool {
 	switch value {
-	case pluginReviewDiagnosticType, operationTypePluginAddonInstall, operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove, operationTypeRestore, operationTypeDataMigration, operationTypeMinecraftReset, operationTypeFactoryReset, operationTypeMigrationExport, operationTypeMigrationImport, operationTypeMigrationRecovery:
+	case pluginReviewDiagnosticType, operationTypePluginAddonInstall, operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove, operationTypeRestore, operationTypeDataMigration, operationTypeMinecraftReset, operationTypeFactoryReset, operationTypeMigrationExport, operationTypeMigrationImport, operationTypeMigrationRecovery, operationTypeMinecraftSwitch:
 		return true
 	}
 	return false
@@ -201,7 +201,7 @@ func diagnosticCategoryForOperationType(value string) string {
 	switch value {
 	case operationTypeSetup:
 		return "setup"
-	case operationTypeDataMigration, operationTypeMigrationExport, operationTypeMigrationImport, operationTypeMigrationRecovery:
+	case operationTypeDataMigration, operationTypeMigrationExport, operationTypeMigrationImport, operationTypeMigrationRecovery, operationTypeMinecraftSwitch:
 		return "migration"
 	case operationTypeRestore:
 		return "restore"
@@ -360,7 +360,10 @@ func (s *operationStore) diagnosticCategoryDirectory(category string) string {
 }
 
 // The error text is browser-safe; command output is private diagnostic evidence.
-type pluginRuntimeVerificationError struct{ output string }
+type pluginRuntimeVerificationError struct {
+	cause  error
+	output string
+}
 
 func (*pluginRuntimeVerificationError) Error() string {
 	return "Existing Minecraft stack verification failed"
@@ -518,16 +521,110 @@ func recordPluginCommandEvidence(store *operationStore, id, operationType, stage
 		output = strings.ReplaceAll(output, key, "<REDACTED>")
 	}
 	for _, line := range strings.Split(output, "\n") {
-		if pluginDiagnosticSensitivePattern.MatchString(line) || strings.Contains(strings.ToLower(line), "csrf") || strings.Contains(line, "://") || strings.ContainsAny(line, "?@\\") {
-			line = "<sensitive diagnostic detail redacted>"
-		}
 		// Sanitize before splitting, so a secret or hostname cannot escape
 		// redaction by crossing the per-value length boundary.
-		line = sanitizeSetupDiagnosticValue("detail", line, store.diagnosticHostname)
+		line = sanitizeOperationDiagnosticDetail(line, store.diagnosticHostname)
 		for line != "" {
 			part := line[:min(len(line), 2048)]
 			line = line[len(part):]
 			_ = store.appendOperationDiagnostic(id, operationType, stage, "Minecraft start failure evidence", map[string]string{"detail": part})
 		}
 	}
+}
+
+func sanitizeOperationDiagnosticDetail(line, hostname string) string {
+	if pluginDiagnosticSensitivePattern.MatchString(line) || strings.Contains(strings.ToLower(line), "csrf") || strings.Contains(line, "://") || strings.ContainsAny(line, "?@\\") {
+		return "<sensitive diagnostic detail redacted>"
+	}
+	return sanitizeSetupDiagnosticValue("detail", line, hostname)
+}
+
+func (s *operationStore) recordSwitchFailure(e minecraftSwitchEvidence, cause error) {
+	var start *pluginStartError
+	var verification *pluginRuntimeVerificationError
+	reason := cause
+	if errors.As(cause, &start) {
+		reason = errors.Join(reason, start.cause)
+	}
+	if errors.As(cause, &verification) {
+		reason = errors.Join(reason, verification.cause)
+	}
+	values := map[string]string{
+		"reason": s.switchDiagnosticReason(e, reason),
+		"target": e.Target, "action": e.Action, "version": e.Version, "stage": e.Stage,
+	}
+	if e.CloneID != "" {
+		values["clone_id"] = e.CloneID
+	}
+	_ = s.appendOperationDiagnostic(e.OperationID, operationTypeMinecraftSwitch, "switch_failure", "Minecraft Switch failed before recovery", values)
+	if start != nil {
+		s.recordSwitchCommandEvidence(e, "systemctl_start", start.output)
+	}
+	if verification != nil {
+		s.recordSwitchCommandEvidence(e, "runtime_verification", verification.output)
+	}
+}
+
+func (s *operationStore) recordSwitchRecovery(e minecraftSwitchEvidence, cause error) {
+	values := map[string]string{"result": "succeeded"}
+	if cause != nil {
+		values["result"] = "failed"
+		values["reason"] = s.switchDiagnosticReason(e, cause)
+	}
+	_ = s.appendOperationDiagnostic(e.OperationID, operationTypeMinecraftSwitch, "switch_recovery", "Minecraft Switch recovery result", values)
+}
+
+func (s *operationStore) switchDiagnosticReason(e minecraftSwitchEvidence, cause error) string {
+	reason := redactSwitchDiagnosticSecrets(e, cause.Error())
+	if key, err := readCurseForgeKey(); err == nil && key != "" {
+		reason = strings.ReplaceAll(reason, key, "<REDACTED>")
+	}
+	lines := strings.Split(reason, "\n")
+	for i, line := range lines {
+		lines[i] = sanitizeOperationDiagnosticDetail(line, s.diagnosticHostname)
+	}
+	return strings.Join(lines, " ")
+}
+
+func (s *operationStore) recordSwitchCloneRuntime(e minecraftSwitchEvidence) {
+	if !instanceIDPattern.MatchString(e.CloneID) || e.CloneID == e.Source {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	unit := "minecraft-" + e.CloneID + ".service"
+	for _, command := range []struct {
+		name, stage string
+		args        []string
+	}{
+		{"systemctl", "service_state", []string{"show", "--no-pager", "--property=LoadState,ActiveState,SubState,Result,ExecMainCode,ExecMainStatus", "--", unit}},
+		{"journalctl", "service_journal", []string{"-b", "-u", unit, "--no-pager", "-n", "80"}},
+	} {
+		output, err := runFailedUnitCommand(ctx, command.name, command.args...)
+		if err != nil || len(output) > failedUnitOutputLimit {
+			_ = s.appendOperationDiagnostic(e.OperationID, operationTypeMinecraftSwitch, command.stage, "Startup evidence command unavailable", nil)
+			continue
+		}
+		s.recordSwitchCommandEvidence(e, command.stage, string(output))
+	}
+}
+
+func (s *operationStore) recordSwitchCommandEvidence(e minecraftSwitchEvidence, stage, output string) {
+	output = redactSwitchDiagnosticSecrets(e, output)
+	// Keep whole lines at the limit so sensitive markers on a trailing
+	// partial line cannot be cut off before command-output redaction.
+	if len(output) > 64<<10 {
+		end := strings.LastIndexByte(output[:64<<10], '\n')
+		output = output[:max(end, 0)]
+	}
+	recordPluginCommandEvidence(s, e.OperationID, operationTypeMinecraftSwitch, stage, []byte(output))
+}
+
+func redactSwitchDiagnosticSecrets(e minecraftSwitchEvidence, value string) string {
+	for _, record := range []*instanceRuntimeRecord{e.SourceRecord, e.CloneRecord} {
+		if record != nil && record.Runtime.RCONPassword != "" {
+			value = strings.ReplaceAll(value, record.Runtime.RCONPassword, "<REDACTED>")
+		}
+	}
+	return value
 }

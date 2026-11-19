@@ -36,6 +36,9 @@ type MinecraftSwitchRequest struct {
 }
 type MinecraftSwitchOperation struct {
 	PersistentOperationResponse
+	Target  string `json:"target,omitempty"`
+	Action  string `json:"action,omitempty"`
+	Version string `json:"version,omitempty"`
 	CloneID string `json:"clone_id,omitempty"`
 }
 

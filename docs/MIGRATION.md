@@ -479,6 +479,10 @@ ordinary conversion through Export/Import Recovery. Recovery never retries the
 conversion automatically. Minecraft Network members must first leave Network
 before standalone conversion can be reviewed.
 
+Switch keeps the attempted software card selected while following an operation
+and when reopening its saved result. Administrators can find Switch progress,
+failure details and recovery results in **System Settings → Logs → Migration**.
+
 Spigot, Vanilla world transformations and mod-loader conversions currently remain
 Not Supported. In particular, Bukkit support does not make Spigot a safe member
 of the Paper family. Paper-to-Spigot is unsupported; direct Spigot-to-Paper

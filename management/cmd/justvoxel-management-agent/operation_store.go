@@ -1210,7 +1210,7 @@ func (s *operationStore) beginMinecraftMaintenance(planFingerprint, kind string,
 	}
 	s.operations[id] = journal
 	s.currentMinecraftResetID = id
-	if isPluginOperationType(kind) {
+	if isPluginOperationType(kind) || kind == operationTypeMinecraftSwitch {
 		s.appendOperationJournalDiagnosticBestEffort(journal)
 	}
 	return journal, true, nil

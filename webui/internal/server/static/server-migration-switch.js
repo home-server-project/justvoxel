@@ -46,10 +46,15 @@
         node.title = plan.reason || (active ? jvT("ui.7d4f12e4405b") : jvT("ui.a195a363286b", {v0: (plan.version)}));
       };
       const reconnect = async (id = "") => {
+        const ticket = sequence;
         const result = await request("operation", { operation_id: id });
+        if (!current() || ticket !== sequence) return;
         operation = result.operation || null;
         busy = Boolean(operation && !["succeeded", "resolved"].includes(operation.state));
         if (!operation) { progress.replaceChildren(); return; }
+        if (cards.some((node) => node.dataset.switchTarget === result.target)) {
+          cards.forEach((node) => node.classList.toggle("is-selected", node.dataset.switchTarget === result.target));
+        }
         progress.replaceChildren(paragraph(operation.status || jvT("ui.934767ef0bcc"), "notice"));
         if (operation.state === "succeeded" && result.clone_id) {
           progress.appendChild(paragraph(jvT("ui.b62c04b44caf")));
@@ -63,21 +68,28 @@
           const recover = document.createElement("button"); recover.type = "button"; recover.textContent = jvT("ui.b8e7e9e5f031"); recover.disabled = true;
           consent.addEventListener("change", () => { recover.disabled = !consent.checked; });
           recover.addEventListener("click", async () => {
-            if (!current() || !consent.checked || recover.disabled) return;
+            if (!current() || ticket !== sequence || !consent.checked || recover.disabled) return;
             recover.disabled = true;
-            try { await request("recover", { operation_id: operation.operation_id, confirm: "yes" }, true); if (current()) await load(); }
-            catch (failure) { if (current()) { state.textContent = failure.message; recover.disabled = !consent.checked; } }
+            try {
+              const result = await request("recover", { operation_id: operation.operation_id, confirm: "yes" }, true);
+              if (current() && ticket === sequence) await load(result.operation.operation_id);
+            }
+            catch (failure) { if (current() && ticket === sequence) { state.textContent = failure.message; recover.disabled = !consent.checked; } }
           });
           progress.append(label, recover);
         }
         cards.forEach((node) => { if (busy) node.disabled = true; });
         if (!terminal.has(operation.state) && !polling) {
           polling = true;
+          const operationID = operation.operation_id;
           setTimeout(async () => {
             polling = false;
-            if (!current()) return;
-            try { await reconnect(operation.operation_id); if (terminal.has(operation.state)) await load(operation.operation_id); }
-            catch (failure) { if (current()) state.textContent = jvT("ui.796b21621486", {v0: (failure.message)}); }
+            if (!current() || ticket !== sequence || operation?.operation_id !== operationID) return;
+            try {
+              await reconnect(operationID);
+              if (current() && ticket === sequence && terminal.has(operation?.state)) await load(operationID);
+            }
+            catch (failure) { if (current() && ticket === sequence) state.textContent = jvT("ui.796b21621486", {v0: (failure.message)}); }
           }, 2000);
         }
       };
@@ -115,19 +127,31 @@
               if (!allowed) button.title = plan.reason || jvT("ui.f4239cda81ee");
               consent.addEventListener("change", () => { button.disabled = !allowed || !consent.checked || busy; });
               button.addEventListener("click", async () => {
-                if (!current() || !allowed || !consent.checked || busy || button.disabled) return;
+                if (!current() || ticket !== sequence || !allowed || !consent.checked || busy || button.disabled) return;
+                const priorOperationID = operation?.operation_id;
                 busy = true; actions.querySelectorAll("button").forEach((item) => { item.disabled = true; }); cards.forEach((item) => { item.disabled = true; });
                 try {
                   const result = await request("apply", { target, action, plan_fingerprint: plan.plan_fingerprint, confirm: "yes" }, true);
+                  if (!current() || ticket !== sequence) return;
                   if (!result.operation?.operation_id) throw new Error(jvT("ui.d8bcc288b463"));
                   review.hidden = true; await reconnect(result.operation.operation_id);
+                  if (current() && ticket === sequence && terminal.has(operation?.state)) await load(result.operation.operation_id);
                 } catch (failure) {
-                  if (!current()) return;
+                  if (!current() || ticket !== sequence) return;
                   state.textContent = failure.message;
                   // A lost Apply response may have started work. Reconnect
                   // before enabling another review or action.
-                  try { await reconnect(); if (!operation) { busy = false; await load(); state.textContent = failure.message; } }
-                  catch (_) { state.textContent = jvT("ui.683b73665685", {v0: (failure.message)}); }
+                  try {
+                    await reconnect();
+                    if (!current() || ticket !== sequence) return;
+                    if (!operation || operation.operation_id === priorOperationID) {
+                      await load();
+                      if (current()) state.textContent = failure.message;
+                    } else if (terminal.has(operation.state)) {
+                      await load(operation.operation_id);
+                    }
+                  }
+                  catch (_) { if (current() && ticket === sequence) state.textContent = jvT("ui.683b73665685", {v0: (failure.message)}); }
                 }
               });
               actions.appendChild(button);
@@ -140,10 +164,12 @@
       const load = async (id = "") => {
         const ticket = ++sequence;
         review.hidden = true;
-        cards.forEach((node) => { node.disabled = true; node.classList.toggle("is-selected", false); });
+        cards.forEach((node) => { node.disabled = true; });
         state.textContent = jvT("ui.e29d2712155f");
         try {
           await reconnect(id);
+          if (!current() || ticket !== sequence) return;
+          if (!operation) cards.forEach((node) => { node.classList.toggle("is-selected", false); });
           const results = await Promise.allSettled(cards.map(async (node) => ({ node, plan: await request("plan", { target: node.dataset.switchTarget }) })));
           if (!current() || ticket !== sequence) return;
           let failed = false;

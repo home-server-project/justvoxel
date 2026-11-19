@@ -547,7 +547,7 @@ func switchStructuralPathFromEvidence(e minecraftSwitchEvidence) bool {
 	if !instanceIDPattern.MatchString(e.Source) || e.SourceRecord == nil || e.SourceRecord.Runtime.ID != e.Source || !switchStructuralPath(e.SourceRecord.Runtime.Software, e.Target) || e.Version == "LATEST" || !instanceRuntimeVersionPattern.MatchString(e.Version) || (e.Action != "convert" && e.Action != "clone") {
 		return false
 	}
-	if e.CloneID != "" && (!instanceIDPattern.MatchString(e.CloneID) || e.CloneID == e.Source || e.CloneRecord == nil || e.CloneRecord.Runtime.ID != e.CloneID || e.CloneRecord.Storage.Root != e.SourceRecord.Storage.Root || e.CloneRecord.Storage.DataPath != filepath.Join(e.SourceRecord.Storage.Root, "minecraft-instances", e.CloneID, "data")) {
+	if e.CloneID != "" && (e.Action != "clone" || !instanceIDPattern.MatchString(e.CloneID) || e.CloneID == e.Source || e.CloneRecord == nil || e.CloneRecord.Runtime.ID != e.CloneID || e.CloneRecord.Storage.Root != e.SourceRecord.Storage.Root || e.CloneRecord.Storage.DataPath != filepath.Join(e.SourceRecord.Storage.Root, "minecraft-instances", e.CloneID, "data")) {
 		return false
 	}
 	if e.WorldChanged && (e.Action != "convert" || !validInstanceRestoreArchive(e.ColdArchive)) {
@@ -628,15 +628,16 @@ func (s *server) minecraftSwitchOperation(w http.ResponseWriter, r *http.Request
 		writeError(w, 503, "Switch tracking is unavailable.")
 		return
 	}
-	j, err := s.operations.currentMinecraftMaintenance()
+	var j *operationJournal
 	if requested := r.URL.Query().Get("operation_id"); requested != "" {
-		found, e := s.operations.get(requested)
-		err = e
+		found, err := s.operations.get(requested)
+		if err != nil {
+			writeError(w, 503, "Switch tracking is unavailable.")
+			return
+		}
 		j = &found
-	}
-	if err != nil {
-		writeError(w, 503, "Switch tracking is unavailable.")
-		return
+	} else {
+		j = s.operations.latestMinecraftSwitch(id)
 	}
 	if j != nil && (j.InstanceID != id || j.OperationType != operationTypeMinecraftSwitch) {
 		j = nil
@@ -644,27 +645,59 @@ func (s *server) minecraftSwitchOperation(w http.ResponseWriter, r *http.Request
 	response := map[string]any{"operation": j}
 	if j != nil {
 		if evidence, e := readSwitchEvidence(*j); e == nil {
-			response["clone_id"] = evidence.CloneID
+			response["target"] = evidence.Target
+			response["action"] = evidence.Action
+			response["version"] = evidence.Version
+			if evidence.CloneID != "" {
+				response["clone_id"] = evidence.CloneID
+			}
 		}
 	}
 	writeJSON(w, 200, response)
 }
 
-// Retain ordinary error details on the privileged side; the persistent operation
-// and original transaction journals are the authoritative recovery evidence.
+// The maintenance lock is released on completion, but the operation still
+// identifies the attempted target when the workspace is reopened.
+func (s *operationStore) latestMinecraftSwitch(id string) *operationJournal {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if current, ok := s.operations[s.currentMinecraftResetID]; ok && current.InstanceID == id && current.OperationType == operationTypeMinecraftSwitch {
+		return &current
+	}
+	var latest *operationJournal
+	var started time.Time
+	for _, j := range s.operations {
+		if j.InstanceID != id || j.OperationType != operationTypeMinecraftSwitch {
+			continue
+		}
+		at, err := time.Parse(time.RFC3339Nano, j.StartedAt)
+		if err == nil && (latest == nil || at.After(started) || at.Equal(started) && j.OperationID > latest.OperationID) {
+			latest, started = &j, at
+		}
+	}
+	return latest
+}
+
 func (s *server) runMinecraftSwitch(ctx context.Context, j operationJournal, p minecraftSwitchPlan, r minecraftSwitchRequest) {
-	_, err := s.operations.transition(j.OperationID, operationValidating, "validating", "Revalidating Switch at the same Minecraft version.")
-	if err != nil {
+	e := minecraftSwitchEvidence{Schema: 1, OperationID: j.OperationID, Source: j.InstanceID, Target: p.Target, Version: p.Version, Action: r.Action, Stage: "validating"}
+	lock, err := acquirePluginMaintenanceLock()
+	source, readErr := instanceRuntimes.readRecord(j.InstanceID)
+	if readErr == nil {
+		e.SourceRecord = &source
+		if switchStructuralPathFromEvidence(e) {
+			readErr = saveSwitchEvidence(e)
+		} else {
+			readErr = errInstanceRecovery
+		}
+	}
+	err = errors.Join(err, readErr)
+	if _, transitionErr := s.operations.transition(j.OperationID, operationValidating, "validating", "Revalidating Switch at the same Minecraft version."); transitionErr != nil {
+		_ = lock.Close()
+		s.operations.recordSwitchFailure(e, errors.Join(err, transitionErr))
 		return
 	}
-	e := minecraftSwitchEvidence{Schema: 1, OperationID: j.OperationID, Source: j.InstanceID, Target: p.Target, Version: p.Version, Action: r.Action, Stage: "reviewed"}
-	lock, err := acquirePluginMaintenanceLock()
-	if err == nil {
-		source, readErr := instanceRuntimes.readRecord(j.InstanceID)
-		if readErr != nil {
-			err = readErr
-		} else {
-			e.SourceRecord = &source
+	if lock != nil {
+		if err == nil {
 			if prior, journalErr := instanceRuntimes.restoreJournal(j.InstanceID); journalErr == nil {
 				// Completed journals may predate ordinary configuration edits.
 				// Capture their identity; never treat a terminal binding as active recovery.
@@ -680,12 +713,13 @@ func (s *server) runMinecraftSwitch(ctx context.Context, j operationJournal, p m
 		if err == nil {
 			state, stateErr := instanceRuntimes.observe(ctx, j.InstanceID)
 			if stateErr != nil || (state.State != "running" && state.State != "stopped") {
-				err = errInstanceBusy
+				err = errors.Join(errInstanceBusy, stateErr)
 			} else {
 				e.OriginallyRunning = state.State == "running"
 			}
 		}
 		if err == nil {
+			e.Stage = "reviewed"
 			err = saveSwitchEvidence(e)
 		}
 		if err == nil {
@@ -721,13 +755,17 @@ func (s *server) runMinecraftSwitch(ctx context.Context, j operationJournal, p m
 		err = errors.Join(err, lock.Close())
 	}
 	if err != nil {
+		s.operations.recordSwitchFailure(e, err)
+		s.operations.recordSwitchCloneRuntime(e)
 		// Rollback composes the existing creation/restore/runtime recovery paths. It
 		// never re-plans or retries the requested conversion.
 		recovered := false
-		if e.SourceRecord != nil {
+		if lock != nil && e.SourceRecord != nil {
 			recovery, recoveryCancel := context.WithTimeout(context.Background(), 30*time.Minute)
-			recovered = s.recoverMinecraftSwitch(recovery, &e) == nil
+			recoveryErr := s.recoverMinecraftSwitch(recovery, &e)
 			recoveryCancel()
+			s.operations.recordSwitchRecovery(e, recoveryErr)
+			recovered = recoveryErr == nil
 		}
 		_, transitionErr := s.operations.transition(j.OperationID, operationNeedsAttention, "switch_failed", "Switch did not complete. Review Switch recovery; the conversion will not be retried automatically.")
 		if recovered && transitionErr == nil {
@@ -772,6 +810,9 @@ func (s *server) minecraftSwitchRecover(w http.ResponseWriter, r *http.Request) 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Minute)
 	defer cancel()
 	e, err := readSwitchEvidence(*j)
+	if err != nil {
+		e = minecraftSwitchEvidence{OperationID: j.OperationID}
+	}
 	if errors.Is(err, os.ErrNotExist) {
 		// No evidence means no worker mutation was authorized. Verify source only.
 		lock, lockErr := acquirePluginMaintenanceLock()
@@ -782,8 +823,10 @@ func (s *server) minecraftSwitchRecover(w http.ResponseWriter, r *http.Request) 
 			err = errors.Join(err, lock.Close())
 		}
 	} else if err == nil {
+		s.operations.recordSwitchCloneRuntime(e)
 		err = s.recoverMinecraftSwitch(ctx, &e)
 	}
+	s.operations.recordSwitchRecovery(e, err)
 	if err != nil {
 		instanceRuntimeError(w, err, id)
 		return

@@ -1356,7 +1356,7 @@ func verifyPluginRuntimeMode(ctx context.Context, id, version string, contentIns
 	args = append(args, version)
 	output, err := pluginInstallCommand(verify, "/usr/libexec/justvoxel/mjust/verify-minecraft-stack", args...)
 	if err != nil {
-		return &pluginRuntimeVerificationError{output: string(output[:min(len(output), 64<<10)])}
+		return &pluginRuntimeVerificationError{cause: err, output: string(output[:min(len(output), 64<<10)])}
 	}
 	return nil
 }

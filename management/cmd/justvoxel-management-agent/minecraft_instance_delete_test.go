@@ -165,6 +165,10 @@ func TestInstanceDeleteExactScopeAndRetainedIdentity(t *testing.T) {
 	if !d.removed {
 		t.Fatal("data not removed")
 	}
+	parent := filepath.Dir(instanceStorageFor(f.snapshot, id).DataPath)
+	if entries, err := os.ReadDir(parent); err != nil || len(entries) != 0 {
+		t.Fatalf("ordinary Delete Server must retain the empty instance parent: %v, %v", entries, err)
+	}
 	for _, path := range []string{instanceStorageFor(f.snapshot, id).DataPath, filepath.Join(b.root, id), filepath.Join(b.store.directory, id+".json"), b.deletePath(id)} {
 		if _, e := os.Lstat(path); !errors.Is(e, os.ErrNotExist) {
 			t.Fatal("selected state retained", path, e)
