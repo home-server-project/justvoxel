@@ -2,7 +2,7 @@
 {{define "language-dialog"}}
 <dialog id="language-picker" class="system-action-dialog language-dialog" data-language-dialog aria-labelledby="language-heading">
   <div class="system-action-dialog-content">
-    <h2 id="language-heading" class="language-dialog-title system-action-dialog-title"><span class="eyebrow">JUSTVOXEL</span><span aria-hidden="true">·</span><span>{{t "language.choose"}}</span></h2>
+    <h2 id="language-heading" class="language-dialog-title"><span class="eyebrow">JUSTVOXEL</span><span aria-hidden="true">·</span><span>{{t "language.choose"}}</span></h2>
     <form method="post" action="/language">
       <input type="hidden" name="return" value="{{languageReturn}}">
       <div class="language-dialog-field">
