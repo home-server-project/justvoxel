@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"mime"
@@ -199,6 +200,8 @@ type PluginInstallArtifact struct {
 	Requested     bool     `json:"requested"`
 	RequiredBy    []string `json:"required_by"`
 	Satisfied     string   `json:"satisfied,omitempty"`
+
+	UploadRequired bool `json:"upload_required,omitempty"`
 }
 type PluginInstallPlan struct {
 	InstallAvailable     bool                    `json:"install_available"`
@@ -244,6 +247,46 @@ func (c *Client) AdminPluginInstall(ctx context.Context, session string, request
 	err := c.pluginPost(ctx, session, "/v1/admin/plugins/install", request, &out)
 	return out, err
 }
+
+const PluginInstallUploadLimit = (256 << 20) + (64 << 10)
+
+// Stream to the selected Agent endpoint. The Agent validates each part against
+// a newly resolved plan before opening a maintenance operation.
+func (c *Client) AdminPluginInstallUpload(ctx context.Context, session, contentType string, body io.Reader) (PersistentOperationResponse, error) {
+	var out PersistentOperationResponse
+	path, err := selectedMaintenancePath(ctx, "/v1/admin/plugins/install")
+	if err != nil {
+		return out, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://unix"+path, body)
+	if err != nil {
+		return out, err
+	}
+	req.Header.Set("Authorization", "Bearer "+session)
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("Accept", "application/json")
+	client := *c.http
+	client.Timeout = 7 * time.Minute
+	response, err := client.Do(req)
+	if err != nil {
+		return out, errors.New("JAR upload to the Management Agent failed")
+	}
+	defer response.Body.Close()
+	switch response.StatusCode {
+	case http.StatusUnauthorized:
+		return out, ErrUnauthorized
+	case http.StatusForbidden:
+		return out, ErrPasswordChangeRequired
+	case http.StatusAccepted:
+		if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&out); err != nil {
+			return out, errors.New("Invalid plugin install response")
+		}
+		return out, validateMaintenanceResponse(ctx, &out)
+	default:
+		return out, readResponseError(response)
+	}
+}
+
 func (c *Client) AdminCurrentPluginInstall(ctx context.Context, session string) (PersistentOperationResponse, error) {
 	var out PersistentOperationResponse
 	err := c.pluginRead(ctx, session, "/v1/admin/plugins/install-operation", &out)

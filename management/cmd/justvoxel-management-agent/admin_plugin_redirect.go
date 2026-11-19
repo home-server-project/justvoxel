@@ -15,7 +15,8 @@ func requestPluginArtifact(ctx context.Context, a pluginInstallArtifact, evidenc
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	current, _ := url.Parse(a.URL) // caller has validated exact official metadata
 	key := ""
-	if pluginSource(a.Source) == "CurseForge" {
+	curseForgeTransport := pluginSource(a.Source) == "CurseForge" && a.AlternateSHA512 == ""
+	if curseForgeTransport {
 		var err error
 		key, err = readCurseForgeKey()
 		if err != nil {
@@ -49,7 +50,7 @@ func requestPluginArtifact(ctx context.Context, a pluginInstallArtifact, evidenc
 		if response.ContentLength >= 0 {
 			evidence["http_content_length"] = strconv.FormatInt(response.ContentLength, 10)
 		}
-		if pluginSource(a.Source) != "CurseForge" {
+		if !curseForgeTransport {
 			return response, nil
 		}
 		switch response.StatusCode {

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -663,6 +664,24 @@ func (u *addonUpload) close() error {
 	return errors.Join(err, removeErr)
 }
 
+// Read the raw disposition because multipart.Part.FileName normalizes paths.
+func uploadPartFilename(part *multipart.Part) (string, bool, error) {
+	disposition, params, err := mime.ParseMediaType(part.Header.Get("Content-Disposition"))
+	if err != nil || disposition != "form-data" {
+		return "", false, errors.New("Invalid upload field")
+	}
+	filename, present := params["filename"]
+	return filename, present, nil
+}
+
+func copyBoundedPluginUpload(file *os.File, part io.Reader) (int64, error) {
+	n, err := io.Copy(file, io.LimitReader(part, pluginMaxJar+1))
+	if err != nil || n <= 0 || n > pluginMaxJar {
+		return 0, errors.New("Empty or oversized upload")
+	}
+	return n, file.Sync()
+}
+
 func parseAddonUpload(w http.ResponseWriter, r *http.Request, apply bool) (u addonUpload, err error) {
 	if r.URL.RawQuery != "" {
 		return u, errors.New("Query fields are not accepted")
@@ -696,21 +715,16 @@ func parseAddonUpload(w http.ResponseWriter, r *http.Request, apply bool) (u add
 		}
 		seen[key] = true
 		if key == "file" {
-			// Parse raw disposition: multipart.Part.FileName strips paths on Unix.
-			_, disposition, e := mime.ParseMediaType(part.Header.Get("Content-Disposition"))
-			if e != nil || !safeAddonFilename(disposition["filename"]) {
+			filename, _, e := uploadPartFilename(part)
+			if e != nil || !safeAddonFilename(filename) {
 				return u, errors.New("Unsafe upload filename")
 			}
-			u.Filename = disposition["filename"]
+			u.Filename = filename
 			u.File, e = os.CreateTemp("", "justvoxel-addon-*")
 			if e != nil {
 				return u, e
 			}
-			n, e := io.Copy(u.File, io.LimitReader(part, pluginMaxJar+1))
-			if e != nil || n <= 0 || n > pluginMaxJar {
-				return u, errors.New("Empty or oversized upload")
-			}
-			if e = u.File.Sync(); e != nil {
+			if _, e = copyBoundedPluginUpload(u.File, part); e != nil {
 				return u, e
 			}
 		} else {

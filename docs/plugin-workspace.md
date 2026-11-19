@@ -26,10 +26,10 @@ individual mod functionality. Failure removes only unchanged transaction artifac
 and restores the original service state using the existing recovery model.
 
 Discover remains a catalog view. Exact compatibility preflight identifies client-only
-releases before offering Install; these results never start an installation,
-backup, or server shutdown. CurseForge preflight verifies and statically inspects
-the exact JAR. Artifact redirects are bounded and accepted only within the HTTPS
-`forgecdn.net` provider domain; exact downloaded size and SHA-1 remain mandatory.
+releases before maintenance. Review inspects automatic JARs, and Apply inspects
+any exact CurseForge JARs supplied by the user. Both paths verify size and SHA-1 for
+CurseForge files. CurseForge CDN redirects stay within the validated HTTPS
+`forgecdn.net` domain.
 
 Dependency handling applies to Fabric, NeoForge, Forge, and Quilt. Dependencies
 already supplied by another verified JustVoxel runtime component are reused
@@ -286,9 +286,10 @@ remain mandatory.
 CurseForge Minecraft/loader compatibility does not establish server eligibility.
 For mods, Discover needs candidate identity and Minecraft/loader release metadata;
 missing artifact filenames, sizes, hashes or download URLs do not suppress Review.
-Exact Review independently re-fetches the file and requires all artifact evidence.
-Exact Review downloads verified artifacts and checks bounded declarative metadata
-before any operation or downtime: Fabric `environment="client"` and Forge
+Exact Review independently re-fetches the file and requires its identity, filename,
+size, and SHA-1. Review checks bounded declarative metadata for automatic downloads.
+When Review requires JARs from the user, Apply checks the same metadata before
+creating a maintenance operation or starting downtime: Fabric `environment="client"` and Forge
 file-level `clientSideOnly=true` are rejected. Fabric defaults to `"*"` when the
 field is absent; malformed environment evidence fails closed. No side field is
 invented for Quilt or NeoForge. Unknown side evidence retains final runtime
@@ -866,14 +867,21 @@ inline configuration notice. The catalog resolves the official Minecraft game
 and content class, filters exact game/loader compatibility, and uses bounded
 pagination and dependency resolution. API requests use a fixed HTTPS origin,
 private authentication header, bounded responses and timeouts, and no redirects.
-Verified CurseForge artifacts use only validated official CDN JAR URLs and receive
-the configured key in the `x-api-key` request header. Artifact downloads may follow
-at most five redirects, each within the validated HTTPS `forgecdn.net` provider
-domain; icons and other providers never receive that key. Exact publisher size and SHA-1
-remain mandatory. Discover disables installation when any of this file evidence
-is missing or ambiguous; the planner independently enforces the same checks.
-Search and install failures return a retryable provider error without exposing
-keys. Configuration removal takes effect for subsequent requests; failed lookups
+Automatic CurseForge downloads use the official artifact URL from file metadata
+or the CurseForge download-URL endpoint. Official CurseForge CDN requests receive
+the configured key and may follow at most five redirects within the validated
+HTTPS `forgecdn.net` domain. Other providers and icons never receive the key.
+
+When CurseForge supplies no URL for an exact file, JustVoxel searches Modrinth by
+the CurseForge SHA-1. It can download an exact match with the same size from a
+compatible, server-capable Modrinth release. Otherwise, Review asks for the exact
+JAR from CurseForge for each missing file, including required dependencies.
+Select those files in Review. Apply verifies every upload against the reviewed
+provider identity, filename, size, and SHA-1, then checks JAR compatibility and
+collisions before creating a maintenance operation or starting downtime.
+The recorded ownership still identifies the original CurseForge project and
+release for either fallback.
+Provider failures return an error without exposing keys. Configuration removal takes effect for subsequent requests; failed lookups
 do not poison later retries. Provider cursors preserve unconsumed positions and
 rotate fairly across enabled catalogs. CurseForge project cards use initials
 when no local project icon is available.

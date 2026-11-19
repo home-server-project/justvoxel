@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -82,6 +83,10 @@ type pluginInstallArtifact struct {
 	ExistingHash     string `json:"-"`
 	PluginName       string `json:"-"`
 	Main             string `json:"-"`
+
+	UploadRequired         bool   `json:"upload_required,omitempty"`
+	AlternateSHA512        string `json:"-"`
+	CurseForgeFileEvidence string `json:"-"`
 }
 type pluginInstallPlan struct {
 	InstallAvailable     bool                    `json:"install_available"`
@@ -102,6 +107,7 @@ type pluginInstallPlan struct {
 	ConfirmationRequired bool                    `json:"confirmation_required"`
 	Fingerprint          string                  `json:"plan_fingerprint"`
 	DataPath             string                  `json:"-"`
+	stagedDirectory      string
 }
 type pluginManifestEntry struct {
 	Target        string   `json:"target,omitempty"`
@@ -242,7 +248,27 @@ func (s *server) adminPluginInstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request pluginInstallApplyRequest
-	if !decodePluginInstallJSON(w, r, &request) {
+	var uploads map[string]curseForgeUpload
+	var directory string
+	media, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if media == "multipart/form-data" {
+		var err error
+		directory, err = os.MkdirTemp("", "justvoxel-curseforge-install-")
+		if err != nil {
+			writeError(w, 503, "Private JAR staging unavailable")
+			return
+		}
+		defer func() {
+			if directory != "" {
+				os.RemoveAll(directory)
+			}
+		}()
+		request, uploads, err = parseCurseForgeInstallUpload(w, r, directory)
+		if err != nil {
+			writeError(w, 400, err.Error())
+			return
+		}
+	} else if !decodePluginInstallJSON(w, r, &request) {
 		return
 	}
 	if !validPluginIdentity(request.Source, request.ProjectID) || !validPluginIdentity(request.Source, request.VersionID) || !operationFingerprintPattern.MatchString(request.PlanFingerprint) {
@@ -260,7 +286,7 @@ func (s *server) adminPluginInstall(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 503, "Plugin operation tracking unavailable")
 		return
 	}
-	if current != nil && current.PlanFingerprint == request.PlanFingerprint {
+	if uploads == nil && current != nil && current.PlanFingerprint == request.PlanFingerprint {
 		writeJSON(w, http.StatusAccepted, adminOperationResponse{Operation: current})
 		return
 	}
@@ -279,9 +305,49 @@ func (s *server) adminPluginInstall(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 409, "Plugin plan changed; review again")
 		return
 	}
+	if err := checkCurseForgeUploads(plan, uploads); err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	if uploads != nil {
+		// Complete artifact and collision preflight before creating a journal.
+		if err := stagePluginInstall(ctx, &plan, directory, uploads); err != nil {
+			var provider *pluginProviderDiagnosticError
+			var pathError *os.PathError
+			switch {
+			case errors.As(err, &provider):
+				s.writePluginReviewFailure(w, request.Source, request.ProjectID, request.VersionID, "stage", err)
+			case errors.As(err, &pathError):
+				writeError(w, 503, "The JARs could not be prepared for installation")
+			default:
+				writeError(w, 400, err.Error())
+			}
+			return
+		}
+		plan.stagedDirectory = directory
+		if err := prepareModInstallPlan(ctx, &plan); err != nil {
+			writeError(w, 409, "The JARs are incompatible with this server or conflict with its installed mods")
+			return
+		}
+		if plan.Fingerprint != request.PlanFingerprint {
+			writeError(w, 409, "Plugin plan changed; review again")
+			return
+		}
+		root, err := openContentDirectory(plan.DataPath, javaServerContentKind(plan.Server.ServerType))
+		if err != nil {
+			writeError(w, 409, "Content directory unavailable")
+			return
+		}
+		err = checkPluginInstallCollisions(root, plan)
+		root.Close()
+		if err != nil {
+			writeError(w, 409, "The JARs conflict with the current installation")
+			return
+		}
+	}
 	// Exact mod side metadata must also be checked on a direct Apply before
 	// creating persistent operations. Staging independently rechecks it.
-	if javaServerContentKind(plan.Server.ServerType) == "mods" {
+	if uploads == nil && javaServerContentKind(plan.Server.ServerType) == "mods" {
 		if err := reviewRootPluginArtifact(ctx, plan); err != nil {
 			s.writePluginReviewFailure(w, request.Source, request.ProjectID, request.VersionID, "review", err)
 			return
@@ -313,6 +379,7 @@ func (s *server) adminPluginInstall(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusAccepted, adminOperationResponse{Operation: &journal})
 	if created {
+		directory = "" // The worker owns staging from here.
 		startPluginInstallWorker(s, journal.OperationID, plan, request.ConfirmPlayers, actor)
 	}
 }
@@ -635,11 +702,16 @@ const pluginDirectReviewRejection = "This release is not a direct Paper/Bukkit p
 // Installation independently inspects staged artifacts before downtime;
 // Review creates no operation.
 func reviewRootPluginArtifact(ctx context.Context, plan pluginInstallPlan) error {
+	requiresUpload := false
 	for _, artifact := range plan.Artifacts {
 		if artifact.Satisfied != "" {
 			continue
 		}
 		if !artifact.Requested && javaServerContentKind(plan.Server.ServerType) != "mods" {
+			continue
+		}
+		if artifact.UploadRequired {
+			requiresUpload = true
 			continue
 		}
 		directory, err := os.MkdirTemp("", "justvoxel-plugin-review-")
@@ -681,7 +753,7 @@ func reviewRootPluginArtifact(ctx context.Context, plan pluginInstallPlan) error
 			return nil
 		}
 	}
-	if javaServerContentKind(plan.Server.ServerType) == "mods" && len(plan.Artifacts) > 0 {
+	if requiresUpload || javaServerContentKind(plan.Server.ServerType) == "mods" && len(plan.Artifacts) > 0 {
 		return nil
 	}
 	return errors.New("Requested plugin artifact unavailable")
@@ -712,10 +784,12 @@ func fingerprintPluginPlan(plan pluginInstallPlan) string {
 	type evidence struct {
 		Artifact                                          pluginInstallArtifact
 		URL, Hash, SHA256, ExistingFilename, ExistingHash string
+		AlternateSHA512                                   string `json:",omitempty"`
+		CurseForgeFileEvidence                            string `json:",omitempty"`
 	}
 	artifacts := []evidence{}
 	for _, a := range plan.Artifacts {
-		artifacts = append(artifacts, evidence{a, a.URL, fingerprintPluginHash(a), a.SHA256, a.ExistingFilename, a.ExistingHash})
+		artifacts = append(artifacts, evidence{a, a.URL, fingerprintPluginHash(a), a.SHA256, a.ExistingFilename, a.ExistingHash, a.AlternateSHA512, a.CurseForgeFileEvidence})
 	}
 	data, _ := json.Marshal(struct {
 		InstanceID, Server, Version, Path, Source, Project, Release, Target, Location string
@@ -1055,7 +1129,7 @@ func downloadVerifiedPluginArtifact(ctx context.Context, a pluginInstallArtifact
 	if response.ContentLength >= 0 {
 		evidence["http_content_length"] = strconv.FormatInt(response.ContentLength, 10)
 	}
-	if pluginSource(a.Source) == "CurseForge" && (response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden) {
+	if pluginSource(a.Source) == "CurseForge" && a.AlternateSHA512 == "" && (response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden) {
 		return "", errors.New("CurseForge download authentication rejected; check the configured API key")
 	}
 	if response.StatusCode != http.StatusOK {
@@ -1063,7 +1137,7 @@ func downloadVerifiedPluginArtifact(ctx context.Context, a pluginInstallArtifact
 	}
 	f, err := os.OpenFile(filepath.Join(directory, a.Filename), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
-		return "", err
+		return "", errors.New("Private artifact staging unavailable")
 	}
 	defer f.Close()
 	h := sha512.New()
@@ -1085,9 +1159,12 @@ func downloadVerifiedPluginArtifact(ctx context.Context, a pluginInstallArtifact
 	if !matches {
 		return "", fmt.Errorf("Downloaded artifact %s did not match %s metadata", evidence["hash_algorithm"], pluginSource(a.Source))
 	}
+	if a.AlternateSHA512 != "" && hex.EncodeToString(h.Sum(nil)) != a.AlternateSHA512 {
+		return "", errors.New("Downloaded artifact SHA-512 did not match Modrinth metadata")
+	}
 	evidence["hash_result"] = "verified"
 	if err := f.Sync(); err != nil {
-		return "", err
+		return "", errors.New("Artifact could not be saved to private staging")
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
@@ -1602,7 +1679,66 @@ func persistPluginTransaction(directory string, tx pluginTransaction) error {
 	defer d.Close()
 	return publishPluginEvidence(d, "transaction.json", tx)
 }
+func stagePluginInstall(ctx context.Context, plan *pluginInstallPlan, directory string, uploads map[string]curseForgeUpload) error {
+	for i := range plan.Artifacts {
+		a := &plan.Artifacts[i]
+		if a.Satisfied != "" {
+			continue
+		}
+		var hash string
+		var err error
+		if a.UploadRequired {
+			hash, err = verifyCurseForgeUpload(*a, uploads[curseForgeUploadField(*a)], directory)
+		} else {
+			hash, err = downloadVerifiedPluginArtifact(ctx, *a, directory)
+		}
+		if err != nil {
+			return err
+		}
+		a.SHA512 = hash
+		f, err := os.Open(filepath.Join(directory, a.Filename))
+		if err != nil {
+			return errors.New("Staged JAR unavailable")
+		}
+		identity, err := inspectServerPlugin(f, a.Filename, plan.Server.ServerType)
+		if err == nil && javaServerContentKind(plan.Server.ServerType) == "mods" {
+			err = inspectDedicatedModSide(f, plan.Server.ServerType)
+		}
+		f.Close()
+		if err != nil {
+			return err
+		}
+		a.PluginName, a.Main = identity.Name, identity.Main
+		if javaServerContentKind(plan.Server.ServerType) == "mods" {
+			a.PluginName = "mod-" + a.ProjectID
+			a.Main = ""
+		}
+		if a.Requested && pluginSource(a.Source) == "Modrinth" && a.ProjectID == "99IreA6y" && identity.Main == "de.bluecolored.bluemap.entities.PaperEntrypoint" {
+			return errors.New(pluginBlueMapReviewRejection)
+		}
+		if component := managedPluginDescriptor(a.Filename, a.PluginName, a.Main); pluginTarget(a.Target) == "plugins" && component != "" {
+			if a.Requested || a.UploadRequired {
+				return errors.New("Requested JAR is a JustVoxel-managed component")
+			}
+			root, err := openContentDirectory(plan.DataPath, javaServerContentKind(plan.Server.ServerType))
+			if err != nil {
+				return err
+			}
+			filename, hash, existing, err := findManagedPluginComponent(root, component)
+			root.Close()
+			if err != nil {
+				return err
+			}
+			a.Satisfied, a.ExistingFilename, a.ExistingHash, a.PluginName, a.Main = "JustVoxel managed", filename, hash, existing.Name, existing.Main
+		}
+	}
+	return nil
+}
+
 func executePluginInstall(ctx context.Context, s *server, id string, plan pluginInstallPlan, confirm bool, actor session) (result error) {
+	if plan.stagedDirectory != "" {
+		defer os.RemoveAll(plan.stagedDirectory)
+	}
 	ctx = withPluginInstance(ctx, plan.Server.InstanceID)
 	if err := s.operations.requireMaintenanceInstance(id, plan.Server.InstanceID); err != nil {
 		return err
@@ -1681,50 +1817,11 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 	if _, err := s.operations.transition(id, operationRunning, "downloading", "Downloading and verifying plugin JARs before Minecraft downtime."); err != nil {
 		return err
 	}
-	for i := range plan.Artifacts {
-		a := &plan.Artifacts[i]
-		if a.Satisfied != "" {
-			continue
-		}
-		hash, downloadErr := downloadVerifiedPluginArtifact(ctx, *a, directory)
-		if err := downloadErr; err != nil {
+	artifactDirectory := plan.stagedDirectory
+	if artifactDirectory == "" {
+		artifactDirectory = directory
+		if err := stagePluginInstall(ctx, &plan, directory, nil); err != nil {
 			return failUntouched(err)
-		}
-		a.SHA512 = hash
-		f, err := os.Open(filepath.Join(directory, a.Filename))
-		if err != nil {
-			return failUntouched(errors.New("Staged JAR unavailable"))
-		}
-		identity, err := inspectServerPlugin(f, a.Filename, plan.Server.ServerType)
-		if err == nil && javaServerContentKind(plan.Server.ServerType) == "mods" {
-			err = inspectDedicatedModSide(f, plan.Server.ServerType)
-		}
-		f.Close()
-		if err != nil {
-			return failUntouched(err)
-		}
-		a.PluginName, a.Main = identity.Name, identity.Main
-		if javaServerContentKind(plan.Server.ServerType) == "mods" {
-			a.PluginName = "mod-" + a.ProjectID
-			a.Main = ""
-		}
-		if a.Requested && pluginSource(a.Source) == "Modrinth" && a.ProjectID == "99IreA6y" && identity.Main == "de.bluecolored.bluemap.entities.PaperEntrypoint" {
-			return failUntouched(errors.New(pluginBlueMapReviewRejection))
-		}
-		if component := managedPluginDescriptor(a.Filename, a.PluginName, a.Main); pluginTarget(a.Target) == "plugins" && component != "" {
-			if a.Requested {
-				return failUntouched(errors.New("Requested JAR is a JustVoxel-managed component"))
-			}
-			root, err := openContentDirectory(plan.DataPath, javaServerContentKind(plan.Server.ServerType))
-			if err != nil {
-				return failUntouched(err)
-			}
-			filename, hash, existing, err := findManagedPluginComponent(root, component)
-			root.Close()
-			if err != nil {
-				return failUntouched(err)
-			}
-			a.Satisfied, a.ExistingFilename, a.ExistingHash, a.PluginName, a.Main = "JustVoxel managed", filename, hash, existing.Name, existing.Main
 		}
 	}
 	// Re-resolve context without a browser session using the existing discovery helper.
@@ -1809,7 +1906,7 @@ func executePluginInstall(ctx context.Context, s *server, id string, plan plugin
 		if a.Satisfied != "" {
 			continue
 		}
-		placed, err := placePluginArtifact(root, directory, id, a)
+		placed, err := placePluginArtifact(root, artifactDirectory, id, a)
 		if placed {
 			created = append(created, a)
 		}
@@ -1940,6 +2037,12 @@ func revalidatePluginInstall(ctx context.Context, s *server, plan pluginInstallP
 	current, err := resolveProviderPluginInstallPlan(ctx, serverContext, dataPath, pluginSource(plan.Source), plan.ProjectID, plan.VersionID)
 	if err != nil || !current.InstallAvailable || current.Fingerprint != plan.Fingerprint {
 		return errors.New("Plugin plan or server context changed; review again")
+	}
+	if plan.stagedDirectory != "" {
+		current.stagedDirectory = plan.stagedDirectory
+		if err := prepareModInstallPlan(ctx, &current); err != nil || current.Fingerprint != plan.Fingerprint {
+			return errors.New("Verified JARs conflict with the current server; review again")
+		}
 	}
 	return nil
 }

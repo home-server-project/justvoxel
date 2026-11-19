@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"html"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -374,6 +376,75 @@ func TestPluginsInstallRoutesAuthorizationCSRFAndContracts(t *testing.T) {
 		}
 	}
 }
+
+type fakePluginsUploadAPI struct {
+	fakePluginsInstallAPI
+	uploadCalls int
+	body        []byte
+	contentType string
+}
+
+func (f *fakePluginsUploadAPI) AdminPluginInstallUpload(_ context.Context, _ string, contentType string, body io.Reader) (api.PersistentOperationResponse, error) {
+	f.uploadCalls++
+	f.contentType = contentType
+	var err error
+	f.body, err = io.ReadAll(body)
+	return api.PersistentOperationResponse{}, err
+}
+
+func TestPluginsWorkspaceStreamsOnlyAuthorizedBoundedMultipartApply(t *testing.T) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	file, err := writer.CreateFormFile("jar_10_20", "root.jar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.Write([]byte("exact bytes")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, role, token, extraQuery string
+		oversized                     bool
+		status                        int
+	}{
+		{name: "authorized", role: "administrator", token: "csrf-token", status: http.StatusAccepted},
+		{name: "missing CSRF", role: "administrator", status: http.StatusForbidden},
+		{name: "viewer", role: "viewer", token: "csrf-token", status: http.StatusForbidden},
+		{name: "extra query", role: "administrator", token: "csrf-token", extraQuery: "&filename=evil.jar", status: http.StatusBadRequest},
+		{name: "oversized", role: "administrator", token: "csrf-token", oversized: true, status: http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &fakePluginsUploadAPI{}
+			client.role = tc.role
+			app, err := New(client, Config{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := authenticatedAdminRequest(http.MethodPost, "http://example/api/plugins/workspace/install?server=jv-family1"+tc.extraQuery, body.String())
+			r.Header.Set("Content-Type", writer.FormDataContentType())
+			r.Header.Set("X-CSRF-Token", tc.token)
+			if tc.oversized {
+				r.ContentLength = api.PluginInstallUploadLimit + 1
+			}
+			rr := httptest.NewRecorder()
+			app.Handler().ServeHTTP(rr, r)
+			if rr.Code != tc.status || client.installs != 0 {
+				t.Fatal(rr.Code, rr.Body.String())
+			}
+			if tc.status == http.StatusAccepted {
+				if client.uploadCalls != 1 || client.contentType != writer.FormDataContentType() || !bytes.Equal(client.body, body.Bytes()) {
+					t.Fatal("reviewed body was not streamed intact")
+				}
+			} else if client.uploadCalls != 0 {
+				t.Fatal("invalid upload was forwarded")
+			}
+		})
+	}
+}
+
 func TestPluginsInstallReviewProgressAndOwnershipRendering(t *testing.T) {
 	raw, err := englishPresentationAsset("static/app.js")
 	if err != nil {
@@ -387,7 +458,7 @@ func TestPluginsInstallReviewProgressAndOwnershipRendering(t *testing.T) {
 	}
 	script = script[start:end]
 	for _, want := range []string{
-		`(project.install_available || server.content_kind === "mods" && project.review_available) && project.compatible && server.supported && server.minecraft_version && version?.id`,
+		`(project.install_available || (server.content_kind === "mods" || project.source === "CurseForge") && project.review_available) && project.compatible && server.supported && server.minecraft_version && version?.id`,
 		`["geyser", "floodgate", "viaversion"].includes(project.slug)`,
 		`pluginRequest("install/plan"`, `plan.project_name`, `overlaySection("Compatibility")`, `plan.artifacts`, `plan.installation_location`,
 		`if (plan.confirmation_required)`, `plan.players`, `confirm_players: String(plan.confirmation_required === true)`,
@@ -498,7 +569,7 @@ func TestPluginsAdditionalInfoAndStructuredInstallPresentation(t *testing.T) {
 		}
 	}
 	review := script[reviewStart:resume]
-	for _, want := range []string{`overlayHeader(plan.project_name, plan.description || project?.description`, `overlaySection("About this version")`, `about("Release"`, `about(plan.source === "Hangar" ? "Channel" : "Release type"`, `about("Published"`, `about("Source"`, `about("Project ID"`, `about("Release ID"`, `overlaySection("Compatibility")`, `compatibility("Result"`, `compatibility("Server software"`, `compatibility("Active Minecraft version"`, `compatibility("Supported platforms"`, `compatibility("Supported versions"`, `overlaySection("Dependencies")`, `artifact.satisfied ? "Already satisfied" : "Will be installed"`, `const informational = plan.display_dependencies || []`, `overlaySection("Files to install")`, `readableSize(artifact.size)`, `overlaySection("Installation")`, `plan.installation_location`, `overlaySection("Restart")`, `restart("Required", plan.restart_required ? "Yes" : "No")`, `Verified cold backup before changes`, `Minecraft starts/restarts to load and verify plugins`, `Returns to stopped after verification`, `if (plan.confirmation_required) {`, `overlaySection("Players")`, `panelAction("Install", () => applyPlugin(plan, project))`} {
+	for _, want := range []string{`overlayHeader(plan.project_name, plan.description || project?.description`, `overlaySection("About this version")`, `about("Release"`, `about(plan.source === "Hangar" ? "Channel" : "Release type"`, `about("Published"`, `about("Source"`, `about("Project ID"`, `about("Release ID"`, `overlaySection("Compatibility")`, `compatibility("Result"`, `compatibility("Server software"`, `compatibility("Active Minecraft version"`, `compatibility("Supported platforms"`, `compatibility("Supported versions"`, `overlaySection("Dependencies")`, `artifact.satisfied ? "Already satisfied" : "Will be installed"`, `const informational = plan.display_dependencies || []`, `overlaySection("Files to install")`, `readableSize(artifact.size)`, `overlaySection("Installation")`, `plan.installation_location`, `overlaySection("Restart")`, `restart("Required", plan.restart_required ? "Yes" : "No")`, `Verified cold backup before changes`, `Minecraft starts/restarts to load and verify plugins`, `Returns to stopped after verification`, `if (plan.confirmation_required) {`, `overlaySection("Players")`, `panelAction("Install", () => applyPlugin(plan, project, uploads))`} {
 		if !strings.Contains(review, want) {
 			t.Fatal("combined plugin overlay missing", want)
 		}
@@ -984,7 +1055,7 @@ func TestPluginCorrectionReviewAndCursorStructure(t *testing.T) {
 		t.Fatal("Install must be passed to the identity header before details")
 	}
 	headerEnd := strings.Index(review[identity:], "\n") + identity
-	if headerEnd < install || !strings.Contains(review[identity:headerEnd], `plan.project_id, panelAction("Install", () => applyPlugin(plan, project))`) {
+	if headerEnd < install || !strings.Contains(review[identity:headerEnd], `plan.project_id, install = panelAction("Install", () => applyPlugin(plan, project, uploads))`) {
 		t.Fatal("Install must be the optional action passed within overlayHeader")
 	}
 	if strings.Count(review, `panelAction("Install"`) != 1 || strings.Contains(review, `overlayActions(panelAction("Install"`) {
@@ -2353,7 +2424,7 @@ func TestPluginsPlainPaginationAndSemanticBadgeStyles(t *testing.T) {
 			t.Fatal("server-specific styling", forbidden)
 		}
 	}
-	if !strings.Contains(script, `panelAction("Install", () => applyPlugin(plan, project))`) {
+	if !strings.Contains(script, `panelAction("Install", () => applyPlugin(plan, project, uploads))`) {
 		t.Fatal("top-right install action missing")
 	}
 }
@@ -2605,7 +2676,8 @@ class Node {
  querySelectorAll(){return [];}
 }
 const flatten=node=>[node,...node.children.flatMap(flatten)];
-const document={activeElement:null,createElement:tag=>new Node(tag)};
+const document={activeElement:null,createElement:tag=>Object.assign(new Node(tag), {files:[]})};
+class FormData extends Map { append(key,value){this.set(key,value);} }
 const queueMicrotask=()=>{}, setTimeout=()=>1, clearTimeout=()=>{};
 let acceptedServer, operationIdentity=null, operationViewID=null, installGeneration=0, installController=null, pollTimer=null;
 let overlayDismissible=false, returnFocus=null, closed=0, requested=[], responsePlan, responseOperation, failureRoute=null;
@@ -2673,7 +2745,9 @@ function verifyStages(op,name,source,id){
   await reviewPlugin("123","release",project);
   const reviewed=headerIdentity(project.title,source,"123");
   const reviewURL=reviewed.image.src;
+  assert.equal(flatten(panelBody).filter(n=>n.type==="file").length,0);
   await button("Install").listeners.click();
+  assert(!(requested.at(-1).body instanceof FormData),"automatic apply should use its ordinary request");
   assert.equal(operationIdentity.name,project.title);
   assert.equal(operationIdentity.source,source);
   assert.equal(operationIdentity.project_id,"123");
@@ -2734,6 +2808,31 @@ function verifyStages(op,name,source,id){
    failureRoute=null;
   }
  }
+ // Restricted files remain in the same review and require every exact JAR.
+ acceptedServer={content_kind:"mods"};
+ const curseForgeProject={title:"Restricted project",source:"CurseForge",project_id:"10"};
+ responsePlan={source:"CurseForge",project_id:"10",project_name:curseForgeProject.title,version_id:"20",version_number:"1",plan_fingerprint:"reviewed",confirmation_required:true,online:1,players:["Alex"],server:{content_kind:"mods"},artifacts:[
+  {project_id:"10",version_id:"20",project_name:"Restricted project",filename:"root.jar",size:321,requested:true,upload_required:true},
+  {project_id:"11",version_id:"21",project_name:"Dependency",filename:"dependency.jar",size:444,upload_required:true},
+  {project_id:"12",version_id:"22",project_name:"Automatic",filename:"auto.jar",size:555},
+ ]};
+ responseOperation={operation_type:"plugin_install",operation_id:"restricted",stage:"downloading",state:"running"};
+ await reviewPlugin("10","20",curseForgeProject);
+ const inputs=flatten(panelBody).filter(n=>n.type==="file"), install=button("Install");
+ assert.equal(inputs.length,2);assert.equal(install.disabled,true);
+ assert.equal(inputs[0].parent.textContent,"Restricted project · root.jar · 321 B");
+ assert.equal(inputs[1].parent.textContent,"Dependency · dependency.jar · 444 B");
+ assert.equal(flatten(panelBody).filter(n=>n.textContent==="CurseForge cannot provide this JAR to JustVoxel automatically. Download the selected file from CurseForge and provide the exact JAR below.").length,2);
+ const requestCount=requested.length;
+ const rootJar={name:"root.jar"}, dependencyJar={name:"dependency.jar"};
+ inputs[0].files=[rootJar];inputs[0].listeners.change();
+ assert.equal(install.disabled,true);await install.listeners.click();assert.equal(requested.length,requestCount);
+ inputs[1].files=[dependencyJar];inputs[1].listeners.change();
+ assert.equal(install.disabled,false);
+ await install.listeners.click();
+ const upload=requested.at(-1).body;
+ assert(upload instanceof FormData);
+ assert.deepEqual(Object.fromEntries(upload),{source:"CurseForge",project_id:"10",version_id:"20",plan_fingerprint:"reviewed",confirm_players:"true",jar_10_20:rootJar,jar_11_21:dependencyJar});
  // Mismatched provider/project metadata cannot supply an installation icon.
  acceptedServer={content_kind:"plugins"};
  responsePlan={source:"Modrinth",project_id:"123",project_name:"Authoritative plan",version_id:"release"};

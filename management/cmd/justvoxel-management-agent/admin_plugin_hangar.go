@@ -174,6 +174,9 @@ func validPluginDownloadMetadata(a pluginInstallArtifact) bool {
 	case "Modrinth":
 		return safePluginArtifactURL(a.URL) && pluginHashPattern.MatchString(a.SHA512)
 	case "CurseForge":
+		if a.AlternateSHA512 != "" {
+			return safePluginArtifactURL(a.URL) && pluginHashPattern.MatchString(a.AlternateSHA512) && curseForgeSHA1.MatchString(a.SHA1)
+		}
 		return safeCurseForgeArtifactURL(a.URL) && curseForgeSHA1.MatchString(a.SHA1)
 	case "Hangar":
 		return safeHangarArtifactURL(a.URL) && hangarHashPattern.MatchString(a.SHA256)

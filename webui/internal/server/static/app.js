@@ -7233,7 +7233,7 @@ if (pluginsDialog && pluginsOpen) {
     const iconProjectID = ["Modrinth", "Hangar", "CurseForge"].includes(project.source) ? project.project_id : undefined;
     const managed = project.source === "Modrinth" && ["geyser", "floodgate", "viaversion"].includes(project.slug);
     if (managed) badges.append(text("span", jvT("ui.9c83434eb959"), "plugins-badge"));
-    const installable = ["Modrinth", "Hangar", "CurseForge"].includes(project.source) && !managed && !project.installed && (project.install_available || server.content_kind === "mods" && project.review_available) && project.compatible && server.supported && server.minecraft_version && version?.id;
+    const installable = ["Modrinth", "Hangar", "CurseForge"].includes(project.source) && !managed && !project.installed && (project.install_available || (server.content_kind === "mods" || project.source === "CurseForge") && project.review_available) && project.compatible && server.supported && server.minecraft_version && version?.id;
     let reviewRejection = "";
     const readOnlyReview = (reason) => {
       reviewRejection = reason;
@@ -7578,7 +7578,13 @@ if (pluginsDialog && pluginsOpen) {
       const options = { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" }, signal };
       if (body) {
         options.method = "POST";
-        options.body = new URLSearchParams({ csrf: document.querySelector('[data-minecraft-workspace-csrf]')?.value || document.querySelector('input[name="csrf"]')?.value || "", ...body });
+        const csrf = document.querySelector('[data-minecraft-workspace-csrf]')?.value || document.querySelector('input[name="csrf"]')?.value || "";
+        if (typeof FormData !== "undefined" && body instanceof FormData) {
+          options.headers["X-CSRF-Token"] = csrf;
+          options.body = body;
+        } else {
+          options.body = new URLSearchParams({ csrf, ...body });
+        }
       }
       const response = await fetch(boundURL || globalThis.justVoxelSelectedURL(`/api/plugins/workspace/${route}`, "plugins"), options);
       const payload = await response.json();
@@ -7758,7 +7764,20 @@ if (pluginsDialog && pluginsOpen) {
     resumeActiveOperation(payload.operation, current);
     return true;
   };
-  const applyPlugin = async (plan, project) => {
+  const applyPlugin = async (plan, project, uploads = []) => {
+    if (uploads.some(({ input }) => input.files.length !== 1)) return;
+    const fields = {
+      source: plan.source, project_id: plan.project_id, version_id: plan.version_id, plan_fingerprint: plan.plan_fingerprint,
+      confirm_players: String(plan.confirmation_required === true),
+    };
+    let body = fields;
+    if (uploads.length) {
+      body = new FormData();
+      for (const [key, value] of Object.entries(fields)) body.append(key, value);
+      for (const { artifact, input } of uploads) {
+        body.append(`jar_${artifact.project_id}_${artifact.version_id}`, input.files[0]);
+      }
+    }
     // Presentation metadata never supplies identity for an installation request.
     const matchingProject = project?.project_id === plan.project_id && project?.source === plan.source ? project : null;
     const identity = { source: plan.source, project_id: plan.project_id, name: plan.project_name, version: plan.version_number, icon_project_id: matchingProject?.icon_project_id, icon_url: matchingProject?.icon_url };
@@ -7770,10 +7789,7 @@ if (pluginsDialog && pluginsOpen) {
     panelBody.append(text("h3", jvT("ui.6acfdc74eadf")));
     try {
       if (await blockPluginInstall(current)) return;
-      const payload = await pluginRequest("install", {
-        source: plan.source, project_id: plan.project_id, version_id: plan.version_id, plan_fingerprint: plan.plan_fingerprint,
-        confirm_players: String(plan.confirmation_required === true),
-      }, installController.signal);
+      const payload = await pluginRequest("install", body, installController.signal);
       if (current !== installGeneration) return;
       if (!payload.operation) throw new Error(jvT("ui.3f04bc49d05a"));
       if (operationIdentity?.operation_id !== payload.operation.operation_id) operationIdentity = { ...identity, operation_id: payload.operation.operation_id };
@@ -7801,7 +7817,9 @@ if (pluginsDialog && pluginsOpen) {
       if (current !== installGeneration) return;
       if (plan.install_available === false) { readOnlyReview?.(plan.compatibility); return; }
       showPanel(`${contentSingular() === "mod" ? "Mod" : "Plugin"} installation`, true);
-      overlayHeader(plan.project_name, plan.description || project?.description, [[plan.version_number, "plugins-badge-version"], [plan.server.server_software || plan.server.server_type, "plugins-badge-server"], [plan.server.minecraft_version && `MC ${plan.server.minecraft_version}`, "plugins-badge-minecraft"]], plan.project_id, panelAction(jvT("ui.569ca49f4aaf"), () => applyPlugin(plan, project)), project?.project_id === plan.project_id && project?.source === plan.source ? project.icon_url || "" : undefined, plan.source);
+      const uploads = [];
+      let install;
+      overlayHeader(plan.project_name, plan.description || project?.description, [[plan.version_number, "plugins-badge-version"], [plan.server.server_software || plan.server.server_type, "plugins-badge-server"], [plan.server.minecraft_version && `MC ${plan.server.minecraft_version}`, "plugins-badge-minecraft"]], plan.project_id, install = panelAction(jvT("ui.569ca49f4aaf"), () => applyPlugin(plan, project, uploads)), project?.project_id === plan.project_id && project?.source === plan.source ? project.icon_url || "" : undefined, plan.source);
       const selectedVersion = project?.version?.id === plan.version_id ? project.version : null;
       const about = infoRows(overlaySection(jvT("ui.63e615c21158")));
       about(jvT("ui.e020e3c67bd0"), plan.version_number);
@@ -7839,6 +7857,26 @@ if (pluginsDialog && pluginsOpen) {
         files.append(item);
       });
       overlaySection(jvT("ui.448167b72151")).append(files);
+      const missing = plan.artifacts.filter((artifact) => artifact.upload_required && !artifact.satisfied);
+      if (missing.length) {
+        const section = overlaySection("JARs to provide");
+        section.classList.add("plugins-addon-results");
+        const updateInstall = () => {
+          install.disabled = uploads.some(({ input }) => input.files.length !== 1);
+        };
+        for (const artifact of missing) {
+          const label = text("label", `${artifact.project_name ? artifact.project_name + " · " : ""}${artifact.filename} · ${artifact.size} B`);
+          const input = document.createElement("input");
+          input.type = "file";
+          input.accept = ".jar";
+          input.required = true;
+          input.addEventListener("change", updateInstall);
+          label.append(input);
+          section.append(text("p", "CurseForge cannot provide this JAR to JustVoxel automatically. Download the selected file from CurseForge and provide the exact JAR below."), label);
+          uploads.push({ artifact, input });
+        }
+        updateInstall();
+      }
       const installation = infoRows(overlaySection(jvT("ui.c3fc54aa5390")));
       installation(jvT("ui.3f70f2563600"), plan.installation_location);
       installation(jvT("ui.bbd4b6a86bc6"), jvT("ui.5c385efbd5ad"));
@@ -7879,7 +7917,7 @@ if (pluginsDialog && pluginsOpen) {
   panel.addEventListener("keydown", (event) => {
     if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closePanel(); }
     if (event.key === "Tab") {
-      const buttons = Array.from(panel.querySelectorAll(panel.classList.contains("plugins-curseforge-panel") ? "button:not(:disabled),input:not(:disabled),summary" : "button:not(:disabled),summary"));
+      const buttons = Array.from(panel.querySelectorAll(panel.classList.contains("plugins-curseforge-panel") ? "button:not(:disabled),input:not(:disabled),summary" : "button:not(:disabled),input[type=file]:not(:disabled),summary"));
       const first = buttons[0], last = buttons.at(-1);
       if (document.activeElement === panel) { event.preventDefault(); (event.shiftKey ? last : first)?.focus(); }
       else if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }

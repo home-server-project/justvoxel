@@ -3,11 +3,14 @@ package server
 import (
 	"context"
 	"errors"
+	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/home-server-project/justvoxel-webui/internal/api"
 )
@@ -143,6 +146,11 @@ func (a *App) pluginsWorkspaceInstall(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	media, params, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if media == "multipart/form-data" {
+		a.pluginsWorkspaceInstallUpload(w, r, session, params["boundary"])
+		return
+	}
 	if !a.pluginInstallForm(w, r, true) {
 		return
 	}
@@ -158,6 +166,38 @@ func (a *App) pluginsWorkspaceInstall(w http.ResponseWriter, r *http.Request) {
 	}
 	writeMinecraftWorkspaceJSON(w, http.StatusAccepted, out)
 }
+func (a *App) pluginsWorkspaceInstallUpload(w http.ResponseWriter, r *http.Request, session, boundary string) {
+	r.Form = url.Values{"csrf": {r.Header.Get("X-CSRF-Token")}}
+	if !a.validCSRF(r) {
+		writeMinecraftWorkspaceError(w, 403, ui(w, "ui.74bccc44f472"))
+		return
+	}
+	if boundary == "" || r.URL.RawQuery != "" || r.ContentLength > api.PluginInstallUploadLimit {
+		writeMinecraftWorkspaceError(w, 400, "Invalid or oversized JAR upload request")
+		return
+	}
+	client, ok := a.api.(interface {
+		AdminPluginInstallUpload(context.Context, string, string, io.Reader) (api.PersistentOperationResponse, error)
+	})
+	if !ok {
+		writeMinecraftWorkspaceError(w, 503, ui(w, "ui.9eaa6a2311c2"))
+		return
+	}
+	if err := http.NewResponseController(w).SetReadDeadline(time.Now().Add(5 * time.Minute)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		writeMinecraftWorkspaceError(w, 503, "JAR upload is unavailable")
+		return
+	}
+	// The Agent owns multipart validation and private staging at the trust boundary.
+	body := http.MaxBytesReader(w, r.Body, api.PluginInstallUploadLimit)
+	defer body.Close()
+	out, err := client.AdminPluginInstallUpload(r.Context(), session, r.Header.Get("Content-Type"), body)
+	if err != nil {
+		a.writePluginWorkspaceAPIError(w, err, ui(w, "ui.a63a8596fa9b"))
+		return
+	}
+	writeMinecraftWorkspaceJSON(w, http.StatusAccepted, out)
+}
+
 func (a *App) pluginsWorkspaceInstallOperation(w http.ResponseWriter, r *http.Request) {
 
 	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator")

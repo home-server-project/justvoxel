@@ -25,12 +25,18 @@ func TestCurseForgeModDiscoverDefersPartialArtifactEvidence(t *testing.T) {
 		{"missing SHA1", "CurseForge SHA-1 evidence is missing", func(f *curseForgeFile) { f.Hashes = nil }},
 		{"malformed SHA1", "CurseForge SHA-1 evidence is malformed or duplicated", func(f *curseForgeFile) { f.Hashes[0].Value = "private-response" }},
 		{"duplicate SHA1", "CurseForge SHA-1 evidence is malformed or duplicated", func(f *curseForgeFile) { f.Hashes = append(f.Hashes, f.Hashes[0]) }},
-		{"missing URL", "CurseForge did not provide an official artifact URL for this release", func(f *curseForgeFile) { f.URL = "" }},
+		{"missing URL", "", func(f *curseForgeFile) { f.URL = "" }},
 		{"unsafe URL", "CurseForge official artifact URL is unsafe", func(f *curseForgeFile) { f.URL = "https://attacker.invalid/private-response?key=secret" }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f, server := curseForgeCatalogFixture(t, "fabric")
 			base := curseForgeClient.Transport
+			pluginCatalogClient.Transport = pluginTestTransport(func(r *http.Request) (*http.Response, error) {
+				if !bytes.HasPrefix([]byte(r.URL.Path), []byte("/v2/version_file/")) {
+					t.Fatal("unexpected Modrinth request", r.URL)
+				}
+				return &http.Response{StatusCode: 404, Body: io.NopCloser(bytes.NewReader(nil))}, nil
+			})
 			exactCalls, urlCalls, downloads := 0, 0, 0
 			curseForgeClient.Transport = pluginTestTransport(func(r *http.Request) (*http.Response, error) {
 				if r.URL.Path == "/v1/mods/10/files/20/download-url" {
@@ -86,7 +92,11 @@ func TestCurseForgeModDiscoverDefersPartialArtifactEvidence(t *testing.T) {
 			if exactCalls != beforeReview+1 {
 				t.Fatal("Review did not independently re-fetch the exact file", exactCalls, beforeReview)
 			}
-			if tc.reason == "" {
+			if tc.name == "missing URL" {
+				if err != nil || !plan.InstallAvailable || len(plan.Artifacts) != 1 || !plan.Artifacts[0].UploadRequired || downloads != 0 {
+					t.Fatal("Review did not request the exact JAR", plan, err, downloads)
+				}
+			} else if tc.reason == "" {
 				if err != nil || !plan.InstallAvailable || downloads == 0 {
 					t.Fatal("complete exact evidence did not pass verified JAR Review", plan, err, downloads)
 				}

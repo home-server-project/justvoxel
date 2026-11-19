@@ -285,11 +285,14 @@ func prepareModInstallPlan(ctx context.Context, plan *pluginInstallPlan) (failur
 			owners[id] = entry.Name()
 		}
 	}
-	directory, err := os.MkdirTemp("", "justvoxel-mod-preflight-")
-	if err != nil {
-		return err
+	directory := plan.stagedDirectory
+	if directory == "" {
+		directory, err = os.MkdirTemp("", "justvoxel-mod-preflight-")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(directory)
 	}
-	defer os.RemoveAll(directory)
 	plannedIDs := map[string]bool{}
 	for i := range plan.Artifacts {
 		a := &plan.Artifacts[i]
@@ -318,9 +321,13 @@ func prepareModInstallPlan(ctx context.Context, plan *pluginInstallPlan) (failur
 				return sideErr
 			}
 		} else {
-			_, err := downloadVerifiedPluginArtifact(ctx, *a, directory)
-			if err != nil {
-				return err
+			if plan.stagedDirectory == "" {
+				if a.UploadRequired {
+					continue
+				}
+				if _, err := downloadVerifiedPluginArtifact(ctx, *a, directory); err != nil {
+					return err
+				}
 			}
 			jar, err := os.Open(filepath.Join(directory, a.Filename))
 			if err != nil {
@@ -348,7 +355,7 @@ func prepareModInstallPlan(ctx context.Context, plan *pluginInstallPlan) (failur
 				matched = component
 			}
 			if matched != nil {
-				if a.Requested && !slices.Equal(ids, matched.IDs) {
+				if a.UploadRequired || a.Requested && !slices.Equal(ids, matched.IDs) {
 					return errors.New(modDependencyConflict)
 				}
 				a.Satisfied, a.ExistingFilename, a.ExistingHash = runtimeModSatisfied, matched.Filename, matched.SHA512

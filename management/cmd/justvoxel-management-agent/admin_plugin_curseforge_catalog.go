@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -344,7 +346,7 @@ func curseForgeIconProject(ctx context.Context, id string) (curseForgeProject, e
 }
 
 func positiveCurseForgeID(id string) bool { return validPluginIdentity("CurseForge", id) }
-func curseForgeArtifact(ctx context.Context, f curseForgeFile, project string, server pluginServerContext, scope curseForgeContext) (a pluginInstallArtifact, failure error) {
+func curseForgeArtifact(ctx context.Context, f curseForgeFile, project string, server pluginServerContext, scope curseForgeContext, restrictedFallback bool) (a pluginInstallArtifact, failure error) {
 	defer func() {
 		if failure == nil {
 			return
@@ -389,12 +391,34 @@ func curseForgeArtifact(ctx context.Context, f curseForgeFile, project string, s
 			Data string `json:"data"`
 		}
 		if err := curseForgeJSON(ctx, "/v1/mods/"+project+"/files/"+a.VersionID+"/download-url", nil, &result); err != nil {
-			return a, err
+			var diagnostic *pluginProviderDiagnosticError
+			if !errors.As(err, &diagnostic) || (diagnostic.values["http_status"] != "403" && diagnostic.values["http_status"] != "404") {
+				return a, err
+			}
+			if !restrictedFallback {
+				a.UploadRequired = true
+				return a, err
+			}
 		}
 		a.URL = result.Data
 	}
 	if a.URL == "" {
-		return a, errors.New("CurseForge did not provide an official artifact URL for this release")
+		if !restrictedFallback {
+			a.UploadRequired = true
+			return a, errors.New("CurseForge did not provide an official artifact URL for this release")
+		}
+		evidence, err := json.Marshal(f)
+		if err != nil {
+			return a, errors.New("CurseForge file evidence could not be recorded")
+		}
+		sum := sha256.Sum256(evidence)
+		a.CurseForgeFileEvidence = hex.EncodeToString(sum[:])
+		if alternate := exactCurseForgeModrinthVersion(ctx, a, server); alternate != nil {
+			a.URL, a.AlternateSHA512 = alternate.Files[0].URL, alternate.Files[0].Hashes.SHA512
+		} else {
+			a.UploadRequired = true
+			return a, nil
+		}
 	}
 	if !validPluginDownloadMetadata(a) {
 		return a, errors.New("CurseForge official artifact URL is unsafe")
@@ -451,14 +475,14 @@ func curseForgeDiscoverServerCapable(f curseForgeFile, server pluginServerContex
 // Exact alternate identity evidence only. This does not switch the install plan,
 // dependency resolver or ownership manifest away from CurseForge.
 func exactCurseForgeModrinthVersion(ctx context.Context, a pluginInstallArtifact, server pluginServerContext) *pluginCatalogVersion {
-	if a.Source != "CurseForge" || !positiveCurseForgeID(a.ProjectID) || !positiveCurseForgeID(a.VersionID) || !server.Supported || !validPluginDownloadMetadata(a) {
+	if a.Source != "CurseForge" || !positiveCurseForgeID(a.ProjectID) || !positiveCurseForgeID(a.VersionID) || !server.Supported || !safePluginFilename(a.Filename) || a.Size <= 0 || a.Size > pluginMaxJar || !curseForgeSHA1.MatchString(a.SHA1) {
 		return nil
 	}
 	var v pluginCatalogVersion
 	if err := modrinthPluginJSON(ctx, "/version_file/"+a.SHA1, url.Values{"algorithm": {"sha1"}}, &v); err != nil {
 		return nil
 	}
-	if !modrinthPluginID.MatchString(v.ProjectID) || !modrinthPluginID.MatchString(v.ID) || v.Type != "release" || !pluginVersionCompatible(v, server) || !modrinthContentEnvironment(v.Environment, server.ServerType) {
+	if !modrinthPluginID.MatchString(v.ProjectID) || !modrinthPluginID.MatchString(v.ID) || v.Type != "release" || !pluginVersionCompatible(v, server) || !modrinthServerEnvironment(v.Environment) {
 		return nil
 	}
 	for _, f := range v.Files {
@@ -466,8 +490,11 @@ func exactCurseForgeModrinthVersion(ctx context.Context, a pluginInstallArtifact
 			continue
 		}
 		if _, err := selectPluginArtifact([]pluginArtifactFile{f}); err == nil {
-			v.Files = []pluginArtifactFile{f}
-			return &v
+			u, _ := url.Parse(f.URL)
+			if !u.ForceQuery && path.Clean(u.Path) == u.Path && path.Base(u.Path) == f.Filename && !strings.ContainsAny(u.Path, "\\\x00\r\n") && !strings.Contains(strings.ToLower(u.EscapedPath()), "%2f") {
+				v.Files = []pluginArtifactFile{f}
+				return &v
+			}
 		}
 	}
 	return nil
@@ -595,8 +622,9 @@ func discoverCurseForgePlugins(ctx context.Context, server pluginServerContext, 
 					// re-fetches and verifies all install-grade artifact evidence.
 					project.ReviewAvailable = server.Supported && project.Compatible && f.Game == scope.Game
 				} else {
-					_, artifactErr := curseForgeArtifact(ctx, *f, id, server, scope)
+					artifact, artifactErr := curseForgeArtifact(ctx, *f, id, server, scope, false)
 					project.InstallAvailable = artifactErr == nil && server.Supported
+					project.ReviewAvailable = artifact.UploadRequired && project.Compatible && server.Supported
 					if artifactErr != nil {
 						project.Compatibility = artifactErr.Error()
 					}
@@ -711,7 +739,7 @@ func resolveCurseForgeInstallPlan(ctx context.Context, server pluginServerContex
 		if err != nil {
 			return err
 		}
-		a, err := curseForgeArtifact(ctx, f, project, server, scope)
+		a, err := curseForgeArtifact(ctx, f, project, server, scope, true)
 		if err != nil {
 			return err
 		}
@@ -779,6 +807,9 @@ func resolveCurseForgeInstallPlan(ctx context.Context, server pluginServerContex
 			if err := unix.Fstatat(int(root.Fd()), a.Filename, &st, unix.AT_SYMLINK_NOFOLLOW); !errors.Is(err, unix.ENOENT) && (err != nil || !slices.ContainsFunc(runtime, func(c trustedModComponent) bool { return c.Filename == a.Filename })) {
 				return errors.New("Content target filename already exists or cannot be safely checked")
 			}
+		}
+		if a.Satisfied != "" {
+			a.UploadRequired = false
 		}
 		seen[key] = len(plan.Artifacts)
 		plan.Artifacts = append(plan.Artifacts, a)
