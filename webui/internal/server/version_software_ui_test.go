@@ -39,31 +39,76 @@ async function open(fail=false) {
  const root=new Element();root.dataset.serverId="jv-family1";
  const state=new Element(),review=new Element(),progress=new Element(),csrf=new Element("input");csrf.value="csrf-token";
  root.selectors={"[data-switch-state]":state,"[data-switch-review]":review,"[data-switch-operation]":progress,"[data-switch-csrf]":csrf};
- root.cards=identities.map(id=>{const node=new Element("button");node.dataset.switchTarget=id;node.disabled=true;node.selectors={"[data-switch-sticker]":new Element("span")};return node;});
+ root.cards=identities.map(id=>{const node=new Element("button");node.dataset.switchTarget=id;node.disabled=true;node.selectors={"[data-switch-status]":new Element("span")};return node;});
  const calls=[];let applied=null;
+ const pendingPlans=new Map();
+ const deferPlan=target=>{
+  let release;
+  pendingPlans.set(target,new Promise(resolve=>{release=resolve;}));
+  return release;
+ };
  const fetch=async(raw,options)=>{
   const url=new URL(raw,"http://example");calls.push({url,options});assert.equal(url.searchParams.get("server"),"jv-family1");
   let result;
   if(url.pathname.endsWith("/operation")) result=applied?{operation:{operation_id:"switch1",state:fail?"needs_attention":"succeeded",status:fail?"Switch did not complete.":"Switch completed."}}:{};
-  else if(url.pathname.endsWith("/plan")) {const target=url.searchParams.get("target");result={instance_id:"jv-family1",current:"paper",target,version:"1.21.4",convert:target==="purpur",clone:["purpur","pufferfish"].includes(target),plan_fingerprint:"reviewed-"+target,content:target==="pufferfish"?[{name:"FamilyTools",filename:"family.jar",compatibility:"unknown",reason:"Unverified provenance"}]:[]};}
+  else if(url.pathname.endsWith("/plan")) {
+   const target=url.searchParams.get("target");
+   const pending=pendingPlans.get(target);
+   pendingPlans.delete(target);
+   if(pending) await pending;
+   result={instance_id:"jv-family1",current:"paper",target,version:"1.21.4",convert:target==="purpur",clone:["purpur","pufferfish"].includes(target),plan_fingerprint:"reviewed-"+target,content:target==="pufferfish"?[{name:"FamilyTools",filename:"family.jar",compatibility:"unknown",reason:"Unverified provenance"}]:[]};
+  }
   else if(url.pathname.endsWith("/apply")) {applied=options.body;result={operation:{operation_id:"switch1"}};}
   else throw Error("Unexpected Switch request: "+url);
   return {ok:true,json:async()=>result};
  };
  const window={};vm.runInNewContext(source,{window,document:{createElement:tag=>new Element(tag)},justVoxelSelectionGeneration:{migration:0},fetch,URLSearchParams,setTimeout:()=>{}});
  window.JustVoxelServerMigrationSwitch.init(root);await flush();await flush();
- return {root,state,review,progress,calls};
+ return {root,state,review,progress,calls,deferPlan};
 }
 (async()=>{
  const page=await open();const cards=page.root.cards;
  assert.equal(cards.length,11);
- assert.equal(cards[0].querySelector("[data-switch-sticker]").textContent,"Current");assert.equal(cards[0].disabled,true);
- assert.equal(cards[1].querySelector("[data-switch-sticker]").textContent,"Available");assert.equal(cards[1].disabled,false);
- for(const id of ["spigot","fabric","neoforge","forge","quilt","vanilla","bedrock"]) {const card=cards.find(node=>node.dataset.switchTarget===id);assert.equal(card.disabled,true);assert.equal(card.querySelector("[data-switch-sticker]").textContent,"Not Supported");}
- cards[3].events.click();await flush();assert.match(page.review.textContent,/FamilyTools.*Unknown \/ unverified/);
+ const status=id=>{
+  const card=cards.find(node=>node.dataset.switchTarget===id);
+  const marker=card.querySelector("[data-switch-status]");
+  return [marker.textContent,[...marker.classes],card.disabled];
+ };
+ assert.deepEqual(status("paper"),["C",["plugins-badge-disabled"],true]);
+ assert.deepEqual(status("purpur"),["A",["plugins-badge-enabled"],false]);
+ assert.deepEqual(status("pufferfish"),["A",["plugins-badge-enabled"],false]);
+ for(const id of ["spigot","fabric","neoforge","forge","quilt","vanilla","bedrock"]) {
+  assert.deepEqual(status(id),["N",[],true]);
+ }
+ const selected=()=>cards.filter(card=>card.classes.has("is-selected")).map(card=>card.dataset.switchTarget);
+ const releaseFirst=page.deferPlan("pufferfish");
+ cards[3].events.click();
+ assert.deepEqual(selected(),["pufferfish"]);assert.equal(page.review.hidden,true);
+ releaseFirst();await flush();
+ assert.deepEqual(selected(),["pufferfish"]);assert.equal(page.review.hidden,false);
+ assert.match(page.review.textContent,/FamilyTools.*Unknown \/ unverified/);
  const buttons=page.review.all().filter(node=>node.tagName==="button");const consent=page.review.all().find(node=>node.tagName==="input");consent.checked=true;consent.events.change();
  assert.equal(buttons.find(node=>node.textContent==="Convert existing server").disabled,true);assert.equal(buttons.find(node=>node.textContent==="Clone and convert").disabled,false);
+
+ const releaseOlder=page.deferPlan("purpur");
+ cards[1].events.click();
+ assert.deepEqual(selected(),["purpur"]);assert.equal(page.review.hidden,true);
+ const releaseNewest=page.deferPlan("pufferfish");
+ cards[3].events.click();
+ assert.deepEqual(selected(),["pufferfish"]);assert.equal(page.review.hidden,true);
+ releaseNewest();await flush();
+ assert.equal(page.review.hidden,false);assert.match(page.review.textContent,/FamilyTools/);
+ releaseOlder();await flush();
+ assert.deepEqual(selected(),["pufferfish"]);assert.match(page.review.textContent,/FamilyTools/);
+
  cards[1].events.click();await flush();const confirm=page.review.all().find(node=>node.tagName==="input");
+ const actions=page.review.children.at(-1);
+ assert.equal(actions.className,"action-row");
+ assert.equal(page.review.children.at(-2).children.includes(confirm),true);
+ assert.deepEqual(actions.children.map(node=>node.textContent),["Plugins & Mods","Convert existing server","Clone and convert"]);
+ assert.equal(actions.children[0].tagName,"a");assert.equal(actions.children[0].className,"button-link secondary");
+ assert.equal(actions.children[0].href,"/?workspace=plugins&server=jv-family1");
+ assert.doesNotMatch(page.review.textContent,/Open Plugins & Mods/);
  const convert=page.review.all().find(node=>node.tagName==="button"&&node.textContent==="Convert existing server");
  const clone=page.review.all().find(node=>node.tagName==="button"&&node.textContent==="Clone and convert");
  assert.equal(confirm.checked,false);assert.equal(convert.disabled,true);assert.equal(clone.disabled,true);

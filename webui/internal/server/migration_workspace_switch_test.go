@@ -29,6 +29,26 @@ func TestMigrationSwitchUsesCompleteSetupCatalogueAndArtwork(t *testing.T) {
 		t.Fatal(err)
 	}
 	markup := html.UnescapeString(rendered.String())
+	legend := `<div class="migration-switch-legend">
+<span><span class="plugins-badge plugins-badge-disabled migration-switch-status-dot" aria-hidden="true">C</span> Current</span>
+<span><span class="plugins-badge migration-switch-status-dot" aria-hidden="true">N</span> Not Supported</span>
+<span><span class="plugins-badge plugins-badge-enabled migration-switch-status-dot" aria-hidden="true">A</span> Available</span>
+</div>
+<p class="muted">Switch server software at the same Minecraft version. Review compatibility before converting this server or creating a separate clone.</p>`
+	if !strings.Contains(markup, legend) {
+		t.Fatal("Switch legend must show Current, Not Supported and Available in that order immediately above the introduction")
+	}
+	introEnd := strings.Index(markup, legend) + len(legend)
+	catalogue := strings.Index(markup, `migration-switch-catalogue"`)
+	lastGroupEnd := strings.LastIndex(markup, `</fieldset>`) + len(`</fieldset>`)
+	operation := strings.Index(markup, `<div data-switch-operation role="status"></div>`)
+	state := strings.Index(markup, `data-switch-state`)
+	review := strings.Index(markup, `data-switch-review`)
+	if strings.Count(markup, `data-switch-operation`) != 1 || catalogue < introEnd ||
+		lastGroupEnd <= catalogue || operation < lastGroupEnd ||
+		strings.TrimSpace(markup[lastGroupEnd:operation]) != `</div>` || state <= operation || review <= state {
+		t.Fatal("Switch must show the introduction, complete catalogue, single operation status, compatibility state and selected-target review in that order")
+	}
 	page, err := os.ReadFile("migration_workspace_switch.go")
 	if err != nil {
 		t.Fatal(err)
@@ -44,28 +64,26 @@ func TestMigrationSwitchUsesCompleteSetupCatalogueAndArtwork(t *testing.T) {
 		t.Fatalf("Switch headings differ from Advanced Setup: %v", headings)
 	}
 	cards := regexp.MustCompile(`(?s)<button[^>]+data-switch-target="([^"]+)"[^>]*>(.*?)</button>`).FindAllStringSubmatch(markup, -1)
+	cardBody := regexp.MustCompile(`^\s*<span class="migration-switch-icon-column">\s*` +
+		`<span class="server-software-icon" aria-hidden="true"><img src="/static/server-software/([^"]+)\.svg" alt="" width="40" height="40"></span>\s*` +
+		`<span class="plugins-badge migration-switch-status-dot" data-switch-status aria-hidden="true">N</span>\s*</span>\s*` +
+		`<span class="server-software-copy"><strong>([^<]+)</strong><small>([^<]+)</small></span>\s*$`)
 	var names []string
 	for _, card := range cards {
-		copy := regexp.MustCompile(`<span class="server-software-copy"><span class="migration-switch-title-row"><strong>([^<]+)</strong><span class="migration-switch-sticker" data-switch-sticker>Not Supported</span></span><small>([^<]+)</small></span>`).FindStringSubmatch(card[2])
-		if copy == nil {
-			t.Fatalf("software name/description presentation changed: %s", card[1])
+		body := cardBody.FindStringSubmatch(card[2])
+		if body == nil || body[1] != card[1] {
+			t.Fatalf("card must contain the matching icon, one permanent status marker below it and plain Setup copy: %s", card[1])
 		}
-		names = append(names, copy[1])
-		if copy[1] == "Vanilla Java" || copy[1] == "native Bedrock" {
-			t.Fatalf("Switch renamed the Setup card: %s", copy[1])
-		}
+		names = append(names, body[2])
 		for _, group := range setupSoftwareGroups() {
 			for _, choice := range group.Software {
-				if choice.ID == card[1] && (copy[1] != choice.Name || copy[2] != choice.Description) {
+				if choice.ID == card[1] && (body[2] != choice.Name || body[3] != choice.Description) {
 					t.Fatalf("Switch changed Setup copy: %s", choice.ID)
 				}
 			}
 		}
-		if !strings.Contains(card[0], "is-pending") || strings.Count(card[2], "data-switch-sticker") != 1 {
-			t.Fatalf("permanent pending title badge missing: %s", card[1])
-		}
-		if strings.Contains(card[2], "<p") || strings.Count(card[2], "<small") != 1 {
-			t.Fatalf("unexpected per-card paragraph or reason: %s", card[1])
+		if !strings.Contains(card[0], "is-pending") || !strings.Contains(card[0], " disabled>") {
+			t.Fatalf("unverified card must start pending and disabled: %s", card[1])
 		}
 	}
 	if !slices.Equal(names, []string{"Paper", "Purpur", "Spigot", "Pufferfish", "Leaf", "Fabric", "NeoForge", "Forge", "Quilt", "Vanilla", "Bedrock"}) {
@@ -87,8 +105,8 @@ func TestMigrationSwitchUsesCompleteSetupCatalogueAndArtwork(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if strings.Count(markup, `data-switch-target=`) != 11 || strings.Contains(markup, "data-server-selector-slot") || !strings.Contains(markup, `disabled>`) {
-		t.Fatal("catalogue hides software, duplicates the selector, or enables unverified actions")
+	if strings.Count(markup, `data-switch-target=`) != 11 || strings.Contains(markup, "data-server-selector-slot") {
+		t.Fatal("catalogue hides software or duplicates the selector")
 	}
 	stylesheet, err := englishPresentationAsset("static/server-migration-switch.css")
 	if err != nil {
@@ -122,15 +140,27 @@ func TestMigrationSwitchUsesCompleteSetupCatalogueAndArtwork(t *testing.T) {
 	if strings.Contains(css, "auto-fit") {
 		t.Fatal("Switch lanes must retain empty desktop tracks")
 	}
-	for _, want := range []string{".is-current", ".is-unsupported", ".migration-switch-title-row{display:flex;", "height:104px;min-height:104px;max-height:104px", "is-pending .migration-switch-sticker{visibility:hidden}", "text-overflow:ellipsis;white-space:nowrap", "background:#e5bb40", "background:#555b61"} {
+	for _, want := range []string{
+		".server-software-card{grid-template-columns:40px minmax(0,1fr);gap:.7rem;height:104px;min-height:104px;max-height:104px",
+		".migration-switch-icon-column{display:grid;justify-items:center;gap:.25rem;width:40px}",
+		".migration-switch-status-dot{display:inline-grid;place-items:center;width:22px;height:22px;box-sizing:border-box;border-radius:999px;padding:0;font-weight:800;line-height:1}",
+		".is-pending .migration-switch-status-dot{visibility:hidden}",
+		".migration-switch-status-dot:not(.plugins-badge-enabled,.plugins-badge-disabled){background:#343a40}",
+		".is-current{border-color:#e5bb40;background:color-mix(in srgb,#e5bb40 12%,var(--jv-surface-sunken));opacity:1}",
+		".is-unsupported{filter:brightness(.82);opacity:.72;cursor:default}",
+	} {
 		if !strings.Contains(css, want) {
 			t.Fatalf("Switch overlay state missing: %s", want)
 		}
 	}
-	stickerRule := regexp.MustCompile(`\.migration-switch \.migration-switch-sticker\{[^}]+\}`).FindString(css)
-	if strings.Contains(stickerRule, "position:absolute") || strings.Contains(stickerRule, "display:none") || !strings.Contains(stickerRule, "white-space:nowrap") {
-		t.Fatal("badge must stay in the title row and reserve its slot")
+	for _, obsolete := range []string{"migration-switch-title-row", "migration-switch-sticker", "display:none", "text-overflow", "13ch"} {
+		if strings.Contains(css, obsolete) || strings.Contains(markup, obsolete) {
+			t.Fatalf("Switch status must reserve only the marker slot and leave software copy unrestricted: %s", obsolete)
+		}
 	}
+}
+
+func TestMigrationSwitchSelectionAndReviewSource(t *testing.T) {
 	script, err := englishPresentationAsset("static/server-migration-switch.js")
 	if err != nil {
 		t.Fatal(err)
@@ -145,9 +175,20 @@ func TestMigrationSwitchUsesCompleteSetupCatalogueAndArtwork(t *testing.T) {
 		}
 	}
 	if !strings.Contains(showCard, `node.classList.toggle("is-pending", false)`) || !strings.Contains(showCard, `Boolean(plan.convert || plan.clone)`) {
-		t.Fatal("pending badges or protected-clone card semantics regressed")
+		t.Fatal("pending markers or protected-clone card semantics regressed")
 	}
-
+	selectTarget := regexp.MustCompile(`(?s)const select = .*?const load =`).FindString(string(script))
+	selection := strings.Index(selectTarget, `node.classList.toggle("is-selected", node.dataset.switchTarget === target)`)
+	request := strings.Index(selectTarget, `await request("plan", { target })`)
+	guard := strings.Index(selectTarget, `if (!current() || ticket !== sequence) return;`)
+	update := strings.Index(selectTarget, "showCard(")
+	if selection < 0 || request <= selection || guard <= request || update <= guard ||
+		!strings.Contains(selectTarget[:selection], "const ticket = ++sequence;") || strings.Count(selectTarget, `"is-selected"`) != 1 {
+		t.Fatal("selection must update once before the request and stale responses must be ignored before updating the card or review")
+	}
+	if strings.Contains(string(script), "Open Plugins & Mods") {
+		t.Fatal("review must use the Plugins & Mods action label")
+	}
 }
 
 func TestMigrationAndVersionNavigationBoundaries(t *testing.T) {

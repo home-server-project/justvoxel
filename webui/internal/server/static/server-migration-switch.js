@@ -39,7 +39,10 @@
         node.classList.toggle("is-available", available);
         node.classList.toggle("is-unsupported", !active && !available);
         node.disabled = active || !available || busy;
-        node.querySelector("[data-switch-sticker]").textContent = active ? "Current" : available ? jvT("ui.e674447337e8") : jvT("ui.120d1307d24e");
+        const marker = node.querySelector("[data-switch-status]");
+        marker.textContent = active ? "C" : available ? "A" : "N";
+        marker.classList.toggle("plugins-badge-disabled", active);
+        marker.classList.toggle("plugins-badge-enabled", available);
         node.title = plan.reason || (active ? jvT("ui.7d4f12e4405b") : jvT("ui.a195a363286b", {v0: (plan.version)}));
       };
       const reconnect = async (id = "") => {
@@ -81,6 +84,7 @@
       const select = async (target) => {
         if (busy) return;
         const ticket = ++sequence;
+        cards.forEach((node) => node.classList.toggle("is-selected", node.dataset.switchTarget === target));
         review.hidden = true;
         state.textContent = jvT("ui.3eb2c3b4c279");
         try {
@@ -89,7 +93,6 @@
           const plan = await request("plan", { target });
           if (!current() || ticket !== sequence) return;
           showCard(cards.find((node) => node.dataset.switchTarget === target), plan);
-          cards.forEach((node) => node.classList.toggle("is-selected", node.dataset.switchTarget === target));
           review.replaceChildren();
           review.append(paragraph(jvT("ui.3101457ed8e3", {v0: (plan.current)})), paragraph(jvT("ui.740cb666e20a", {v0: (plan.target)})), paragraph(jvT("ui.6a5ef5b0f8c1", {v0: (plan.version || jvT("ui.33c8e8de41c3"))})),
             paragraph(jvT("ui.9ccd64d18f1e", {v0: (plan.convert ? "Available" : jvT("ui.ca1844969742"))})), paragraph(jvT("ui.b985dbadc276", {v0: (plan.clone ? "Available" : jvT("ui.ca1844969742"))})));
@@ -99,13 +102,14 @@
             review.appendChild(paragraph(jvT("ui.31d29868e4e3", {v0: (item.name), v1: (item.filename), v2: (label), v3: (item.reason)}), item.compatibility === "verified" ? "muted" : "notice warning"));
           }
           for (const warning of plan.warnings || []) review.appendChild(paragraph(warning, "notice warning"));
-          const plugins = document.createElement("a"); plugins.href = `/?workspace=plugins&server=${encodeURIComponent(server)}`; plugins.className = "button-link secondary"; plugins.textContent = "Open Plugins & Mods"; review.appendChild(plugins);
+          const actions = document.createElement("div"); actions.className = "action-row";
+          const plugins = document.createElement("a"); plugins.href = `/?workspace=plugins&server=${encodeURIComponent(server)}`; plugins.className = "button-link secondary"; plugins.textContent = jvT("ui.70171ec7a356");
+          actions.appendChild(plugins);
           if (plan.convert || plan.clone) {
             review.appendChild(paragraph(jvT("ui.6b2df59bf4f2"), "notice"));
             const label = document.createElement("label"); label.className = "minecraft-native-toggle system-ups-shutdown-switch";
             const consent = document.createElement("input"); consent.type = "checkbox"; consent.setAttribute("role", "switch");
             label.append(paragraph(jvT("ui.1ee40e71974c")), consent); review.appendChild(label);
-            const actions = document.createElement("div"); actions.className = "action-row";
             for (const [action, text, allowed] of [["convert", jvT("ui.5abb6e80374e"), plan.convert], ["clone", jvT("ui.90b908765b19"), plan.clone]]) {
               const button = document.createElement("button"); button.type = "button"; button.textContent = text; button.disabled = true;
               if (!allowed) button.title = plan.reason || jvT("ui.f4239cda81ee");
@@ -128,8 +132,8 @@
               });
               actions.appendChild(button);
             }
-            review.appendChild(actions);
           }
+          review.appendChild(actions);
           review.hidden = false; state.textContent = "";
         } catch (failure) { if (current() && ticket === sequence) state.textContent = failure.message; }
       };

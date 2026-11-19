@@ -1,15 +1,23 @@
 {{define "migration_workspace_switch.html"}}<div class="migration-workspace-content migration-switch" data-migration-workspace-root data-migration-switch data-server-id="{{.ServerID}}">
 <input type="hidden" data-switch-csrf value="{{.CSRF}}">
+<div class="migration-switch-legend">
+<span><span class="plugins-badge plugins-badge-disabled migration-switch-status-dot" aria-hidden="true">C</span> Current</span>
+<span><span class="plugins-badge migration-switch-status-dot" aria-hidden="true">N</span> {{t "ui.120d1307d24e"}}</span>
+<span><span class="plugins-badge plugins-badge-enabled migration-switch-status-dot" aria-hidden="true">A</span> {{t "ui.e674447337e8"}}</span>
+</div>
 <p class="muted">{{t "ui.8e50b76ef001"}}</p>
-<div data-switch-operation role="status"></div>
 <div class="setup-software-groups setup-software-lanes migration-switch-catalogue">
 {{range .Groups}}<fieldset class="setup-server-types setup-server-types-compact"><legend>{{ts .Name}}</legend>
 {{range .Software}}<button type="button" class="setup-server-type server-software-card migration-switch-card is-unsupported is-pending" data-switch-target="{{.ID}}" disabled>
+<span class="migration-switch-icon-column">
 <span class="server-software-icon" aria-hidden="true"><img src="/static/server-software/{{.ID}}.svg" alt="" width="40" height="40"></span>
-<span class="server-software-copy"><span class="migration-switch-title-row"><strong>{{ts .Name}}</strong><span class="migration-switch-sticker" data-switch-sticker>{{t "ui.120d1307d24e"}}</span></span><small>{{ts .Description}}</small></span>
+<span class="plugins-badge migration-switch-status-dot" data-switch-status aria-hidden="true">N</span>
+</span>
+<span class="server-software-copy"><strong>{{ts .Name}}</strong><small>{{ts .Description}}</small></span>
 </button>{{end}}
 </fieldset>{{end}}
 </div>
+<div data-switch-operation role="status"></div>
 <p data-switch-state role="status">{{t "ui.e29d2712155f"}}</p>
 <section class="panel" data-switch-review hidden></section>
 </div>{{end}}

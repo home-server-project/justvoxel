@@ -10,18 +10,20 @@
 .migration-switch .server-software-copy small{font-size:.82rem}
 .migration-switch .server-software-icon img[src$="/paper.svg"]{transform:scale(.82);transform-origin:center}
 .migration-switch .server-software-icon img[src$="/purpur.svg"]{transform:scale(.90);transform-origin:center}
-.migration-switch .migration-switch-title-row{display:flex;align-items:center;gap:.3rem;min-width:0;white-space:nowrap}
-.migration-switch .migration-switch-title-row strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.migration-switch .is-pending .migration-switch-sticker{visibility:hidden}
-.migration-switch .migration-switch-sticker{flex:0 0 auto;box-sizing:content-box;inline-size:13ch;text-align:center;white-space:nowrap;border-radius:5px;padding:.12rem .4rem;background:var(--jv-accent);color:var(--jv-surface);font-size:.65rem;line-height:1;font-weight:700;pointer-events:none}
+.migration-switch .migration-switch-legend{display:flex;flex-wrap:wrap;gap:.35rem .8rem;font-size:.82rem}
+.migration-switch .migration-switch-legend>span{display:inline-flex;align-items:center;gap:.3rem}
+.migration-switch .migration-switch-icon-column{display:grid;justify-items:center;gap:.25rem;width:40px}
+.migration-switch .migration-switch-status-dot{display:inline-grid;place-items:center;width:22px;height:22px;box-sizing:border-box;border-radius:999px;padding:0;font-weight:800;line-height:1}
+.migration-switch .migration-switch-status-dot:not(.plugins-badge-enabled,.plugins-badge-disabled){background:#343a40}
+.migration-switch .is-pending .migration-switch-status-dot{visibility:hidden}
 .migration-switch .is-current{border-color:#e5bb40;background:color-mix(in srgb,#e5bb40 12%,var(--jv-surface-sunken));opacity:1}
-.migration-switch .is-current .migration-switch-sticker{background:#e5bb40;color:#241f10}
 .migration-switch .is-unsupported{filter:brightness(.82);opacity:.72;cursor:default}
-.migration-switch .is-unsupported .migration-switch-sticker{background:#555b61;color:#fff}
 .migration-switch .server-software-card:disabled:hover{border-color:var(--jv-border-strong);background:var(--jv-surface-sunken)}
 .migration-switch .is-current:disabled:hover{border-color:#e5bb40;background:color-mix(in srgb,#e5bb40 12%,var(--jv-surface-sunken))}
+.migration-switch .server-software-card.is-selected:not(.is-current){border-color:var(--jv-success);background:color-mix(in srgb,var(--jv-success) 18%,var(--jv-surface-sunken))}
 @media(prefers-color-scheme:light){
   .migration-switch .setup-server-types legend{color:#34414a}
+  .migration-switch .migration-switch-status-dot:not(.plugins-badge-enabled,.plugins-badge-disabled){background:#e9ecef}
 }
 @media(max-width:1000px){
   .migration-switch .setup-software-lanes .setup-server-types{grid-template-columns:repeat(2,minmax(0,1fr))}
