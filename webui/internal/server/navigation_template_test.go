@@ -1224,7 +1224,7 @@ func TestCompactUsersAndFiveRowMonitorContract(t *testing.T) {
 	start := strings.Index(js, "  const renderUsers =")
 	end := strings.Index(js[start:], "  const renderSecurity =")
 	users := js[start : start+end]
-	for _, want := range []string{"system-users-table", "Username", "Role", "Status", "Restart", "Backup", "Actions", "storage-action-menu system-user-menu", "dialog.showModal()", "heading.textContent = title +", "user.restart_used ?? 0", "user.backup_used ?? 0", "Primary administrator", "minimum_password_len", "restart-allowance/reset", "backup-allowance/reset", `"role", "Save role"`, `"enabled", user.enabled`, `"password", "Change password"`, `"delete", "Delete account", true`, "data-destructive-slider", "data-destructive-toggle", "submit.className = \"danger\""} {
+	for _, want := range []string{"system-users-table", "Username", "Role", "Status", "Restart", "Backup", "Actions", "storage-action-menu system-user-menu", "dialog.showModal()", "user.restart_used ?? 0", "user.backup_used ?? 0", "Primary administrator", "minimum_password_len", "restart-allowance/reset", "backup-allowance/reset", `"role", "Save role"`, `"enabled", user.enabled`, `"password", "Change password"`, `"delete", "Delete account", true`, "data-destructive-slider", "data-destructive-toggle", "submit.className = \"danger\""} {
 		if !strings.Contains(users, want) {
 			t.Fatalf("compact Users contract missing %q", want)
 		}
@@ -1243,6 +1243,78 @@ func TestCompactUsersAndFiveRowMonitorContract(t *testing.T) {
 	} {
 		if !strings.Contains(css, want) {
 			t.Fatalf("compact table styling missing %q", want)
+		}
+	}
+}
+
+func TestUsersManageActionDialogPresentation(t *testing.T) {
+	script, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, users, found := strings.Cut(string(script), "  const renderUsers =")
+	dialog, _, ended := strings.Cut(users, "        const addAction =")
+	if !found || !ended {
+		t.Fatal("missing Users action dialog builder")
+	}
+	for _, want := range []string{
+		`dialog.className = "system-action-dialog system-user-dialog"`,
+		`heading.id = "system-user-action-" + index;`,
+		`if (action === "password" || action === "delete" || (action === "enabled" && dangerous)) {`,
+		`heading.className = "system-action-dialog-title"`,
+		`const eyebrow = document.createElement("span");`,
+		`eyebrow.className = "eyebrow";`,
+		`eyebrow.textContent = "JUSTVOXEL";`,
+		`const separator = document.createElement("span");`,
+		`separator.textContent = "·";`,
+		`separator.setAttribute("aria-hidden", "true");`,
+		`const actionTitle = document.createElement("span");`,
+		`actionTitle.textContent = title;`,
+		`const username = document.createElement("span");`,
+		`username.textContent = user.username;`,
+		`heading.append(eyebrow, separator, actionTitle, separator.cloneNode(true), username);`,
+		`dialog.setAttribute("aria-labelledby", heading.id);`,
+		`wrap.append(heading, form);`,
+		`actions.className = "action-row";`,
+		`cancel.type = "button";`,
+		`cancel.className = "secondary";`,
+		`submit.type = "submit";`,
+		`submit.textContent = submitText;`,
+		"if (dangerous) {\n            submit.className = \"danger\";",
+		`actions.append(cancel, submit);`,
+	} {
+		if !strings.Contains(dialog, want) {
+			t.Errorf("Users action dialog missing %q", want)
+		}
+	}
+	if strings.Contains(dialog, `heading.textContent = title + " · " + user.username`) {
+		t.Error("Users action dialog still uses the concatenated heading")
+	}
+	if strings.Count(dialog, "submit.className") != 1 {
+		t.Error("the normal Users action must retain the default button style")
+	}
+
+	rules := regexp.MustCompile(`([^{}]+)\{([^{}]*)\}`)
+	footerSelector := regexp.MustCompile(`button|\.action-row|\.secondary|\.danger\b|\[data-destructive-submit\]`)
+	sizing := regexp.MustCompile(`(?:^|;)\s*(?:padding[^:;]*|font[^:;]*|line-height|(?:min-|max-)?(?:width|height)|border-radius)\s*:`)
+	for _, path := range []string{"static/app.css", "static/storage-browser.css"} {
+		data, err := assets.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		css := string(data)
+		if path == "static/app.css" {
+			standard := regexp.MustCompile(`(?:^|})button,\.button-link\{([^{}]*)\}`).FindString(css)
+			for _, want := range []string{"border-radius:8px;", "padding:.72rem 1rem;", "font:inherit;", "font-weight:700;"} {
+				if !strings.Contains(standard, want) {
+					t.Errorf("missing standard button sizing declaration %q", want)
+				}
+			}
+		}
+		for _, rule := range rules.FindAllStringSubmatch(css, -1) {
+			if strings.Contains(rule[1], ".system-user-dialog") && footerSelector.MatchString(rule[1]) && sizing.MatchString(rule[2]) {
+				t.Errorf("Users dialog footer must use standard button sizing: %s", rule[0])
+			}
 		}
 	}
 }

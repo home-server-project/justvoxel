@@ -1441,6 +1441,7 @@ input[type=checkbox].destructive-confirm-toggle::before{content:none}
 .system-user-menu .storage-action-menu-popover:not(:popover-open){display:none}
 .system-user-dialog{max-height:calc(100dvh - 2rem);overflow:auto}
 .system-user-dialog form>label{margin:var(--jv-space-sm) 0}
+.system-user-dialog .system-action-dialog-title>span:last-child{overflow-wrap:anywhere}
 @media(max-width:700px){
   .system-history-view>.system-logs-splitter{display:none}
   .system-monitor-profile-actions{justify-content:flex-end}
@@ -1882,8 +1883,8 @@ body:not(.primary-administrator) .nav-admin-only[data-primary-admin-only]{displa
 .language-control button:focus-visible{outline:2px solid #78c99d;outline-offset:2px}
 @media(prefers-color-scheme:light){.language-control button:hover{background:#dce4e8;border-color:#aab8c1}}
 .language-dialog{width:max-content;max-width:calc(100% - 2rem)}
-.language-dialog .language-dialog-title{display:flex;flex-wrap:wrap;align-items:baseline;gap:.32rem;margin:0;font-size:.98rem;line-height:normal}
-.language-dialog-title .eyebrow{margin:0;font-size:.68rem;font-weight:400;white-space:nowrap}
+.system-action-dialog .system-action-dialog-title{display:flex;flex-wrap:wrap;align-items:baseline;gap:.32rem;margin:0;font-size:.98rem;line-height:normal}
+.system-action-dialog-title .eyebrow{margin:0;font-size:.68rem;font-weight:400;white-space:nowrap}
 .language-dialog-field{margin-top:1rem}
 .language-dialog select{width:100%;max-width:100%;margin-top:0}
 

@@ -256,8 +256,8 @@ func TestLanguageDialogUsesCompactSharedStyles(t *testing.T) {
 		`.system-action-dialog{width:min(470px,calc(100% - 2rem));padding:0;`,
 		`.system-action-dialog-content{padding:1.4rem}`,
 		`.system-action-dialog .action-row{justify-content:flex-end}`,
-		`.language-dialog .language-dialog-title{display:flex;flex-wrap:wrap;align-items:baseline;gap:.32rem;margin:0;font-size:.98rem;line-height:normal}`,
-		`.language-dialog-title .eyebrow{margin:0;font-size:.68rem;font-weight:400;white-space:nowrap}`,
+		`.system-action-dialog .system-action-dialog-title{display:flex;flex-wrap:wrap;align-items:baseline;gap:.32rem;margin:0;font-size:.98rem;line-height:normal}`,
+		`.system-action-dialog-title .eyebrow{margin:0;font-size:.68rem;font-weight:400;white-space:nowrap}`,
 		`.language-dialog-field{margin-top:1rem}`,
 		`.language-dialog select{width:100%;max-width:100%;margin-top:0}`,
 	} {
