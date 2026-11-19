@@ -93,8 +93,8 @@ func TestCurseForgeModDiscoverDefersPartialArtifactEvidence(t *testing.T) {
 				t.Fatal("Review did not independently re-fetch the exact file", exactCalls, beforeReview)
 			}
 			if tc.name == "missing URL" {
-				if err != nil || !plan.InstallAvailable || len(plan.Artifacts) != 1 || !plan.Artifacts[0].UploadRequired || downloads != 0 {
-					t.Fatal("Review did not request the exact JAR", plan, err, downloads)
+				if err != nil || !plan.InstallAvailable || len(plan.Artifacts) != 1 || plan.Artifacts[0].UploadRequired || downloads == 0 {
+					t.Fatal("Review did not verify the deterministic CDN JAR", plan, err, downloads)
 				}
 			} else if tc.reason == "" {
 				if err != nil || !plan.InstallAvailable || downloads == 0 {

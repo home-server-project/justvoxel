@@ -417,8 +417,9 @@ func recordPluginRollbackResult(store *operationStore, id string) {
 const pluginReviewDiagnosticType = "plugin_review"
 
 type pluginProviderDiagnosticError struct {
-	reason string
-	values map[string]string
+	reason              string
+	values              map[string]string
+	downloadUnavailable bool
 }
 
 func (e *pluginProviderDiagnosticError) Error() string { return e.reason }

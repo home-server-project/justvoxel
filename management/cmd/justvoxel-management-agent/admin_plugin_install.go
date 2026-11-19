@@ -1109,10 +1109,11 @@ func downloadPluginArtifact(ctx context.Context, a pluginInstallArtifact, direct
 }
 func downloadVerifiedPluginArtifact(ctx context.Context, a pluginInstallArtifact, directory string) (hash string, failure error) {
 	evidence := pluginArtifactDiagnostic(a, "download")
+	unavailable := false
 	defer func() {
 		if failure != nil {
 			evidence["reason"] = failure.Error()
-			failure = &pluginProviderDiagnosticError{reason: failure.Error(), values: evidence}
+			failure = &pluginProviderDiagnosticError{reason: failure.Error(), values: evidence, downloadUnavailable: unavailable}
 		}
 	}()
 	if !validPluginDownloadMetadata(a) {
@@ -1122,12 +1123,17 @@ func downloadVerifiedPluginArtifact(ctx context.Context, a pluginInstallArtifact
 	defer cancel()
 	response, err := requestPluginArtifact(ctx, a, evidence)
 	if err != nil {
+		unavailable = errors.Is(err, errPluginDownloadUnavailable)
 		return "", err
 	}
 	defer response.Body.Close()
 	evidence["http_status"] = strconv.Itoa(response.StatusCode)
 	if response.ContentLength >= 0 {
 		evidence["http_content_length"] = strconv.FormatInt(response.ContentLength, 10)
+	}
+	switch response.StatusCode {
+	case http.StatusForbidden, http.StatusNotFound, http.StatusGone, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		unavailable = true
 	}
 	if pluginSource(a.Source) == "CurseForge" && a.AlternateSHA512 == "" && (response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden) {
 		return "", errors.New("CurseForge download authentication rejected; check the configured API key")
@@ -1145,6 +1151,11 @@ func downloadVerifiedPluginArtifact(ctx context.Context, a pluginInstallArtifact
 	h1 := sha1.New()
 	n, err := io.Copy(io.MultiWriter(f, h, h256, h1), io.LimitReader(response.Body, a.Size+1))
 	evidence["actual_bytes"] = strconv.FormatInt(n, 10)
+	var stagingError *os.PathError
+	if errors.As(err, &stagingError) {
+		return "", errors.New("Plugin artifact could not be staged")
+	}
+	unavailable = true
 	if n != a.Size {
 		return "", fmt.Errorf("Downloaded artifact size did not match %s metadata", pluginSource(a.Source))
 	}
@@ -1163,6 +1174,7 @@ func downloadVerifiedPluginArtifact(ctx context.Context, a pluginInstallArtifact
 		return "", errors.New("Downloaded artifact SHA-512 did not match Modrinth metadata")
 	}
 	evidence["hash_result"] = "verified"
+	unavailable = false
 	if err := f.Sync(); err != nil {
 		return "", errors.New("Artifact could not be saved to private staging")
 	}

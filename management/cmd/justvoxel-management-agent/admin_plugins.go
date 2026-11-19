@@ -508,6 +508,12 @@ func pluginMetadataScalars(data string) map[string]string {
 	return out
 }
 
+type modrinthCatalogHTTPError int
+
+func (status modrinthCatalogHTTPError) Error() string {
+	return fmt.Sprintf("catalog response %d", status)
+}
+
 func modrinthPluginJSON(ctx context.Context, path string, query url.Values, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.modrinth.com/v2"+path+"?"+query.Encode(), nil)
 	if err != nil {
@@ -521,7 +527,7 @@ func modrinthPluginJSON(ctx context.Context, path string, query url.Values, out 
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("catalog response %d", response.StatusCode)
+		return modrinthCatalogHTTPError(response.StatusCode)
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, (2<<20)+1))
 	if err != nil {

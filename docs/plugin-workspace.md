@@ -872,15 +872,17 @@ or the CurseForge download-URL endpoint. Official CurseForge CDN requests receiv
 the configured key and may follow at most five redirects within the validated
 HTTPS `forgecdn.net` domain. Other providers and icons never receive the key.
 
-When CurseForge supplies no URL for an exact file, JustVoxel searches Modrinth by
-the CurseForge SHA-1. It can download an exact match with the same size from a
-compatible, server-capable Modrinth release. Otherwise, Review asks for the exact
-JAR from CurseForge for each missing file, including required dependencies.
-Select those files in Review. Apply verifies every upload against the reviewed
-provider identity, filename, size, and SHA-1, then checks JAR compatibility and
-collisions before creating a maintenance operation or starting downtime.
-The recorded ownership still identifies the original CurseForge project and
-release for either fallback.
+When CurseForge supplies no official URL for an exact file, JustVoxel tries a
+ForgeCDN URL derived from the authoritative file ID and exact filename. If that
+does not supply the exact binary, JustVoxel looks up the CurseForge SHA-1 on
+Modrinth and tries an exact match from a compatible, server-capable release.
+Review asks for the exact CurseForge JAR only after all automatic sources for
+that file are exhausted. The same order applies to each required dependency.
+Every alternate source must match the authoritative CurseForge file identity,
+SHA-1, and size. Apply verifies the reviewed filename, JAR compatibility, and
+collisions before creating a maintenance operation for uploads. Automatic installs
+also verify compatibility and collisions before downtime. Ownership records
+the original CurseForge project and release for every source.
 Provider failures return an error without exposing keys. Configuration removal takes effect for subsequent requests; failed lookups
 do not poison later retries. Provider cursors preserve unconsumed positions and
 rotate fairly across enabled catalogs. CurseForge project cards use initials

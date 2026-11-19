@@ -8,12 +8,14 @@ import (
 	"strconv"
 )
 
+var errPluginDownloadUnavailable = errors.New("Plugin download failed")
+
 // Follow only explicitly validated CurseForge artifact redirects. Other providers
 // retain their existing no-redirect behavior. Never retain Location or URL secrets.
 func requestPluginArtifact(ctx context.Context, a pluginInstallArtifact, evidence map[string]string) (*http.Response, error) {
 	client := *pluginDownloadClient
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	current, _ := url.Parse(a.URL) // caller has validated exact official metadata
+	current, _ := url.Parse(a.URL) // caller has validated the artifact URL
 	key := ""
 	curseForgeTransport := pluginSource(a.Source) == "CurseForge" && a.AlternateSHA512 == ""
 	if curseForgeTransport {
@@ -43,7 +45,7 @@ func requestPluginArtifact(ctx context.Context, a pluginInstallArtifact, evidenc
 		req.Header.Set("User-Agent", "JustVoxel/PluginWorkspace-Stage2")
 		response, err := client.Do(req)
 		if err != nil {
-			return nil, errors.New("Plugin download failed")
+			return nil, errPluginDownloadUnavailable
 		}
 		evidence["http_status"] = strconv.Itoa(response.StatusCode)
 		delete(evidence, "http_content_length")

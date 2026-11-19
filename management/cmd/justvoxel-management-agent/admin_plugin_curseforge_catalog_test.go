@@ -658,8 +658,8 @@ func TestCurseForgeExactModrinthContentEnvironment(t *testing.T) {
 							return &http.Response{StatusCode: 200, Body: io.NopCloser(bytes.NewReader(raw))}, err
 						})
 						want := evidence == "exact" && (environment == "server_only" || environment == "client_and_server")
-						if got := exactCurseForgeModrinthVersion(context.Background(), a, server); (got != nil) != want {
-							t.Fatal("exact hash environment policy", got, want)
+						if got, err := exactCurseForgeModrinthVersion(context.Background(), a, server); err != nil || (got != nil) != want {
+							t.Fatal("exact hash environment policy", got, want, err)
 						}
 					})
 				}

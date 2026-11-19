@@ -13,6 +13,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -36,8 +37,12 @@ func TestCurseForgeOfficialDownloadURLResolution(t *testing.T) {
 		{name: "query", body: `{"data":"` + artifactURL + `?key=private-fixture-key"}`, wantFallback: true},
 		{name: "http", body: `{"data":"http://edge.forgecdn.net/files/123/456/example.jar"}`, wantFallback: true},
 		{name: "empty fallback", body: `{"data":""}`, wantFallback: true, wantOK: true, wantUpload: true},
+		{name: "null fallback", body: `{"data":null}`, wantFallback: true, wantOK: true, wantUpload: true},
 		{name: "not found", status: http.StatusNotFound, body: "private-fixture-key private-response", wantFallback: true, wantOK: true, wantUpload: true},
 		{name: "forbidden", status: http.StatusForbidden, body: "private-fixture-key private-response", wantFallback: true, wantOK: true, wantUpload: true},
+		{name: "unauthorized", status: http.StatusUnauthorized, wantFallback: true},
+		{name: "rate limited", status: http.StatusTooManyRequests, wantFallback: true},
+		{name: "server error", status: http.StatusInternalServerError, wantFallback: true},
 		{name: "redirect", status: http.StatusFound, wantFallback: true},
 		{name: "transport failure", invalid: "transport", wantFallback: true},
 		{name: "wrong JSON type", body: `{"data":{"url":"` + artifactURL + `"}}`, wantFallback: true},
@@ -55,6 +60,14 @@ func TestCurseForgeOfficialDownloadURLResolution(t *testing.T) {
 			f, server := curseForgeCatalogFixture(t, "fabric")
 			curseForgeClient.CheckRedirect = redirectPolicy
 			base := curseForgeClient.Transport
+			probes := 0
+			pluginDownloadClient.Transport = pluginTestTransport(func(r *http.Request) (*http.Response, error) {
+				probes++
+				if r.URL.String() != "https://edge.forgecdn.net/files/0/020/example.jar" {
+					t.Fatal("unexpected artifact probe", r.URL)
+				}
+				return &http.Response{StatusCode: 404, Body: http.NoBody}, nil
+			})
 			lookups := 0
 			pluginCatalogClient.Transport = pluginTestTransport(func(r *http.Request) (*http.Response, error) {
 				lookups++
@@ -126,14 +139,17 @@ func TestCurseForgeOfficialDownloadURLResolution(t *testing.T) {
 			if tc.wantFallback {
 				wantCalls = 1
 			}
-			if calls != 0 {
-				t.Fatal("Discover resolved an install artifact URL", calls)
+			if calls != 0 || probes != 0 || lookups != 0 {
+				t.Fatal("Discover resolved an install artifact URL", calls, probes, lookups)
 			}
 			// Planning must resolve independently of Discover, including direct requests.
 			calls = 0
 			plan, planErr := resolveCurseForgeInstallPlan(context.Background(), server, f.data, "10", "20")
 			if (planErr == nil) != tc.wantOK || calls != wantCalls {
 				t.Fatal("unexpected independent plan resolution", calls)
+			}
+			if (probes == 1) != tc.wantUpload || probes > 1 || (lookups == 1) != tc.wantUpload || lookups > 1 {
+				t.Fatal("unexpected fallback traffic", probes, lookups)
 			}
 			if planErr != nil && (strings.Contains(planErr.Error(), "private-fixture-key") || strings.Contains(planErr.Error(), "private-response")) {
 				t.Fatal("private API failure exposed")
@@ -241,7 +257,7 @@ func TestCurseForgeEscapedArtifactFilename(t *testing.T) {
 		"https://edge.forgecdn.net/%66iles/123/456/mod.jar",
 		"https://edge.forgecdn.net/files/%31%32%33/456/mod.jar",
 		"https://edge.forgecdn.net/files/123/%34%35%36/mod.jar",
-		"https://edge.forgecdn.net/files/0/456/mod.jar",
+		"https://edge.forgecdn.net/files/0/000/mod.jar",
 		"https://edge.forgecdn.net/files/123/0/mod.jar",
 		"https://user@edge.forgecdn.net/files/123/456/mod.jar",
 		"https://edge.forgecdn.net.evil/files/123/456/mod.jar",
@@ -252,6 +268,36 @@ func TestCurseForgeEscapedArtifactFilename(t *testing.T) {
 	} {
 		if safeCurseForgeArtifactURL(raw) {
 			t.Error("hostile artifact URL accepted", raw)
+		}
+	}
+}
+
+func TestCurseForgeCDNCandidate(t *testing.T) {
+	for _, tc := range []struct {
+		id       int64
+		filename string
+		path     string
+	}{
+		{9386331, "Advance_Eco_Economy.jar", "/files/9386/331/Advance_Eco_Economy.jar"},
+		{9476007, "space +%#?;é.jar", "/files/9476/007/space%20+%25%23%3F%3B%C3%A9.jar"},
+		{9090000, "%2f.jar", "/files/9090/000/%252f.jar"},
+		{1, "mod.jar", "/files/0/001/mod.jar"},
+		{0, "mod.jar", ""},
+		{-1, "mod.jar", ""},
+		{9386331, "../mod.jar", ""},
+		{9386331, "dir\\mod.jar", ""},
+		{9386331, "bad\x00.jar", ""},
+	} {
+		raw, ok := curseForgeCDNCandidate(tc.id, tc.filename)
+		if tc.path == "" {
+			if ok || raw != "" {
+				t.Fatalf("candidate accepted invalid ID or filename %d %q", tc.id, tc.filename)
+			}
+			continue
+		}
+		u, err := url.Parse(raw)
+		if !ok || err != nil || raw != "https://edge.forgecdn.net"+tc.path || !safeCurseForgeArtifactURL(raw) || u.RawQuery != "" || u.Fragment != "" || strings.Count(u.Path, "/") != 4 || filepath.Base(u.Path) != tc.filename {
+			t.Fatalf("candidate did not preserve one exact filename segment %q (%v)", raw, err)
 		}
 	}
 }
@@ -321,9 +367,9 @@ func TestCurseForgeExactModrinthAlternateIdentity(t *testing.T) {
 			if state == "invalid input" {
 				input.SHA1 = "../not-a-hash"
 			}
-			alternate := exactCurseForgeModrinthVersion(context.Background(), input, server)
-			if (alternate != nil) != (state == "exact") {
-				t.Fatal("unproven alternate identity", alternate)
+			alternate, err := exactCurseForgeModrinthVersion(context.Background(), input, server)
+			if err != nil || (alternate != nil) != (state == "exact") {
+				t.Fatal("unproven alternate identity", alternate, err)
 			}
 			if state == "invalid input" {
 				if calls != 0 {
@@ -467,6 +513,9 @@ func restrictedCurseForgeFixture(t *testing.T, rootJar, dependencyJar []byte, al
 		return jsonReply(pluginCatalogVersion{ID: "Exact", ProjectID: "Alternate", Number: "Mirror release", Type: "release", Environment: "server_only", GameVersions: []string{"1.21.8"}, Loaders: []string{"fabric"}, Files: []pluginArtifactFile{file}})
 	})
 	pluginDownloadClient.Transport = pluginTestTransport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host == "edge.forgecdn.net" && r.Header.Get("x-api-key") == "private-fixture-key" {
+			return &http.Response{StatusCode: 404, Body: http.NoBody}, nil
+		}
 		if !alternate || r.URL.String() != mirrorURL || r.Header.Get("x-api-key") != "" {
 			t.Fatal("unexpected artifact transport or credential", r.URL)
 		}
@@ -597,6 +646,172 @@ func TestCurseForgeRestrictedDownloadUsesExactModrinthBytes(t *testing.T) {
 	assertCurseForgeInstallOwnership(t, f, *id, false)
 }
 
+func serveRestrictedForgeCDN(t *testing.T, root, dependency []byte, status int) {
+	t.Helper()
+	base := pluginDownloadClient.Transport
+	pluginDownloadClient.Transport = pluginTestTransport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host != "edge.forgecdn.net" {
+			return base.RoundTrip(r)
+		}
+		if r.URL.Scheme != "https" || r.URL.RawQuery != "" || r.Header.Get("x-api-key") != "private-fixture-key" {
+			t.Fatal("unexpected ForgeCDN request", r.URL)
+		}
+		var raw []byte
+		switch r.URL.EscapedPath() {
+		case "/files/0/020/root.jar":
+			raw = root
+		case "/files/0/021/dependency.jar":
+			raw = dependency
+		default:
+			t.Fatal("unexpected candidate path", r.URL)
+		}
+		if raw != nil {
+			return &http.Response{StatusCode: 200, ContentLength: int64(len(raw)), Body: io.NopCloser(bytes.NewReader(raw))}, nil
+		}
+		if status == 0 {
+			return nil, errors.New("ForgeCDN fixture unavailable")
+		}
+		return &http.Response{StatusCode: status, Body: http.NoBody}, nil
+	})
+}
+
+func TestCurseForgeRestrictedForgeCDNInstallsWithRequiredDependency(t *testing.T) {
+	root := restrictedFabricJar(t, "rootmod", "*")
+	dependency := restrictedFabricJar(t, "depmod", "*")
+	f, _ := restrictedCurseForgeFixture(t, root, dependency, false)
+	serveRestrictedForgeCDN(t, root, dependency, http.StatusNotFound)
+	pluginCatalogClient.Transport = pluginTestTransport(func(*http.Request) (*http.Response, error) {
+		t.Fatal("verified CDN artifact should bypass Modrinth")
+		return nil, nil
+	})
+	plan := reviewRestrictedCurseForge(t, f)
+	if plan.Source != "CurseForge" || len(plan.Artifacts) != 2 {
+		t.Fatal("wrong Review ownership or dependencies", plan)
+	}
+	for _, a := range plan.Artifacts {
+		if a.UploadRequired || a.Source != "CurseForge" {
+			t.Fatal("verified CDN JAR was not automatic", a)
+		}
+	}
+	id := runCurseForgeWorkerSynchronously(t)
+	raw, _ := json.Marshal(pluginInstallApplyRequest{Source: "CurseForge", ProjectID: "10", VersionID: "20", PlanFingerprint: plan.Fingerprint})
+	rr := httptest.NewRecorder()
+	f.s.adminPluginInstall(rr, pluginTestRequest(http.MethodPost, "/", string(raw)))
+	if rr.Code != http.StatusAccepted {
+		t.Fatal(rr.Code, rr.Body.String())
+	}
+	assertCurseForgeInstallOwnership(t, f, *id, true)
+	for name, want := range map[string][]byte{"root.jar": root, "dependency.jar": dependency} {
+		got, err := os.ReadFile(filepath.Join(f.data, "mods", name))
+		if err != nil || !bytes.Equal(got, want) {
+			t.Fatal("installed JAR differs from authoritative bytes", name, err)
+		}
+	}
+}
+
+func TestCurseForgeRestrictedForgeCDNFallbacks(t *testing.T) {
+	root := restrictedFabricJar(t, "rootmod", "*")
+	wrongHash := slices.Clone(root)
+	wrongHash[0] ^= 1
+	for _, tc := range []struct {
+		name   string
+		bytes  []byte
+		status int
+	}{
+		{"size mismatch", root[:len(root)-1], 0},
+		{"SHA1 mismatch", wrongHash, 0},
+		{"forbidden", nil, http.StatusForbidden},
+		{"not found", nil, http.StatusNotFound},
+		{"unavailable", nil, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, _ := restrictedCurseForgeFixture(t, root, nil, true)
+			serveRestrictedForgeCDN(t, tc.bytes, nil, tc.status)
+			server := pluginContentContext("fabric")
+			server.InstanceID = "jv-a1b2c3"
+			server.MinecraftVersion = "1.21.8"
+			plan, err := resolveProviderPluginInstallPlan(context.Background(), server, f.data, "CurseForge", "10", "20")
+			if err != nil || !plan.InstallAvailable || len(plan.Artifacts) != 1 {
+				t.Fatal(plan, err)
+			}
+			a := plan.Artifacts[0]
+			if a.UploadRequired || a.AlternateSHA512 == "" || a.Source != "CurseForge" || a.ProjectID != "10" || a.VersionID != "20" || a.VersionNumber != "1" {
+				t.Fatal("CDN failure did not select the exact alternate with CurseForge ownership", a)
+			}
+		})
+	}
+}
+
+func TestCurseForgeRestrictedAlternateMustProvideExactBytes(t *testing.T) {
+	root := restrictedFabricJar(t, "rootmod", "*")
+	f, _ := restrictedCurseForgeFixture(t, root, nil, true)
+	base := pluginDownloadClient.Transport
+	pluginDownloadClient.Transport = pluginTestTransport(func(r *http.Request) (*http.Response, error) {
+		response, err := base.RoundTrip(r)
+		if err == nil && r.URL.Host == "cdn.modrinth.com" {
+			response.Body.Close()
+			wrong := slices.Clone(root)
+			wrong[0] ^= 1
+			response.Body = io.NopCloser(bytes.NewReader(wrong))
+		}
+		return response, err
+	})
+	plan := reviewRestrictedCurseForge(t, f)
+	if len(plan.Artifacts) != 1 || !plan.Artifacts[0].UploadRequired {
+		t.Fatal("alternate metadata alone bypassed the exact upload requirement", plan)
+	}
+}
+
+func TestCurseForgeRestrictedFallbackPreservesProviderFailure(t *testing.T) {
+	f, _ := restrictedCurseForgeFixture(t, restrictedFabricJar(t, "rootmod", "*"), nil, false)
+	pluginCatalogClient.Transport = pluginTestTransport(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusTooManyRequests, Body: http.NoBody}, nil
+	})
+	rr := httptest.NewRecorder()
+	f.s.adminPluginInstallPlan(rr, pluginTestRequest(http.MethodPost, "/", `{"source":"CurseForge","project_id":"10","version_id":"20"}`))
+	if rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), "Modrinth exact artifact lookup returned HTTP 429") {
+		t.Fatal("provider failure was hidden by the upload fallback", rr.Code, rr.Body.String())
+	}
+	assertNoCurseForgeInstallMutation(t, f)
+}
+
+func TestCurseForgeRestrictedForgeCDNRejectsInvalidExactJAR(t *testing.T) {
+	for name, raw := range map[string][]byte{
+		"malformed":    []byte("not a JAR"),
+		"wrong loader": resetModJar(t, "forge"),
+		"client only":  restrictedFabricJar(t, "rootmod", "client"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, _ := restrictedCurseForgeFixture(t, raw, nil, false)
+			serveRestrictedForgeCDN(t, raw, nil, http.StatusNotFound)
+			rr := httptest.NewRecorder()
+			f.s.adminPluginInstallPlan(rr, pluginTestRequest(http.MethodPost, "/", `{"source":"CurseForge","project_id":"10","version_id":"20"}`))
+			var plan pluginInstallPlan
+			if rr.Code != http.StatusConflict && (rr.Code != http.StatusOK || json.Unmarshal(rr.Body.Bytes(), &plan) != nil || plan.InstallAvailable) {
+				t.Fatal("invalid exact bytes passed Review", rr.Code, rr.Body.String())
+			}
+			assertNoCurseForgeInstallMutation(t, f)
+		})
+	}
+}
+
+func TestCurseForgeRestrictedForgeCDNRequiresUploadOnlyForMissingDependency(t *testing.T) {
+	root := restrictedFabricJar(t, "rootmod", "*")
+	dependency := restrictedFabricJar(t, "depmod", "*")
+	f, _ := restrictedCurseForgeFixture(t, root, dependency, false)
+	serveRestrictedForgeCDN(t, root, nil, http.StatusNotFound)
+	plan := reviewRestrictedCurseForge(t, f)
+	if len(plan.Artifacts) != 2 || plan.Artifacts[0].UploadRequired || !plan.Artifacts[1].UploadRequired {
+		t.Fatal("only the missing dependency should require upload", plan)
+	}
+	id := runCurseForgeWorkerSynchronously(t)
+	part := reviewedJarPart{"jar_11_21", "dependency.jar", dependency}
+	if rr := applyRestrictedCurseForge(t, f, plan.Fingerprint, false, false, part); rr.Code != http.StatusAccepted {
+		t.Fatal(rr.Code, rr.Body.String())
+	}
+	assertCurseForgeInstallOwnership(t, f, *id, true)
+}
+
 func TestCurseForgeApplyRequiresExactUploadsForRootAndDependency(t *testing.T) {
 	rootJar := restrictedFabricJar(t, "rootmod", "*")
 	dependencyJar := restrictedFabricJar(t, "depmod", "*")
@@ -704,6 +919,9 @@ func TestCurseForgeRestrictedPluginCanOpenReview(t *testing.T) {
 		}
 	})
 	lookups := 0
+	pluginDownloadClient.Transport = pluginTestTransport(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 404, Body: http.NoBody}, nil
+	})
 	pluginCatalogClient.Transport = pluginTestTransport(func(*http.Request) (*http.Response, error) {
 		lookups++
 		return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader(""))}, nil

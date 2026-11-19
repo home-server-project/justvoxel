@@ -8,10 +8,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -276,11 +278,30 @@ func safeCurseForgeArtifactURL(raw string) bool {
 	// Split the escaped path first so encoded structural segments and separators
 	// cannot change the expected CDN layout. Only the filename may be escaped.
 	parts := strings.Split(u.EscapedPath(), "/")
-	if len(parts) != 5 || parts[0] != "" || parts[1] != "files" || !positiveCurseForgeID(parts[2]) || !positiveCurseForgeID(parts[3]) {
+	if len(parts) != 5 || parts[0] != "" || parts[1] != "files" {
+		return false
+	}
+	// Accept the canonical split file ID, including zero-padded suffixes,
+	// as well as the positive numeric segments in existing official URLs.
+	minor, err := strconv.ParseUint(parts[3], 10, 16)
+	padded := err == nil && len(parts[3]) == 3
+	if parts[2] == "0" {
+		if !padded || minor == 0 {
+			return false
+		}
+	} else if !positiveCurseForgeID(parts[2]) || (!padded && !positiveCurseForgeID(parts[3])) {
 		return false
 	}
 	filename, err := url.PathUnescape(parts[4])
 	return err == nil && safePluginFilename(filename)
+}
+
+func curseForgeCDNCandidate(fileID int64, filename string) (string, bool) {
+	if fileID <= 0 || !safePluginFilename(filename) {
+		return "", false
+	}
+	raw := fmt.Sprintf("https://edge.forgecdn.net/files/%d/%03d/%s", fileID/1000, fileID%1000, url.PathEscape(filename))
+	return raw, safeCurseForgeArtifactURL(raw)
 }
 
 // Current operational avatar allowlist, independent of artifact download URLs.
@@ -413,18 +434,60 @@ func curseForgeArtifact(ctx context.Context, f curseForgeFile, project string, s
 		}
 		sum := sha256.Sum256(evidence)
 		a.CurseForgeFileEvidence = hex.EncodeToString(sum[:])
-		if alternate := exactCurseForgeModrinthVersion(ctx, a, server); alternate != nil {
-			a.URL, a.AlternateSHA512 = alternate.Files[0].URL, alternate.Files[0].Hashes.SHA512
-		} else {
-			a.UploadRequired = true
-			return a, nil
-		}
+		return a, nil
 	}
 	if !validPluginDownloadMetadata(a) {
 		return a, errors.New("CurseForge official artifact URL is unsafe")
 	}
 	return a, nil
 }
+
+// Select a restricted file's byte source before exposing upload requirements.
+// The usual Review and Apply preflight still validate the selected JAR and graph.
+func resolveRestrictedCurseForgeDownload(ctx context.Context, a *pluginInstallArtifact, server pluginServerContext) error {
+	directory, err := os.MkdirTemp("", "justvoxel-curseforge-review-")
+	if err != nil {
+		return errors.New("Private artifact staging unavailable")
+	}
+	defer os.RemoveAll(directory)
+	probe := func() (bool, error) {
+		_, err := downloadVerifiedPluginArtifact(ctx, *a, directory)
+		if err == nil {
+			return true, nil
+		}
+		var diagnostic *pluginProviderDiagnosticError
+		if ctx.Err() != nil || !errors.As(err, &diagnostic) || !diagnostic.downloadUnavailable {
+			return false, err
+		}
+		if err := os.Remove(filepath.Join(directory, a.Filename)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return false, errors.New("Private artifact staging could not be cleared")
+		}
+		return false, nil
+	}
+	id, _ := strconv.ParseInt(a.VersionID, 10, 64) // already validated exact file ID
+	candidate, ok := curseForgeCDNCandidate(id, a.Filename)
+	if !ok {
+		return errors.New("CurseForge file evidence could not produce a safe ForgeCDN URL")
+	}
+	a.URL = candidate
+	if verified, err := probe(); verified || err != nil {
+		return err
+	}
+	a.URL = ""
+	alternate, err := exactCurseForgeModrinthVersion(ctx, *a, server)
+	if err != nil {
+		return err
+	}
+	if alternate != nil {
+		a.URL, a.AlternateSHA512 = alternate.Files[0].URL, alternate.Files[0].Hashes.SHA512
+		if verified, err := probe(); verified || err != nil {
+			return err
+		}
+	}
+	a.URL, a.AlternateSHA512, a.UploadRequired = "", "", true
+	return nil
+}
+
 func exactCurseForgeProject(ctx context.Context, id string, scope curseForgeContext) (curseForgeProject, error) {
 	var response struct {
 		Data curseForgeProject `json:"data"`
@@ -474,16 +537,23 @@ func curseForgeDiscoverServerCapable(f curseForgeFile, server pluginServerContex
 
 // Exact alternate identity evidence only. This does not switch the install plan,
 // dependency resolver or ownership manifest away from CurseForge.
-func exactCurseForgeModrinthVersion(ctx context.Context, a pluginInstallArtifact, server pluginServerContext) *pluginCatalogVersion {
+func exactCurseForgeModrinthVersion(ctx context.Context, a pluginInstallArtifact, server pluginServerContext) (*pluginCatalogVersion, error) {
 	if a.Source != "CurseForge" || !positiveCurseForgeID(a.ProjectID) || !positiveCurseForgeID(a.VersionID) || !server.Supported || !safePluginFilename(a.Filename) || a.Size <= 0 || a.Size > pluginMaxJar || !curseForgeSHA1.MatchString(a.SHA1) {
-		return nil
+		return nil, nil
 	}
 	var v pluginCatalogVersion
 	if err := modrinthPluginJSON(ctx, "/version_file/"+a.SHA1, url.Values{"algorithm": {"sha1"}}, &v); err != nil {
-		return nil
+		var status modrinthCatalogHTTPError
+		if errors.As(err, &status) {
+			if int(status) == http.StatusNotFound {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("Modrinth exact artifact lookup returned HTTP %d", status)
+		}
+		return nil, errors.New("Modrinth exact artifact lookup is unavailable")
 	}
 	if !modrinthPluginID.MatchString(v.ProjectID) || !modrinthPluginID.MatchString(v.ID) || v.Type != "release" || !pluginVersionCompatible(v, server) || !modrinthServerEnvironment(v.Environment) {
-		return nil
+		return nil, nil
 	}
 	for _, f := range v.Files {
 		if f.Hashes.SHA1 != a.SHA1 || f.Size != a.Size {
@@ -493,11 +563,11 @@ func exactCurseForgeModrinthVersion(ctx context.Context, a pluginInstallArtifact
 			u, _ := url.Parse(f.URL)
 			if !u.ForceQuery && path.Clean(u.Path) == u.Path && path.Base(u.Path) == f.Filename && !strings.ContainsAny(u.Path, "\\\x00\r\n") && !strings.Contains(strings.ToLower(u.EscapedPath()), "%2f") {
 				v.Files = []pluginArtifactFile{f}
-				return &v
+				return &v, nil
 			}
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 func selectCurseForgeFile(ctx context.Context, project string, server pluginServerContext, compatible, release, discover bool) (*curseForgeFile, error) {
@@ -839,7 +909,13 @@ func resolveCurseForgeInstallPlan(ctx context.Context, server pluginServerContex
 	}
 	sort.Slice(plan.Artifacts, func(i, j int) bool { return plan.Artifacts[i].ProjectID < plan.Artifacts[j].ProjectID })
 	for i := range plan.Artifacts {
-		sort.Strings(plan.Artifacts[i].RequiredBy)
+		a := &plan.Artifacts[i]
+		sort.Strings(a.RequiredBy)
+		if a.Satisfied == "" && a.CurseForgeFileEvidence != "" {
+			if err := resolveRestrictedCurseForgeDownload(ctx, a, server); err != nil {
+				return plan, err
+			}
+		}
 	}
 	plan.Fingerprint = fingerprintPluginPlan(plan)
 	return plan, nil
