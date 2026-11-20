@@ -185,6 +185,11 @@ func TestTwoFactorManageDialogAndLocaleContract(t *testing.T) {
 	if strings.Contains(dialog, "destructive-confirm") || strings.Contains(dialog, "localStorage") {
 		t.Error("two-factor dialog uses a destructive slider or persistent browser storage")
 	}
+	css := correctionSource(t, "static/app.css")
+	if !strings.Contains(css, `.two-factor-fields{text-align:right}`) ||
+		!strings.Contains(dialog, `fields.append(copy, status)`) || !strings.Contains(dialog, `fields.appendChild(toggle)`) {
+		t.Error("two-factor setup key and code toggle buttons must use the right-aligned field container")
+	}
 	if !strings.Contains(account, `user.two_factor_source === "administrator"`) || !strings.Contains(account, "if (!managed)") {
 		t.Error("administrator-managed account exposes self-disable")
 	}

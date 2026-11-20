@@ -1439,6 +1439,8 @@ input[type=checkbox].destructive-confirm-toggle::before{content:none}
 .system-user-dialog form>label{margin:var(--jv-space-sm) 0}
 .system-user-dialog .system-action-dialog-title>span:last-child{overflow-wrap:anywhere}
 :where(.system-user-dialog) .two-factor-fields>label{margin:var(--jv-space-sm) 0}
+:where(.system-user-dialog) .two-factor-fields{text-align:right}
+:where(.system-user-dialog) .two-factor-fields>:is(label,p){text-align:start}
 :where(.system-user-dialog) .two-factor-qr{display:block;width:min(216px,100%);height:auto;margin:var(--jv-space-sm) auto}
 :where(.system-user-dialog) .two-factor-recovery-codes{display:block;width:100%;font-family:monospace;resize:none}
 @media(max-width:700px){
@@ -1520,6 +1522,12 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 .system-security-status{display:inline-flex;flex:none;align-self:flex-start;width:fit-content;max-width:100%;padding:.35rem .55rem;margin:.1rem 0 .6rem}
 .system-security-form{display:flex;flex-direction:column;flex:1;align-items:stretch;width:100%;max-width:380px;gap:.65rem}
 .system-security-form button[type=submit]{align-self:flex-end;justify-self:end;max-width:100%;margin-top:auto;min-height:36px;padding:.5rem .85rem}
+@media(width>600px){
+  /* Both panes size the same grid row so switching tabs keeps the dialog height. */
+  .system-security-view>.system-security-pane{grid-area:1/1}
+  .system-security-view>.notice~.system-security-pane{grid-row:2}
+  .system-security-view>.system-security-pane[hidden]{display:flex!important;visibility:hidden}
+}
 @media(max-width:600px){.system-security-view .system-security-pane{min-height:0}.system-security-heading .system-security-switcher{margin-left:0}.system-security-form{flex:none}.system-security-form button[type=submit]{margin-top:.2rem}}
 .system-workspace-content .date-time-panel{width:min(520px,100%);max-width:520px;margin-inline:auto;padding:.8rem}
 .date-time-panel .system-action-dialog-content{padding:0;gap:.4rem}

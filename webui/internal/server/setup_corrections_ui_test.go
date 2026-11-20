@@ -490,6 +490,9 @@ func TestApprovedSecurityVisualCleanupContract(t *testing.T) {
 		`.system-security-pane[hidden]{display:none!important}`,
 		`.system-security-form{display:flex;flex-direction:column;flex:1;align-items:stretch;width:100%;max-width:380px;gap:.65rem}`,
 		`.system-security-form button[type=submit]{align-self:flex-end;justify-self:end;max-width:100%;margin-top:auto;`,
+		`.system-security-view>.system-security-pane{grid-area:1/1}`,
+		`.system-security-view>.notice~.system-security-pane{grid-row:2}`,
+		`.system-security-view>.system-security-pane[hidden]{display:flex!important;visibility:hidden}`,
 		`@media(max-width:600px){.system-security-view .system-security-pane{min-height:0}.system-security-heading .system-security-switcher{margin-left:0}.system-security-form{flex:none}.system-security-form button[type=submit]{margin-top:.2rem}}`,
 	} {
 		if !strings.Contains(css, want) {
