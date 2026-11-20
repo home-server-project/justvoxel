@@ -24,7 +24,7 @@ about_line="$(grep -n 'data-system-tab="about"' "${header}" | head -n1 | cut -d:
     exit 1
 }
 
-grep -Fq 'const administratorTabs = new Set(["health", "users", "security", "logs", "date-time", "reset"]);' "${script}"
+grep -Fq 'const administratorTabs = new Set(["health", "logs", "date-time", "reset"]);' "${script}"
 grep -Fq 'currentTab === "reset"' "${script}"
 grep -Fq '/api/system/workspace/reset/minecraft/plan' "${script}"
 grep -Fq '/api/system/workspace/reset/factory/plan' "${script}"
