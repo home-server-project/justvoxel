@@ -605,6 +605,13 @@ paper_fork_version_available() {
 java_server_version_available() {
     local software="$1" version="$2" loader="${3:-}" url coordinate prefix patch digest java_class=65
     [[ ${version} =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || return 1
+    case "${software}" in
+        paper|purpur|vanilla)
+            [[ -z ${loader} ]] || return 1
+            MINECRAFT_SERVER_TYPE="${software}" server_version_available "${version}"
+            return
+            ;;
+    esac
     # Loader metadata can describe profiles independently of Mojang releases.
     # Require the exact game release as well as the exact implementation pair.
     curl --connect-timeout 3 --max-time 8 -fsSL https://piston-meta.mojang.com/mc/game/version_manifest_v2.json | jq -e --arg version "${version}" '
@@ -665,7 +672,7 @@ java_server_version_available() {
 resolve_setup_loader() {
     local software="$1" game="$2" metadata prefix
     case "${software}" in
-        spigot|pufferfish|leaf) return 0 ;;
+        paper|purpur|vanilla|spigot|pufferfish|leaf) return 0 ;;
         fabric|quilt)
             local api=https://meta.fabricmc.net/v2
             [[ ${software} != quilt ]] || api=https://meta.quiltmc.org/v3

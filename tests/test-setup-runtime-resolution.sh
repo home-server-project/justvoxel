@@ -8,7 +8,15 @@ curl() {
     [[ ${offline:-no} != yes ]] || return 22
     case "${*: -1}" in
         */version_manifest_v2.json)
-            printf '%s' '{"latest":{"release":"26.3"},"versions":[{"id":"26.4-rc-1","type":"snapshot"},{"id":"26.3","type":"release"},{"id":"1.21.8","type":"release"}]}' ;;
+            printf '%s' '{"latest":{"release":"26.3"},"versions":[{"id":"26.4","type":"snapshot"},{"id":"26.4-rc-1","type":"snapshot"},{"id":"26.3","type":"release"},{"id":"1.21.8","type":"release"}]}' ;;
+        https://fill.papermc.io/v3/projects/paper/versions/26.3/builds)
+            if [[ ${missing_build:-no} == yes ]]; then
+                printf '%s' '[{"channel":"STABLE","downloads":{}}]'
+            else
+                printf '%s' '[{"channel":"STABLE","downloads":{"server:default":{"url":"https://example.invalid/paper-26.3.jar"}}}]'
+            fi ;;
+        https://api.purpurmc.org/v2/purpur)
+            printf '%s' '{"metadata":{"current":"26.3"},"versions":["26.3"]}' ;;
         https://meta.fabricmc.net/v2/versions/loader/26.3)
             printf '%s' '[{"loader":{"version":"0.99.0","stable":false}},{"loader":{"version":"0.20.0"}},{"loader":{"version":"0.19.5","stable":true}}]' ;;
         https://meta.quiltmc.org/v3/versions/loader/1.21.8)
@@ -33,6 +41,21 @@ curl() {
         *) return 22 ;; # Never delegate unlisted URLs to the network.
     esac
 }
+for software in paper purpur vanilla; do
+    resolved="$(resolve_setup_java_runtime "${software}" pinned 26.3)"
+    jq -e '.game == "26.3" and .loader == "" and .image == "java25"' <<< "${resolved}" >/dev/null
+    reject java_server_version_available "${software}" 26.3 0.19.5
+    reject resolve_setup_java_runtime "${software}" pinned 26.4
+    offline=yes
+    reject resolve_setup_java_runtime "${software}" pinned 26.3
+    offline=no
+done
+reject resolve_setup_java_runtime paper pinned 1.21.8
+reject resolve_setup_java_runtime purpur pinned 1.21.8
+missing_build=yes
+reject resolve_setup_java_runtime paper pinned 26.3
+missing_build=no
+
 for software in spigot fabric quilt forge neoforge; do
     expected_game=1.21.8
     case "${software}" in

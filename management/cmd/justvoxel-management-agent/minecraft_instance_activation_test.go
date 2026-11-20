@@ -933,6 +933,99 @@ func TestInstanceRuntimeLocks(t *testing.T) {
 	}
 }
 
+func TestInstanceCreateTrackedSoftwareValidation(t *testing.T) {
+	for _, failFirst := range []bool{false, true} {
+		t.Run("fail-first="+strconv.FormatBool(failFirst), func(t *testing.T) {
+			f := newInstanceActivationFixture(t)
+			c := f.configs[0]
+			c.Software, c.VersionPolicy, c.Version, c.ImageTag = "leaf", "pinned", "26.3", "java25"
+			c.StartOnBoot = false
+			for c.JavaPort == f.configs[0].JavaPort || c.JavaPort == f.configs[1].JavaPort {
+				c.JavaPort = instanceTestPort(t)
+			}
+			validations := 0
+			f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+				if command == instanceRuntimeHelper && len(args) > 0 && args[0] == "version" {
+					validations++
+					want := []string{"version", "leaf", "26.3", c.PaperChannel, ""}
+					if !reflect.DeepEqual(args, want) {
+						t.Fatalf("unexpected software validation: %v", args)
+					}
+					if failFirst || validations > 1 {
+						return nil, errors.New("upstream unavailable")
+					}
+				}
+				return f.command(ctx, command, args...)
+			}
+			ctx := context.Background()
+			var tracked string
+			id, err := f.backend.createTracked(ctx, c, "New Leaf", f.snapshot, func(record instanceRuntimeRecord) error {
+				if validations != 1 {
+					t.Fatalf("tracked before exact software validation: %d calls", validations)
+				}
+				tracked = record.Runtime.ID
+				return nil
+			})
+			if validations != 1 {
+				t.Fatalf("create made %d software checks, want 1", validations)
+			}
+			if failFirst {
+				if err == nil || id != "" || tracked != "" {
+					t.Fatalf("failed validation reached tracking or creation: %q %q %v", id, tracked, err)
+				}
+				return
+			}
+			if err != nil || id == "" || id != tracked {
+				t.Fatalf("validated create did not activate its tracked instance: %q %q %v", id, tracked, err)
+			}
+			previous, err := f.backend.readRecord(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			records, err := f.backend.records()
+			if err != nil {
+				t.Fatal(err)
+			}
+			next := previous
+			next.Runtime.MOTD = "Updated Leaf"
+			err = f.backend.apply(ctx, previous, instanceReplaceRecord(records, next), f.snapshot)
+			if validations != 2 || err == nil || err.Error() != "Selected Minecraft software/version could not be verified." {
+				t.Fatalf("later configuration did not revalidate software: %d calls, %v", validations, err)
+			}
+		})
+	}
+}
+
+func TestInstanceCreateSoftwareProofRejectsChangedRuntime(t *testing.T) {
+	f := newInstanceActivationFixture(t)
+	previous, err := f.backend.readRecord(f.configs[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, err := f.backend.records()
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := previous
+	next.Runtime.Version = "1.21.5"
+	validations := 0
+	f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+		if command == instanceRuntimeHelper && len(args) > 0 && args[0] == "version" {
+			validations++
+			if args[2] != next.Runtime.Version {
+				t.Fatalf("checked the wrong version: %v", args)
+			}
+			return nil, errors.New("upstream unavailable")
+		}
+		return f.command(ctx, command, args...)
+	}
+	ctx := context.WithValue(context.Background(), instanceCreateSoftwareProofKey{}, previous.Runtime)
+	err = f.backend.apply(ctx, previous, instanceReplaceRecord(records, next), f.snapshot)
+	if validations != 1 || err == nil || err.Error() != "Selected Minecraft software/version could not be verified." {
+		t.Fatalf("changed runtime reused create validation: %d calls, %v", validations, err)
+	}
+}
+
 func TestInstanceCreationRegistersAndActivatesTwoNewWorlds(t *testing.T) {
 	f := newInstanceActivationFixture(t)
 	f.snapshot.TotalMemoryMiB = 16384

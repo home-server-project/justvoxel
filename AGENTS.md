@@ -43,6 +43,19 @@ Prefer simple, safe, stable, secure solutions. Do not add machinery merely becau
 
 ## Protected product invariants
 
+### CurseForge distribution permission is protected
+
+**allowModDistribution IS A PROTECTED PRODUCT INVARIANT. DO NOT CHANGE IT WITHOUT EXPLICIT HUMAN APPROVAL FOR THAT EXACT CHANGE.**
+
+Do not change, bypass, weaken, default, synthesize, ignore, invert, or reinterpret
+CurseForge allowModDistribution handling as collateral work.
+
+Approval for Plugins, Mods, Switch, Migration, CurseForge integration, refactors,
+tests, or adjacent work does not authorize changing this behavior.
+
+If an approved task appears to require changing allowModDistribution, STOP and
+request explicit human approval before touching it.
+
 ### Known-working behavior
 
 **WORKING FEATURE = DO NOT TOUCH IT.**

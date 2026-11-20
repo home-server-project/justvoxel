@@ -121,8 +121,11 @@ selected="$(resolve_setup_java_runtime leaf recommended '')"
 jq -e '.game == "26.3" and (.reason | contains("Experimental"))' <<< "${selected}" >/dev/null
 specific="$(resolve_setup_java_runtime leaf pinned 1.21.11)"
 jq -e '.game == "1.21.11" and .reason == ""' <<< "${specific}" >/dev/null
+specific="$(resolve_setup_java_runtime leaf pinned 26.3)"
+jq -e '.game == "26.3" and .loader == "" and (.reason | contains("Experimental"))' <<< "${specific}" >/dev/null
 specific="$(resolve_setup_java_runtime pufferfish pinned 1.21.10)"
 jq -e '.game == "1.21.10"' <<< "${specific}" >/dev/null
+reject java_server_version_available pufferfish 26.3
 reject resolve_setup_java_runtime pufferfish pinned 26.3
 # A single usable identity, official release, safe path and positive integer
 # build are mandatory even when another archived JAR looks plausible.

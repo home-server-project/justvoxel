@@ -5,6 +5,7 @@ const { test } = require('node:test');
 const vm = require('node:vm');
 
 const source = readFileSync(path.join(__dirname, '../webui/internal/server/static/server-migration-switch.js'), 'utf8');
+const english = JSON.parse(readFileSync(path.join(__dirname, '../webui/internal/server/locales/en.json'), 'utf8'));
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const snapshot = (state, target = 'leaf') => ({
   target, operation: { operation_id: 'switch-1', state, status: state },
@@ -56,7 +57,7 @@ function fixture(operation, readPlan = plan, apply) {
     '[data-switch-review]': review, '[data-switch-csrf]': { value: 'csrf' },
   })[selector];
   const context = {
-    window: {}, URLSearchParams, justVoxelSelectionGeneration: generation, jvT: key => key,
+    window: {}, URLSearchParams, justVoxelSelectionGeneration: generation, jvT: key => english[key] ?? key,
     document: { createElement: tag => new Element(tag) },
     setTimeout: callback => timers.push(callback),
     fetch: async (request, options) => {
@@ -67,7 +68,7 @@ function fixture(operation, readPlan = plan, apply) {
         result = await readPlan(url.searchParams.get('target'));
       } else if (action === 'operation') {
         operations.push(url.searchParams.get('operation_id'));
-        result = await operation();
+        result = await operation(url.searchParams.get('operation_id'));
       } else if (action === 'recover') {
         assert.equal(options.body.get('operation_id'), 'switch-1');
         result = snapshot('resolved');
@@ -82,7 +83,7 @@ function fixture(operation, readPlan = plan, apply) {
   vm.runInNewContext(source, context);
   context.window.JustVoxelServerMigrationSwitch.init(root);
   const selected = () => cards.filter(card => card.classList.contains('is-selected')).map(card => card.dataset.switchTarget);
-  return { cards, root, review, progress, timers, operations, generation, selected };
+  return { cards, root, state, review, progress, timers, operations, generation, selected };
 }
 
 test('durable Switch target stays selected through polling and a terminal reload', async () => {
@@ -102,12 +103,26 @@ test('durable Switch target stays selected through polling and a terminal reload
   assert.deepEqual(f.operations, ['', 'switch-1', 'switch-1', 'switch-1', 'switch-1']);
 });
 
-test('initial load selects a durable terminal Switch and recovery keeps the same card', async () => {
-  for (let state of ['needs_attention', 'failed', 'resolved', 'succeeded']) {
-    const f = fixture(() => snapshot(state));
+test('fresh open has no selection or progress for terminal history', async () => {
+  for (const state of ['resolved', 'succeeded']) {
+    const f = fixture(id => id === 'switch-1' ? snapshot(state) : { operation: null });
+    await flush();
+    assert.deepEqual(f.operations, ['']);
+    assert.deepEqual(f.selected(), []);
+    assert.deepEqual(f.progress.children, []);
+  }
+});
+
+test('fresh open reconnects to unresolved Switch and recovery keeps the same card', async () => {
+  for (let state of ['needs_attention', 'failed']) {
+    const f = fixture(id => state === 'resolved' && !id ? { operation: null } : snapshot(state));
     await flush();
     assert.deepEqual(f.selected(), ['leaf']);
     assert.equal(f.review.hidden, true);
+    assert.equal(f.progress.children[0].textContent, state);
+    f.cards[2].events.click();
+    assert.deepEqual(f.selected(), ['leaf']);
+    assert.equal(f.progress.children[0].textContent, state);
     if (state === 'needs_attention') {
       const consent = f.progress.children[1].children[1];
       consent.checked = true;
@@ -116,20 +131,27 @@ test('initial load selects a durable terminal Switch and recovery keeps the same
       await f.progress.children[2].events.click();
       assert.deepEqual(f.operations, ['', 'switch-1']);
       assert.deepEqual(f.selected(), ['leaf']);
+      assert.equal(f.progress.children[0].textContent, 'resolved');
       assert.equal(f.review.hidden, true);
     }
   }
 });
 
-test('click selects immediately and late review responses cannot restore the earlier selection', async () => {
+test('a new card clears terminal progress immediately and stale reviews cannot restore earlier selections', async () => {
   const pending = new Map();
   let deferPlans = false;
-  const f = fixture(() => snapshot('resolved'), target =>
+  const f = fixture(id => snapshot(id ? 'resolved' : 'running'), target =>
     deferPlans ? new Promise(resolve => pending.set(target, resolve)) : plan(target));
   await flush();
+  await f.timers.shift()();
+  assert.deepEqual(f.selected(), ['leaf']);
+  assert.equal(f.progress.children[0].textContent, 'resolved');
   deferPlans = true;
   f.cards[2].events.click();
   assert.deepEqual(f.selected(), ['fabric']);
+  assert.deepEqual(f.progress.children, []);
+  assert.equal(f.review.hidden, true);
+  assert.equal(f.state.textContent, 'Checking the selected server…');
   f.cards[1].events.click();
   assert.deepEqual(f.selected(), ['leaf']);
   pending.get('leaf')(plan('leaf'));
@@ -140,11 +162,12 @@ test('click selects immediately and late review responses cannot restore the ear
   await flush();
   assert.deepEqual(f.selected(), ['leaf']);
   assert.deepEqual(f.review.children, review);
+  assert.deepEqual(f.progress.children, []);
 });
 
-test('a rejected Apply re-enables the catalogue when reconnect finds only an earlier Switch', async () => {
+test('a rejected Apply re-enables the catalogue when there is no unresolved Switch', async () => {
   let applied = false;
-  const f = fixture(() => snapshot('resolved'), plan, body => {
+  const f = fixture(() => ({ operation: null }), plan, body => {
     applied = true;
     assert.equal(body.get('target'), 'fabric');
     return { ok: false, json: async () => ({ error: 'Apply rejected' }) };
@@ -160,7 +183,39 @@ test('a rejected Apply re-enables the catalogue when reconnect finds only an ear
   assert.equal(applied, true);
   assert.equal(f.cards[2].disabled, false);
   assert.equal(f.review.hidden, true);
-  assert.deepEqual(f.selected(), ['leaf']);
+  assert.deepEqual(f.selected(), []);
+  assert.deepEqual(f.progress.children, []);
+});
+
+test('a new Apply follows its own operation after a terminal result', async () => {
+  let nextState = 'validating';
+  const nextOperation = () => ({
+    target: 'fabric', operation: { operation_id: 'switch-2', state: nextState, status: nextState },
+  });
+  const f = fixture(id => {
+    if (!id) return snapshot('running');
+    if (id === 'switch-1') return snapshot('resolved');
+    assert.equal(id, 'switch-2');
+    return nextOperation();
+  }, plan, body => {
+    assert.equal(body.get('target'), 'fabric');
+    return { ok: true, json: async () => nextOperation() };
+  });
+  await flush();
+  await f.timers.shift()();
+  f.cards[2].events.click();
+  await flush();
+  const consent = f.review.children.find(node => node.tag === 'label').children[1];
+  const clone = f.review.children.at(-1).children.at(-1);
+  consent.checked = true;
+  consent.events.change();
+  await clone.events.click();
+  assert.equal(f.progress.children[0].textContent, 'validating');
+  nextState = 'succeeded';
+  await f.timers.shift()();
+  assert.deepEqual(f.operations, ['', 'switch-1', 'switch-1', 'switch-2', 'switch-2', 'switch-2']);
+  assert.deepEqual(f.selected(), ['fabric']);
+  assert.equal(f.progress.children[0].textContent, 'succeeded');
 });
 
 test('operation response from an old workspace generation is ignored', async () => {

@@ -32,6 +32,59 @@ func switchTestOperation(t *testing.T, s *server, sourceID, query string) map[st
 	return result
 }
 
+func TestSwitchOperationReconnectAndExplicitLookup(t *testing.T) {
+	f := newInstanceActivationFixture(t)
+	original := instanceRuntimes
+	instanceRuntimes = f.backend
+	t.Cleanup(func() { instanceRuntimes = original })
+	source, other := f.configs[0].ID, f.configs[1].ID
+	for _, tc := range []struct {
+		states    []operationState
+		reconnect bool
+	}{
+		{[]operationState{operationNeedsAttention, operationResolved}, false},
+		{[]operationState{operationValidating, operationRunning, operationVerifying, operationSucceeded}, false},
+		{[]operationState{operationValidating}, true},
+		{[]operationState{operationValidating, operationRunning}, true},
+		{[]operationState{operationNeedsAttention}, true},
+		{[]operationState{operationFailed}, true},
+	} {
+		state := tc.states[len(tc.states)-1]
+		t.Run(string(state), func(t *testing.T) {
+			s := surfaceTestServer(t, roleAdministrator)
+			s.operations = openTestOperationStore(t)
+			journal, _, err := s.operations.beginMinecraftMaintenance(testMinecraftResetFingerprint, operationTypeMinecraftSwitch, source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, next := range tc.states {
+				if _, err := s.operations.transition(journal.OperationID, next, string(next), "Switch "+string(next)+"."); err != nil {
+					t.Fatal(err)
+				}
+			}
+			assertResult := func(response map[string]any, wantOperation bool) {
+				t.Helper()
+				operation := response["operation"]
+				if !wantOperation {
+					if operation != nil {
+						t.Fatalf("unexpected Switch operation: %v", operation)
+					}
+					return
+				}
+				result, ok := operation.(map[string]any)
+				if !ok || result["operation_id"] != journal.OperationID || result["state"] != string(state) {
+					t.Fatalf("wrong Switch operation: %v", operation)
+				}
+			}
+			query := "?operation_id=" + journal.OperationID
+			assertResult(switchTestOperation(t, s, source, ""), tc.reconnect)
+			assertResult(switchTestOperation(t, s, source, query), true)
+			assertResult(switchTestOperation(t, s, other, ""), false)
+			assertResult(switchTestOperation(t, s, other, query), false)
+		})
+	}
+}
+
 func TestSwitchDiagnosticCategoryAndRecoveryFailure(t *testing.T) {
 	store := openTestOperationStore(t)
 	if !validDiagnosticOperationType(operationTypeMinecraftSwitch) || diagnosticCategoryForOperationType(operationTypeMinecraftSwitch) != "migration" {

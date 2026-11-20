@@ -314,7 +314,7 @@ func TestSwitchCloneFailureNeverReportsSuccess(t *testing.T) {
 		strings.Contains(log, "clone_id=") || strings.Contains(result.Status, "Instance backup storage") {
 		t.Fatal("early failure detail was lost, exposed in status, or attributed to a clone")
 	}
-	response := switchTestOperation(t, s, plan.InstanceID, "")
+	response := switchTestOperation(t, s, plan.InstanceID, "?operation_id="+journal.OperationID)
 	if response["target"] != plan.Target || response["action"] != "clone" || response["version"] != plan.Version {
 		t.Fatal("early failed Switch lost its durable metadata", response)
 	}

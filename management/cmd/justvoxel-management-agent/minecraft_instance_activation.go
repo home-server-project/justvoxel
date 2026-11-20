@@ -492,6 +492,10 @@ func (b *instanceRuntimeBackend) storage(ctx context.Context, action string, rec
 	}
 	return nil
 }
+
+// Only createTracked supplies this proof, for its immediate unpublished apply.
+type instanceCreateSoftwareProofKey struct{}
+
 func (b *instanceRuntimeBackend) validateSoftware(ctx context.Context, c minecraftInstanceRuntimeConfig) error {
 	if c.Software == "bedrock" {
 		if !nativeBedrockValid(c) {
@@ -821,7 +825,10 @@ func (b *instanceRuntimeBackend) applyVersion(ctx context.Context, previous inst
 			}
 		}()
 	}
-	if !bootOnly && !whitelistOnly && !containerOnly {
+	validated, hasCreateProof := ctx.Value(instanceCreateSoftwareProofKey{}).(minecraftInstanceRuntimeConfig)
+	createVerified := hasCreateProof && !maintenance && previous.EnvironmentSHA256 == "" && next.EnvironmentSHA256 == "" &&
+		validated == previous.Runtime && validated == next.Runtime
+	if !bootOnly && !whitelistOnly && !containerOnly && !createVerified {
 		if err = b.validateSoftware(ctx, next.Runtime); err != nil {
 			return err
 		}

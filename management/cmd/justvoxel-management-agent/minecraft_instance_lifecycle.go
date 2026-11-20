@@ -629,6 +629,7 @@ func (b *instanceRuntimeBackend) createTracked(ctx context.Context, c minecraftI
 	if err = b.writeJSON(filepath.Join(dir, "config.json"), next, false); err != nil {
 		return id, err
 	}
+	ctx = context.WithValue(ctx, instanceCreateSoftwareProofKey{}, c)
 	if err = b.apply(ctx, next, candidates, snapshot); err != nil {
 		return id, err
 	}

@@ -480,7 +480,8 @@ conversion automatically. Minecraft Network members must first leave Network
 before standalone conversion can be reviewed.
 
 Switch keeps the attempted software card selected while following an operation
-and when reopening its saved result. Administrators can find Switch progress,
+and showing its result. Opening Switch reconnects to work in progress or an
+operation that requires recovery. Administrators can find Switch progress,
 failure details and recovery results in **System Settings → Logs → Migration**.
 
 Spigot, Vanilla world transformations and mod-loader conversions currently remain

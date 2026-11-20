@@ -637,7 +637,7 @@ func (s *server) minecraftSwitchOperation(w http.ResponseWriter, r *http.Request
 		}
 		j = &found
 	} else {
-		j = s.operations.latestMinecraftSwitch(id)
+		j = s.operations.latestUnresolvedMinecraftSwitch(id)
 	}
 	if j != nil && (j.InstanceID != id || j.OperationType != operationTypeMinecraftSwitch) {
 		j = nil
@@ -656,18 +656,16 @@ func (s *server) minecraftSwitchOperation(w http.ResponseWriter, r *http.Request
 	writeJSON(w, 200, response)
 }
 
-// The maintenance lock is released on completion, but the operation still
-// identifies the attempted target when the workspace is reopened.
-func (s *operationStore) latestMinecraftSwitch(id string) *operationJournal {
+func (s *operationStore) latestUnresolvedMinecraftSwitch(id string) *operationJournal {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if current, ok := s.operations[s.currentMinecraftResetID]; ok && current.InstanceID == id && current.OperationType == operationTypeMinecraftSwitch {
+	if current, ok := s.operations[s.currentMinecraftResetID]; ok && current.InstanceID == id && current.OperationType == operationTypeMinecraftSwitch && operationIsCurrent(current.State) {
 		return &current
 	}
 	var latest *operationJournal
 	var started time.Time
 	for _, j := range s.operations {
-		if j.InstanceID != id || j.OperationType != operationTypeMinecraftSwitch {
+		if j.InstanceID != id || j.OperationType != operationTypeMinecraftSwitch || !operationIsCurrent(j.State) {
 			continue
 		}
 		at, err := time.Parse(time.RFC3339Nano, j.StartedAt)

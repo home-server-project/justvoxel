@@ -98,7 +98,11 @@
         const ticket = ++sequence;
         cards.forEach((node) => node.classList.toggle("is-selected", node.dataset.switchTarget === target));
         review.hidden = true;
-        state.textContent = jvT("ui.3eb2c3b4c279");
+        if (operation && terminal.has(operation.state)) {
+          operation = null;
+          progress.replaceChildren();
+        }
+        state.textContent = jvT("ui.e29d2712155f");
         try {
           // Selection always re-reads authoritative inventory, even if a prior
           // catalogue response had made this card available.
@@ -128,7 +132,6 @@
               consent.addEventListener("change", () => { button.disabled = !allowed || !consent.checked || busy; });
               button.addEventListener("click", async () => {
                 if (!current() || ticket !== sequence || !allowed || !consent.checked || busy || button.disabled) return;
-                const priorOperationID = operation?.operation_id;
                 busy = true; actions.querySelectorAll("button").forEach((item) => { item.disabled = true; }); cards.forEach((item) => { item.disabled = true; });
                 try {
                   const result = await request("apply", { target, action, plan_fingerprint: plan.plan_fingerprint, confirm: "yes" }, true);
@@ -144,7 +147,7 @@
                   try {
                     await reconnect();
                     if (!current() || ticket !== sequence) return;
-                    if (!operation || operation.operation_id === priorOperationID) {
+                    if (!operation) {
                       await load();
                       if (current()) state.textContent = failure.message;
                     } else if (terminal.has(operation.state)) {
