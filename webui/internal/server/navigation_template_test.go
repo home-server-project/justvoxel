@@ -186,7 +186,6 @@ func TestSystemWorkspaceMigrationContract(t *testing.T) {
 		`data-system-tab="health"`,
 		`data-system-tab="history"`,
 		`data-system-tab="users"`,
-		`data-system-tab="security"`,
 		`data-system-tab="about"`,
 		`data-system-tab="ups"`,
 		`data-system-ups-tab`,
@@ -194,6 +193,10 @@ func TestSystemWorkspaceMigrationContract(t *testing.T) {
 		if !strings.Contains(markup, want) {
 			t.Fatalf("System workspace migration contract missing %q", want)
 		}
+	}
+
+	if strings.Contains(markup, `data-system-tab="security"`) {
+		t.Fatal("Security belongs in the Users workspace")
 	}
 
 	script, err := englishPresentationAsset("static/app.js")
@@ -1222,14 +1225,14 @@ func TestCompactUsersAndFiveRowMonitorContract(t *testing.T) {
 	}
 	js, css := string(script), string(styles)
 	start := strings.Index(js, "  const renderUsers =")
-	end := strings.Index(js[start:], "  const renderSecurity =")
+	end := strings.Index(js[start:], "  const openAccountSecurity =")
 	users := js[start : start+end]
-	for _, want := range []string{"system-users-table", "Username", "Role", "Status", "Restart", "Backup", "Actions", "storage-action-menu system-user-menu", "dialog.showModal()", "user.restart_used ?? 0", "user.backup_used ?? 0", "Primary administrator", "minimum_password_len", "restart-allowance/reset", "backup-allowance/reset", `"role", "Save role"`, `"enabled", user.enabled`, `"password", "Change password"`, `"delete", "Delete account", true`, "data-destructive-slider", "data-destructive-toggle", "submit.className = \"danger\""} {
+	for _, want := range []string{"system-users-table", "Username", "Role", "Status", "Restart", "Backup", "Actions", "storage-action-menu system-user-menu", "dialog.showModal()", "user.restart_used ?? 0", "user.backup_used ?? 0", "primary_administrator", "minimum_password_len", "restart-allowance/reset", "backup-allowance/reset", `"role", "Save role"`, `"enabled", user.enabled`, `"password", "Change password"`, `"delete", "Delete account", true`, "data-destructive-slider", "data-destructive-toggle", "submit.className = \"danger\""} {
 		if !strings.Contains(users, want) {
 			t.Fatalf("compact Users contract missing %q", want)
 		}
 	}
-	for _, removed := range []string{`card.className = "user-card"`, `quota.className = "quota-grid"`, "managementRow", "openManagement"} {
+	for _, removed := range []string{`card.className = "user-card"`, `quota.className = "quota-grid"`, "managementRow", "openManagement", "Primary administrator"} {
 		if strings.Contains(users, removed) {
 			t.Fatalf("Users retains expanded card presentation %q", removed)
 		}
@@ -1253,7 +1256,7 @@ func TestUsersManageActionDialogPresentation(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, users, found := strings.Cut(string(script), "  const renderUsers =")
-	dialog, _, ended := strings.Cut(users, "        const addAction =")
+	dialog, _, ended := strings.Cut(users, "      const addAction =")
 	if !found || !ended {
 		t.Fatal("missing Users action dialog builder")
 	}
@@ -1280,7 +1283,7 @@ func TestUsersManageActionDialogPresentation(t *testing.T) {
 		`cancel.className = "secondary";`,
 		`submit.type = "submit";`,
 		`submit.textContent = submitText;`,
-		"if (dangerous) {\n            submit.className = \"danger\";",
+		"if (dangerous) {\n          submit.className = \"danger\";",
 		`actions.append(cancel, submit);`,
 	} {
 		if !strings.Contains(dialog, want) {

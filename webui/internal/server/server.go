@@ -334,6 +334,12 @@ func (a *App) dashboard(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
+	query := r.URL.Query()
+	if query.Get("workspace") == "system" && query.Get("tab") == "security" {
+		query.Set("tab", "users")
+		http.Redirect(w, r, "/?"+query.Encode(), http.StatusSeeOther)
+		return
+	}
 	originalQuery := r.URL.RawQuery
 	selected, ok := a.dashboardBrowserSelection(w, r, session)
 	if !ok {

@@ -4864,14 +4864,13 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   const state = systemWorkspaceDialog.querySelector("[data-system-state]");
   const content = systemWorkspaceDialog.querySelector("[data-system-workspace-content]");
   const tabs = Array.from(systemWorkspaceDialog.querySelectorAll("[data-system-tab]"));
-  const allowedSystemTabs = new Set(["health", "history", "users", "security", "logs", "date-time", "wallpaper", "reset", "about", "ups"]);
-  const administratorTabs = new Set(["health", "users", "security", "logs", "date-time", "reset"]);
+  const allowedSystemTabs = new Set(["health", "history", "users", "logs", "date-time", "wallpaper", "reset", "about", "ups"]);
+  const administratorTabs = new Set(["health", "users", "logs", "date-time", "reset"]);
   const upsTabButton = systemWorkspaceDialog.querySelector("[data-system-ups-tab]");
   const upsCSRF = document.querySelector("[data-system-ups-csrf]");
   const systemWorkspaceCSRF = document.querySelector("[data-system-workspace-csrf]")?.value || "";
   let identity = null;
   let upsAvailable = false;
-  let securityPane = "authentication";
   let currentTab = "health";
   let initialized = false;
   let loadSequence = 0;
@@ -5468,13 +5467,6 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     root.className = "system-users-view";
     if (message) root.appendChild(systemNotice(message));
 
-    const primary = systemPanel(jvT("ui.41d555d7fceb"), payload.primary_administrator || "voxel").panel;
-    const primaryText = document.createElement("p");
-    primaryText.className = "muted compact";
-    primaryText.textContent = jvT("ui.7a55b26e98f0");
-    primary.appendChild(primaryText);
-    root.appendChild(primary);
-
     const create = systemPanel(jvT("ui.ca0b591569ff"), jvT("ui.f06da128c342")).panel;
     const createForm = document.createElement("form");
     createForm.className = "admin-form-grid";
@@ -5503,171 +5495,213 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     create.appendChild(createForm);
     root.appendChild(create);
 
-    const listPanel = systemPanel(jvT("ui.e6d207fbe7a8"), jvT("ui.5583497579f3")).panel;
-    const users = Array.isArray(payload.users) ? payload.users : [];
-    if (!users.length) {
-      const empty = document.createElement("p");
-      empty.className = "muted compact";
-      empty.textContent = jvT("ui.a1b459a55030");
-      listPanel.appendChild(empty);
-    } else {
-      const list = document.createElement("div");
-      list.className = "user-list";
-      const table = document.createElement("table");
-      table.className = "system-users-table";
-      const head = document.createElement("thead");
-      head.innerHTML = `<tr><th scope="col">${jvH("ui.e3b89e9d33f8")}</th><th scope="col">Role</th><th scope="col">${jvH("ui.920e413c7d41")}</th><th scope="col">${jvH("ui.6b983a81e5e8")}</th><th scope="col">${jvH("ui.838557924a5c")}</th><th scope="col">Actions</th></tr>`;
-      const rows = document.createElement("tbody");
-      table.append(head, rows);
-      list.appendChild(table);
-      users.forEach((user, index) => {
-        const row = document.createElement("tr");
-        for (const value of [user.username || jvT("ui.b512d97e7cbf"), user.role === "operator" ? "Operator" : jvT("ui.678bfa6af48b"), user.enabled ? jvT("ui.92c1cdfdf4cb") : jvT("ui.75081b593d15"),
-          `${user.restart_used ?? 0} / ${user.restart_limit ?? 0}`, `${user.backup_used ?? 0} / ${user.backup_limit ?? 0}`]) {
-          const cell = document.createElement("td");
-          cell.textContent = value;
-          row.appendChild(cell);
-        }
+    const listPanel = systemPanel(jvT("ui.e6d207fbe7a8"), jvT("ui.6b0cc904d081")).panel;
+    const primary = { username: payload.primary_administrator || "voxel", enabled: true };
+    const users = [primary, ...(Array.isArray(payload.users) ? payload.users : [])];
+    const list = document.createElement("div");
+    list.className = "user-list";
+    const table = document.createElement("table");
+    table.className = "system-users-table";
+    const head = document.createElement("thead");
+    head.innerHTML = `<tr><th scope="col">${jvH("ui.e3b89e9d33f8")}</th><th scope="col">Role</th><th scope="col">${jvH("ui.920e413c7d41")}</th><th scope="col">${jvH("ui.6b983a81e5e8")}</th><th scope="col">${jvH("ui.838557924a5c")}</th><th scope="col">Actions</th></tr>`;
+    const rows = document.createElement("tbody");
+    table.append(head, rows);
+    list.appendChild(table);
+    users.forEach((user, index) => {
+      const isPrimary = user === primary;
+      const role = isPrimary ? jvT("ui.e7d3e769f3f5") : user.role === "operator" ? "Operator" : jvT("ui.678bfa6af48b");
+      const row = document.createElement("tr");
+      for (const value of [user.username || jvT("ui.b512d97e7cbf"), role, user.enabled ? jvT("ui.92c1cdfdf4cb") : jvT("ui.75081b593d15"),
+        isPrimary ? "-" : `${user.restart_used ?? 0} / ${user.restart_limit ?? 0}`,
+        isPrimary ? "-" : `${user.backup_used ?? 0} / ${user.backup_limit ?? 0}`]) {
         const cell = document.createElement("td");
-        const menu = document.createElement("details");
-        menu.className = "storage-action-menu system-user-menu";
-        const trigger = document.createElement("summary");
-        trigger.textContent = jvT("ui.5a23444828db");
-        trigger.setAttribute("aria-label", jvT("ui.d1f3b7c8d7b5") + user.username);
-        const choices = document.createElement("div");
-        choices.className = "storage-action-menu-popover";
-        // Use the browser top layer so the compact scrolling table cannot clip the menu.
-        choices.setAttribute("popover", "auto");
-        menu.addEventListener("toggle", () => {
-          if (!menu.isConnected) return;
-          if (menu.open) {
-            const rect = trigger.getBoundingClientRect();
-            choices.style.right = Math.max(8, window.innerWidth - rect.right) + "px";
-            choices.style.top = Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - 300)) + "px";
-            choices.showPopover();
-          } else if (choices.matches(":popover-open")) choices.hidePopover();
-        });
-        choices.addEventListener("toggle", (event) => {
-          if (event.newState === "closed") {
-            menu.open = false;
-            if (choices.contains(document.activeElement)) trigger.focus();
-          }
-        });
-        const openAction = (title, fields, action, submitText, dangerous = false) => {
-          menu.open = false;
-          if (choices.matches(":popover-open")) choices.hidePopover();
-          const dialog = document.createElement("dialog");
-          dialog.className = "system-action-dialog system-user-dialog";
-          const wrap = document.createElement("div");
-          wrap.className = "system-action-dialog-content";
-          const heading = document.createElement("h2");
-          heading.id = "system-user-action-" + index;
-          if (action === "password" || action === "delete" || (action === "enabled" && dangerous)) {
-            heading.className = "system-action-dialog-title";
-            const eyebrow = document.createElement("span");
-            eyebrow.className = "eyebrow";
-            eyebrow.textContent = "JUSTVOXEL";
-            const separator = document.createElement("span");
-            separator.textContent = "·";
-            separator.setAttribute("aria-hidden", "true");
-            const actionTitle = document.createElement("span");
-            actionTitle.textContent = title;
-            const username = document.createElement("span");
-            username.textContent = user.username;
-            heading.append(eyebrow, separator, actionTitle, separator.cloneNode(true), username);
-          } else {
-            heading.textContent = `${title} · ${user.username}`;
-          }
-          dialog.setAttribute("aria-labelledby", heading.id);
-          const form = document.createElement("form");
-          form.innerHTML = fields;
-          form.querySelectorAll('input[type="password"]').forEach((input) => { input.minLength = Number(payload.minimum_password_len || 8); });
-          const error = document.createElement("p");
-          error.className = "notice error";
-          error.hidden = true;
-          error.setAttribute("role", "alert");
-          const actions = document.createElement("div");
-          actions.className = "action-row";
-          const cancel = document.createElement("button");
-          cancel.type = "button";
-          cancel.className = "secondary";
-          cancel.textContent = jvT("ui.19766ed6ccb2");
-          cancel.addEventListener("click", () => dialog.close());
-          const submit = document.createElement("button");
-          submit.type = "submit";
-          submit.textContent = submitText;
-          if (dangerous) {
-            submit.className = "danger";
-            submit.dataset.destructiveSubmit = "";
-            submit.disabled = true;
-            const confirmation = document.createElement("div");
-            confirmation.className = "destructive-confirmation";
-            confirmation.dataset.destructiveConfirmation = "";
-            confirmation.innerHTML = `<div class="destructive-confirm-slider" data-destructive-slider-shell><span class="destructive-confirm-slider-text" data-destructive-slider-text>${jvH("ui.656bae9bfca6")}</span><span class="destructive-confirm-slider-thumb" aria-hidden="true">&gt;</span><input type="range" min="0" max="100" step="1" value="0" data-destructive-slider aria-label="${jvH("ui.958924d8ce3a")}"></div><label class="destructive-confirm-toggle-row" data-destructive-toggle-row hidden><span class="destructive-confirm-toggle-callout">${jvH("ui.8ba7a99174e0")}</span><input class="destructive-confirm-toggle" type="checkbox" data-destructive-toggle aria-label="${jvH("ui.0114e3d64460")}"></label>`;
-            form.appendChild(confirmation);
-          }
-          actions.append(cancel, submit);
-          form.append(error, actions);
-          form.addEventListener("submit", async (event) => {
-            event.preventDefault();
-            if (submit.disabled || (dangerous && (!form.querySelector("[data-destructive-toggle]").checked || Number(form.querySelector("[data-destructive-slider]").value) < 100))) return;
-            submit.disabled = true;
-            cancel.disabled = true;
-            const preventClose = (event) => event.preventDefault();
-            dialog.addEventListener("cancel", preventClose);
-            try {
-              const fields = Object.fromEntries(new FormData(form).entries());
-              const result = await systemPostForm("/api/system/workspace/users/" + user.id + "/" + action, fields);
-              if (result) {
-                dialog.close();
-                await renderUsers(++loadSequence, result.message || jvT("ui.6107d3a04c7b"));
-              }
-            } catch (failure) {
-              error.textContent = failure?.message || jvT("ui.09d234f0346f");
-              error.hidden = false;
-            } finally {
-              cancel.disabled = false;
-              dialog.removeEventListener("cancel", preventClose);
-              if (dangerous) form.querySelector("[data-destructive-confirmation]")._justVoxelDestructiveSync();
-              else submit.disabled = false;
-            }
-          });
-          wrap.append(heading, form);
-          dialog.appendChild(wrap);
-          document.body.appendChild(dialog);
-          initializeSharedWebUIControls(dialog);
-          dialog.addEventListener("close", () => { dialog.remove(); trigger.focus(); }, { once: true });
-          dialog.showModal();
-        };
-        const addAction = (title, fields, action, submitText, dangerous = false, disabled = false) => {
-          const button = document.createElement("button");
-          button.type = "button";
-          button.textContent = title;
-          button.disabled = disabled;
-          if (dangerous) button.className = "storage-action-danger";
-          button.addEventListener("click", () => openAction(title, fields, action, submitText, dangerous));
-          choices.appendChild(button);
-        };
-        addAction(jvT("ui.a43a8d8cfd29"), '<label>Role<select name="role"><option value="operator"' + (user.role === "operator" ? ' selected' : '') + '>Operator</option><option value="viewer"' + (user.role !== "operator" ? ' selected' : '') + '>Viewer</option></select></label>', "role", jvT("ui.c7523b152e8b"));
-        addAction(jvT("ui.a683c212b7ef"), `<p>${jvH("ui.6bf4d1978e20")}</p>`, "restart-allowance/reset", jvT("ui.37769ec42cac"), false, Number(user.restart_used || 0) === 0);
-        addAction(jvT("ui.3ad28e785fb3"), `<p>${jvH("ui.2abbefb55ee4")}</p>`, "backup-allowance/reset", jvT("ui.37769ec42cac"), false, Number(user.backup_used || 0) === 0);
-        addAction(user.enabled ? jvT("ui.9f024ada2282") : jvT("ui.1965185f3488"), '<input type="hidden" name="enabled" value="' + String(!user.enabled) + '"><p>' + (user.enabled ? jvT("ui.29ee543445e6") : jvT("ui.67022675441b")) + '</p>', "enabled", user.enabled ? jvT("ui.9f024ada2282") : jvT("ui.1965185f3488"), Boolean(user.enabled));
-        addAction(jvT("ui.3f9c991f63a9"), `<label>${jvH("ui.3dd9df4441fb")}<input type="password" name="password" required autocomplete="new-password"></label><label>${jvH("ui.5ac265f396a2")}<input type="password" name="confirm_password" required autocomplete="new-password"></label>`, "password", jvT("ui.3f9c991f63a9"));
-        addAction(jvT("ui.a2e20a335700"), `<p>${jvH("ui.0eb640efdff4")}</p>`, "delete", jvT("ui.a2e20a335700"), true);
-        menu.append(trigger, choices);
-        cell.appendChild(menu);
+        cell.textContent = value;
         row.appendChild(cell);
-        rows.appendChild(row);
+      }
+      const cell = document.createElement("td");
+      const menu = document.createElement("details");
+      menu.className = "storage-action-menu system-user-menu";
+      const trigger = document.createElement("summary");
+      trigger.textContent = jvT("ui.5a23444828db");
+      trigger.setAttribute("aria-label", jvT("ui.d1f3b7c8d7b5") + user.username);
+      const choices = document.createElement("div");
+      choices.className = "storage-action-menu-popover";
+      // Use the browser top layer so the compact scrolling table cannot clip the menu.
+      choices.setAttribute("popover", "auto");
+      menu.addEventListener("toggle", () => {
+        if (!menu.isConnected) return;
+        if (menu.open) {
+          const rect = trigger.getBoundingClientRect();
+          choices.style.right = Math.max(8, window.innerWidth - rect.right) + "px";
+          choices.style.top = Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - 300)) + "px";
+          choices.showPopover();
+        } else if (choices.matches(":popover-open")) choices.hidePopover();
       });
-      listPanel.appendChild(list);
-    }
+      choices.addEventListener("toggle", (event) => {
+        if (event.newState === "closed") {
+          menu.open = false;
+          if (choices.contains(document.activeElement)) trigger.focus();
+        }
+      });
+      const openAction = (title, fields, action, submitText, dangerous = false) => {
+        menu.open = false;
+        if (choices.matches(":popover-open")) choices.hidePopover();
+        if (isPrimary) {
+          openAccountSecurity(trigger);
+          return;
+        }
+        const dialog = document.createElement("dialog");
+        dialog.className = "system-action-dialog system-user-dialog";
+        const wrap = document.createElement("div");
+        wrap.className = "system-action-dialog-content";
+        const heading = document.createElement("h2");
+        heading.id = "system-user-action-" + index;
+        if (action === "password" || action === "delete" || (action === "enabled" && dangerous)) {
+          heading.className = "system-action-dialog-title";
+          const eyebrow = document.createElement("span");
+          eyebrow.className = "eyebrow";
+          eyebrow.textContent = "JUSTVOXEL";
+          const separator = document.createElement("span");
+          separator.textContent = "·";
+          separator.setAttribute("aria-hidden", "true");
+          const actionTitle = document.createElement("span");
+          actionTitle.textContent = title;
+          const username = document.createElement("span");
+          username.textContent = user.username;
+          heading.append(eyebrow, separator, actionTitle, separator.cloneNode(true), username);
+        } else {
+          heading.textContent = `${title} · ${user.username}`;
+        }
+        dialog.setAttribute("aria-labelledby", heading.id);
+        const form = document.createElement("form");
+        form.innerHTML = fields;
+        form.querySelectorAll('input[type="password"]').forEach((input) => { input.minLength = Number(payload.minimum_password_len || 8); });
+        const error = document.createElement("p");
+        error.className = "notice error";
+        error.hidden = true;
+        error.setAttribute("role", "alert");
+        const actions = document.createElement("div");
+        actions.className = "action-row";
+        const cancel = document.createElement("button");
+        cancel.type = "button";
+        cancel.className = "secondary";
+        cancel.textContent = jvT("ui.19766ed6ccb2");
+        cancel.addEventListener("click", () => dialog.close());
+        const submit = document.createElement("button");
+        submit.type = "submit";
+        submit.textContent = submitText;
+        if (dangerous) {
+          submit.className = "danger";
+          submit.dataset.destructiveSubmit = "";
+          submit.disabled = true;
+          const confirmation = document.createElement("div");
+          confirmation.className = "destructive-confirmation";
+          confirmation.dataset.destructiveConfirmation = "";
+          confirmation.innerHTML = `<div class="destructive-confirm-slider" data-destructive-slider-shell><span class="destructive-confirm-slider-text" data-destructive-slider-text>${jvH("ui.656bae9bfca6")}</span><span class="destructive-confirm-slider-thumb" aria-hidden="true">&gt;</span><input type="range" min="0" max="100" step="1" value="0" data-destructive-slider aria-label="${jvH("ui.958924d8ce3a")}"></div><label class="destructive-confirm-toggle-row" data-destructive-toggle-row hidden><span class="destructive-confirm-toggle-callout">${jvH("ui.8ba7a99174e0")}</span><input class="destructive-confirm-toggle" type="checkbox" data-destructive-toggle aria-label="${jvH("ui.0114e3d64460")}"></label>`;
+          form.appendChild(confirmation);
+        }
+        actions.append(cancel, submit);
+        form.append(error, actions);
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          if (submit.disabled || (dangerous && (!form.querySelector("[data-destructive-toggle]").checked || Number(form.querySelector("[data-destructive-slider]").value) < 100))) return;
+          submit.disabled = true;
+          cancel.disabled = true;
+          const preventClose = (event) => event.preventDefault();
+          dialog.addEventListener("cancel", preventClose);
+          try {
+            const fields = Object.fromEntries(new FormData(form).entries());
+            const result = await systemPostForm("/api/system/workspace/users/" + user.id + "/" + action, fields);
+            if (result) {
+              dialog.close();
+              await renderUsers(++loadSequence, result.message || jvT("ui.6107d3a04c7b"));
+            }
+          } catch (failure) {
+            error.textContent = failure?.message || jvT("ui.09d234f0346f");
+            error.hidden = false;
+          } finally {
+            cancel.disabled = false;
+            dialog.removeEventListener("cancel", preventClose);
+            if (dangerous) form.querySelector("[data-destructive-confirmation]")._justVoxelDestructiveSync();
+            else submit.disabled = false;
+          }
+        });
+        wrap.append(heading, form);
+        dialog.appendChild(wrap);
+        document.body.appendChild(dialog);
+        initializeSharedWebUIControls(dialog);
+        dialog.addEventListener("close", () => { dialog.remove(); trigger.focus(); }, { once: true });
+        dialog.showModal();
+      };
+      const addAction = (title, fields, action, submitText, dangerous = false, disabled = false) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = title;
+        button.disabled = disabled || (isPrimary && action !== "password");
+        if (dangerous) button.className = "storage-action-danger";
+        if (!button.disabled) button.addEventListener("click", () => openAction(title, fields, action, submitText, dangerous));
+        choices.appendChild(button);
+      };
+      addAction(jvT("ui.a43a8d8cfd29"), '<label>Role<select name="role"><option value="operator"' + (user.role === "operator" ? ' selected' : '') + '>Operator</option><option value="viewer"' + (user.role !== "operator" ? ' selected' : '') + '>Viewer</option></select></label>', "role", jvT("ui.c7523b152e8b"));
+      addAction(jvT("ui.a683c212b7ef"), `<p>${jvH("ui.6bf4d1978e20")}</p>`, "restart-allowance/reset", jvT("ui.37769ec42cac"), false, Number(user.restart_used || 0) === 0);
+      addAction(jvT("ui.3ad28e785fb3"), `<p>${jvH("ui.2abbefb55ee4")}</p>`, "backup-allowance/reset", jvT("ui.37769ec42cac"), false, Number(user.backup_used || 0) === 0);
+      addAction(user.enabled ? jvT("ui.9f024ada2282") : jvT("ui.1965185f3488"), '<input type="hidden" name="enabled" value="' + String(!user.enabled) + '"><p>' + (user.enabled ? jvT("ui.29ee543445e6") : jvT("ui.67022675441b")) + '</p>', "enabled", user.enabled ? jvT("ui.9f024ada2282") : jvT("ui.1965185f3488"), Boolean(user.enabled));
+      addAction(jvT("ui.3f9c991f63a9"), `<label>${jvH("ui.3dd9df4441fb")}<input type="password" name="password" required autocomplete="new-password"></label><label>${jvH("ui.5ac265f396a2")}<input type="password" name="confirm_password" required autocomplete="new-password"></label>`, "password", jvT("ui.3f9c991f63a9"));
+      addAction(jvT("ui.a2e20a335700"), `<p>${jvH("ui.0eb640efdff4")}</p>`, "delete", jvT("ui.a2e20a335700"), true);
+      menu.append(trigger, choices);
+      cell.appendChild(menu);
+      row.appendChild(cell);
+      rows.appendChild(row);
+    });
+    listPanel.appendChild(list);
     root.appendChild(listPanel);
     content.replaceChildren(root);
   };
 
-  const renderSecurity = async (sequence, message = "") => {
+  const openAccountSecurity = async (trigger) => {
+    const dialog = document.createElement("dialog");
+    dialog.className = "system-action-dialog system-user-dialog";
+    const wrap = document.createElement("div");
+    wrap.className = "system-action-dialog-content";
+    const heading = document.createElement("div");
+    heading.className = "system-security-heading";
+    const title = document.createElement("h2");
+    title.id = "system-account-security-title";
+    title.textContent = jvT("ui.1d85c11e1444");
+    heading.appendChild(title);
+    dialog.setAttribute("aria-labelledby", title.id);
+
+    const body = document.createElement("div");
+    const loading = document.createElement("p");
+    loading.setAttribute("role", "status");
+    loading.textContent = jvT("ui.ba3bbbe10d8b");
+    body.appendChild(loading);
+    const actions = document.createElement("div");
+    actions.className = "action-row";
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "secondary";
+    close.textContent = jvT("ui.7d9eb7acb13e");
+    close.addEventListener("click", () => dialog.close());
+    actions.appendChild(close);
+
+    wrap.append(heading, body, actions);
+    dialog.appendChild(wrap);
+    document.body.appendChild(dialog);
+    dialog.addEventListener("close", () => { dialog.remove(); trigger.focus(); }, { once: true });
+    dialog.addEventListener("cancel", (event) => { if (close.disabled) event.preventDefault(); });
+    dialog.showModal();
+    try {
+      await renderSecurity(dialog, heading, body, close, "password");
+    } catch (error) {
+      if (dialog.open) body.replaceChildren(systemNotice(error?.message || jvT("ui.626618e6da03"), "error"));
+    }
+  };
+
+  const renderSecurity = async (dialog, heading, body, close, securityPane, message = "") => {
     const payload = await systemFetchJSON("/api/system/workspace/security");
-    if (!payload || sequence !== loadSequence || !content) return;
+    if (!payload || !dialog.open) return;
+    const minimumPasswordLength = Number(payload.minimum_password_len || 8);
     const root = document.createElement("div");
     root.className = "system-security-view";
     if (message) root.appendChild(systemNotice(message));
@@ -5675,23 +5709,18 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     const switcher = document.createElement("div");
     switcher.className = "system-security-switcher";
     switcher.setAttribute("role", "tablist");
+    switcher.setAttribute("aria-labelledby", "system-account-security-title");
     ["authentication", "password"].forEach((kind) => {
       const button = document.createElement("button");
       button.type = "button";
+      button.id = "system-security-tab-" + kind;
       button.dataset.systemSecurityChoice = kind;
       button.textContent = kind === "authentication" ? jvT("ui.66880d2d8216") : jvT("ui.e7cf3ef4f17c");
-      button.setAttribute("aria-selected", securityPane === kind ? "true" : "false");
+      button.setAttribute("role", "tab");
+      button.setAttribute("aria-controls", "system-security-pane-" + kind);
       switcher.appendChild(button);
     });
-    const securityHeading = document.createElement("div");
-    securityHeading.className = "system-security-heading";
-    const securityLabel = document.createElement("p");
-    securityLabel.className = "eyebrow";
-    securityLabel.textContent = jvT("ui.1d85c11e1444");
-    const securityTitle = document.createElement("h2");
-    securityTitle.textContent = jvT("ui.8f6fb4eb7f42");
-    securityHeading.append(securityLabel, securityTitle, switcher);
-    root.appendChild(securityHeading);
+    const securityTabs = Array.from(switcher.querySelectorAll("button"));
 
     const authPane = document.createElement("section");
     authPane.className = "system-security-pane";
@@ -5729,7 +5758,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
         `<p class="muted compact">${jvH("ui.9b90a0542675")}</p>` +
         `<button type="submit">${jvH("ui.9036a3beaa8e")}</button>`;
       authForm.querySelectorAll('input[name="new_web_password"],input[name="confirm_web_password"]').forEach((input) => {
-        input.minLength = Number(payload.minimum_password_len || 8);
+        input.minLength = minimumPasswordLength;
       });
     } else {
       authForm.innerHTML =
@@ -5738,24 +5767,6 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
         `<p class="muted compact">${jvH("ui.eaf5cde5b815")}</p>` +
         `<button type="submit">${jvH("ui.95bb800209fc")}</button>`;
     }
-    authForm.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const submit = event.submitter;
-      if (submit) submit.disabled = true;
-      try {
-        const data = Object.fromEntries(new FormData(authForm).entries());
-        const result = await systemPostForm("/api/system/workspace/security/authentication", data);
-        if (!result) return;
-        if (result.reauthenticate) {
-          window.location.assign("/login?message=auth-mode-changed");
-          return;
-        }
-        await renderSecurity(++loadSequence, result.message || jvT("ui.db5611ae62d9"));
-      } catch (error) {
-        if (state) state.textContent = error?.message || jvT("ui.f5adad2c4d22");
-        if (submit) submit.disabled = false;
-      }
-    });
     authPane.appendChild(authForm);
     root.appendChild(authPane);
 
@@ -5781,45 +5792,82 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       `<label>${jvH("ui.72ed2bd767ce")}<input type="password" name="current_password" autocomplete="current-password" required></label>` +
       `<label>${jvH("ui.3dd9df4441fb")}<input type="password" name="new_password" autocomplete="new-password" required></label>` +
       `<label>${jvH("ui.bf000421aeb3")}<input type="password" name="confirm_password" autocomplete="new-password" required></label>` +
-      `<p class="muted compact">${jvH("ui.0d33e45397d7")}` + String(payload.minimum_password_len || 8) + ' characters and follow the host password policy.</p>' +
+      `<p class="muted compact">${jvH("ui.218ee1d5a513", { minimum: minimumPasswordLength })}</p>` +
       `<button type="submit">${jvH("ui.3f9c991f63a9")}</button>`;
     passwordForm.querySelectorAll('input[name="new_password"],input[name="confirm_password"]').forEach((input) => {
-      input.minLength = Number(payload.minimum_password_len || 8);
-    });
-    passwordForm.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const submit = event.submitter;
-      if (submit) submit.disabled = true;
-      try {
-        const data = Object.fromEntries(new FormData(passwordForm).entries());
-        const result = await systemPostForm("/api/system/workspace/security/password", data);
-        if (!result) return;
-        if (result.reauthenticate) {
-          window.location.assign("/login?message=password-changed");
-          return;
-        }
-      } catch (error) {
-        if (state) state.textContent = error?.message || jvT("ui.c1683634fe84");
-        if (submit) submit.disabled = false;
-      }
+      input.minLength = minimumPasswordLength;
     });
     passwordPane.appendChild(passwordForm);
     root.appendChild(passwordPane);
 
-    const showPane = (kind) => {
-      securityPane = kind;
-      root.querySelectorAll("[data-system-security-choice]").forEach((button) => {
-        button.setAttribute("aria-selected", button.dataset.systemSecurityChoice === kind ? "true" : "false");
+    const bindSecurityForm = (form, url, loginMessage, failureMessage, onSuccess) => {
+      const submit = form.querySelector('button[type="submit"]');
+      const feedback = systemNotice("", "error");
+      feedback.setAttribute("role", "alert");
+      feedback.hidden = true;
+      submit.before(feedback);
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (close.disabled) return;
+        close.disabled = submit.disabled = true;
+        securityTabs.forEach((tab) => { tab.disabled = true; });
+        feedback.hidden = true;
+        try {
+          const data = Object.fromEntries(new FormData(form).entries());
+          const result = await systemPostForm(url, data);
+          if (!result) return;
+          if (result.reauthenticate) {
+            window.location.assign("/login?message=" + loginMessage);
+            return;
+          }
+          await onSuccess?.(result);
+        } catch (error) {
+          feedback.textContent = error?.message || failureMessage;
+          feedback.hidden = false;
+        } finally {
+          close.disabled = submit.disabled = false;
+          securityTabs.forEach((tab) => { tab.disabled = false; });
+        }
       });
-      root.querySelectorAll("[data-system-security-pane]").forEach((pane) => {
+    };
+    bindSecurityForm(authForm, "/api/system/workspace/security/authentication", "auth-mode-changed", jvT("ui.f5adad2c4d22"),
+      (result) => renderSecurity(dialog, heading, body, close, "authentication", result.message || jvT("ui.db5611ae62d9")));
+    bindSecurityForm(passwordForm, "/api/system/workspace/security/password", "password-changed", jvT("ui.c1683634fe84"));
+
+    const panes = [authPane, passwordPane];
+    panes.forEach((pane) => {
+      const kind = pane.dataset.systemSecurityPane;
+      pane.id = "system-security-pane-" + kind;
+      pane.setAttribute("role", "tabpanel");
+      pane.setAttribute("aria-labelledby", "system-security-tab-" + kind);
+    });
+    const showPane = (kind) => {
+      securityTabs.forEach((button) => {
+        const selected = button.dataset.systemSecurityChoice === kind;
+        button.setAttribute("aria-selected", String(selected));
+        button.tabIndex = selected ? 0 : -1;
+      });
+      panes.forEach((pane) => {
         pane.hidden = pane.dataset.systemSecurityPane !== kind;
       });
     };
-    root.querySelectorAll("[data-system-security-choice]").forEach((button) => {
+    securityTabs.forEach((button, index) => {
       button.addEventListener("click", () => showPane(button.dataset.systemSecurityChoice));
+      button.addEventListener("keydown", (event) => {
+        const nextIndex = { ArrowLeft: 1 - index, ArrowRight: 1 - index, Home: 0, End: 1 }[event.key];
+        if (!Number.isInteger(nextIndex)) return;
+        event.preventDefault();
+        const next = securityTabs[nextIndex];
+        showPane(next.dataset.systemSecurityChoice);
+        next.focus();
+      });
     });
-    content.replaceChildren(root);
     showPane(securityPane);
+    heading.querySelector(".system-security-switcher")?.remove();
+    heading.appendChild(switcher);
+    body.replaceChildren(root);
+    initializeSharedWebUIControls(root);
+    securityTabs.find((tab) => tab.tabIndex === 0)?.focus();
   };
 
   const clearResetPoll = () => {
@@ -6922,7 +6970,6 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       if (currentTab === "health") await renderHealth(sequence);
       else if (currentTab === "history") await renderHistory(sequence);
       else if (currentTab === "users") await renderUsers(sequence);
-      else if (currentTab === "security") await renderSecurity(sequence);
       else if (currentTab === "logs") await renderLogs(sequence);
       else if (settingsPanels.has(currentTab)) {
         const { panel } = settingsPanels.get(currentTab);
@@ -8544,7 +8591,7 @@ if (dashboard) {
         minecraft: ["overview", "logs", "memory", "gameplay", "players", "crossplay", "rcon"],
         version: ["container", "minecraft"],
         plugins: ["discover", "installed", "addons"],
-        system: ["health", "history", "users", "security", "logs", "date-time", "wallpaper", "reset", "ups", "about"],
+        system: ["health", "history", "users", "logs", "date-time", "wallpaper", "reset", "ups", "about"],
         migration: ["export", "import", "switch"],
       };
       if (workspace !== "migration" && allowedTabs[workspace]?.includes(tab)) {

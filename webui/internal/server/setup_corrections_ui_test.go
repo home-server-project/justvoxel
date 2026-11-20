@@ -223,7 +223,7 @@ func TestSystemCorrectionsPreserveMenusAndMetadata(t *testing.T) {
 		`"restart-allowance/reset"`, `"backup-allowance/reset"`, `"role", "Save role"`,
 		`"enabled", user.enabled`, `"password", "Change password"`, `"delete", "Delete account", true`,
 		`choices.showPopover()`, `button.disabled = disabled`, `minimum_password_len`,
-		`securityHeading.append(securityLabel, securityTitle, switcher)`, `root.appendChild(securityHeading)`, `authHeading.append(authLabel, authTitle, authDescription)`,
+		`openAccountSecurity(trigger);`, `authHeading.append(authLabel, authTitle, authDescription)`,
 		`passwordHeading.append(passwordLabel, passwordTitle, passwordDescription)`,
 		`String(payload.variant || "")`, `variantName ? ` + "`JustVoxel ${variantName}`",
 		`payload.justvoxel`, `payload.webui`, `payload.management_api`, `payload.commit`, `payload.username`,
@@ -245,7 +245,7 @@ func TestSystemCorrectionsPreserveMenusAndMetadata(t *testing.T) {
 		}
 	}
 	css := correctionSource(t, "static/app.css")
-	for _, want := range []string{`.system-user-menu.storage-action-menu summary{width:max-content`, `.system-workspace-content .system-security-pane{width:100%`, `.wallpaper-panel .action-row button{width:auto;min-height:36px`} {
+	for _, want := range []string{`.system-user-menu.storage-action-menu summary{width:max-content`, `.system-security-view .system-security-pane{width:100%`, `.wallpaper-panel .action-row button{width:auto;min-height:36px`} {
 		if !strings.Contains(css, want) {
 			t.Fatalf("System panel/action styling missing %q", want)
 		}
@@ -427,7 +427,7 @@ const flatten = n => [n.textContent || "", ...(n.children || []).flatMap(flatten
 
 func TestApprovedSecurityVisualCleanupContract(t *testing.T) {
 	app := correctionSource(t, "static/app.js")
-	start := strings.Index(app, "  const renderSecurity =")
+	start := strings.Index(app, "  const openAccountSecurity =")
 	if start < 0 {
 		t.Fatal("Security renderer missing")
 	}
@@ -437,15 +437,15 @@ func TestApprovedSecurityVisualCleanupContract(t *testing.T) {
 	}
 	security := app[start : start+end]
 	for _, want := range []string{
-		`securityHeading.append(securityLabel, securityTitle, switcher);`,
-		`root.appendChild(securityHeading);`,
+		`title.textContent = "Account Security";`,
+		`heading.appendChild(switcher);`,
+		`dialog.showModal();`,
 		`authDescription.textContent = "Choose the password WebUI uses to sign in.";`,
 		`passwordDescription.textContent = "Change the password for the current sign-in mode.";`,
 		`switcher.setAttribute("role", "tablist");`,
 		`const button = document.createElement("button");`, `button.type = "button";`,
 		`["authentication", "password"].forEach((kind) =>`,
-		`button.setAttribute("aria-selected", securityPane === kind ? "true" : "false");`,
-		`button.setAttribute("aria-selected", button.dataset.systemSecurityChoice === kind ? "true" : "false");`,
+		`button.setAttribute("aria-selected", String(selected));`,
 		`pane.hidden = pane.dataset.systemSecurityPane !== kind;`,
 		`button.addEventListener("click", () => showPane(button.dataset.systemSecurityChoice));`,
 		`authPane.className = "system-security-pane";`, `passwordPane.className = "system-security-pane";`,
@@ -459,10 +459,10 @@ func TestApprovedSecurityVisualCleanupContract(t *testing.T) {
 		`<label>Current password<input type="password" name="current_password" autocomplete="current-password" required></label>`,
 		`<label>New password<input type="password" name="new_password" autocomplete="new-password" required></label>`,
 		`<label>Confirm new password<input type="password" name="confirm_password" autocomplete="new-password" required></label>`,
-		`input.minLength = Number(payload.minimum_password_len || 8);`,
+		`input.minLength = minimumPasswordLength;`,
 		`systemFetchJSON("/api/system/workspace/security")`,
-		`systemPostForm("/api/system/workspace/security/authentication", data)`,
-		`systemPostForm("/api/system/workspace/security/password", data)`,
+		`bindSecurityForm(authForm, "/api/system/workspace/security/authentication"`,
+		`bindSecurityForm(passwordForm, "/api/system/workspace/security/password"`,
 	} {
 		if !strings.Contains(security, want) {
 			t.Fatalf("Security presentation or preserved form contract missing %q", want)
@@ -486,11 +486,11 @@ func TestApprovedSecurityVisualCleanupContract(t *testing.T) {
 		`.system-security-heading{display:flex;align-items:center;flex-wrap:wrap;gap:.4rem}`,
 		`.system-security-heading .system-security-switcher{flex-wrap:wrap;max-width:100%;margin-left:auto}`,
 		`.system-security-switcher button[aria-selected="true"]{background:#25382e;color:#c8f2d7}`,
-		`.system-workspace-content .system-security-pane{width:100%;max-width:520px;min-height:31rem;display:flex;flex-direction:column;`,
+		`.system-security-view .system-security-pane{width:100%;max-width:520px;min-height:31rem;display:flex;flex-direction:column;`,
 		`.system-security-pane[hidden]{display:none!important}`,
 		`.system-security-form{display:flex;flex-direction:column;flex:1;align-items:stretch;width:100%;max-width:380px;gap:.65rem}`,
 		`.system-security-form button[type=submit]{align-self:flex-end;justify-self:end;max-width:100%;margin-top:auto;`,
-		`@media(max-width:600px){.system-workspace-content .system-security-pane{min-height:0}.system-security-heading .system-security-switcher{margin-left:0}.system-security-form{flex:none}.system-security-form button[type=submit]{margin-top:.2rem}}`,
+		`@media(max-width:600px){.system-security-view .system-security-pane{min-height:0}.system-security-heading .system-security-switcher{margin-left:0}.system-security-form{flex:none}.system-security-form button[type=submit]{margin-top:.2rem}}`,
 	} {
 		if !strings.Contains(css, want) {
 			t.Fatalf("Security desktop/mobile layout contract missing %q", want)

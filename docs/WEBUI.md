@@ -52,7 +52,7 @@ The Storage and Backups setup steps open the same disk and partition browser as 
 
 The dashboard shows live Minecraft controls and players after configuration. Before configuration, it presents a centered setup invitation. Quick Look in the header holds compact status values. Control Center launches the Minecraft, System, Network, System Monitor, System Update, Storage, Backups, Migration, and Files workspaces. Older page URLs with workspace replacements open the matching dashboard workspace. In-progress operation and recovery pages remain available, and Operators can still start a manual backup from Quick Look.
 
-The floating top panel shows date and time in the appliance timezone. Timezone, automatic time (NTP), and manual Date/Time are host system settings. The 12-hour or 24-hour time format and Day first or Month first date order are appliance-wide JustVoxel WebUI settings, persisted by the Management Agent and shared by all WebUI clients across logins and reboots. Topbar dates use abbreviated text months. Display formats do not change the host clock, schedules, or stored timestamps. System contains Health, History, Users, Security, Logs, Date & Time, Wallpaper, Factory Reset, and About; UPS remains conditional on availability. Only Administrators can change Date & Time settings; every authenticated role receives the saved display format. Wallpaper settings remain local to this browser, and the footer Wallpaper link opens the same System tab.
+The floating top panel shows date and time in the appliance timezone. Timezone, automatic time (NTP), and manual Date/Time are host system settings. The 12-hour or 24-hour time format and Day first or Month first date order are appliance-wide JustVoxel WebUI settings, persisted by the Management Agent and shared by all WebUI clients across logins and reboots. Topbar dates use abbreviated text months. Display formats do not change the host clock, schedules, or stored timestamps. System contains Health, History, Users, Logs, Date & Time, Wallpaper, Factory Reset, and About. UPS appears when available. Only Administrators can change Date & Time settings; every authenticated role receives the saved display format. Wallpaper settings remain local to this browser, and the footer Wallpaper link opens the same System tab.
 
 Network keeps loading and errors below its navigation. Troubleshoot groups each interface with its connection, gateway, DNS, and reconnect action. Tailscale and NetBird activation shows service progress and opens their dashboard after the service is running; use the dashboard link if the browser blocks opening. Account setup remains separate from service activation. Playit retains its dark waiting page and validated claim-link flow. Storage refresh keeps the selected physical drive when it is still available.
 
@@ -196,9 +196,9 @@ The privileged Management Agent intentionally uses systemd `ProtectSystem=true` 
 
 ## Optional Separate WebUI password
 
-An administrator can deliberately switch to **Separate WebUI password** mode from WebUI Authentication settings.
+In **System → Users**, the permanent administrator `voxel` appears alongside the other accounts. Open **Manage → Change password** on the `voxel` row to open **Account Security**. Use **Authentication** to choose the sign-in mode or **Password** to change the password for the current mode.
 
-In this mode:
+With **Separate WebUI password** enabled:
 
 - the username remains `voxel`;
 - browser authentication uses a WebUI-local Argon2 credential;

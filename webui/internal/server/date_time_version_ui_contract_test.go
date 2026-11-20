@@ -183,7 +183,7 @@ func TestSecondRoundWorkspacePresentationContracts(t *testing.T) {
 	}
 	header := read("templates/header.html")
 	last := -1
-	for _, tab := range []string{"health", "history", "users", "security", "logs", "date-time", "wallpaper", "reset", "about"} {
+	for _, tab := range []string{"health", "history", "users", "logs", "date-time", "wallpaper", "reset", "about"} {
 		position := strings.Index(header, `data-system-tab="`+tab+`"`)
 		if position <= last {
 			t.Fatalf("System tab missing or out of order: %s", tab)
