@@ -210,6 +210,14 @@ Switching from System account to Separate WebUI password requires confirmation w
 
 WebUI-only Operator and Viewer identities do not create Linux system users. In **System → Users**, the Administrator opens an account’s actions menu to change its role or password, reset its restart or backup allowance, enable or disable it, or delete it. Each dialog names the selected account. Disabling or deleting an account requires sliding to the end and enabling the red confirmation toggle.
 
+## WebUI two-factor authentication
+
+JustVoxel supports standard time-based one-time passwords (RFC 6238, six digits every 30 seconds, SHA-1). Scan the setup QR code or enter the setup key in Google Authenticator, Microsoft Authenticator, Bitwarden, 1Password, Aegis, or another standard TOTP app. The account appears under **JustVoxel** with its actual username. Setup takes effect after you confirm an authenticator code.
+
+Administrators can use **System → Users → Manage** to enable or disable 2FA. Operators and Viewers can enable 2FA on their own account in **System → Users**. A user can turn off self-managed 2FA with their current password and an authenticator or recovery code. If the Administrator enabled it for an Operator or Viewer, only the Administrator can turn it off. The Administrator can also help recover any Operator or Viewer account by turning off 2FA with the Administrator’s current password.
+
+Enrollment shows ten one-time recovery codes once. Save them when prompted. Each can replace an authenticator code at sign-in once. Two-factor authentication protects WebUI sign-in only and leaves SSH and local-console authentication unchanged.
+
 ## Recovery
 
 `mjust web password-reset` is mode-aware.

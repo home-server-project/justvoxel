@@ -7,6 +7,7 @@ require (
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/mattn/go-sqlite3 v1.14.49
 	github.com/msteinert/pam/v2 v2.1.0
+	github.com/pquerna/otp v1.5.0
 	golang.org/x/crypto v0.55.0
 )
 
@@ -18,6 +19,7 @@ require (
 )
 
 require (
+	github.com/boombuler/barcode v1.0.1-0.20190219062509-6c824513bacc // indirect
 	github.com/disgoorg/json/v2 v2.0.0 // indirect
 	github.com/disgoorg/omit v1.0.0 // indirect
 	github.com/klauspost/compress v1.19.0 // indirect

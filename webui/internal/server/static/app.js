@@ -4865,7 +4865,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   const content = systemWorkspaceDialog.querySelector("[data-system-workspace-content]");
   const tabs = Array.from(systemWorkspaceDialog.querySelectorAll("[data-system-tab]"));
   const allowedSystemTabs = new Set(["health", "history", "users", "logs", "date-time", "wallpaper", "reset", "about", "ups"]);
-  const administratorTabs = new Set(["health", "users", "logs", "date-time", "reset"]);
+  const administratorTabs = new Set(["health", "logs", "date-time", "reset"]);
   const upsTabButton = systemWorkspaceDialog.querySelector("[data-system-ups-tab]");
   const upsCSRF = document.querySelector("[data-system-ups-csrf]");
   const systemWorkspaceCSRF = document.querySelector("[data-system-workspace-csrf]")?.value || "";
@@ -5496,7 +5496,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     root.appendChild(create);
 
     const listPanel = systemPanel(jvT("ui.e6d207fbe7a8"), jvT("ui.6b0cc904d081")).panel;
-    const primary = { username: payload.primary_administrator || "voxel", enabled: true };
+    const primary = { username: payload.primary_administrator || "voxel", enabled: true, ...payload.primary_two_factor };
     const users = [primary, ...(Array.isArray(payload.users) ? payload.users : [])];
     const list = document.createElement("div");
     list.className = "user-list";
@@ -5642,6 +5642,18 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
         if (!button.disabled) button.addEventListener("click", () => openAction(title, fields, action, submitText, dangerous));
         choices.appendChild(button);
       };
+      const twoFactor = document.createElement("button");
+      twoFactor.type = "button";
+      twoFactor.textContent = jvT(user.two_factor_enabled ? "two_factor.disable" : "two_factor.enable");
+      if (user.two_factor_enabled) twoFactor.className = "storage-action-danger";
+      twoFactor.addEventListener("click", () => {
+        menu.open = false;
+        if (choices.matches(":popover-open")) choices.hidePopover();
+        openTwoFactorDialog(user, trigger, !isPrimary, () => {
+          if (currentTab === "users") return renderUsers(++loadSequence);
+        });
+      });
+      choices.appendChild(twoFactor);
       addAction(jvT("ui.a43a8d8cfd29"), '<label>Role<select name="role"><option value="operator"' + (user.role === "operator" ? ' selected' : '') + '>Operator</option><option value="viewer"' + (user.role !== "operator" ? ' selected' : '') + '>Viewer</option></select></label>', "role", jvT("ui.c7523b152e8b"));
       addAction(jvT("ui.a683c212b7ef"), `<p>${jvH("ui.6bf4d1978e20")}</p>`, "restart-allowance/reset", jvT("ui.37769ec42cac"), false, Number(user.restart_used || 0) === 0);
       addAction(jvT("ui.3ad28e785fb3"), `<p>${jvH("ui.2abbefb55ee4")}</p>`, "backup-allowance/reset", jvT("ui.37769ec42cac"), false, Number(user.backup_used || 0) === 0);
@@ -5656,6 +5668,271 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     listPanel.appendChild(list);
     root.appendChild(listPanel);
     content.replaceChildren(root);
+  };
+
+  const openTwoFactorDialog = (user, trigger, administratorReset, refresh) => {
+    const disabling = Boolean(user.two_factor_enabled);
+    const action = disabling ? "disable" : "confirm";
+    const title = jvT(disabling ? "two_factor.disable" : "two_factor.enable");
+    const dialog = document.createElement("dialog");
+    dialog.className = "system-action-dialog system-user-dialog";
+    dialog.setAttribute("aria-labelledby", "two-factor-action-title");
+    const wrap = document.createElement("div");
+    wrap.className = "system-action-dialog-content";
+    const heading = document.createElement("h2");
+    heading.id = "two-factor-action-title";
+    heading.className = "system-action-dialog-title";
+    ["JUSTVOXEL", "·", title, "·", user.username].forEach((text, index) => {
+      const part = document.createElement("span");
+      part.textContent = text;
+      if (index === 0) part.className = "eyebrow";
+      if (index === 1 || index === 3) part.setAttribute("aria-hidden", "true");
+      heading.appendChild(part);
+    });
+    const form = document.createElement("form");
+    form.method = "post";
+    form.autocomplete = "off";
+    const fields = document.createElement("div");
+    fields.className = "two-factor-fields";
+    const feedback = systemNotice("", "error");
+    feedback.setAttribute("role", "alert");
+    feedback.hidden = true;
+    const showError = (message) => {
+      feedback.textContent = message;
+      feedback.hidden = false;
+    };
+    const button = (key, className = "secondary") => {
+      const control = document.createElement("button");
+      control.type = "button";
+      control.className = className;
+      control.textContent = jvT(key);
+      return control;
+    };
+    const actions = document.createElement("div");
+    actions.className = "action-row";
+    const cancel = button("ui.19766ed6ccb2");
+    cancel.addEventListener("click", () => dialog.close());
+    const submit = button(disabling ? "two_factor.disable" : "two_factor.enable", disabling ? "danger" : "");
+    submit.type = "submit";
+    submit.disabled = !disabling;
+    actions.append(cancel, submit);
+    form.append(fields, feedback, actions);
+    wrap.append(heading, form);
+    dialog.appendChild(wrap);
+    document.body.appendChild(dialog);
+
+    const target = administratorReset ? { user_id: user.id } : {};
+    const endpoint = "/api/system/workspace/users/two-factor/";
+    let enrollment = "";
+    let qrURL = "";
+    let changed = false;
+    let recovery = false;
+    dialog.addEventListener("close", () => {
+      if (qrURL) URL.revokeObjectURL(qrURL);
+      enrollment = "";
+      form.reset();
+      fields.replaceChildren();
+      dialog.replaceChildren();
+      dialog.remove();
+      trigger.focus();
+      if (changed) Promise.resolve().then(refresh).catch((error) => {
+        if (state && currentTab === "users") state.textContent = error?.message || jvT("two_factor.unavailable");
+      });
+    }, { once: true });
+    dialog.addEventListener("cancel", (event) => { if (cancel.disabled) event.preventDefault(); });
+
+    const addField = (key, name, type = "text") => {
+      const label = document.createElement("label");
+      const caption = document.createElement("span");
+      caption.textContent = jvT(key);
+      const input = document.createElement("input");
+      input.name = name;
+      input.type = type;
+      input.required = true;
+      label.append(caption, input);
+      fields.appendChild(label);
+      return { input, caption };
+    };
+    const addCode = (canUseRecovery) => {
+      const { input, caption } = addField(canUseRecovery ? "two_factor.authenticator_code" : "two_factor.verification_code", "code");
+      input.inputMode = "numeric";
+      input.maxLength = 6;
+      input.pattern = "[0-9]{6}";
+      input.autocomplete = "one-time-code";
+      input.spellcheck = false;
+      if (!canUseRecovery) return input;
+      const toggle = button("two_factor.use_recovery");
+      toggle.addEventListener("click", () => {
+        recovery = !recovery;
+        caption.textContent = jvT(recovery ? "two_factor.recovery_code" : "two_factor.authenticator_code");
+        toggle.textContent = jvT(recovery ? "two_factor.use_authenticator" : "two_factor.use_recovery");
+        input.inputMode = recovery ? "text" : "numeric";
+        input.autocomplete = recovery ? "off" : "one-time-code";
+        input.maxLength = recovery ? 32 : 6;
+        if (recovery) input.removeAttribute("pattern");
+        else input.pattern = "[0-9]{6}";
+        input.value = "";
+        input.focus();
+      });
+      fields.appendChild(toggle);
+      return input;
+    };
+    const bindCopy = (control, input, status) => {
+      control.addEventListener("click", async () => {
+        let copied = false;
+        try {
+          if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(input.value);
+            copied = true;
+          }
+        } catch {}
+        if (!dialog.open || !input.isConnected) return;
+        if (!copied) {
+          input.focus();
+          input.select();
+          try { copied = document.execCommand("copy"); } catch {}
+        }
+        status.textContent = jvT(copied ? "ui.d249818eccab" : "two_factor.copy_manually");
+      });
+    };
+    const showRecoveryCodes = (codes) => {
+      if (qrURL) URL.revokeObjectURL(qrURL);
+      qrURL = "";
+      enrollment = "";
+      form.reset();
+      fields.replaceChildren();
+      const note = document.createElement("p");
+      note.textContent = jvT("two_factor.save_codes");
+      const label = document.createElement("label");
+      label.textContent = jvT("two_factor.recovery_codes");
+      const list = document.createElement("textarea");
+      list.className = "two-factor-recovery-codes";
+      list.rows = codes.length;
+      list.value = codes.join("\n");
+      list.readOnly = true;
+      list.spellcheck = false;
+      label.appendChild(list);
+      const status = document.createElement("p");
+      status.setAttribute("role", "status");
+      const copy = button("two_factor.copy_all");
+      bindCopy(copy, list, status);
+      const download = button("two_factor.download_codes");
+      download.addEventListener("click", () => {
+        const url = URL.createObjectURL(new Blob([list.value + "\n"], { type: "text/plain;charset=utf-8" }));
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "justvoxel-recovery-codes.txt";
+        wrap.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 0);
+      });
+      const close = button("ui.7d9eb7acb13e");
+      close.addEventListener("click", () => dialog.close());
+      const recoveryActions = document.createElement("div");
+      recoveryActions.className = "action-row";
+      recoveryActions.append(copy, download, close);
+      wrap.replaceChildren(heading, note, label, status, recoveryActions);
+      close.focus();
+    };
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (submit.disabled) return;
+      submit.disabled = cancel.disabled = true;
+      feedback.hidden = true;
+      try {
+        const data = Object.fromEntries(new FormData(form).entries());
+        const result = await systemPostForm(endpoint + action, { ...target, ...data, enrollment, recovery });
+        if (!result || !dialog.open) return;
+        changed = true;
+        if (disabling) dialog.close();
+        else showRecoveryCodes(result.recovery_codes);
+      } catch (error) {
+        showError(error?.message || jvT("two_factor.unavailable"));
+        const code = form.elements.code;
+        if (code) { code.value = ""; code.focus(); }
+      } finally {
+        submit.disabled = cancel.disabled = false;
+      }
+    });
+
+    if (disabling) {
+      if (administratorReset) {
+        const description = document.createElement("p");
+        description.textContent = jvT("two_factor.admin_disable_note");
+        fields.appendChild(description);
+      }
+      const { input } = addField(administratorReset ? "two_factor.admin_password" : "ui.72ed2bd767ce", "current_password", "password");
+      input.autocomplete = "current-password";
+      if (!administratorReset) addCode(true);
+      initializeSharedWebUIControls(dialog);
+      dialog.showModal();
+      input.focus();
+      return;
+    }
+    const note = document.createElement("p");
+    note.textContent = jvT("two_factor.scan");
+    const loading = document.createElement("p");
+    loading.setAttribute("role", "status");
+    loading.textContent = jvT("ui.ba3bbbe10d8b");
+    fields.append(note, loading);
+    dialog.showModal();
+    systemPostForm(endpoint + "begin", target).then((result) => {
+      if (!result || !dialog.open) return;
+      loading.remove();
+      enrollment = result.enrollment;
+      const bytes = Uint8Array.from(atob(result.qr_png), (character) => character.charCodeAt(0));
+      qrURL = URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
+      const image = document.createElement("img");
+      image.className = "two-factor-qr";
+      image.src = qrURL;
+      image.alt = jvT("two_factor.qr");
+      image.width = image.height = 216;
+      fields.appendChild(image);
+      const { input } = addField("two_factor.setup_key", "setup_key");
+      input.removeAttribute("name");
+      input.readOnly = true;
+      input.value = result.setup_key;
+      input.spellcheck = false;
+      const copy = button("two_factor.copy_key");
+      const status = document.createElement("p");
+      status.setAttribute("role", "status");
+      bindCopy(copy, input, status);
+      fields.append(copy, status);
+      const code = addCode(false);
+      submit.disabled = false;
+      code.focus();
+    }).catch((error) => {
+      if (!dialog.open) return;
+      loading.remove();
+      showError(error?.message || jvT("two_factor.unavailable"));
+    });
+  };
+
+  const renderOwnAccount = async (sequence) => {
+    const user = await systemFetchJSON("/api/session-info");
+    if (!user || sequence !== loadSequence || !content) return;
+    const account = systemPanel(user.username, jvT("ui.1d85c11e1444")).panel;
+    const section = document.createElement("section");
+    const title = document.createElement("h3");
+    title.textContent = jvT("two_factor.title");
+    const status = document.createElement("p");
+    const managed = user.two_factor_enabled && user.two_factor_source === "administrator";
+    status.textContent = jvT(managed ? "two_factor.managed" : user.two_factor_enabled ? "ui.92c1cdfdf4cb" : "ui.75081b593d15");
+    section.append(title, status);
+    if (!managed) {
+      const trigger = document.createElement("button");
+      trigger.type = "button";
+      trigger.className = "secondary";
+      trigger.textContent = jvT(user.two_factor_enabled ? "two_factor.disable" : "two_factor.enable");
+      trigger.addEventListener("click", () => openTwoFactorDialog(user, trigger, false, () => {
+        if (currentTab === "users") return renderOwnAccount(++loadSequence);
+      }));
+      section.appendChild(trigger);
+    }
+    account.appendChild(section);
+    content.replaceChildren(account);
   };
 
   const openAccountSecurity = async (trigger) => {
@@ -6969,7 +7246,10 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       }
       if (currentTab === "health") await renderHealth(sequence);
       else if (currentTab === "history") await renderHistory(sequence);
-      else if (currentTab === "users") await renderUsers(sequence);
+      else if (currentTab === "users") {
+        if (user.role === "administrator") await renderUsers(sequence);
+        else await renderOwnAccount(sequence);
+      }
       else if (currentTab === "logs") await renderLogs(sequence);
       else if (settingsPanels.has(currentTab)) {
         const { panel } = settingsPanels.get(currentTab);

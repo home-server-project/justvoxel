@@ -8,6 +8,9 @@ import (
 )
 
 func (s *server) providerChangePassword(w http.ResponseWriter, r *http.Request) {
+	// Serialize credential changes with password and second-factor sign-in.
+	s.twoFactorMu.Lock()
+	defer s.twoFactorMu.Unlock()
 	if _, ok := s.requireAdministratorCredentialPath(w, r); !ok {
 		return
 	}

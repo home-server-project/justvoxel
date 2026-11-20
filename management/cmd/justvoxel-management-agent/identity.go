@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/home-server-project/justvoxel/management/internal/systemauth"
 )
@@ -32,6 +33,8 @@ type identityAuthResult struct {
 	WebUserID              int64
 	PasswordChangeRequired bool
 	AdminMode              authMode
+	AccountCreated         time.Time
+	PasswordChanged        time.Time
 }
 
 func (s *server) authenticateIdentity(username, password string) (identityAuthResult, error) {
@@ -70,10 +73,12 @@ func (s *server) authenticateIdentity(username, password string) (identityAuthRe
 		return identityAuthResult{}, systemauth.ErrInvalidCredentials
 	}
 	return identityAuthResult{
-		Username:   user.Username,
-		Role:       role,
-		AuthSource: authSourceWebUI,
-		WebUserID:  user.ID,
+		Username:        user.Username,
+		Role:            role,
+		AuthSource:      authSourceWebUI,
+		WebUserID:       user.ID,
+		AccountCreated:  user.CreatedAt,
+		PasswordChanged: user.PasswordChangedAt,
 	}, nil
 }
 
@@ -88,12 +93,22 @@ func (s *server) sessionStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "Date and time display settings are unavailable")
 		return
 	}
+	var factor twoFactorStatus
+	if sess.AuthSource == authSourceSystem || sess.AuthSource == authSourceSeparate || sess.AuthSource == authSourceWebUI {
+		factor, err = s.accountTwoFactorStatus(sess.WebUserID)
+		if err != nil {
+			writeError(w, http.StatusServiceUnavailable, "two-factor authentication unavailable")
+			return
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"time_format": profile.TimeFormat,
-		"date_format": profile.DateFormat,
-		"username":    sess.Username,
-		"role":        sess.Role,
-		"auth_source": sess.AuthSource,
-		"must_change": sess.MustChange,
+		"time_format":        profile.TimeFormat,
+		"date_format":        profile.DateFormat,
+		"username":           sess.Username,
+		"role":               sess.Role,
+		"auth_source":        sess.AuthSource,
+		"must_change":        sess.MustChange,
+		"two_factor_enabled": factor.Enabled,
+		"two_factor_source":  factor.Source,
 	})
 }

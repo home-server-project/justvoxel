@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"syscall"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -33,8 +35,9 @@ type authModeState struct {
 }
 
 type localAuthStore struct {
-	Version  int            `json:"version"`
-	Accounts []localAccount `json:"accounts"`
+	TwoFactor *twoFactorRecord `json:"two_factor,omitempty"`
+	Version   int              `json:"version"`
+	Accounts  []localAccount   `json:"accounts"`
 }
 
 type localAccount struct {
@@ -118,6 +121,12 @@ func writeLocalAdministrator(password string) error {
 		return err
 	}
 
+	dir, err := lockLocalAuthDirectory(localAuthPath)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+
 	store := localAuthStore{Version: localAuthVersion}
 	if existing, err := readLocalAuthStore(); err == nil {
 		store = existing
@@ -139,6 +148,20 @@ func writeLocalAdministrator(password string) error {
 	return writeLocalAuthStore(store)
 }
 
+// A directory lock serializes local-auth updates with the existing standalone
+// password-reset command. Closing the descriptor releases the lock.
+func lockLocalAuthDirectory(path string) (*os.File, error) {
+	dir, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(dir.Fd()), syscall.LOCK_EX); err != nil {
+		dir.Close()
+		return nil, err
+	}
+	return dir, nil
+}
+
 func verifyLocalAdministrator(username, password string) bool {
 	if username != systemAdminUsername {
 		return false
@@ -156,7 +179,11 @@ func verifyLocalAdministrator(username, password string) bool {
 }
 
 func readLocalAuthStore() (localAuthStore, error) {
-	data, err := os.ReadFile(localAuthPath)
+	return readLocalAuthStoreAt(localAuthPath)
+}
+
+func readLocalAuthStoreAt(path string) (localAuthStore, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return localAuthStore{}, err
 	}
@@ -171,6 +198,10 @@ func readLocalAuthStore() (localAuthStore, error) {
 }
 
 func writeLocalAuthStore(store localAuthStore) error {
+	return writeLocalAuthStoreAt(localAuthPath, store)
+}
+
+func writeLocalAuthStoreAt(path string, store localAuthStore) error {
 	if store.Version != localAuthVersion {
 		return fmt.Errorf("unsupported local authentication store version %d", store.Version)
 	}
@@ -179,7 +210,7 @@ func writeLocalAuthStore(store localAuthStore) error {
 		return err
 	}
 	data = append(data, '\n')
-	return atomicWrite(localAuthPath, data, 0o600)
+	return atomicWrite(path, data, 0o600)
 }
 
 func localAccountForPassword(username, role, password string) (localAccount, error) {

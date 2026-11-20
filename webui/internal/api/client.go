@@ -23,6 +23,7 @@ type Client struct {
 }
 
 type LoginResponse struct {
+	Challenge     string `json:"challenge"`
 	Session       string `json:"session"`
 	MustChange    bool   `json:"must_change"`
 	ManagementAPI string `json:"management_api"`

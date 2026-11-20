@@ -56,6 +56,8 @@ type session struct {
 	Created    time.Time
 	LastSeen   time.Time
 	MustChange bool
+	Challenge  *twoFactorChallenge
+	Enrollment *twoFactorEnrollment
 }
 
 type server struct {
@@ -83,10 +85,13 @@ type server struct {
 	networkMu           sync.Mutex
 	networkTransactions map[string]networkCheckpointTransaction
 
-	mu       sync.Mutex
-	sessions map[string]session
-	failures []time.Time
-	lockTill time.Time
+	twoFactorMu          sync.Mutex
+	adminFactorPath      string
+	secondFactorAttempts loginAttempts
+	mu                   sync.Mutex
+	sessions             map[string]session
+	failures             []time.Time
+	lockTill             time.Time
 }
 
 type peerUIDKey struct{}
@@ -263,6 +268,7 @@ func serve(socket string) error {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/auth/login", s.providerLogin)
+	registerTwoFactorRoutes(mux, s)
 	mux.HandleFunc("POST /v1/auth/logout", s.logout)
 	mux.HandleFunc("POST /v1/auth/password", s.providerChangePassword)
 	mux.HandleFunc("GET /v1/auth", s.authStatus)
@@ -442,7 +448,7 @@ func (s *server) authorize(r *http.Request, allowMustChange bool) (string, sessi
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sess, ok := s.sessions[token]
-	if !ok {
+	if !ok || sess.Challenge != nil {
 		return token, session{}, false
 	}
 	if now.Sub(sess.Created) > 12*time.Hour || now.Sub(sess.LastSeen) > 30*time.Minute {
@@ -457,38 +463,56 @@ func (s *server) authorize(r *http.Request, allowMustChange bool) (string, sessi
 	return token, sess, true
 }
 
+type loginAttempts struct {
+	failures []time.Time
+	lockTill time.Time
+}
+
 func (s *server) loginDelay() time.Duration {
-	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if now.Before(s.lockTill) {
-		return time.Until(s.lockTill)
+	attempts := loginAttempts{s.failures, s.lockTill}
+	delay := attempts.delay()
+	s.failures = attempts.failures
+	return delay
+}
+
+func (a *loginAttempts) delay() time.Duration {
+	now := time.Now()
+	if now.Before(a.lockTill) {
+		return time.Until(a.lockTill)
 	}
 	cutoff := now.Add(-5 * time.Minute)
-	kept := s.failures[:0]
-	for _, failure := range s.failures {
+	kept := a.failures[:0]
+	for _, failure := range a.failures {
 		if failure.After(cutoff) {
 			kept = append(kept, failure)
 		}
 	}
-	s.failures = kept
+	a.failures = kept
 	return 0
 }
 
 func (s *server) recordFailure() {
-	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.failures = append(s.failures, now)
+	attempts := loginAttempts{s.failures, s.lockTill}
+	attempts.recordFailure()
+	s.failures, s.lockTill = attempts.failures, attempts.lockTill
+}
+
+func (a *loginAttempts) recordFailure() {
+	now := time.Now()
+	a.failures = append(a.failures, now)
 	cutoff := now.Add(-5 * time.Minute)
 	count := 0
-	for _, failure := range s.failures {
+	for _, failure := range a.failures {
 		if failure.After(cutoff) {
 			count++
 		}
 	}
 	if count >= 5 {
-		s.lockTill = now.Add(30 * time.Second)
+		a.lockTill = now.Add(30 * time.Second)
 	}
 }
 

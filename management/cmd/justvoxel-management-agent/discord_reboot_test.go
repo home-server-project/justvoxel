@@ -31,10 +31,13 @@ func TestDiscordRebootMigrationV10AndPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err = s.store.db.Exec(`DROP TABLE web_user_two_factor`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err = s.store.db.Exec(`DROP TABLE discord_reboot_state`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.store.db.Exec(`DELETE FROM schema_migrations WHERE version=10`); err != nil {
+	if _, err = s.store.db.Exec(`DELETE FROM schema_migrations WHERE version>=10`); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.store.close(); err != nil {

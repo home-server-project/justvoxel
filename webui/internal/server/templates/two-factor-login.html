@@ -1,0 +1,31 @@
+{{define "two-factor-login.html"}}<!doctype html>
+<html lang="{{locale}}">
+<head>
+  <script src="/i18n.js"></script><script src="/static/i18n.js"></script>
+  <link rel="icon" type="image/png" href="/static/justvoxel-favicon.png">
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>JustVoxel · {{.Title}}</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body data-credential-boundary>
+  <main class="login-shell"><section class="panel login-panel">
+    <p class="eyebrow">JustVoxel</p>
+    <h1>{{.Title}}</h1>
+    {{if .Error}}<div class="alert" role="alert">{{.Error}}</div>{{end}}
+    <form method="post" action="/login/two-factor" autocomplete="off">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      {{if .OAuthRequest}}<input type="hidden" name="oauth_request" value="{{.OAuthRequest}}">{{end}}
+      {{if .Recovery}}
+      <input type="hidden" name="recovery" value="true">
+      <label>{{t "two_factor.recovery_code"}}<input name="code" maxlength="32" autocomplete="off" autocapitalize="characters" spellcheck="false" required autofocus></label>
+      {{else}}
+      <label>{{t "two_factor.authenticator_code"}}<input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required autofocus></label>
+      {{end}}
+      <a href="{{.SwitchURL}}">{{if .Recovery}}{{t "two_factor.use_authenticator"}}{{else}}{{t "two_factor.use_recovery"}}{{end}}</a>
+      <div class="login-actions">{{template "language-button" .}}<button type="submit">{{t "ui.eea2745e2867"}}</button></div>
+    </form>
+    <a href="{{.LoginURL}}">{{t "ui.19766ed6ccb2"}}</a>
+  </section></main>
+  {{template "language-dialog" .}}
+</body>
+</html>{{end}}

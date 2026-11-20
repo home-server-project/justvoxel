@@ -217,6 +217,19 @@ var webUIStoreMigrations = []webUIStoreMigration{
  boot_id TEXT NOT NULL, expected_digest TEXT NOT NULL, requested_at INTEGER NOT NULL,
  state TEXT NOT NULL CHECK(state IN ('requesting','accepted','unverified')))`},
 	},
+	{
+		version: 11,
+		name:    "web_user_two_factor",
+		statements: []string{
+			`CREATE TABLE web_user_two_factor (
+				user_id INTEGER PRIMARY KEY REFERENCES web_users(id) ON DELETE CASCADE,
+				secret TEXT NOT NULL,
+				source TEXT NOT NULL CHECK (source IN ('self', 'administrator')),
+				recovery_hashes TEXT NOT NULL,
+				last_step INTEGER NOT NULL DEFAULT 0
+			)`,
+		},
+	},
 }
 
 func openWebUIStore(path string) (*webUIStore, error) {

@@ -18,6 +18,8 @@ func (a *App) providerLoginPage(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Query().Get("message") {
 	case "password-changed":
 		message = ui(w, "ui.49cd9108c32c")
+	case "two-factor-expired":
+		message = ui(w, "two_factor.expired")
 	case "auth-mode-changed":
 		message = ui(w, "ui.e707330bcc43")
 	}

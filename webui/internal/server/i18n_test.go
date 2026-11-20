@@ -543,7 +543,7 @@ func englishPresentationAsset(path string) ([]byte, error) {
 }
 
 func TestTemplateAndBrowserCatalogReferences(t *testing.T) {
-	keyPattern := regexp.MustCompile(`(?:\bt |jv[THSC]\()"(ui\.[a-f0-9]+|language\.[a-z]+)"`)
+	keyPattern := regexp.MustCompile(`(?:\bt |jv[THSC]\()"(ui\.[a-f0-9]+|language\.[a-z]+|two_factor\.[a-z_]+)"`)
 	for _, directory := range []string{"templates", "static"} {
 		entries, err := assets.ReadDir(directory)
 		if err != nil {

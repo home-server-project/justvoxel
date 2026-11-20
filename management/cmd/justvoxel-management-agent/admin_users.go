@@ -9,6 +9,8 @@ import (
 )
 
 type adminUserView struct {
+	TwoFactorEnabled  bool        `json:"two_factor_enabled"`
+	TwoFactorSource   string      `json:"two_factor_source,omitempty"`
 	ID                int64       `json:"id"`
 	Username          string      `json:"username"`
 	Role              webUserRole `json:"role"`
@@ -50,11 +52,18 @@ func (s *server) adminListUsers(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "password policy unavailable")
 		return
 	}
+	primaryFactor, err := s.accountTwoFactorStatus(0)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "two-factor authentication unavailable")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"primary_administrator": map[string]any{
-			"username": systemAdminUsername,
-			"role":     roleAdministrator,
-			"managed":  false,
+			"username":           systemAdminUsername,
+			"role":               roleAdministrator,
+			"managed":            false,
+			"two_factor_enabled": primaryFactor.Enabled,
+			"two_factor_source":  primaryFactor.Source,
 		},
 		"users":                users,
 		"minimum_password_len": policy.MinLength,
@@ -345,9 +354,10 @@ func writeAdminUserStoreError(w http.ResponseWriter, err error) {
 func (s *webUIStore) listAdminUserViews() ([]adminUserView, error) {
 	rows, err := s.db.Query(`SELECT
 		u.id, u.username, u.role, u.enabled, u.created_at, u.updated_at, u.password_changed_at,
-		o.restart_used, o.last_restart_at, o.backup_used, o.last_backup_at
+		o.restart_used, o.last_restart_at, o.backup_used, o.last_backup_at, COALESCE(f.source, '')
 		FROM web_users AS u
 		JOIN operator_usage AS o ON o.user_id = u.id
+		LEFT JOIN web_user_two_factor AS f ON f.user_id = u.id
 		ORDER BY u.username COLLATE NOCASE, u.id`)
 	if err != nil {
 		return nil, err
@@ -370,9 +380,10 @@ func (s *webUIStore) listAdminUserViews() ([]adminUserView, error) {
 func (s *webUIStore) adminUserViewByID(id int64) (adminUserView, error) {
 	return scanAdminUserView(s.db.QueryRow(`SELECT
 		u.id, u.username, u.role, u.enabled, u.created_at, u.updated_at, u.password_changed_at,
-		o.restart_used, o.last_restart_at, o.backup_used, o.last_backup_at
+		o.restart_used, o.last_restart_at, o.backup_used, o.last_backup_at, COALESCE(f.source, '')
 		FROM web_users AS u
 		JOIN operator_usage AS o ON o.user_id = u.id
+		LEFT JOIN web_user_two_factor AS f ON f.user_id = u.id
 		WHERE u.id = ?`, id))
 }
 
@@ -396,6 +407,7 @@ func scanAdminUserView(scanner adminUserScanner) (adminUserView, error) {
 		&lastRestart,
 		&view.BackupUsed,
 		&lastBackup,
+		&view.TwoFactorSource,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return adminUserView{}, errWebUserNotFound
@@ -403,6 +415,7 @@ func scanAdminUserView(scanner adminUserScanner) (adminUserView, error) {
 		return adminUserView{}, err
 	}
 	view.Enabled = enabled == 1
+	view.TwoFactorEnabled = view.TwoFactorSource != ""
 	view.RestartLimit = operatorRestartLimit
 	view.BackupLimit = operatorBackupLimit
 	if lastRestart.Valid && lastRestart.String != "" {

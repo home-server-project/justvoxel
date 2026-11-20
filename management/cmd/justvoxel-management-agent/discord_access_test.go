@@ -132,6 +132,9 @@ func TestDiscordAccessMigrationV9AndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Remove later schema too so this remains a real v8 upgrade fixture.
+	if _, err := store.db.Exec(`DROP TABLE web_user_two_factor`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := store.db.Exec(`DROP TABLE discord_reboot_state`); err != nil {
 		t.Fatal(err)
 	}

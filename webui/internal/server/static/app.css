@@ -1438,6 +1438,9 @@ input[type=checkbox].destructive-confirm-toggle::before{content:none}
 .system-user-dialog{max-height:calc(100dvh - 2rem);overflow:auto}
 .system-user-dialog form>label{margin:var(--jv-space-sm) 0}
 .system-user-dialog .system-action-dialog-title>span:last-child{overflow-wrap:anywhere}
+:where(.system-user-dialog) .two-factor-fields>label{margin:var(--jv-space-sm) 0}
+:where(.system-user-dialog) .two-factor-qr{display:block;width:min(216px,100%);height:auto;margin:var(--jv-space-sm) auto}
+:where(.system-user-dialog) .two-factor-recovery-codes{display:block;width:100%;font-family:monospace;resize:none}
 @media(max-width:700px){
   .system-history-view>.system-logs-splitter{display:none}
   .system-monitor-profile-actions{justify-content:flex-end}

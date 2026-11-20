@@ -29,6 +29,9 @@ func (s *server) authStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) changeAuthMode(w http.ResponseWriter, r *http.Request) {
+	// Serialize credential changes with password and second-factor sign-in.
+	s.twoFactorMu.Lock()
+	defer s.twoFactorMu.Unlock()
 	if _, ok := s.requireAdministrator(w, r); !ok {
 		return
 	}

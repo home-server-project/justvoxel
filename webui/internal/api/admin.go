@@ -7,6 +7,7 @@ import (
 )
 
 type SessionInfo struct {
+	TwoFactorStatus
 	TimeFormat string `json:"time_format"`
 	DateFormat string `json:"date_format"`
 	Username   string `json:"username"`
@@ -16,6 +17,7 @@ type SessionInfo struct {
 }
 
 type AdminUser struct {
+	TwoFactorStatus
 	ID                int64   `json:"id"`
 	Username          string  `json:"username"`
 	Role              string  `json:"role"`
@@ -33,6 +35,7 @@ type AdminUser struct {
 
 type AdminUsersResponse struct {
 	PrimaryAdministrator struct {
+		TwoFactorStatus
 		Username string `json:"username"`
 		Role     string `json:"role"`
 		Managed  bool   `json:"managed"`

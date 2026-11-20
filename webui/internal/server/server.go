@@ -147,6 +147,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", a.health)
 	mux.HandleFunc("GET /login", a.providerLoginPage)
 	mux.HandleFunc("POST /login", a.login)
+	a.registerTwoFactorRoutes(mux)
 	mux.HandleFunc("POST /logout", a.logout)
 	mux.HandleFunc("GET /password", a.providerPasswordPage)
 	mux.HandleFunc("POST /password", a.providerPasswordChange)
@@ -251,6 +252,19 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, ui(w, "ui.feddfa539b02"), http.StatusServiceUnavailable)
 		return
 	}
+	if result.Challenge != "" {
+		a.startTwoFactorChallenge(w, r, result.Challenge)
+		return
+	}
+	a.finishLogin(w, r, result)
+}
+
+func (a *App) finishLogin(w http.ResponseWriter, r *http.Request, result api.LoginResponse) {
+	if result.Session == "" || (result.ManagementAPI != "" && result.ManagementAPI != a.config.ManagementAPI) {
+		http.Error(w, ui(w, "ui.feddfa539b02"), http.StatusServiceUnavailable)
+		return
+	}
+	a.setTwoFactorCookie(w, "", -1)
 	csrf, err := randomToken(32)
 	if err != nil {
 		http.Error(w, ui(w, "ui.955ec9c5d5c3"), http.StatusInternalServerError)

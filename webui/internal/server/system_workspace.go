@@ -59,12 +59,13 @@ type systemWorkspaceHistoryResponse struct {
 }
 
 type systemWorkspaceUsersResponse struct {
-	OK                   bool            `json:"ok"`
-	Username             string          `json:"username"`
-	PrimaryAdministrator string          `json:"primary_administrator"`
-	Users                []api.AdminUser `json:"users"`
-	MinimumPasswordLen   int             `json:"minimum_password_len"`
-	Message              string          `json:"message,omitempty"`
+	OK                   bool                `json:"ok"`
+	Username             string              `json:"username"`
+	PrimaryAdministrator string              `json:"primary_administrator"`
+	PrimaryTwoFactor     api.TwoFactorStatus `json:"primary_two_factor"`
+	Users                []api.AdminUser     `json:"users"`
+	MinimumPasswordLen   int                 `json:"minimum_password_len"`
+	Message              string              `json:"message,omitempty"`
 }
 
 type systemWorkspaceSecurityResponse struct {
@@ -259,7 +260,8 @@ func (a *App) systemWorkspaceUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	writeSystemWorkspaceJSON(w, http.StatusOK, systemWorkspaceUsersResponse{
 		OK: true, Username: identity.Username, PrimaryAdministrator: payload.PrimaryAdministrator.Username,
-		Users: payload.Users, MinimumPasswordLen: payload.MinimumPasswordLen,
+		PrimaryTwoFactor: payload.PrimaryAdministrator.TwoFactorStatus,
+		Users:            payload.Users, MinimumPasswordLen: payload.MinimumPasswordLen,
 	})
 }
 
