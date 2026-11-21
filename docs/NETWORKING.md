@@ -52,8 +52,8 @@ The Router tab has a setup guide and a live connection for MikroTik RouterOS. TP
 The router administrator makes these changes on the router.
 
 1. Enable `www-ssl` and assign an HTTPS certificate that JustVoxel can trust. Enable `rest-secure` and disable `rest-plain`. WebFig, index and graphs can stay enabled if you use them, or you can disable them to reserve HTTPS access for REST. See [RouterOS Services](https://help.mikrotik.com/docs/spaces/ROS/pages/103841820/Services) and [RouterOS REST API](https://help.mikrotik.com/docs/spaces/ROS/pages/47579162/REST%2BAPI).
-2. Create a dedicated RouterOS group named `jv` with only `read`, `write`, `api` and `rest-api`. The native RouterOS API service on TCP 8728 can remain disabled. The `api` group policy is required for REST authorization. See [RouterOS users and groups](https://help.mikrotik.com/docs/spaces/ROS/pages/8978504/User).
-3. Create a dedicated user named `justvoxel` in group `jv`. Set **Allowed Address** to `<JUSTVOXEL_IP>/32` and choose a strong, unique password on the router.
+2. Create a dedicated RouterOS group, for example `jv`, and grant it only the `read`, `write`, `api` and `rest-api` policies. REST authorization requires the `api` policy. The native RouterOS API service on TCP 8728 can stay disabled unless you use it for another purpose. See [RouterOS users and groups](https://help.mikrotik.com/docs/spaces/ROS/pages/8978504/User).
+3. Create a dedicated RouterOS user, for example `justvoxel`, and assign it to your dedicated group. Limit **Allowed Address** to `<JUSTVOXEL_IP>/32` and choose a strong, unique password on the router.
 4. Allow the JustVoxel host to reach the HTTPS REST endpoint, normally `<JUSTVOXEL_IP> → <ROUTER_IP>:443/TCP`. This security decision belongs to the router administrator. JustVoxel will never create or modify the router’s input or firewall filter rules.
 5. Ensure the firewall allows legitimate destination-NAT traffic to the JustVoxel host. Some configurations already allow legitimate `dstnat` traffic and need no additional rule.
 

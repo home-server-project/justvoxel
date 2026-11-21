@@ -119,6 +119,13 @@ func TestNetworkRouterCatalogReferences(t *testing.T) {
 	if len(keys) == 0 {
 		t.Fatal("Router catalog references missing")
 	}
+	examplePhrases := map[string]string{
+		"en": "for example", "fr-CA": "par exemple", "de": "zum Beispiel", "pl": "na przykład",
+		"pt-BR": "por exemplo", "es-419": "por ejemplo", "uk": "наприклад", "ru": "например", "zh-Hans": "例如",
+	}
+	if len(examplePhrases) != len(supportedLocales) {
+		t.Fatal("Router guide example wording must cover every supported locale")
+	}
 	for _, locale := range supportedLocales {
 		for _, key := range keys {
 			if strings.TrimSpace(catalogs[locale][key]) == "" {
@@ -132,6 +139,13 @@ func TestNetworkRouterCatalogReferences(t *testing.T) {
 		}
 		if !strings.Contains(catalogs[locale]["network.router.user_help"], "<JUSTVOXEL_IP>/32") {
 			t.Errorf("%s router user help missing allowed address placeholder", locale)
+		}
+		phrase := examplePhrases[locale]
+		if phrase == "" || !strings.Contains(catalogs[locale]["network.router.group_help"], phrase+" jv") {
+			t.Errorf("%s router group help must present jv as an example", locale)
+		}
+		if phrase == "" || !strings.Contains(catalogs[locale]["network.router.user_help"], phrase+" justvoxel") {
+			t.Errorf("%s router user help must present justvoxel as an example", locale)
 		}
 	}
 }
@@ -1445,6 +1459,13 @@ func TestNetworkPresentationLayoutContract(t *testing.T) {
 		}
 		return script[a:b]
 	}
+	if strings.Contains(slice("  const renderMikroTikGuide =", "  const renderNetwork ="), "innerHTML") {
+		t.Error("Router guide must build tokens with DOM nodes")
+	}
+	if !strings.Contains(script, `refreshButton?.addEventListener("click", loadNetwork)`) ||
+		!strings.Contains(slice("  const loadNetwork =", "  const requestScan ="), `if (selectedTab === "Router") refreshRouter();`) {
+		t.Error("Network header Refresh must refresh Router state when Router is selected")
+	}
 	program := `
 const assert = require("node:assert/strict");
 class Element {
@@ -1464,8 +1485,12 @@ class Element {
   setAttribute(name, value) { this[name] = value; }
   addEventListener(event, listener) { this["on" + event] = listener; }
   focus() { document.activeElement = this; }
+  reportValidity() { return !this.required || Boolean(this.value); }
 }
-const document = { createElement: (tag) => new Element(tag) };
+const document = {
+  createElement: (tag) => new Element(tag),
+  createTextNode: (textContent) => ({ tag: "#text", textContent, children: [], dataset: {}, className: "" }),
+};
 const flatten = (node) => [node, ...node.children.flatMap(flatten)];
 const find = (root, predicate) => flatten(root).find(predicate);
 const hasClass = (name) => (node) => node.className.split(" ").includes(name);
@@ -1480,7 +1505,15 @@ let selectedTab = "Overview", currentCheckpoint = null, connectionDraft = null;
 let routerSubview = "", routerStatus = { status: "not_configured", can_configure: true };
 let routerSequence = 0, routerConnectionView = null;
 const routerPath = "/api/network/router/mikrotik";
-const requestJSON = async () => routerStatus;
+const csrf = "test-csrf";
+let testResult, testFailure;
+const routerRequests = [];
+const requestJSON = async (path, options) => {
+  if (!options) return routerStatus;
+  routerRequests.push([path, options.method]);
+  if (options.method === "POST" && testFailure) throw new Error("Connection failed");
+  return options.method === "POST" ? testResult : routerStatus;
+};
 const refreshRemoteAccess = async () => {}, pollRemoteAccess = () => {};
 const wifi = { kind: "wifi", interface: "wlp1s0", state: "activated", managed: true,
   wireless: { ssid: "Robinson Crusoe", signal: 79 },
@@ -1584,7 +1617,7 @@ const routerProviders = [
   ["mikrotik", "MikroTik RouterOS"], ["omada", "TP-Link Omada"], ["unifi", "UniFi"],
   ["openwrt", "OpenWrt"], ["opnsense", "OPNsense"], ["cisco", "Cisco"]
 ];
-assert.deepEqual(cards.map((card) => [card.dataset.routerProvider, card.children[0].textContent]), routerProviders);
+assert.deepEqual(cards.map((card) => [card.dataset.routerProvider, find(card, (node) => node.tag === "h3").textContent]), routerProviders);
 for (const [index, card] of cards.entries()) {
   const [id] = routerProviders[index];
   const icons = flatten(card).filter((node) => node.tag === "img");
@@ -1592,10 +1625,14 @@ for (const [index, card] of cards.entries()) {
   const mikrotik = id === "mikrotik";
   const actions = flatten(card).filter((node) => ["button", "a", "form", "input", "select", "textarea"].includes(node.tag));
   if (mikrotik) {
-    const lane = find(card, hasClass("network-router-lane"));
-    assert.equal(lane.children[0].textContent, "Not configured");
-    assert.equal(actions[0].parentElement, lane.children[1]);
-    assert.equal(actions[1].parentElement, lane.children[1]);
+    const [titleLane, statusLane] = card.children;
+    assert.equal(card.children.length, 2);
+    assert(hasClass("network-router-lane")(titleLane));
+    assert(hasClass("network-router-lane")(statusLane));
+    assert.deepEqual(titleLane.children.map((node) => node.textContent), ["MikroTik RouterOS", "Setup guide"]);
+    assert.equal(titleLane.children[0].children[0], icons[0]);
+    assert.deepEqual(statusLane.children.map((node) => node.textContent), ["Not configured", "Connect"]);
+    assert.equal(statusLane.children[0].role, "status");
   } else assert.equal(card.children[1].textContent, "Not supported yet");
   assert.deepEqual(actions.map((node) => [node.tag, node.textContent]), mikrotik ? [["button", "Setup guide"], ["button", "Connect"]] : []);
   assert(!find(card, (node) => Object.hasOwn(node.dataset, "networkProvider")));
@@ -1607,10 +1644,20 @@ assert(guide);
 assert(!find(tabPanel(), hasClass("network-provider-card")));
 assert.equal(document.activeElement, content.querySelector("[data-router-heading]"));
 assert.deepEqual(flatten(guide).filter((node) => ["button", "a", "form", "input", "select", "textarea"].includes(node.tag)), []);
-const guideText = flatten(guide).map((node) => node.textContent).join("\n");
+const guideNodes = flatten(guide);
+const readText = (node) => node.textContent + node.children.map(readText).join("");
+const guideText = guideNodes.filter((node) => node.tag === "p" || node.tag === "pre").map(readText).join("\n");
+const tokens = guideNodes.filter(hasClass("network-router-token"));
+const inlineTokens = tokens.filter((node) => node.tag === "code" && node.parentElement.tag === "p");
+for (const literal of ["www-ssl", "rest-secure", "rest-plain", "read", "write", "api", "rest-api",
+  "jv", "justvoxel", "<JUSTVOXEL_IP>/32", "<JUSTVOXEL_IP>", "<ROUTER_IP>:443/TCP", "dstnat"]) {
+  assert(inlineTokens.some((node) => node.textContent === literal), literal);
+}
+assert(tokens.some((node) => node.textContent === "<WAN_INTERFACE_LIST>" && node.parentElement.parentElement.tag === "pre"));
 for (const required of [
-  "www-ssl", "rest-secure", "rest-plain", "WebFig", "group named jv", "read, write, api and rest-api",
-  "TCP 8728", "justvoxel", "<JUSTVOXEL_IP>/32", "strong, unique password", "<ROUTER_IP>:443/TCP",
+  "www-ssl", "rest-secure", "rest-plain", "WebFig", "group, for example jv", "read, write, api and rest-api",
+  "TCP 8728", "user, for example justvoxel", "assign it to your dedicated group", "<JUSTVOXEL_IP>/32",
+  "strong, unique password", "<ROUTER_IP>:443/TCP",
   "chain=forward", "action=accept", "connection-nat-state=dstnat",
   "in-interface-list=<WAN_INTERFACE_LIST>", "dst-address=<JUSTVOXEL_IP>",
   "example only, not a universal command", "WAN selection, destination, chains and rule order",
@@ -1626,9 +1673,14 @@ selectNetworkTab("Router");
 assert.equal(document.activeElement.dataset.networkTab, "Router");
 assert(!find(tabPanel(), hasClass("network-router-guide")));
 assert(find(tabPanel(), hasClass("network-provider-card")));
-routerStatus.can_configure = false;
+routerStatus = { status: "connected", can_configure: false };
+renderNetwork();
+const connectedCard = find(tabPanel(), (node) => node.dataset.routerProvider === "mikrotik");
+assert.deepEqual(connectedCard.children[1].children.map((node) => node.textContent), ["Connected", "Connection"]);
 content.querySelector("[data-router-open-connection]").onclick();
-assert(find(tabPanel(), hasClass("network-router-connection")));
+const routerConnection = find(tabPanel(), hasClass("network-router-connection"));
+assert(routerConnection);
+assert(!find(routerConnection, (node) => node.tag === "button"));
 selectNetworkTab("Router");
 assert(find(tabPanel(), hasClass("network-provider-card")));
 content.querySelector("[data-router-open-guide]").onclick();
@@ -1638,6 +1690,53 @@ assert(find(tabPanel(), hasClass("network-provider-card")));
 selectNetworkTab("Remote Access");
 assert(find(tabPanel(), (node) => node.textContent === "Providers"));
 assert(!find(tabPanel(), (node) => node.dataset.routerProvider || hasClass("network-router-guide")(node)));
+
+(async () => {
+  routerStatus = { status: "connected", can_configure: true, configured: true,
+    endpoint: "https://router.example", username: "operator" };
+  const connection = renderRouterConnection();
+  assert(!find(connection, (node) => node.tag === "button" && node.textContent === "Refresh"));
+  const form = find(connection, (node) => node.tag === "form");
+  const [credentialsRow, endpointRow, targetLabel, ingressLabel] = form.children;
+  assert(hasClass("network-router-credentials-row")(credentialsRow));
+  assert.deepEqual(credentialsRow.children.map((node) => node.textContent), ["Username", "Password"]);
+  const password = credentialsRow.children[1].children[0];
+  assert.equal(password.type, "password");
+  assert(!password.value);
+  assert(hasClass("network-router-endpoint-row")(endpointRow));
+  assert.equal(endpointRow.children[0].textContent, "HTTPS endpoint");
+  const [test, save] = endpointRow.children[1].children;
+  assert.deepEqual([test.textContent, save.textContent], ["Test connection", "Save"]);
+  assert(!save.hidden && save.disabled);
+  assert(targetLabel.hidden && ingressLabel.hidden);
+  const target = targetLabel.children[0], ingress = ingressLabel.children[0];
+  target.value = "192.0.2.10"; ingress.value = "0";
+  target.onchange();
+  assert(save.disabled);
+
+  testFailure = true;
+  password.value = "test-password";
+  await test.onclick();
+  assert(save.disabled && !password.value);
+  testFailure = false;
+  testResult = { target_choices: ["192.0.2.10"], ingress_choices: [{ type: "list", name: "WAN" }] };
+  password.value = "test-password";
+  await test.onclick();
+  assert(!password.value && save.disabled);
+  assert(!targetLabel.hidden && !ingressLabel.hidden);
+  target.value = "192.0.2.10";
+  target.onchange();
+  assert(save.disabled);
+  ingress.value = "0";
+  ingress.onchange();
+  assert(!save.disabled);
+  password.value = "test-password";
+  await save.onclick();
+  assert(!password.value);
+  endpointRow.children[0].children[0].oninput();
+  assert(save.disabled);
+  assert.deepEqual(routerRequests, [[routerPath + "/test", "POST"], [routerPath + "/test", "POST"], [routerPath, "PUT"]]);
+})().catch(error => { console.error(error); process.exitCode = 1; });
 `
 	cmd := nodeTestCommand()
 	cmd.Stdin = strings.NewReader(program)
@@ -1651,6 +1750,14 @@ assert(!find(tabPanel(), (node) => node.dataset.routerProvider || hasClass("netw
 	css, err := englishPresentationAsset("static/network-workspace.css")
 	if err != nil {
 		t.Fatal(err)
+	}
+	var providerTracks []string
+	providerGrid := regexp.MustCompile(`\.network-provider-grid\{grid-template-columns:([^}]+)\}`)
+	for _, match := range providerGrid.FindAllStringSubmatch(string(css), -1) {
+		providerTracks = append(providerTracks, match[1])
+	}
+	if want := []string{"minmax(0,1fr)", "repeat(2,minmax(0,1fr))", "repeat(3,minmax(0,1fr))", "repeat(4,minmax(0,1fr))"}; !reflect.DeepEqual(providerTracks, want) {
+		t.Errorf("provider grid tracks = %v, want %v", providerTracks, want)
 	}
 	for _, want := range []string{
 		`.network-workspace-content:has([data-network-view="Wi-Fi"]){height:100%}`,

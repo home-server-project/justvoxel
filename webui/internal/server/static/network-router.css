@@ -2,12 +2,27 @@
   overflow-x: auto;
 }
 
-[data-network-view="Router"] .network-provider-card > .network-router-lane {
-  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+.network-router-lane {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) fit-content(50%);
+  align-items: center;
+  gap: var(--jv-space-sm);
 }
 
 .network-router-lane > .state-text {
   margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.network-router-lane > button {
+  justify-self: end;
+}
+
+.network-router-lane > button,
+.network-router-endpoint-row button {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .network-router-connection {
@@ -16,8 +31,25 @@
   overflow-wrap: anywhere;
 }
 
-.network-router-connection > button {
-  justify-self: start;
+.network-router-credentials-row,
+.network-router-endpoint-row {
+  grid-column: 1 / -1;
+  gap: var(--jv-space-xs) var(--jv-space-md);
+}
+
+.network-router-credentials-row {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.network-router-credentials-row > label {
+  flex: 1 1 12rem;
+}
+
+.network-router-endpoint-row {
+  display: grid;
+  grid-template-columns: minmax(min(7rem, 35%), 1fr) minmax(0, max-content);
+  align-items: end;
 }
 
 .network-router-guide {
@@ -34,6 +66,18 @@
 
 .network-router-guide p {
   margin: .25rem 0 0;
+}
+
+.network-router-token {
+  padding-inline: .15em;
+  border-radius: .2em;
+  background: var(--jv-surface-sunken);
+  font-family: monospace;
+}
+
+.network-router-guide pre .network-router-token {
+  padding-inline: 0;
+  background: var(--jv-surface);
 }
 
 .network-router-guide pre {

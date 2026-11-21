@@ -1463,14 +1463,13 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       title.prepend(icon);
       const status = document.createElement("p");
       status.className = "state-text";
-      card.append(title);
       if (id === "mikrotik") {
         status.textContent = routerLabel(routerStatus?.status);
         status.setAttribute("role", "status");
-        const lane = document.createElement("div");
-        lane.className = "network-inline-actions network-router-lane";
-        const buttons = document.createElement("div");
-        buttons.className = "network-inline-actions";
+        const titleLane = document.createElement("div");
+        titleLane.className = "network-router-lane";
+        const statusLane = document.createElement("div");
+        statusLane.className = "network-router-lane";
         const guide = actionButton(jvT("network.router.setup_guide"), "routerOpenGuide", "");
         const connection = actionButton(routerStatus?.status === "not_configured" && routerStatus.can_configure
           ? jvT("ui.1a2303ede074") : jvT("ui.639a40e82b9a"), "routerOpenConnection", "");
@@ -1481,12 +1480,12 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         };
         guide.addEventListener("click", () => openSubview("guide"));
         connection.addEventListener("click", () => openSubview("connection"));
-        buttons.append(guide, connection);
-        lane.append(status, buttons);
-        card.appendChild(lane);
+        titleLane.append(title, guide);
+        statusLane.append(status, connection);
+        card.append(titleLane, statusLane);
       } else {
         status.textContent = jvT("network.router.unsupported");
-        card.appendChild(status);
+        card.append(title, status);
       }
       grid.appendChild(card);
     }
@@ -1500,24 +1499,32 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       const label = document.createElement("label");
       label.textContent = text;
       label.appendChild(control);
-      form.appendChild(label);
       return label;
     };
+    const username = document.createElement("input");
+    username.value = stored.username || "";
+    username.required = true;
+    const password = document.createElement("input");
+    password.type = "password";
+    password.required = true;
+    password.autocomplete = "new-password";
+    const credentialsRow = document.createElement("div");
+    credentialsRow.className = "network-router-credentials-row";
+    credentialsRow.append(field(jvT("ui.e3b89e9d33f8"), username), field(jvT("ui.e7cf3ef4f17c"), password));
+
     const endpoint = document.createElement("input");
     endpoint.type = "url";
     endpoint.value = stored.endpoint || "";
     endpoint.placeholder = "https://router.example";
     endpoint.required = true;
-    field(jvT("network.router.endpoint"), endpoint);
-    const username = document.createElement("input");
-    username.value = stored.username || "";
-    username.required = true;
-    field(jvT("ui.e3b89e9d33f8"), username);
-    const password = document.createElement("input");
-    password.type = "password";
-    password.required = true;
-    password.autocomplete = "new-password";
-    field(jvT("ui.e7cf3ef4f17c"), password);
+    const endpointRow = document.createElement("div");
+    endpointRow.className = "network-router-endpoint-row";
+    const actions = document.createElement("div");
+    actions.className = "network-inline-actions";
+    const test = actionButton(jvT("network.router.test"), "routerTest", "");
+    const save = actionButton(jvT("ui.1509f561f241"), "routerSave", "");
+    actions.append(test, save);
+    endpointRow.append(field(jvT("network.router.endpoint"), endpoint), actions);
 
     const target = document.createElement("select");
     target.required = true;
@@ -1529,22 +1536,21 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     feedback.className = "network-connect-hint";
     feedback.setAttribute("role", "status");
 
-    const actions = document.createElement("div");
-    actions.className = "network-inline-actions network-form-actions";
-    const test = actionButton(jvT("network.router.test"), "routerTest", "");
-    const save = actionButton(jvT("ui.1509f561f241"), "routerSave", "");
     const forget = actionButton(jvT("network.router.forget"), "routerForget", "danger");
-    actions.append(test, save);
-    if (stored.configured) actions.appendChild(forget);
-    form.append(feedback, actions);
+    form.append(credentialsRow, endpointRow, targetLabel, ingressLabel, feedback);
+    if (stored.configured) {
+      const forgetActions = document.createElement("div");
+      forgetActions.className = "network-form-actions";
+      forgetActions.appendChild(forget);
+      form.appendChild(forgetActions);
+    }
 
     let choices = [];
     let verified = false;
     let busy = false;
     const update = () => {
       targetLabel.hidden = ingressLabel.hidden = !verified;
-      save.hidden = !verified;
-      save.disabled = busy || !target.value || !ingress.value;
+      save.disabled = busy || !verified || !target.value || !ingress.value;
       test.disabled = forget.disabled = busy;
       endpoint.readOnly = username.readOnly = password.readOnly = busy;
       target.disabled = ingress.disabled = busy || !verified;
@@ -1642,12 +1648,6 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     title.dataset.routerHeading = "";
     title.tabIndex = -1;
     section.append(title, row(jvT("ui.639a40e82b9a"), routerLabel(data.status)), ...routerIdentityRows(data));
-    const refresh = actionButton(jvT("ui.0e9161011702"), "routerRefresh", "");
-    refresh.addEventListener("click", async () => {
-      refresh.disabled = true;
-      await refreshRouter();
-    });
-    section.appendChild(refresh);
     for (const [label, value] of [
       [jvT("network.router.endpoint"), data.endpoint],
       [jvT("ui.e3b89e9d33f8"), data.username],
@@ -1696,15 +1696,29 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     title.tabIndex = -1;
     guide.append(title, intro);
 
+    const appendGuideText = (parent, text, tokenTag = "code") => {
+      const tokens = /(<JUSTVOXEL_IP>(?:\/32)?|<ROUTER_IP>:443\/TCP|<WAN_INTERFACE_LIST>|\b(?:www-ssl|rest-secure|rest-plain|rest-api|read|write|api|jv|justvoxel|dstnat)\b)/g;
+      text.split(tokens).forEach((part, index) => {
+        if (index % 2 === 0) {
+          parent.appendChild(document.createTextNode(part));
+        } else {
+          const token = document.createElement(tokenTag);
+          token.className = "network-router-token";
+          token.textContent = part;
+          parent.appendChild(token);
+        }
+      });
+    };
+
     const forwardExample = document.createElement("pre");
     const code = document.createElement("code");
-    code.textContent = [
+    appendGuideText(code, [
       "chain=forward",
       "action=accept",
       "connection-nat-state=dstnat",
       "in-interface-list=<WAN_INTERFACE_LIST>",
       "dst-address=<JUSTVOXEL_IP>",
-    ].join("\n");
+    ].join("\n"), "span");
     forwardExample.appendChild(code);
     const sections = [
       [jvT("network.router.https"), [jvT("network.router.https_help")]],
@@ -1722,7 +1736,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       section.appendChild(subtitle);
       for (const text of paragraphs) {
         const paragraph = document.createElement("p");
-        paragraph.textContent = text;
+        appendGuideText(paragraph, text);
         section.appendChild(paragraph);
       }
       if (example) section.appendChild(example);
