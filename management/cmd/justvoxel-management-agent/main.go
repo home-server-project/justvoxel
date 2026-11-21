@@ -82,6 +82,7 @@ type server struct {
 	discordRebootReconciling bool
 	discordRebootAfter       time.Time
 
+	routerOSMu          sync.Mutex
 	networkMu           sync.Mutex
 	networkTransactions map[string]networkCheckpointTransaction
 

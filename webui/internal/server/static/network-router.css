@@ -2,8 +2,22 @@
   overflow-x: auto;
 }
 
-[data-network-view="Router"] [data-router-open-guide] {
-  align-self: start;
+[data-network-view="Router"] .network-provider-card > .network-router-lane {
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+}
+
+.network-router-lane > .state-text {
+  margin: 0;
+}
+
+.network-router-connection {
+  display: grid;
+  gap: .5rem;
+  overflow-wrap: anywhere;
+}
+
+.network-router-connection > button {
+  justify-self: start;
 }
 
 .network-router-guide {

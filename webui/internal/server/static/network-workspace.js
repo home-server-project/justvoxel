@@ -20,7 +20,11 @@
   const checkpointStorageKey = "justvoxel-network-checkpoint";
 
   let selectedTab = "Overview";
-  let showMikroTikGuide = false;
+  let routerSubview = "";
+  let routerStatus = null;
+  let routerSequence = 0;
+  let routerConnectionView = null;
+  const routerPath = "/api/network/router/mikrotik";
   let remoteProviders = [];
   let remoteError = "";
   let playitSetup = { state: "idle" };
@@ -1376,6 +1380,65 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     return section;
   };
 
+  const routerLabel = (status) => {
+    switch (status) {
+      case "not_configured": return jvT("ui.dd1841d29502");
+      case "connected": return jvT("ui.22965568d22a");
+      case "configuration_error": return jvT("network.router.configuration_error");
+      case "unavailable": return jvT("ui.ca1844969742");
+      default: return jvT("ui.ec963ffc911b");
+    }
+  };
+
+  const routerIngressLabel = (choice) => {
+    const type = choice.type === "list" ? jvT("network.router.interface_list") : jvT("network.router.interface");
+    return type + " · " + choice.name;
+  };
+
+  const routerEdition = (edition) => edition === "java" ? jvT("network.router.java") : jvT("network.router.bedrock");
+
+  const routerExposureLabel = (status) => {
+    switch (status) {
+      case "open": return jvT("network.router.open");
+      case "closed": return jvT("network.router.closed");
+      case "conflict": return jvT("network.router.conflict");
+      default: return jvT("ui.b764cdc0eab7");
+    }
+  };
+
+  const routerExposureDetail = (status) => {
+    switch (status) {
+      case "open": return jvT("network.router.open_detail");
+      case "closed": return jvT("network.router.closed_detail");
+      case "conflict": return jvT("network.router.conflict_detail");
+      default: return jvT("network.router.unknown_detail");
+    }
+  };
+
+  const routerPortLabel = (endpoint) => {
+    const ports = endpoint.last_port > endpoint.port ? endpoint.port + "–" + endpoint.last_port : endpoint.port;
+    return routerEdition(endpoint.edition) + " · " + endpoint.protocols.join("+").toUpperCase() + " · " + ports;
+  };
+
+  const routerIdentityRows = (data) => [
+    [jvT("network.router.identity"), data.identity],
+    [jvT("ui.dd167905de0d"), data.version],
+    [jvT("network.router.board"), data.board],
+  ].filter(([, value]) => value).map(([name, value]) => row(name, value));
+
+  const refreshRouter = async () => {
+    const sequence = ++routerSequence;
+    try {
+      const result = await requestJSON(routerPath);
+      if (sequence === routerSequence) routerStatus = result;
+    } catch (_) {
+      if (sequence === routerSequence) routerStatus = { status: "unavailable" };
+    }
+    if (sequence !== routerSequence) return;
+    routerConnectionView = null;
+    if (selectedTab === "Router" && routerSubview !== "guide") renderNetwork();
+  };
+
   const renderRouter = () => {
     const grid = document.createElement("div");
     grid.className = "network-provider-grid";
@@ -1400,36 +1463,238 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       title.prepend(icon);
       const status = document.createElement("p");
       status.className = "state-text";
-      status.textContent = id === "mikrotik" ? jvT("ui.dd1841d29502") : jvT("network.router.unsupported");
-      card.append(title, status);
+      card.append(title);
       if (id === "mikrotik") {
+        status.textContent = routerLabel(routerStatus?.status);
+        status.setAttribute("role", "status");
+        const lane = document.createElement("div");
+        lane.className = "network-inline-actions network-router-lane";
+        const buttons = document.createElement("div");
+        buttons.className = "network-inline-actions";
         const guide = actionButton(jvT("network.router.setup_guide"), "routerOpenGuide", "");
-        guide.addEventListener("click", () => {
-          showMikroTikGuide = true;
+        const connection = actionButton(routerStatus?.status === "not_configured" && routerStatus.can_configure
+          ? jvT("ui.1a2303ede074") : jvT("ui.639a40e82b9a"), "routerOpenConnection", "");
+        const openSubview = (name) => {
+          routerSubview = name;
           renderNetwork();
-          content.querySelector("[data-router-back]")?.focus();
-        });
-        card.appendChild(guide);
+          content.querySelector("[data-router-heading]")?.focus();
+        };
+        guide.addEventListener("click", () => openSubview("guide"));
+        connection.addEventListener("click", () => openSubview("connection"));
+        buttons.append(guide, connection);
+        lane.append(status, buttons);
+        card.appendChild(lane);
+      } else {
+        status.textContent = jvT("network.router.unsupported");
+        card.appendChild(status);
       }
       grid.appendChild(card);
     }
     return grid;
   };
 
+  const renderRouterConfiguration = (stored) => {
+    const form = document.createElement("form");
+    form.className = "network-ethernet-form";
+    const field = (text, control) => {
+      const label = document.createElement("label");
+      label.textContent = text;
+      label.appendChild(control);
+      form.appendChild(label);
+      return label;
+    };
+    const endpoint = document.createElement("input");
+    endpoint.type = "url";
+    endpoint.value = stored.endpoint || "";
+    endpoint.placeholder = "https://router.example";
+    endpoint.required = true;
+    field(jvT("network.router.endpoint"), endpoint);
+    const username = document.createElement("input");
+    username.value = stored.username || "";
+    username.required = true;
+    field(jvT("ui.e3b89e9d33f8"), username);
+    const password = document.createElement("input");
+    password.type = "password";
+    password.required = true;
+    password.autocomplete = "new-password";
+    field(jvT("ui.e7cf3ef4f17c"), password);
+
+    const target = document.createElement("select");
+    target.required = true;
+    const ingress = document.createElement("select");
+    ingress.required = true;
+    const targetLabel = field(jvT("network.router.target"), target);
+    const ingressLabel = field(jvT("network.router.ingress"), ingress);
+    const feedback = document.createElement("div");
+    feedback.className = "network-connect-hint";
+    feedback.setAttribute("role", "status");
+
+    const actions = document.createElement("div");
+    actions.className = "network-inline-actions network-form-actions";
+    const test = actionButton(jvT("network.router.test"), "routerTest", "");
+    const save = actionButton(jvT("ui.1509f561f241"), "routerSave", "");
+    const forget = actionButton(jvT("network.router.forget"), "routerForget", "danger");
+    actions.append(test, save);
+    if (stored.configured) actions.appendChild(forget);
+    form.append(feedback, actions);
+
+    let choices = [];
+    let verified = false;
+    let busy = false;
+    const update = () => {
+      targetLabel.hidden = ingressLabel.hidden = !verified;
+      save.hidden = !verified;
+      save.disabled = busy || !target.value || !ingress.value;
+      test.disabled = forget.disabled = busy;
+      endpoint.readOnly = username.readOnly = password.readOnly = busy;
+      target.disabled = ingress.disabled = busy || !verified;
+      target.required = ingress.required = verified;
+    };
+    const invalidate = () => {
+      verified = false;
+      feedback.replaceChildren();
+      update();
+    };
+    endpoint.addEventListener("input", invalidate);
+    username.addEventListener("input", invalidate);
+    target.addEventListener("change", update);
+    ingress.addEventListener("change", update);
+    update();
+
+    const options = (select, values, oldValue) => {
+      select.replaceChildren();
+      const empty = document.createElement("option");
+      empty.value = "";
+      empty.textContent = jvT("network.router.choose");
+      select.appendChild(empty);
+      for (const [value, label] of values) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = label;
+        select.appendChild(option);
+      }
+      select.value = oldValue || "";
+      if (select.selectedIndex < 0) select.value = "";
+    };
+    const run = async (method) => {
+      if (busy) return;
+      if (method === "DELETE" && !window.confirm(jvT("network.router.forget_confirm"))) return;
+      if (method !== "DELETE" && (!endpoint.reportValidity() || !username.reportValidity() || !password.reportValidity())) return;
+      if (method === "PUT" && (!verified || !target.value || !ingress.value)) return;
+      const body = new URLSearchParams();
+      if (method !== "DELETE") {
+        body.set("endpoint", endpoint.value);
+        body.set("username", username.value);
+        body.set("password", password.value);
+      }
+      if (method === "PUT") {
+        const choice = choices[Number(ingress.value)];
+        body.set("target", target.value);
+        body.set("ingress_type", choice.type);
+        body.set("ingress_name", choice.name);
+      }
+      if (method === "POST") verified = false;
+      busy = true;
+      update();
+      feedback.textContent = jvT("ui.ec963ffc911b");
+      try {
+        const data = await requestJSON(method === "POST" ? routerPath + "/test" : routerPath, {
+          method,
+          headers: { "Content-Type": "application/x-www-form-urlencoded", "X-CSRF-Token": csrf },
+          body: method === "DELETE" ? undefined : body,
+        }).finally(() => {
+          password.value = "";
+          body.delete("password");
+        });
+        if (!data) return;
+        if (method !== "POST") {
+          await refreshRouter();
+          return;
+        }
+        choices = data.ingress_choices || [];
+        const selected = choices.findIndex(choice => choice.type === stored.ingress?.type && choice.name === stored.ingress?.name);
+        options(target, (data.target_choices || []).map(address => [address, address]), stored.target);
+        options(ingress, choices.map((choice, i) => [String(i), routerIngressLabel(choice)]), selected < 0 ? "" : String(selected));
+        const hint = document.createElement("p");
+        hint.textContent = data.target_choices?.length && choices.length ? jvT("network.router.reenter") : jvT("network.router.no_choices");
+        feedback.replaceChildren(...routerIdentityRows(data), hint);
+        verified = true;
+      } catch (error) {
+        feedback.textContent = error?.message || jvT("network.router.unavailable");
+      } finally {
+        busy = false;
+        update();
+      }
+    };
+    test.addEventListener("click", () => run("POST"));
+    save.addEventListener("click", () => run("PUT"));
+    forget.addEventListener("click", () => run("DELETE"));
+    form.addEventListener("submit", (event) => { event.preventDefault(); run("POST"); });
+    return form;
+  };
+
+  const renderRouterConnection = () => {
+    const data = routerStatus || {};
+    const section = document.createElement("section");
+    section.className = "panel network-section network-router-connection";
+    const title = document.createElement("h2");
+    title.textContent = jvT("network.router.mikrotik");
+    title.dataset.routerHeading = "";
+    title.tabIndex = -1;
+    section.append(title, row(jvT("ui.639a40e82b9a"), routerLabel(data.status)), ...routerIdentityRows(data));
+    const refresh = actionButton(jvT("ui.0e9161011702"), "routerRefresh", "");
+    refresh.addEventListener("click", async () => {
+      refresh.disabled = true;
+      await refreshRouter();
+    });
+    section.appendChild(refresh);
+    for (const [label, value] of [
+      [jvT("network.router.endpoint"), data.endpoint],
+      [jvT("ui.e3b89e9d33f8"), data.username],
+      [jvT("network.router.target"), data.target],
+      [jvT("network.router.ingress"), data.ingress && routerIngressLabel(data.ingress)],
+    ]) {
+      if (value) section.appendChild(row(label, value));
+    }
+    if (data.can_configure) section.appendChild(renderRouterConfiguration(data));
+    const heading = document.createElement("h3");
+    heading.textContent = jvT("network.router.endpoints");
+    section.appendChild(heading);
+    if (data.inventory_error || !data.endpoints?.length) {
+      const message = document.createElement("p");
+      message.textContent = data.inventory_error ? jvT("network.router.inventory_error") : jvT("network.router.no_endpoints");
+      section.appendChild(message);
+    }
+    const groups = new Map();
+    for (const endpoint of data.endpoints || []) {
+      const key = endpoint.network ? "network" : endpoint.id;
+      let group = groups.get(key);
+      if (!group) {
+        group = document.createElement("section");
+        groups.set(key, group);
+        const name = document.createElement("h4");
+        name.textContent = endpoint.network ? jvT("ui.60d8c0cc037f") : endpoint.name || endpoint.id;
+        group.appendChild(name);
+        section.appendChild(group);
+      }
+      const detail = document.createElement("p");
+      detail.className = "muted";
+      detail.textContent = routerExposureDetail(endpoint.state);
+      group.append(row(routerPortLabel(endpoint), routerExposureLabel(endpoint.state)), detail);
+    }
+    return section;
+  };
+
   const renderMikroTikGuide = () => {
     const guide = document.createElement("section");
     guide.className = "panel network-section network-router-guide";
-    const back = actionButton(jvT("ui.76900f1bfd16"), "routerBack", "");
-    back.addEventListener("click", () => {
-      showMikroTikGuide = false;
-      renderNetwork();
-      content.querySelector("[data-router-open-guide]")?.focus();
-    });
     const title = document.createElement("h2");
     title.textContent = jvT("network.router.guide_title");
     const intro = document.createElement("p");
     intro.textContent = jvT("network.router.guide_intro");
-    guide.append(back, title, intro);
+    title.dataset.routerHeading = "";
+    title.tabIndex = -1;
+    guide.append(title, intro);
 
     const forwardExample = document.createElement("pre");
     const code = document.createElement("code");
@@ -1531,7 +1796,12 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     } else if (selectedTab === "Remote Access") {
       panel.appendChild(renderRemoteAccess());
     } else if (selectedTab === "Router") {
-      panel.appendChild(showMikroTikGuide ? renderMikroTikGuide() : renderRouter());
+      if (routerSubview === "guide") panel.appendChild(renderMikroTikGuide());
+      else if (routerSubview === "connection") {
+        routerConnectionView ||= renderRouterConnection();
+        panel.appendChild(routerConnectionView);
+      }
+      else panel.appendChild(renderRouter());
     }
     root.appendChild(panel);
     content.replaceChildren(root);
@@ -1592,6 +1862,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       updatePlayitPopup();
       openActivatedDashboards();
       renderNetwork();
+      if (selectedTab === "Router") refreshRouter();
       state.textContent = "";
       if (remoteProviders.some(providerTransitional) || setupRunning()) pollRemoteAccess();
     } catch (error) {
@@ -1844,14 +2115,22 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     );
   };
 
+  const selectNetworkTab = (name) => {
+    const returningToCards = selectedTab === "Router" && name === "Router" && routerSubview !== "";
+    routerSubview = "";
+    routerConnectionView = null;
+    selectedTab = name;
+    connectionDraft = null;
+    renderNetwork();
+    if (selectedTab === "Router" && !returningToCards) refreshRouter();
+    if (selectedTab === "Remote Access") refreshRemoteAccess().then(pollRemoteAccess).catch((error) => { state.textContent = error?.message || jvT("ui.d6b5cd96e853"); });
+    content.querySelector('[aria-selected="true"]')?.focus();
+  };
+
   content.addEventListener("click", (event) => {
     const tab = event.target.closest("[data-network-tab]");
     if (tab) {
-      selectedTab = tab.dataset.networkTab;
-      connectionDraft = null;
-      renderNetwork();
-      if (selectedTab === "Remote Access") refreshRemoteAccess().then(pollRemoteAccess).catch((error) => { state.textContent = error?.message || jvT("ui.d6b5cd96e853"); });
-      content.querySelector('[aria-selected="true"]')?.focus();
+      selectNetworkTab(tab.dataset.networkTab);
       return;
     }
     if (!isAdministrator()) return;
@@ -2057,11 +2336,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     if (event.key === "Home") index = 0;
     else if (event.key === "End") index = tabs.length - 1;
     else index = (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
-    selectedTab = tabs[index];
-    connectionDraft = null;
-    renderNetwork();
-    if (selectedTab === "Remote Access") refreshRemoteAccess().then(pollRemoteAccess).catch((error) => { state.textContent = error?.message || jvT("ui.d6b5cd96e853"); });
-    content.querySelector('[aria-selected="true"]')?.focus();
+    selectNetworkTab(tabs[index]);
   });
 
   content.addEventListener("submit", (event) => {
@@ -2082,5 +2357,9 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
   closeButton?.addEventListener("click", () => workspace?.close());
   refreshButton?.addEventListener("click", loadNetwork);
 
-  if (readWorkspaceWindowState("network").open) workspace?.open();
+  const params = new URLSearchParams(window.location.search);
+  const routerDeepLink = window.location.pathname === "/" && [...params].length === 2 &&
+    params.get("workspace") === "network" && params.get("tab") === "Router";
+  if (routerDeepLink) selectedTab = "Router";
+  if (routerDeepLink || readWorkspaceWindowState("network").open) workspace?.open();
 })();

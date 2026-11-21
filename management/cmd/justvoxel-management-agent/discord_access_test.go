@@ -138,6 +138,9 @@ func TestDiscordAccessMigrationV9AndRestart(t *testing.T) {
 	if _, err := store.db.Exec(`DROP TABLE discord_reboot_state`); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := store.db.Exec(`DROP TABLE routeros_state`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := store.db.Exec(`DELETE FROM schema_migrations WHERE version>=9`); err != nil {
 		t.Fatal(err)
 	}

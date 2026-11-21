@@ -6235,10 +6235,13 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
 
     const status = document.createElement("p");
     status.className = "system-reset-progress-status";
-    status.textContent = operation.status || jvT("ui.7cd4cd6b5a1f");
+    const routerRevocationFailed = operation.operation_type === "factory_reset" && operation.stage === "routeros_revocation_failed";
+    const statusMessage = routerRevocationFailed ? jvT("network.router.factory_reset_failed") : operation.status;
+    status.textContent = statusMessage || jvT("ui.7cd4cd6b5a1f");
     const stage = document.createElement("p");
     stage.className = "muted compact";
-    stage.textContent = "Stage: " + String(operation.stage || "working").replaceAll("_", " ");
+    stage.textContent = routerRevocationFailed ? jvT("network.router.factory_reset_stage")
+      : "Stage: " + String(operation.stage || "working").replaceAll("_", " ");
     built.panel.append(status, stage);
     const liveConsole = document.createElement("button");
     liveConsole.type = "button";
@@ -6324,7 +6327,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
 
     const terminal = ["succeeded", "needs_attention", "resolved", "rolled_back"].includes(operation.state);
     if (terminal) {
-      if (state) state.textContent = operation.status || systemResetOperationLabel(operation);
+      if (state) state.textContent = statusMessage || systemResetOperationLabel(operation);
       return;
     }
 

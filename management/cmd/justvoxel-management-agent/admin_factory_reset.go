@@ -542,6 +542,11 @@ func executeFactoryReset(ctx context.Context, s *server, operationID, expectedFi
 		return err
 	}
 
+	if err := s.routerOSFactoryRevoke(); err != nil {
+		_, _ = s.operations.transition(operationID, operationNeedsAttention, "routeros_revocation_failed", "The MikroTik connection could not be forgotten. No destructive cleanup was started. Retry Factory Reset.")
+		return err
+	}
+
 	s.gatewayMu.Lock()
 	revokeErr := s.store.gatewayFactoryRevoke()
 	s.gatewayMu.Unlock()

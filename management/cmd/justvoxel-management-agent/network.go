@@ -110,6 +110,7 @@ func registerNetworkRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("POST /v1/admin/network/ethernet/{interface}", s.networkEthernetConfigure)
 	mux.HandleFunc("POST /v1/admin/network/connectivity-check", s.networkConnectivityCheck)
 	mux.HandleFunc("POST /v1/admin/network/reconnect/{interface}", s.networkReconnect)
+	registerRouterOSRoutes(mux, s)
 	registerNetworkCheckpointRoutes(mux, s)
 	registerNetworkWiFiActionRoutes(mux, s)
 }

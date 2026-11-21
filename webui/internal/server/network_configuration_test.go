@@ -73,55 +73,54 @@ func TestNetworkWorkspaceTabsFollowAuthenticatedRole(t *testing.T) {
 	}
 }
 
-func TestNetworkRouterHasNoAPI(t *testing.T) {
+func TestNetworkRouterHasNoGenericProxy(t *testing.T) {
 	app, err := New(&fakeNetworkAPI{fakeAPI: &fakeAPI{}, role: "administrator"}, Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := app.Handler()
-	for _, path := range []string{"/api/network/router", "/api/network/router/mikrotik"} {
+	for _, path := range []string{"/api/network/router", "/api/network/router/mikrotik/rest/ip/firewall/nat"} {
 		for _, method := range []string{http.MethodGet, http.MethodPost} {
 			req := httptest.NewRequest(method, path, nil)
 			req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
 			rr := httptest.NewRecorder()
-			handler.ServeHTTP(rr, req)
+			app.Handler().ServeHTTP(rr, req)
 			if rr.Code != http.StatusNotFound && rr.Code != http.StatusMethodNotAllowed {
 				t.Errorf("%s %s is registered: %d", method, path, rr.Code)
 			}
 		}
 	}
-	source, err := assets.ReadFile("static/network-workspace.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	script := string(source)
-	start := strings.Index(script, "  const renderRouter =")
-	end := strings.Index(script, "  const renderNetwork =")
-	if start < 0 || end <= start {
-		t.Fatal("Router presentation functions missing")
-	}
-	for _, forbidden := range []string{"/api/network/router", "/rest/", "https://<ROUTER_IP>"} {
-		if strings.Contains(script, forbidden) {
-			t.Errorf("network workspace references a router API: %q", forbidden)
+	for _, path := range []string{"static/network-workspace.js", "static/minecraft-servers.js"} {
+		source, err := assets.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	if ioCall := regexp.MustCompile(`\b(fetch|requestJSON|postForm|XMLHttpRequest|localStorage|sessionStorage|WebSocket)\b`).FindString(script[start:end]); ioCall != "" {
-		t.Errorf("Router presentation uses I/O: %s", ioCall)
+		if strings.Contains(string(source), "/rest/") {
+			t.Errorf("%s addresses a RouterOS resource directly", path)
+		}
 	}
 }
 
 func TestNetworkRouterCatalogReferences(t *testing.T) {
-	source, err := assets.ReadFile("static/network-workspace.js")
-	if err != nil {
-		t.Fatal(err)
+	var keys []string
+	for key := range catalogs["en"] {
+		if strings.HasPrefix(key, "network.router.") {
+			keys = append(keys, key)
+		}
 	}
-	keys := regexp.MustCompile(`jvT\("(network\.router\.[a-z_]+)"\)`).FindAllStringSubmatch(string(source), -1)
+	for _, path := range []string{"static/network-workspace.js", "static/minecraft-servers.js", "templates/minecraft_servers.html"} {
+		source, err := assets.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, match := range regexp.MustCompile(`"(network\.router\.[a-z_]+)"`).FindAllStringSubmatch(string(source), -1) {
+			keys = append(keys, match[1])
+		}
+	}
 	if len(keys) == 0 {
 		t.Fatal("Router catalog references missing")
 	}
 	for _, locale := range supportedLocales {
-		for _, match := range keys {
-			key := match[1]
+		for _, key := range keys {
 			if strings.TrimSpace(catalogs[locale][key]) == "" {
 				t.Errorf("%s missing %q", locale, key)
 			}
@@ -696,8 +695,13 @@ func TestNetworkVisibleTabsAndConnectivityPresentation(t *testing.T) {
 	if start < 0 || end <= start || !strings.Contains(script, validation) || strings.Count(script, "const tabs = effectiveTabs(currentSnapshot);") != 2 {
 		t.Fatal("rendering, selection and keyboard navigation must share visible tabs")
 	}
+	selectStart := strings.Index(script, "  const selectNetworkTab =")
+	selectEnd := strings.Index(script, `  content.addEventListener("click",`)
 	keyboardStart := strings.Index(script, `  content.addEventListener("keydown", (event) => {`)
-	keyboardEnd := strings.Index(script[keyboardStart:], `  content.addEventListener("submit"`)
+	keyboardEnd := strings.Index(script, `  content.addEventListener("submit"`)
+	if selectStart < 0 || selectEnd <= selectStart || keyboardStart < 0 || keyboardEnd <= keyboardStart {
+		t.Fatal("tab selection helper or keyboard handler missing")
+	}
 	program := `
 const assert = require("node:assert/strict");
 ` + script[start:end] + `
@@ -709,14 +713,16 @@ for (const state of ["disconnected", "unavailable"]) {
 }
 assert.deepEqual(effectiveTabs({ workspace_tabs: ["Overview", "Troubleshoot"], devices: [{ kind: "wifi" }] }), ["Overview", "Troubleshoot"]);
 let selectedTab = "Wi-Fi", connectionDraft = null;
+let routerSubview = "", routerConnectionView = null;
 const renderNetwork = () => {
 ` + validation + `
 };
 renderNetwork(); assert.equal(selectedTab, "Overview");
 let onKey;
 const content = { addEventListener: (_, callback) => { onKey = callback; }, querySelector: () => null };
+const refreshRouter = () => {};
 const refreshRemoteAccess = async () => {}, pollRemoteAccess = () => {}, state = {};
-` + script[keyboardStart:keyboardStart+keyboardEnd] + `
+` + script[selectStart:selectEnd] + script[keyboardStart:keyboardEnd] + `
 const key = (key) => onKey({ key, target: { closest: () => ({}) }, preventDefault() {} });
 selectedTab = "Ethernet"; key("ArrowRight"); assert.equal(selectedTab, "Troubleshoot");
 key("ArrowLeft"); assert.equal(selectedTab, "Ethernet");
@@ -1467,10 +1473,15 @@ const isAdministrator = () => true;
 const remoteProviders = [];
 const remoteError = "";
 const content = new Element("div"), state = new Element("p");
-const routerActions = { "[data-router-open-guide]": "routerOpenGuide", "[data-router-back]": "routerBack" };
-content.querySelector = (selector) => find(content, (node) => Object.hasOwn(node.dataset, routerActions[selector]));
+const routerActions = { "[data-router-open-guide]": "routerOpenGuide", "[data-router-open-connection]": "routerOpenConnection", "[data-router-heading]": "routerHeading" };
+content.querySelector = (selector) => find(content, (node) => selector === '[aria-selected="true"]'
+  ? node['aria-selected'] === "true" : Object.hasOwn(node.dataset, routerActions[selector]));
 let selectedTab = "Overview", currentCheckpoint = null, connectionDraft = null;
-let showMikroTikGuide = false;
+let routerSubview = "", routerStatus = { status: "not_configured", can_configure: true };
+let routerSequence = 0, routerConnectionView = null;
+const routerPath = "/api/network/router/mikrotik";
+const requestJSON = async () => routerStatus;
+const refreshRemoteAccess = async () => {}, pollRemoteAccess = () => {};
 const wifi = { kind: "wifi", interface: "wlp1s0", state: "activated", managed: true,
   wireless: { ssid: "Robinson Crusoe", signal: 79 },
   ipv4: { addresses: [{ address: "192.168.0.27", prefix: 24 }] },
@@ -1490,7 +1501,8 @@ const currentNetworks = new Map([["wlp1s0", { networks: [
 		slice("  const row =", "  const readStoredCheckpointID =") +
 		slice("  const sectionHeading =", "  const renderCheckpoint =") +
 		slice("  const renderDevice =", "  // Account actions reuse setup state") +
-		slice("  const renderRemoteAccess =", "  const resumeCheckpoint =") + `
+		slice("  const renderRemoteAccess =", "  const resumeCheckpoint =") +
+		slice("  const selectNetworkTab =", "  content.addEventListener(\"click\",") + `
 for (const tab of currentSnapshot.workspace_tabs) {
   selectedTab = tab; renderNetwork();
   const internet = find(content, (node) => node.textContent === "Internet connected");
@@ -1579,8 +1591,13 @@ for (const [index, card] of cards.entries()) {
   assert.deepEqual(icons.map((icon) => icon.src), ["/static/router-provider-icons/" + id + ".svg"]);
   const mikrotik = id === "mikrotik";
   const actions = flatten(card).filter((node) => ["button", "a", "form", "input", "select", "textarea"].includes(node.tag));
-  assert.equal(card.children[1].textContent, mikrotik ? "Not configured" : "Not supported yet");
-  assert.deepEqual(actions.map((node) => [node.tag, node.textContent]), mikrotik ? [["button", "Setup guide"]] : []);
+  if (mikrotik) {
+    const lane = find(card, hasClass("network-router-lane"));
+    assert.equal(lane.children[0].textContent, "Not configured");
+    assert.equal(actions[0].parentElement, lane.children[1]);
+    assert.equal(actions[1].parentElement, lane.children[1]);
+  } else assert.equal(card.children[1].textContent, "Not supported yet");
+  assert.deepEqual(actions.map((node) => [node.tag, node.textContent]), mikrotik ? [["button", "Setup guide"], ["button", "Connect"]] : []);
   assert(!find(card, (node) => Object.hasOwn(node.dataset, "networkProvider")));
 }
 const setup = content.querySelector("[data-router-open-guide]");
@@ -1588,10 +1605,8 @@ setup.onclick();
 const guide = find(tabPanel(), hasClass("network-router-guide"));
 assert(guide);
 assert(!find(tabPanel(), hasClass("network-provider-card")));
-const back = content.querySelector("[data-router-back]");
-assert.equal(back.textContent, "Back");
-assert.equal(document.activeElement, back);
-assert.deepEqual(flatten(guide).filter((node) => ["button", "a", "form", "input", "select", "textarea"].includes(node.tag)), [back]);
+assert.equal(document.activeElement, content.querySelector("[data-router-heading]"));
+assert.deepEqual(flatten(guide).filter((node) => ["button", "a", "form", "input", "select", "textarea"].includes(node.tag)), []);
 const guideText = flatten(guide).map((node) => node.textContent).join("\n");
 for (const required of [
   "www-ssl", "rest-secure", "rest-plain", "WebFig", "group named jv", "read, write, api and rest-api",
@@ -1601,16 +1616,26 @@ for (const required of [
   "example only, not a universal command", "WAN selection, destination, chains and rule order",
   "before any rule", "need no additional rule", "never create, move, enable, disable or delete",
   "never create or modify router input or firewall filter rules", "only its own destination NAT (dstnat) records",
-  "router identity and version", "status and conflicts", "create, enable, disable, reconcile or remove",
+  "router identity and version", "status and conflicts",
   "interfaces, VLANs, routes, DNS, DHCP", "RouterOS users and groups, certificates, /ip service",
   "packages and updates, router reboots and arbitrary RouterOS commands",
-  "Minecraft instance or Minecraft Network (Velocity) configuration", "no way to supply arbitrary ports"
+  "Minecraft instance or Minecraft Network (Velocity) configuration", "no way to accept arbitrary ports"
 ]) assert(guideText.includes(required), required);
 assert.doesNotMatch(guideText, /\b(?:\d{1,3}\.){3}\d{1,3}\b|RB3011|bridge-minecraft|pppoe-wan/i);
-back.onclick();
-assert.equal(document.activeElement, content.querySelector("[data-router-open-guide]"));
+selectNetworkTab("Router");
+assert.equal(document.activeElement.dataset.networkTab, "Router");
 assert(!find(tabPanel(), hasClass("network-router-guide")));
-selectedTab = "Remote Access"; renderNetwork();
+assert(find(tabPanel(), hasClass("network-provider-card")));
+routerStatus.can_configure = false;
+content.querySelector("[data-router-open-connection]").onclick();
+assert(find(tabPanel(), hasClass("network-router-connection")));
+selectNetworkTab("Router");
+assert(find(tabPanel(), hasClass("network-provider-card")));
+content.querySelector("[data-router-open-guide]").onclick();
+selectNetworkTab("Overview");
+selectNetworkTab("Router");
+assert(find(tabPanel(), hasClass("network-provider-card")));
+selectNetworkTab("Remote Access");
 assert(find(tabPanel(), (node) => node.textContent === "Providers"));
 assert(!find(tabPanel(), (node) => node.dataset.routerProvider || hasClass("network-router-guide")(node)));
 `

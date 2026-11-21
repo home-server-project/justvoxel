@@ -26,6 +26,7 @@ type networkAPI interface {
 }
 
 func (a *App) registerNetworkWorkspaceRoutes(mux *http.ServeMux) {
+	a.registerRouterOSRoutes(mux)
 	mux.HandleFunc("GET /api/network", a.networkStatus)
 	mux.HandleFunc("POST /api/network/remote-access/playit/relink", a.networkPlayitRelink)
 	mux.HandleFunc("GET /api/network/remote-access/playit/setup", a.networkPlayitSetup)

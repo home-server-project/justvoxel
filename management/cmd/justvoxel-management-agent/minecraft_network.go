@@ -447,13 +447,27 @@ func (s *server) minecraftNetworkConnection(w http.ResponseWriter, r *http.Reque
 		writeError(w, 409, "Minecraft connection information is unavailable during network recovery.")
 		return
 	}
-	java, bedrock, enabled := record.Runtime.JavaPort, record.Runtime.BedrockPort, record.Runtime.BedrockEnabled
-	member := n.Config.Enabled && record.NetworkMember
-	if member {
-		java, bedrock, enabled = n.Config.JavaPort, n.Config.BedrockPort, true
-	}
-	writeJSON(w, 200, map[string]any{"id": id, "network_member": member, "java_port": java, "bedrock_port": bedrock, "bedrock_enabled": enabled})
+	connection := effectiveMinecraftConnection(record, n.Config)
+	writeJSON(w, 200, map[string]any{"id": id, "network_member": connection.networkMember, "java_port": connection.javaPort, "bedrock_port": connection.bedrockPort, "bedrock_enabled": connection.bedrockEnabled})
 }
+
+type minecraftEffectiveConnection struct {
+	networkMember, bedrockEnabled bool
+	javaPort, bedrockPort         int
+	bedrockTCP, udpStart, udpEnd  int
+}
+
+func effectiveMinecraftConnection(record instanceRuntimeRecord, network minecraftNetworkConfig) minecraftEffectiveConnection {
+	if network.Enabled && record.NetworkMember {
+		return minecraftEffectiveConnection{networkMember: true, bedrockEnabled: true, javaPort: network.JavaPort, bedrockPort: network.BedrockPort}
+	}
+	c := record.Runtime
+	return minecraftEffectiveConnection{
+		javaPort: c.JavaPort, bedrockPort: c.BedrockPort, bedrockEnabled: c.BedrockEnabled,
+		bedrockTCP: c.BedrockTCPPort, udpStart: c.BedrockUDPStart, udpEnd: c.BedrockUDPEnd,
+	}
+}
+
 func (s *server) minecraftNetworkConfigure(w http.ResponseWriter, r *http.Request) {
 	actor, ok := s.requireAdministrator(w, r)
 	if !ok {

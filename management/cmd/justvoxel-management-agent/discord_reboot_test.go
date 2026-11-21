@@ -37,6 +37,9 @@ func TestDiscordRebootMigrationV10AndPersistence(t *testing.T) {
 	if _, err = s.store.db.Exec(`DROP TABLE discord_reboot_state`); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = s.store.db.Exec(`DROP TABLE routeros_state`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err = s.store.db.Exec(`DELETE FROM schema_migrations WHERE version>=10`); err != nil {
 		t.Fatal(err)
 	}

@@ -9,6 +9,94 @@
   if (!list || !arrange || !done || initialized.has(list)) return;
   initialized.add(list);
 
+  const showPortForwarding = async (card, id) => {
+    const dialog = document.createElement('dialog');
+    dialog.className = 'minecraft-server-invitation';
+    const title = document.createElement('h2');
+    title.textContent = jvT("network.router.port_forwarding");
+    dialog.setAttribute('aria-label', title.textContent);
+    const name = document.createElement('p');
+    name.textContent = card.dataset.serverName;
+    const state = document.createElement('p');
+    state.setAttribute('role', 'status');
+    state.textContent = jvT("ui.ec963ffc911b");
+    const summary = document.createElement('div');
+    const actions = document.createElement('div');
+    actions.className = 'action-row';
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'secondary';
+    close.textContent = jvT("ui.7d9eb7acb13e");
+    actions.appendChild(close);
+    dialog.append(title, name, state, summary, actions);
+    const controller = new AbortController();
+    close.addEventListener('click', () => dialog.close());
+    dialog.addEventListener('close', () => {
+      controller.abort();
+      dialog.remove();
+      card.querySelector('summary')?.focus();
+    });
+    document.body.appendChild(dialog);
+    dialog.showModal();
+    const paragraph = (text) => {
+      const p = document.createElement('p');
+      p.textContent = text;
+      summary.appendChild(p);
+    };
+    try {
+      const response = await fetch('/api/network/router/mikrotik/instances/' + encodeURIComponent(id), {
+        credentials: 'same-origin', cache: 'no-store', signal: controller.signal,
+      });
+      if (!response.ok) throw new Error();
+      const data = await response.json();
+      switch (data.status) {
+        case 'not_configured': {
+          state.textContent = jvT("network.router.not_configured");
+          const router = document.createElement('a');
+          router.className = 'button-link secondary';
+          router.href = '/?workspace=network&tab=Router';
+          router.textContent = jvT("network.router.open_workspace");
+          actions.prepend(router);
+          break;
+        }
+        case 'connected': state.textContent = jvT("ui.22965568d22a"); break;
+        case 'configuration_error': state.textContent = jvT("network.router.configuration_error"); break;
+        default: state.textContent = jvT("network.router.unavailable"); break;
+      }
+      if (data.network_member) paragraph(jvT("network.router.managed_by_network"));
+      if (data.inventory_error || !data.endpoints?.length) paragraph(jvT("network.router.inventory_error"));
+      for (const endpoint of data.endpoints || []) {
+        const edition = endpoint.edition === 'java' ? jvT("network.router.java") : jvT("network.router.bedrock");
+        const ports = endpoint.last_port > endpoint.port ? endpoint.port + '–' + endpoint.last_port : endpoint.port;
+        let label, detail;
+        switch (endpoint.state) {
+          case 'open':
+            label = jvT("network.router.open");
+            detail = jvT("network.router.open_detail");
+            break;
+          case 'closed':
+            label = jvT("network.router.closed");
+            detail = jvT("network.router.closed_detail");
+            break;
+          case 'conflict':
+            label = jvT("network.router.conflict");
+            detail = jvT("network.router.conflict_detail");
+            break;
+          default:
+            label = jvT("ui.b764cdc0eab7");
+            detail = jvT("network.router.unknown_detail");
+            break;
+        }
+        const heading = document.createElement('h3');
+        heading.textContent = [edition, endpoint.protocols.join('+').toUpperCase(), ports, label].join(' · ');
+        summary.appendChild(heading);
+        paragraph(detail);
+      }
+    } catch (_) {
+      if (!controller.signal.aborted) state.textContent = jvT("network.router.unavailable");
+    }
+  };
+
   const key = 'justvoxel:minecraft-server-order:v1';
   const idPattern = /^jv-[a-z0-9]{6,12}$/;
   const cards = () => Array.from(list.querySelectorAll('[data-minecraft-server-card]'));
@@ -381,6 +469,11 @@
         csrf, request, dismissOnDeleted: true, isCurrent: () => card.isConnected && !isArranging(),
         onError: error => feedback(error.message), onDeleted: () => refresh(),
       });
+    });
+    card.querySelector('[data-server-port-forwarding]')?.addEventListener('click', () => {
+      if (isArranging()) return;
+      closeMenu();
+      showPortForwarding(card, id);
     });
     card.querySelector('[data-server-invite]')?.addEventListener('click', () => {
       closeMenu();

@@ -230,6 +230,15 @@ var webUIStoreMigrations = []webUIStoreMigration{
 			)`,
 		},
 	},
+	{
+		version: 12,
+		name:    "routeros_state",
+		statements: []string{
+			`CREATE TABLE routeros_state (id INTEGER PRIMARY KEY CHECK (id = 1), schema_version INTEGER NOT NULL,
+				endpoint TEXT NOT NULL, username TEXT NOT NULL, password TEXT NOT NULL,
+				target TEXT NOT NULL, ingress_type TEXT NOT NULL, ingress_name TEXT NOT NULL)`,
+		},
+	},
 }
 
 func openWebUIStore(path string) (*webUIStore, error) {
@@ -394,6 +403,7 @@ func (s *webUIStore) resetFactoryState() error {
 	defer func() { _ = tx.Rollback() }()
 
 	for _, statement := range []string{
+		`DELETE FROM routeros_state`,
 		`DELETE FROM discord_access_requests`,
 		`DELETE FROM discord_reboot_state`,
 		`UPDATE discord_state SET record_json = '{"schema":1,"status":"disconnected"}' WHERE id=1`,

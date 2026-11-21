@@ -39,13 +39,13 @@ The draggable, resizable Network window provides Refresh and these administrator
 - **Wi-Fi** (when Wi-Fi hardware is present): radio, nearby networks, scan, saved-profile activation, new/hidden networks, disconnect and forget.
 - **Troubleshoot**: NetworkManager connectivity, interface/carrier state, addresses, gateway, DNS and active profile. Administrators can request a fresh connectivity check or reconnect a selected active Ethernet/Wi-Fi profile behind a checkpoint.
 - **Remote Access**: Tailscale, NetBird, Playit.gg and NordVPN Meshnet availability, enabled/running state, configuration evidence, lifecycle controls and external dashboard links.
-- **Router**: router provider cards and the MikroTik RouterOS setup guide.
+- **Router**: router provider cards, the MikroTik RouterOS setup guide, and live read-only forwarding status.
 
 Operators and Viewers receive Overview only. Management Agent authorization remains authoritative for all mutations; WebUI POST requests retain CSRF protection.
 
 ### Router workspace
 
-Cycle 1 adds the Router tab and a preparation guide for MikroTik RouterOS, shown as **Not configured**. TP-Link Omada, UniFi, OpenWrt, OPNsense and Cisco are placeholders marked **Not supported yet**. This release has no live router connection, router API, credential entry or storage, discovery, or router changes.
+The Router tab has a setup guide and a live connection for MikroTik RouterOS. TP-Link Omada, UniFi, OpenWrt, OPNsense and Cisco are marked **Not supported yet**. Select the Router tab again to return from the guide or connection details to the provider cards.
 
 #### MikroTik RouterOS preparation
 
@@ -67,13 +67,19 @@ in-interface-list=<WAN_INTERFACE_LIST>
 dst-address=<JUSTVOXEL_IP>
 ```
 
-#### Planned connector
+#### Cycle 2 connection and forwarding status
 
-The next cycle is planned for read-only discovery and status, including router identity and version and NAT record inspection for status and conflicts. Later changes may let JustVoxel create, enable, disable, reconcile or remove only the destination-NAT (`dstnat`) records it owns.
+In **System Network → Router → Connect**, the primary administrator enters the router’s HTTPS address and RouterOS credentials, then selects **Test connection**. A successful test reads the router name, version, board or platform if available, and available interfaces and interface lists. Choose the JustVoxel IPv4 address to forward to and the router interface or interface list where traffic arrives. Re-enter the password to save. JustVoxel checks the address and ingress selection again before saving.
+
+The Management Agent uses HTTPS REST GET requests and verifies the router certificate against the appliance’s system trust store. It keeps credentials in the existing root-owned private database at `/var/lib/justvoxel/webui/webui.db`. The directory uses mode `0700` and the database uses mode `0600`. Only the primary administrator can test, save, or forget credentials. Forget connection and Factory Reset erase the local connector state. Existing router rules are never modified.
+
+Administrators can view live router identity and version and the summarized NAT status for authoritative Minecraft ports. Open means an existing rule matches the selected ingress, protocol, port and JustVoxel destination. It describes the NAT rule and does not establish Internet reachability. Closed means no applicable enabled mapping, Conflict means a competing mapping, and Unknown means the router or rule state could not be verified. Use **Port forwarding** in an individual server’s menu to see its ports and status. Minecraft Network members use the shared Velocity public endpoints. JustVoxel exposes no arbitrary port controls and does not send the raw router NAT table to the WebUI.
+
+#### Future Cycle 3
+
+A future cycle may let JustVoxel create, enable, disable, reconcile or remove only destination-NAT (`dstnat`) records it owns.
 
 Firewall filter rules, router input rules, interfaces, VLANs, routes, DNS, DHCP, RouterOS users and groups, certificates, `/ip service` settings, packages and updates, router reboots and arbitrary RouterOS commands remain outside the connector’s scope.
-
-Future forwarding operations will derive ports from the authoritative configuration of an existing Minecraft instance or Minecraft Network (Velocity). The WebUI, CLI and external callers will have no arbitrary port-entry surface and cannot supply ports such as 22, 21 or 8099.
 
 ### Checkpoint safety layer
 
