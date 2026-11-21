@@ -1,8 +1,9 @@
 (() => {
-  if (!document.querySelector('link[href="/static/network-workspace.css"]')) {
+  for (const href of ["/static/network-workspace.css", "/static/network-router.css"]) {
+    if (document.querySelector(`link[href="${href}"]`)) continue;
     const stylesheet = document.createElement("link");
     stylesheet.rel = "stylesheet";
-    stylesheet.href = "/static/network-workspace.css";
+    stylesheet.href = href;
     document.head.appendChild(stylesheet);
   }
 
@@ -19,6 +20,7 @@
   const checkpointStorageKey = "justvoxel-network-checkpoint";
 
   let selectedTab = "Overview";
+  let showMikroTikGuide = false;
   let remoteProviders = [];
   let remoteError = "";
   let playitSetup = { state: "idle" };
@@ -1374,6 +1376,96 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     return section;
   };
 
+  const renderRouter = () => {
+    const grid = document.createElement("div");
+    grid.className = "network-provider-grid";
+    const providers = [
+      ["mikrotik", jvT("network.router.mikrotik")],
+      ["omada", jvT("network.router.omada")],
+      ["unifi", jvT("network.router.unifi")],
+      ["openwrt", jvT("network.router.openwrt")],
+      ["opnsense", jvT("network.router.opnsense")],
+      ["cisco", jvT("network.router.cisco")],
+    ];
+    for (const [id, name] of providers) {
+      const card = document.createElement("article");
+      card.className = "panel network-device-card network-provider-card";
+      card.dataset.routerProvider = id;
+      const title = document.createElement("h3");
+      title.textContent = name;
+      const icon = document.createElement("img");
+      icon.className = "network-provider-icon";
+      icon.src = `/static/router-provider-icons/${id}.svg`;
+      icon.alt = "";
+      title.prepend(icon);
+      const status = document.createElement("p");
+      status.className = "state-text";
+      status.textContent = id === "mikrotik" ? jvT("ui.dd1841d29502") : jvT("network.router.unsupported");
+      card.append(title, status);
+      if (id === "mikrotik") {
+        const guide = actionButton(jvT("network.router.setup_guide"), "routerOpenGuide", "");
+        guide.addEventListener("click", () => {
+          showMikroTikGuide = true;
+          renderNetwork();
+          content.querySelector("[data-router-back]")?.focus();
+        });
+        card.appendChild(guide);
+      }
+      grid.appendChild(card);
+    }
+    return grid;
+  };
+
+  const renderMikroTikGuide = () => {
+    const guide = document.createElement("section");
+    guide.className = "panel network-section network-router-guide";
+    const back = actionButton(jvT("ui.76900f1bfd16"), "routerBack", "");
+    back.addEventListener("click", () => {
+      showMikroTikGuide = false;
+      renderNetwork();
+      content.querySelector("[data-router-open-guide]")?.focus();
+    });
+    const title = document.createElement("h2");
+    title.textContent = jvT("network.router.guide_title");
+    const intro = document.createElement("p");
+    intro.textContent = jvT("network.router.guide_intro");
+    guide.append(back, title, intro);
+
+    const forwardExample = document.createElement("pre");
+    const code = document.createElement("code");
+    code.textContent = [
+      "chain=forward",
+      "action=accept",
+      "connection-nat-state=dstnat",
+      "in-interface-list=<WAN_INTERFACE_LIST>",
+      "dst-address=<JUSTVOXEL_IP>",
+    ].join("\n");
+    forwardExample.appendChild(code);
+    const sections = [
+      [jvT("network.router.https"), [jvT("network.router.https_help")]],
+      [jvT("network.router.group"), [jvT("network.router.group_help")]],
+      [jvT("network.router.user"), [jvT("network.router.user_help")]],
+      [jvT("network.router.input"), [jvT("network.router.input_help")]],
+      [jvT("network.router.forward"), [jvT("network.router.forward_help")], forwardExample],
+      [jvT("network.router.boundary"), [jvT("network.router.boundary_help"), jvT("network.router.exclusions")]],
+      [jvT("network.router.endpoints"), [jvT("network.router.endpoints_help")]],
+    ];
+    for (const [heading, paragraphs, example] of sections) {
+      const section = document.createElement("section");
+      const subtitle = document.createElement("h3");
+      subtitle.textContent = heading;
+      section.appendChild(subtitle);
+      for (const text of paragraphs) {
+        const paragraph = document.createElement("p");
+        paragraph.textContent = text;
+        section.appendChild(paragraph);
+      }
+      if (example) section.appendChild(example);
+      guide.appendChild(section);
+    }
+    return guide;
+  };
+
   const renderNetwork = (checkpoint = currentCheckpoint) => {
     if (!currentSnapshot) return;
     currentCheckpoint = checkpoint || null;
@@ -1389,7 +1481,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       const button = document.createElement("button");
       button.type = "button";
       button.dataset.networkTab = name;
-      button.textContent = jvS(name);
+      button.textContent = name === "Router" ? jvT("network.router.tab") : jvS(name);
       button.setAttribute("role", "tab");
       button.setAttribute("aria-selected", String(name === selectedTab));
       button.tabIndex = name === selectedTab ? 0 : -1;
@@ -1438,6 +1530,8 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       panel.appendChild(renderTroubleshoot(currentSnapshot));
     } else if (selectedTab === "Remote Access") {
       panel.appendChild(renderRemoteAccess());
+    } else if (selectedTab === "Router") {
+      panel.appendChild(showMikroTikGuide ? renderMikroTikGuide() : renderRouter());
     }
     root.appendChild(panel);
     content.replaceChildren(root);

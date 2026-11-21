@@ -1,0 +1,31 @@
+.network-workspace-view > .network-tabs:has([data-network-tab="Router"]) {
+  overflow-x: auto;
+}
+
+[data-network-view="Router"] [data-router-open-guide] {
+  align-self: start;
+}
+
+.network-router-guide {
+  display: grid;
+  justify-items: start;
+  gap: .65rem;
+  overflow-wrap: anywhere;
+}
+
+.network-router-guide section {
+  width: 100%;
+  padding-top: .65rem;
+}
+
+.network-router-guide p {
+  margin: .25rem 0 0;
+}
+
+.network-router-guide pre {
+  margin: .55rem 0 0;
+  padding: .55rem .65rem;
+  border-radius: var(--jv-radius);
+  background: var(--jv-surface-sunken);
+  white-space: pre-wrap;
+}

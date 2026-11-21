@@ -32,15 +32,48 @@ The Management Agent owns the JustVoxel networking backend under `management/int
 
 ## Network Workspace
 
-The existing draggable, resizable Network window retains Refresh and now has five tabs for administrators:
+The draggable, resizable Network window provides Refresh and these administrator tabs.
 
 - **Overview**: connectivity, NetworkManager state/version, networking enabled state, and compact Ethernet/Wi-Fi summaries with addresses. No configuration controls.
 - **Ethernet**: active profile, carrier, speed, IPv4, gateway, DNS, MTU and autoconnect, with automatic/DHCP or manual IPv4 controls.
-- **Wi-Fi**: radio, nearby networks, scan, saved-profile activation, new/hidden networks, disconnect and forget.
+- **Wi-Fi** (when Wi-Fi hardware is present): radio, nearby networks, scan, saved-profile activation, new/hidden networks, disconnect and forget.
 - **Troubleshoot**: NetworkManager connectivity, interface/carrier state, addresses, gateway, DNS and active profile. Administrators can request a fresh connectivity check or reconnect a selected active Ethernet/Wi-Fi profile behind a checkpoint.
 - **Remote Access**: Tailscale, NetBird, Playit.gg and NordVPN Meshnet availability, enabled/running state, configuration evidence, lifecycle controls and external dashboard links.
+- **Router**: router provider cards and the MikroTik RouterOS setup guide.
 
 Operators and Viewers receive Overview only. Management Agent authorization remains authoritative for all mutations; WebUI POST requests retain CSRF protection.
+
+### Router workspace
+
+Cycle 1 adds the Router tab and a preparation guide for MikroTik RouterOS, shown as **Not configured**. TP-Link Omada, UniFi, OpenWrt, OPNsense and Cisco are placeholders marked **Not supported yet**. This release has no live router connection, router API, credential entry or storage, discovery, or router changes.
+
+#### MikroTik RouterOS preparation
+
+The router administrator makes these changes on the router.
+
+1. Enable `www-ssl` and assign an HTTPS certificate that JustVoxel can trust. Enable `rest-secure` and disable `rest-plain`. WebFig, index and graphs can stay enabled if you use them, or you can disable them to reserve HTTPS access for REST. See [RouterOS Services](https://help.mikrotik.com/docs/spaces/ROS/pages/103841820/Services) and [RouterOS REST API](https://help.mikrotik.com/docs/spaces/ROS/pages/47579162/REST%2BAPI).
+2. Create a dedicated RouterOS group named `jv` with only `read`, `write`, `api` and `rest-api`. The native RouterOS API service on TCP 8728 can remain disabled. The `api` group policy is required for REST authorization. See [RouterOS users and groups](https://help.mikrotik.com/docs/spaces/ROS/pages/8978504/User).
+3. Create a dedicated user named `justvoxel` in group `jv`. Set **Allowed Address** to `<JUSTVOXEL_IP>/32` and choose a strong, unique password on the router.
+4. Allow the JustVoxel host to reach the HTTPS REST endpoint, normally `<JUSTVOXEL_IP> → <ROUTER_IP>:443/TCP`. This security decision belongs to the router administrator. JustVoxel will never create or modify the router’s input or firewall filter rules.
+5. Ensure the firewall allows legitimate destination-NAT traffic to the JustVoxel host. Some configurations already allow legitimate `dstnat` traffic and need no additional rule.
+
+The following filter settings are an example only, not a universal command. Adapt the WAN selection, destination, chains and rule order to your firewall. Put the allowance before any rule that would otherwise block the forwarded traffic. JustVoxel will never create, move, enable, disable or delete this filter rule.
+
+```text
+chain=forward
+action=accept
+connection-nat-state=dstnat
+in-interface-list=<WAN_INTERFACE_LIST>
+dst-address=<JUSTVOXEL_IP>
+```
+
+#### Planned connector
+
+The next cycle is planned for read-only discovery and status, including router identity and version and NAT record inspection for status and conflicts. Later changes may let JustVoxel create, enable, disable, reconcile or remove only the destination-NAT (`dstnat`) records it owns.
+
+Firewall filter rules, router input rules, interfaces, VLANs, routes, DNS, DHCP, RouterOS users and groups, certificates, `/ip service` settings, packages and updates, router reboots and arbitrary RouterOS commands remain outside the connector’s scope.
+
+Future forwarding operations will derive ports from the authoritative configuration of an existing Minecraft instance or Minecraft Network (Velocity). The WebUI, CLI and external callers will have no arbitrary port-entry surface and cannot supply ports such as 22, 21 or 8099.
 
 ### Checkpoint safety layer
 

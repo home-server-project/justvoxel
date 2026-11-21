@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -64,10 +65,74 @@ func TestNetworkWorkspaceTabsFollowAuthenticatedRole(t *testing.T) {
 		}
 		want := []string{"Overview"}
 		if role == "administrator" {
-			want = []string{"Overview", "Ethernet", "Wi-Fi", "Troubleshoot", "Remote Access"}
+			want = []string{"Overview", "Ethernet", "Wi-Fi", "Troubleshoot", "Remote Access", "Router"}
 		}
 		if !reflect.DeepEqual(status.WorkspaceTabs, want) {
 			t.Fatalf("role %s tabs %v", role, status.WorkspaceTabs)
+		}
+	}
+}
+
+func TestNetworkRouterHasNoAPI(t *testing.T) {
+	app, err := New(&fakeNetworkAPI{fakeAPI: &fakeAPI{}, role: "administrator"}, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := app.Handler()
+	for _, path := range []string{"/api/network/router", "/api/network/router/mikrotik"} {
+		for _, method := range []string{http.MethodGet, http.MethodPost} {
+			req := httptest.NewRequest(method, path, nil)
+			req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
+			if rr.Code != http.StatusNotFound && rr.Code != http.StatusMethodNotAllowed {
+				t.Errorf("%s %s is registered: %d", method, path, rr.Code)
+			}
+		}
+	}
+	source, err := assets.ReadFile("static/network-workspace.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(source)
+	start := strings.Index(script, "  const renderRouter =")
+	end := strings.Index(script, "  const renderNetwork =")
+	if start < 0 || end <= start {
+		t.Fatal("Router presentation functions missing")
+	}
+	for _, forbidden := range []string{"/api/network/router", "/rest/", "https://<ROUTER_IP>"} {
+		if strings.Contains(script, forbidden) {
+			t.Errorf("network workspace references a router API: %q", forbidden)
+		}
+	}
+	if ioCall := regexp.MustCompile(`\b(fetch|requestJSON|postForm|XMLHttpRequest|localStorage|sessionStorage|WebSocket)\b`).FindString(script[start:end]); ioCall != "" {
+		t.Errorf("Router presentation uses I/O: %s", ioCall)
+	}
+}
+
+func TestNetworkRouterCatalogReferences(t *testing.T) {
+	source, err := assets.ReadFile("static/network-workspace.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := regexp.MustCompile(`jvT\("(network\.router\.[a-z_]+)"\)`).FindAllStringSubmatch(string(source), -1)
+	if len(keys) == 0 {
+		t.Fatal("Router catalog references missing")
+	}
+	for _, locale := range supportedLocales {
+		for _, match := range keys {
+			key := match[1]
+			if strings.TrimSpace(catalogs[locale][key]) == "" {
+				t.Errorf("%s missing %q", locale, key)
+			}
+		}
+		for _, token := range []string{"<JUSTVOXEL_IP>", "<ROUTER_IP>"} {
+			if !strings.Contains(catalogs[locale]["network.router.input_help"], token) {
+				t.Errorf("%s router input help missing %q", locale, token)
+			}
+		}
+		if !strings.Contains(catalogs[locale]["network.router.user_help"], "<JUSTVOXEL_IP>/32") {
+			t.Errorf("%s router user help missing allowed address placeholder", locale)
 		}
 	}
 }
@@ -636,9 +701,9 @@ func TestNetworkVisibleTabsAndConnectivityPresentation(t *testing.T) {
 	program := `
 const assert = require("node:assert/strict");
 ` + script[start:end] + `
-const all = ["Overview", "Ethernet", "Wi-Fi", "Troubleshoot", "Remote Access"];
+const all = ["Overview", "Ethernet", "Wi-Fi", "Troubleshoot", "Remote Access", "Router"];
 let currentSnapshot = { workspace_tabs: all, devices: [{ kind: "ethernet" }], wireless_enabled: true };
-assert.deepEqual(effectiveTabs(currentSnapshot), ["Overview", "Ethernet", "Troubleshoot", "Remote Access"]);
+assert.deepEqual(effectiveTabs(currentSnapshot), ["Overview", "Ethernet", "Troubleshoot", "Remote Access", "Router"]);
 for (const state of ["disconnected", "unavailable"]) {
   assert.deepEqual(effectiveTabs({ workspace_tabs: all, devices: [{ kind: "wifi", state }], wireless_enabled: false }), all);
 }
@@ -655,8 +720,9 @@ const refreshRemoteAccess = async () => {}, pollRemoteAccess = () => {}, state =
 const key = (key) => onKey({ key, target: { closest: () => ({}) }, preventDefault() {} });
 selectedTab = "Ethernet"; key("ArrowRight"); assert.equal(selectedTab, "Troubleshoot");
 key("ArrowLeft"); assert.equal(selectedTab, "Ethernet");
-key("End"); assert.equal(selectedTab, "Remote Access");
+key("End"); assert.equal(selectedTab, "Router");
 key("ArrowRight"); assert.equal(selectedTab, "Overview");
+key("ArrowLeft"); assert.equal(selectedTab, "Router");
 key("ArrowLeft"); assert.equal(selectedTab, "Remote Access");
 key("Home"); assert.equal(selectedTab, "Overview");
 for (const [value, expected] of Object.entries({ full: "Internet connected", limited: "Limited connectivity", portal: "Sign-in network detected", none: "No internet connection", unknown: "Network status unknown" })) {
@@ -1355,6 +1421,16 @@ func TestNetworkPresentationLayoutContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := string(source)
+	if strings.Contains(script, "router.svg") {
+		t.Error("network workspace references the removed generic router icon")
+	}
+	routerCSS, err := assets.ReadFile("static/network-router.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value := regexp.MustCompile(`(?i)(?:[0-9]*\.)?[0-9]+px\b`).Find(routerCSS); value != nil {
+		t.Errorf("Router stylesheet contains an explicit pixel value: %s", value)
+	}
 	slice := func(start, end string) string {
 		t.Helper()
 		a, b := strings.Index(script, start), strings.Index(script, end)
@@ -1377,9 +1453,11 @@ class Element {
     }
   }
   appendChild(node) { this.append(node); return node; }
+  prepend(node) { this.children.unshift(node); }
   replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
   setAttribute(name, value) { this[name] = value; }
-  addEventListener() {}
+  addEventListener(event, listener) { this["on" + event] = listener; }
+  focus() { document.activeElement = this; }
 }
 const document = { createElement: (tag) => new Element(tag) };
 const flatten = (node) => [node, ...node.children.flatMap(flatten)];
@@ -1387,8 +1465,12 @@ const find = (root, predicate) => flatten(root).find(predicate);
 const hasClass = (name) => (node) => node.className.split(" ").includes(name);
 const isAdministrator = () => true;
 const remoteProviders = [];
+const remoteError = "";
 const content = new Element("div"), state = new Element("p");
+const routerActions = { "[data-router-open-guide]": "routerOpenGuide", "[data-router-back]": "routerBack" };
+content.querySelector = (selector) => find(content, (node) => Object.hasOwn(node.dataset, routerActions[selector]));
 let selectedTab = "Overview", currentCheckpoint = null, connectionDraft = null;
+let showMikroTikGuide = false;
 const wifi = { kind: "wifi", interface: "wlp1s0", state: "activated", managed: true,
   wireless: { ssid: "Robinson Crusoe", signal: 79 },
   ipv4: { addresses: [{ address: "192.168.0.27", prefix: 24 }] },
@@ -1408,7 +1490,7 @@ const currentNetworks = new Map([["wlp1s0", { networks: [
 		slice("  const row =", "  const readStoredCheckpointID =") +
 		slice("  const sectionHeading =", "  const renderCheckpoint =") +
 		slice("  const renderDevice =", "  // Account actions reuse setup state") +
-		slice("  const renderNetwork =", "  const resumeCheckpoint =") + `
+		slice("  const renderRemoteAccess =", "  const resumeCheckpoint =") + `
 for (const tab of currentSnapshot.workspace_tabs) {
   selectedTab = tab; renderNetwork();
   const internet = find(content, (node) => node.textContent === "Internet connected");
@@ -1480,6 +1562,57 @@ assert.equal(healthTitle.tag, "p"); assert.equal(healthTitle.className, "eyebrow
 const repair = find(health, (node) => node.textContent === "Reconnect active profile");
 assert(hasClass("network-reconnect-information")(repair.parentElement));
 assert(repair.parentElement.children[0].textContent.startsWith("Reconnect this interface using its current settings."));
+
+currentSnapshot.workspace_tabs.push("Remote Access", "Router");
+selectedTab = "Router"; renderNetwork();
+const tabPanel = () => find(content, (node) => node.id === "network-tab-panel");
+assert.equal(tabPanel()["aria-labelledby"], "network-tab-Router");
+const cards = flatten(tabPanel()).filter(hasClass("network-provider-card"));
+const routerProviders = [
+  ["mikrotik", "MikroTik RouterOS"], ["omada", "TP-Link Omada"], ["unifi", "UniFi"],
+  ["openwrt", "OpenWrt"], ["opnsense", "OPNsense"], ["cisco", "Cisco"]
+];
+assert.deepEqual(cards.map((card) => [card.dataset.routerProvider, card.children[0].textContent]), routerProviders);
+for (const [index, card] of cards.entries()) {
+  const [id] = routerProviders[index];
+  const icons = flatten(card).filter((node) => node.tag === "img");
+  assert.deepEqual(icons.map((icon) => icon.src), ["/static/router-provider-icons/" + id + ".svg"]);
+  const mikrotik = id === "mikrotik";
+  const actions = flatten(card).filter((node) => ["button", "a", "form", "input", "select", "textarea"].includes(node.tag));
+  assert.equal(card.children[1].textContent, mikrotik ? "Not configured" : "Not supported yet");
+  assert.deepEqual(actions.map((node) => [node.tag, node.textContent]), mikrotik ? [["button", "Setup guide"]] : []);
+  assert(!find(card, (node) => Object.hasOwn(node.dataset, "networkProvider")));
+}
+const setup = content.querySelector("[data-router-open-guide]");
+setup.onclick();
+const guide = find(tabPanel(), hasClass("network-router-guide"));
+assert(guide);
+assert(!find(tabPanel(), hasClass("network-provider-card")));
+const back = content.querySelector("[data-router-back]");
+assert.equal(back.textContent, "Back");
+assert.equal(document.activeElement, back);
+assert.deepEqual(flatten(guide).filter((node) => ["button", "a", "form", "input", "select", "textarea"].includes(node.tag)), [back]);
+const guideText = flatten(guide).map((node) => node.textContent).join("\n");
+for (const required of [
+  "www-ssl", "rest-secure", "rest-plain", "WebFig", "group named jv", "read, write, api and rest-api",
+  "TCP 8728", "justvoxel", "<JUSTVOXEL_IP>/32", "strong, unique password", "<ROUTER_IP>:443/TCP",
+  "chain=forward", "action=accept", "connection-nat-state=dstnat",
+  "in-interface-list=<WAN_INTERFACE_LIST>", "dst-address=<JUSTVOXEL_IP>",
+  "example only, not a universal command", "WAN selection, destination, chains and rule order",
+  "before any rule", "need no additional rule", "never create, move, enable, disable or delete",
+  "never create or modify router input or firewall filter rules", "only its own destination NAT (dstnat) records",
+  "router identity and version", "status and conflicts", "create, enable, disable, reconcile or remove",
+  "interfaces, VLANs, routes, DNS, DHCP", "RouterOS users and groups, certificates, /ip service",
+  "packages and updates, router reboots and arbitrary RouterOS commands",
+  "Minecraft instance or Minecraft Network (Velocity) configuration", "no way to supply arbitrary ports"
+]) assert(guideText.includes(required), required);
+assert.doesNotMatch(guideText, /\b(?:\d{1,3}\.){3}\d{1,3}\b|RB3011|bridge-minecraft|pppoe-wan/i);
+back.onclick();
+assert.equal(document.activeElement, content.querySelector("[data-router-open-guide]"));
+assert(!find(tabPanel(), hasClass("network-router-guide")));
+selectedTab = "Remote Access"; renderNetwork();
+assert(find(tabPanel(), (node) => node.textContent === "Providers"));
+assert(!find(tabPanel(), (node) => node.dataset.routerProvider || hasClass("network-router-guide")(node)));
 `
 	cmd := nodeTestCommand()
 	cmd.Stdin = strings.NewReader(program)

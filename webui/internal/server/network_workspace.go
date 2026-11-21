@@ -503,7 +503,7 @@ func (a *App) networkConfigurationChange(w http.ResponseWriter, r *http.Request)
 
 func networkWorkspaceTabs(role string) []string {
 	if role == "administrator" {
-		return []string{uiText("ui.d4b1ea5708dd"), "Ethernet", "Wi-Fi", "Troubleshoot", uiText("ui.7946a3c57900")}
+		return []string{uiText("ui.d4b1ea5708dd"), "Ethernet", "Wi-Fi", "Troubleshoot", uiText("ui.7946a3c57900"), uiText("network.router.tab")}
 	}
 	return []string{uiText("ui.d4b1ea5708dd")}
 }
