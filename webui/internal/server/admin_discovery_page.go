@@ -1,0 +1,465 @@
+package server
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"github.com/home-server-project/justvoxel-webui/internal/api"
+)
+
+type adminDiscoveryAPI interface {
+	Session(ctx context.Context, session string) (api.SessionInfo, error)
+	AdminConfiguration(ctx context.Context, session string) (api.AdminConfigurationDiscovery, error)
+	AdminStorage(ctx context.Context, session string) (api.AdminStorageDiscovery, error)
+	AdminSetupDefaults(ctx context.Context, session string) (api.AdminSetupDefaults, error)
+}
+
+type storageBrowserMigrationDiscoveryAPI interface {
+	AdminDataMigrationDiscovery(ctx context.Context, session string) (api.AdminDataMigrationDiscoveryResponse, error)
+}
+
+type storageDeviceView struct {
+	Name                 string
+	Path                 string
+	Parent               string
+	Type                 string
+	Size                 string
+	Filesystem           string
+	Label                string
+	UUID                 string
+	Mountpoints          string
+	Model                string
+	Transport            string
+	PartitionTable       string
+	ReadOnly             bool
+	System               bool
+	FilesystemUsed       string
+	FilesystemFree       string
+	FilesystemUsageKnown bool
+}
+
+type storageBrowserPartitionView struct {
+	SetupSelectable bool
+	SetupMountPoint string
+	storageDeviceView
+	FilesystemDisplay   string
+	Role                string
+	Mounted             bool
+	Formatted           bool
+	Swap                bool
+	Interactive         bool
+	CanInitialize       bool
+	MinecraftCandidate  bool
+	MinecraftMountPoint string
+}
+
+type storageBrowserFreeSpaceView struct {
+	Device    string
+	Start     string
+	End       string
+	Size      string
+	SizeBytes uint64
+}
+
+type storageBrowserDiskView struct {
+	Name               string
+	Path               string
+	Size               string
+	Model              string
+	Transport          string
+	PartitionTable     string
+	System             bool
+	MinecraftWholeDisk bool
+	BackupWholeDisk    bool
+	CanInitialize      bool
+	Partitions         []storageBrowserPartitionView
+	FreeSpaces         []storageBrowserFreeSpaceView
+}
+
+func (disk storageBrowserDiskView) PartitionTableLabel() string {
+	switch disk.PartitionTable {
+	case "gpt":
+		return "GPT"
+	case "msdos":
+		return "MBR"
+	case "none":
+		return uiText("ui.feff1fe15289")
+	default:
+		return uiText("ui.faea5cfb33a8")
+	}
+}
+
+type storageBrowserPageData struct {
+	SetupPurpose           string
+	BackupDestination      *backupsWorkspaceData
+	BackupDestinationNote  string
+	Title                  string
+	Version                string
+	ManagementAPI          string
+	CSRF                   string
+	Identity               api.SessionInfo
+	Configuration          api.AdminConfigurationDiscovery
+	Disks                  []storageBrowserDiskView
+	InternalDisks          []storageBrowserDiskView
+	ExternalDisks          []storageBrowserDiskView
+	SelectedDisk           string
+	MinecraftMigrationNote string
+}
+
+func (a *App) registerAdminDiscoveryPages(mux *http.ServeMux) {
+	mux.HandleFunc("GET /workspace/storage", a.storageBrowserWindow)
+	mux.HandleFunc("POST /workspace/storage/destination/plan", a.backupsWorkspaceDestinationPlan)
+	mux.HandleFunc("POST /workspace/storage/destination/apply", a.backupsWorkspaceDestinationApply)
+	a.registerStorageBrowserActionRoutes(mux)
+	a.registerSetupWizardRoutes(mux)
+	a.registerSetupWizardReviewRoutes(mux)
+}
+
+func (a *App) storageBrowserWindow(w http.ResponseWriter, r *http.Request) {
+	session, client, identity, ok := a.adminDiscoveryRequest(w, r)
+	if !ok {
+		return
+	}
+	data, err := a.buildStorageBrowserPageData(r.Context(), session, client, identity, csrfFromRequest(r))
+	if err != nil {
+		a.handleAdminDiscoveryError(w, r, err)
+		return
+	}
+	if data.Configuration.Configured {
+		destination, err := a.storageDestinationData(r, session, identity, csrfFromRequest(r), nil, nil)
+		if err != nil {
+			data.BackupDestinationNote = ui(w, "ui.01d19daee2cf")
+		} else {
+			if r.URL.Query().Get("result") == "destination" {
+				destination.Message = ui(w, "ui.b074f47785c2")
+			}
+			data.BackupDestination = &destination
+		}
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	if err := a.executeTemplate(w, "storage_browser_content", data); err != nil {
+		http.Error(w, ui(w, "ui.4a9d9119358b"), http.StatusInternalServerError)
+	}
+}
+
+func (a *App) buildStorageBrowserPageData(ctx context.Context, session string, client adminDiscoveryAPI, identity api.SessionInfo, csrf string) (storageBrowserPageData, error) {
+	configuration, err := client.AdminConfiguration(ctx, session)
+	if err != nil {
+		return storageBrowserPageData{}, err
+	}
+	storage, err := client.AdminStorage(ctx, session)
+	if err != nil {
+		return storageBrowserPageData{}, err
+	}
+
+	migrationCandidates := make(map[string]api.AdminDataMigrationCandidate)
+	migrationWholeDisks := make(map[string]bool)
+	migrationNote := ""
+	if migrationClient, ok := any(client).(storageBrowserMigrationDiscoveryAPI); ok {
+		discovery, err := migrationClient.AdminDataMigrationDiscovery(ctx, session)
+		if err != nil {
+			migrationNote = uiText("ui.95769f6b4ee1")
+		} else {
+			for _, candidate := range discovery.Partitions {
+				migrationCandidates[candidate.Path] = candidate
+			}
+			for _, candidate := range discovery.WholeDisks {
+				migrationWholeDisks[candidate.Path] = true
+			}
+		}
+	} else {
+		migrationNote = uiText("ui.ad8bbfd8d5d8")
+	}
+
+	data := storageBrowserPresentation(storage, configuration, identity, csrf, migrationCandidates, migrationWholeDisks)
+	data.Version, data.ManagementAPI = a.config.Version, a.config.ManagementAPI
+	data.MinecraftMigrationNote = migrationNote
+	return data, nil
+}
+
+// Shared disk/partition presentation; callers supply their authorized inventory.
+func storageBrowserPresentation(storage api.AdminStorageDiscovery, configuration api.AdminConfigurationDiscovery, identity api.SessionInfo, csrf string, migrationCandidates map[string]api.AdminDataMigrationCandidate, migrationWholeDisks map[string]bool) storageBrowserPageData {
+	systemDisks := make(map[string]struct{}, len(storage.SystemDisks))
+	for _, path := range storage.SystemDisks {
+		systemDisks[path] = struct{}{}
+	}
+	systemDiskNames := make(map[string]bool)
+	for _, device := range storage.Devices {
+		if device.Type == "part" && storageBrowserLooksSystem(device) {
+			systemDiskNames[device.Parent] = true
+		}
+	}
+
+	disks := make([]storageBrowserDiskView, 0)
+	diskIndex := make(map[string]int)
+	diskPathIndex := make(map[string]int)
+	for _, device := range storage.Devices {
+		if device.Type != "disk" || strings.HasPrefix(strings.ToLower(device.Name), "zram") {
+			continue
+		}
+		_, listedSystemDisk := systemDisks[device.Path]
+		diskIndex[device.Name] = len(disks)
+		diskPathIndex[device.Path] = len(disks)
+		system := device.System || listedSystemDisk || systemDiskNames[device.Name] || storageBrowserLooksSystem(device)
+		table := storageBrowserPartitionTable(device.PartitionTable)
+		eligible := !device.ReadOnly && !system && table == "none"
+		usb := strings.EqualFold(strings.TrimSpace(device.Transport), "usb")
+		disks = append(disks, storageBrowserDiskView{
+			Name: device.Name, Path: device.Path, Size: humanBytes(device.SizeBytes),
+			Model: device.Model, Transport: device.Transport, PartitionTable: table,
+			System:             system,
+			MinecraftWholeDisk: eligible && !usb && device.Filesystem == "" && migrationWholeDisks[device.Path],
+			BackupWholeDisk:    eligible && (usb || device.Filesystem == ""),
+			CanInitialize:      eligible && !storageBrowserMountableFilesystem(device.Filesystem),
+		})
+	}
+	for _, device := range storage.Devices {
+		if device.Type != "part" && !(device.Type == "disk" && device.Filesystem != "") {
+			continue
+		}
+		parent := device.Parent
+		if device.Type == "disk" {
+			parent = device.Name
+		}
+		index, exists := diskIndex[parent]
+		if !exists {
+			continue
+		}
+		systemPartition := device.System || storageBrowserLooksSystem(device)
+		roleDevice := device
+		roleDevice.System = systemPartition
+		role := storageBrowserRole(roleDevice, configuration)
+		migrationCandidate, canMigrate := migrationCandidates[device.Path]
+		if strings.Contains(role, "Minecraft") || strings.Contains(role, "Backups") || strings.EqualFold(strings.TrimSpace(disks[index].Transport), "usb") {
+			canMigrate = false
+		}
+		view := storageBrowserPartitionView{
+			storageDeviceView: storageDeviceView{
+				Name: device.Name, Path: device.Path, Parent: device.Parent, Type: device.Type,
+				Size: humanBytes(device.SizeBytes), Filesystem: device.Filesystem, Label: device.Label,
+				UUID: device.UUID, Mountpoints: strings.Join(device.Mountpoints, ", "), Model: device.Model,
+				Transport: disks[index].Transport, PartitionTable: disks[index].PartitionTable, ReadOnly: device.ReadOnly, System: systemPartition,
+				FilesystemUsed: humanBytes(device.FilesystemUsedBytes), FilesystemFree: humanBytes(device.FilesystemFreeBytes),
+				FilesystemUsageKnown: device.FilesystemUsageKnown,
+			},
+			FilesystemDisplay: storageBrowserFilesystemDisplay(device.Filesystem),
+			Role:              role, Mounted: len(device.Mountpoints) > 0, Formatted: device.Filesystem != "",
+			Swap:                device.Filesystem == "swap",
+			Interactive:         device.Filesystem != "swap",
+			CanInitialize:       device.Type == "disk" && disks[index].CanInitialize,
+			MinecraftCandidate:  canMigrate,
+			MinecraftMountPoint: migrationCandidate.Mountpoint,
+		}
+		disks[index].Partitions = append(disks[index].Partitions, view)
+	}
+	for _, free := range storage.FreeSpaces {
+		index, exists := diskPathIndex[free.Device]
+		if !exists {
+			continue
+		}
+		disks[index].FreeSpaces = append(disks[index].FreeSpaces, storageBrowserFreeSpaceView{
+			Device: free.Device, Start: free.Start, End: free.End,
+			Size: humanBytes(free.SizeBytes), SizeBytes: free.SizeBytes,
+		})
+	}
+
+	for index := range disks {
+		for _, partition := range disks[index].Partitions {
+			if partition.Type == "part" {
+				disks[index].CanInitialize = false
+				disks[index].MinecraftWholeDisk = false
+				disks[index].BackupWholeDisk = false
+				break
+			}
+		}
+	}
+
+	internalDisks := make([]storageBrowserDiskView, 0, len(disks))
+	externalDisks := make([]storageBrowserDiskView, 0)
+	for _, disk := range disks {
+		if strings.EqualFold(strings.TrimSpace(disk.Transport), "usb") {
+			externalDisks = append(externalDisks, disk)
+			continue
+		}
+		internalDisks = append(internalDisks, disk)
+	}
+	selectedDisk := ""
+	if len(internalDisks) > 0 {
+		selectedDisk = internalDisks[0].Name
+	} else if len(externalDisks) > 0 {
+		selectedDisk = externalDisks[0].Name
+	}
+
+	return storageBrowserPageData{
+		Title: uiText("ui.a69c4dece144"),
+		CSRF:  csrf, Identity: identity, Configuration: configuration, Disks: disks,
+		InternalDisks: internalDisks, ExternalDisks: externalDisks, SelectedDisk: selectedDisk,
+	}
+}
+
+func storageBrowserPartitionTable(table string) string {
+	switch table = strings.ToLower(strings.TrimSpace(table)); table {
+	case "", "none", "loop":
+		return "none"
+	case "dos":
+		return "msdos"
+	default:
+		return table
+	}
+}
+
+func storageBrowserMountableFilesystem(filesystem string) bool {
+	switch strings.ToLower(strings.TrimSpace(filesystem)) {
+	case "xfs", "ext4", "btrfs", "ntfs", "vfat", "exfat":
+		return true
+	default:
+		return false
+	}
+}
+
+func storageBrowserLooksSystem(device api.AdminStorageDevice) bool {
+	for _, mountpoint := range device.Mountpoints {
+		switch {
+		case mountpoint == "/",
+			mountpoint == "/boot",
+			strings.HasPrefix(mountpoint, "/boot/"),
+			mountpoint == "/var",
+			mountpoint == "/var/tmp",
+			mountpoint == "/var/lib/containers",
+			strings.HasPrefix(mountpoint, "/var/lib/containers/"),
+			mountpoint == "/etc",
+			strings.HasPrefix(mountpoint, "/etc/"),
+			mountpoint == "/sysroot",
+			strings.HasPrefix(mountpoint, "/sysroot/"):
+			return true
+		}
+	}
+	return false
+}
+
+func storageBrowserFilesystemDisplay(filesystem string) string {
+	switch strings.ToLower(strings.TrimSpace(filesystem)) {
+	case "xfs":
+		return "XFS"
+	case "ext4":
+		return "ext4"
+	case "btrfs":
+		return "Btrfs"
+	case "ntfs", "ntfs-3g":
+		return "NTFS"
+	case "vfat", "fat", "fat32":
+		return "FAT / FAT32"
+	case "exfat":
+		return "exFAT"
+	case "swap":
+		return "Swap"
+	case "":
+		return uiText("ui.af9d8f12b31f")
+	default:
+		return filesystem
+	}
+}
+
+func storageBrowserRole(device api.AdminStorageDevice, configuration api.AdminConfigurationDiscovery) string {
+	if device.Filesystem == "swap" {
+		return "Swap"
+	}
+	if device.System {
+		return uiText("ui.31f023724e64")
+	}
+	roles := make([]string, 0, 2)
+	if configuration.Configured {
+		if storageDeviceMatchesConfiguration(device, configuration.Minecraft.DataExpectedUUID, configuration.Minecraft.DataMountPoint, configuration.Minecraft.DataPath) {
+			roles = append(roles, "Minecraft")
+		}
+		if storageDeviceMatchesConfiguration(device, configuration.Backup.ExpectedUUID, configuration.Backup.MountPoint, configuration.Backup.Path) {
+			roles = append(roles, uiText("ui.3334fee2c77f"))
+		}
+	}
+	if len(roles) > 0 {
+		return strings.Join(roles, " + ")
+	}
+	if device.Filesystem == "" {
+		return uiText("ui.af9d8f12b31f")
+	}
+	if len(device.Mountpoints) > 0 {
+		return uiText("ui.81f39eb58b3b")
+	}
+	return uiText("ui.e674447337e8")
+}
+
+func storageDeviceMatchesConfiguration(device api.AdminStorageDevice, expectedUUID, expectedMountPoint, configuredPath string) bool {
+	if expectedUUID != "" && device.UUID != "" && device.UUID == expectedUUID {
+		return true
+	}
+	for _, mountpoint := range device.Mountpoints {
+		if expectedMountPoint != "" && mountpoint == expectedMountPoint {
+			return true
+		}
+		if mountpoint != "" && configuredPath != "" && (configuredPath == mountpoint || strings.HasPrefix(configuredPath, strings.TrimRight(mountpoint, "/")+"/")) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *App) adminDiscoveryRequest(w http.ResponseWriter, r *http.Request) (string, adminDiscoveryAPI, api.SessionInfo, bool) {
+	session, ok := sessionFromRequest(r)
+	if !ok {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return "", nil, api.SessionInfo{}, false
+	}
+	client, ok := a.api.(adminDiscoveryAPI)
+	if !ok {
+		http.Error(w, ui(w, "ui.5b04d3cecec9"), http.StatusServiceUnavailable)
+		return "", nil, api.SessionInfo{}, false
+	}
+	identity, err := client.Session(r.Context(), session)
+	if err != nil {
+		a.handleAdminDiscoveryError(w, r, err)
+		return "", nil, api.SessionInfo{}, false
+	}
+	if !isAdministratorLevel(identity.Role) {
+		http.Error(w, ui(w, "ui.031cc7a3ec82"), http.StatusForbidden)
+		return "", nil, api.SessionInfo{}, false
+	}
+	return session, client, identity, true
+}
+
+func (a *App) handleAdminDiscoveryError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, api.ErrUnauthorized) {
+		a.clearSessionCookies(w)
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	if errors.Is(err, api.ErrPasswordChangeRequired) {
+		http.Redirect(w, r, "/password", http.StatusSeeOther)
+		return
+	}
+	http.Error(w, ui(w, "ui.5b04d3cecec9"), http.StatusBadGateway)
+}
+
+func (a *App) renderAdminDiscovery(w http.ResponseWriter, name string, data any) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	if err := a.executeTemplate(w, name, data); err != nil {
+		http.Error(w, ui(w, "ui.4a9d9119358b"), http.StatusInternalServerError)
+	}
+}
+
+func humanBytes(value uint64) string {
+	const unit = uint64(1024)
+	if value < unit {
+		return fmt.Sprintf("%d B", value)
+	}
+	div, exp := unit, 0
+	for n := value / unit; n >= unit && exp < 5; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(value)/float64(div), "KMGTPE"[exp])
+}

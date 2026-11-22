@@ -1,0 +1,478 @@
+#!/usr/bin/bash
+set -Eeuo pipefail
+
+source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/storage-common.sh
+# Runtime work is owned by the authoritative Agent instance implementation.
+runtime() { /usr/libexec/justvoxel/management-agent data-migration-runtime "$1" "${operation_id}"; }
+participants='[]'
+participants_captured=no
+acquire_migration_locks() {
+    umask 0077
+    for lock in /run/justvoxel-minecraft-restore-exclusion.lock "${JV_MAINTENANCE_LOCK}"; do
+        [[ ! -L ${lock} ]] || return 1
+    done
+    exec 8>/run/justvoxel-minecraft-restore-exclusion.lock
+    flock -n 8 || return 1
+    exec 9>"${JV_MAINTENANCE_LOCK}"
+    flock -n 9 || return 1
+    exec 6>/var/lib/justvoxel/management/setup.lock
+    flock -n 6 || return 1
+    exec 5>/var/lib/justvoxel/management/restore.lock
+    flock -n 5 || return 1
+    exec 4>/var/lib/justvoxel/management/server-migration.lock
+    flock -n 4 || return 1
+    exec 7</var/lib/justvoxel/instances
+    flock -s -n 7
+}
+restore_participant_states() {
+    # ExecStartPre needs maintenance itself. Keep registry/exclusion/operation
+    # claims while allowing only the journal-bound live Agent startup permit.
+    flock -u 9
+    local rc=0
+    runtime restore >/dev/null 2>&1 || rc=$?
+    flock -n 9 || return 1
+    return "${rc}"
+}
+
+require_root
+
+recovery=''
+recovery_owned=no
+result_emitted=no
+target_prepared=no
+config_switched=no
+validated=no
+minecraft_stopped_by_migration=no
+expected_minecraft_state=''
+players_confirmed=false
+old_data=''
+old_mount=''
+old_uuid=''
+old_source=''
+new_data=''
+new_mount=''
+new_uuid=''
+new_source=''
+
+emit_progress() {
+    local state="$1" stage="$2" status="$3"
+    jq -cn --arg state "${state}" --arg stage "${stage}" --arg status "${status}" \
+        '{event:"progress",state:$state,stage:$stage,status:$status}'
+}
+
+emit_result() {
+    local outcome="$1" status="$2"
+    result_emitted=yes
+    jq -cn --arg outcome "${outcome}" --arg status "${status}" \
+        '{event:"result",outcome:$outcome,status:$status}'
+}
+
+write_recovery_state() {
+    local phase="$1"
+    [[ -n ${recovery} ]] || return 0
+    jq -cn \
+        --arg operation_id "${operation_id}" --argjson participants "${participants}" \
+        --arg phase "${phase}" \
+        --arg old_data "${old_data}" \
+        --arg old_mount "${old_mount}" \
+        --arg old_uuid "${old_uuid}" \
+        --arg old_source "${old_source}" \
+        --arg new_data "${new_data}" \
+        --arg new_mount "${new_mount}" \
+        --arg new_uuid "${new_uuid}" \
+        --arg new_source "${new_source}" \
+        '{schema_version:"v2",operation_id:$operation_id,participants:$participants,phase:$phase,old:{data_path:$old_data,mount_point:$old_mount,expected_uuid:$old_uuid,expected_source:$old_source},new:{data_path:$new_data,mount_point:$new_mount,expected_uuid:$new_uuid,expected_source:$new_source}}' \
+        > "${recovery}/state.json.tmp"
+    chmod 0600 "${recovery}/state.json.tmp"
+    sync -f "${recovery}/state.json.tmp"
+    mv -f "${recovery}/state.json.tmp" "${recovery}/state.json"
+    sync -f "${recovery}"
+}
+
+restart_original_if_required() {
+    [[ ${participants_captured} == yes ]] || return 0
+    restore_participant_states
+}
+
+rollback_config() {
+    # Never stop an unexpected running sibling without verified journal identity.
+    JV_MIGRATION_PLAYERS_CONFIRMED="${players_confirmed}" runtime quiesce-recovery >/dev/null 2>&1 || return 1
+    cp -a -- "${recovery}/justvoxel.conf.before" "${JV_CONFIG}" || return 1
+    sync -f "${JV_CONFIG}" || return 1
+    runtime rollback >/dev/null 2>&1 || return 1
+    restore_participant_states || return 1
+    runtime finish >/dev/null 2>&1 || return 1
+    config_switched=no
+    minecraft_stopped_by_migration=no
+}
+
+on_exit() {
+    local rc=$?
+    local cleanup_ok=yes
+    trap - EXIT
+    if [[ ${recovery_owned} != yes && -n ${recovery} && -e ${recovery} ]]; then
+        emit_result needs_attention 'Preserved migration evidence already exists. It was left unchanged for explicit recovery.'
+        exit 0
+    fi
+    if [[ ${recovery_owned} != yes ]]; then
+        emit_result rolled_back 'Migration stopped before acquiring any migration-owned storage or runtime state.'
+        exit 0
+    fi
+
+    if (( rc == 0 )); then
+        if [[ ${result_emitted} != yes ]]; then
+            emit_result needs_attention 'Minecraft data migration backend ended without a final safety result; administrator attention is required.'
+        fi
+        exit 0
+    fi
+
+    if [[ ${config_switched} == yes && ${validated} != yes ]]; then
+        emit_progress rolling_back rollback 'Migration validation failed; restoring the original Minecraft configuration and runtime.'
+        write_recovery_state rollback || true
+        if rollback_config; then
+            write_recovery_state rolled_back || true
+            emit_result rolled_back 'Minecraft data migration failed validation and the original configuration/runtime was restored. Reviewed target-storage changes may remain.'
+        else
+            write_recovery_state needs_attention || true
+            emit_result needs_attention 'Automatic Minecraft data migration rollback could not be fully validated; preserved recovery state requires administrator attention.'
+        fi
+        exit 0
+    fi
+
+    if [[ ${participants_captured} == yes ]]; then
+        restart_original_if_required || cleanup_ok=no
+        if [[ ${cleanup_ok} == yes ]]; then runtime finish >/dev/null 2>&1 || cleanup_ok=no; fi
+    elif [[ -f ${recovery}/runtime.json ]]; then
+        # Capture can fail after publishing some startup gates. Keep its durable
+        # evidence for the same explicit recovery path, never discard it.
+        cleanup_ok=no
+    fi
+
+    if [[ ${cleanup_ok} == yes ]]; then
+        [[ -n ${recovery} ]] && write_recovery_state rolled_back || true
+        if [[ ${target_prepared} == yes ]]; then
+            emit_result rolled_back 'Minecraft data migration stopped before the live configuration changed. Original Minecraft data remains active; reviewed target-storage preparation may remain.'
+        else
+            emit_result rolled_back 'Minecraft data migration stopped safely before live Minecraft data or configuration changed.'
+        fi
+    else
+        write_recovery_state needs_attention || true
+        emit_result needs_attention 'Minecraft data migration stopped before configuration switch, but the original Minecraft runtime could not be confirmed. Preserved recovery state requires administrator attention.'
+    fi
+    exit 0
+}
+trap on_exit EXIT
+
+request="$(cat)"
+# Recovery accepts only an operation ID; all identities and old states must
+# come from private durable evidence, never current selection or request fields.
+if [[ $(jq -r '.recovery // false' <<< "${request}") == true ]]; then
+    operation_id="$(jq -er '.operation_id' <<< "${request}")"
+    [[ ${operation_id} =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+    recovery="/var/lib/justvoxel/management/data-migration-${operation_id}"
+    # Do not install a cleanup trap until valid modern evidence is established.
+    trap - EXIT
+    for file in state.json runtime.json justvoxel.conf.before; do
+        [[ -f ${recovery}/${file} && ! -L ${recovery}/${file} && $(stat -c '%u:%g:%a' "${recovery}/${file}") == 0:0:600 ]]
+    done
+    [[ -d ${recovery} && ! -L ${recovery} && $(realpath -e "${recovery}") == "${recovery}" && $(stat -c '%u:%g:%a' "${recovery}") == 0:0:700 ]]
+    jq -e --arg op "${operation_id}" '.schema_version == "v2" and .operation_id == $op and (.participants|length>0)' "${recovery}/state.json" >/dev/null
+    participants="$(jq -c .participants "${recovery}/state.json")"
+    [[ $(jq -cS . <<< "${participants}") == $(jq -cS '[.entries[].participant]' "${recovery}/runtime.json") ]]
+    old_data="$(jq -er .old.data_path "${recovery}/state.json")"
+    old_mount="$(jq -r .old.mount_point "${recovery}/state.json")"
+    old_uuid="$(jq -r .old.expected_uuid "${recovery}/state.json")"
+    old_source="$(jq -r .old.expected_source "${recovery}/state.json")"
+    new_data="$(jq -r .new.data_path "${recovery}/state.json")"
+    new_mount="$(jq -r .new.mount_point "${recovery}/state.json")"
+    new_uuid="$(jq -r .new.expected_uuid "${recovery}/state.json")"
+    new_source="$(jq -r .new.expected_source "${recovery}/state.json")"
+    players_confirmed=true
+    acquire_migration_locks
+    [[ -f ${JV_CONFIG} && ! -L ${JV_CONFIG} && $(realpath -e "${JV_CONFIG}") == "${JV_CONFIG}" && $(stat -c '%u:%g:%a' "${JV_CONFIG}") == 0:0:600 ]]
+    # Prove current appliance config is the old config or the exact storage-only
+    # switch. Do not overwrite unrelated administrator changes during recovery.
+    python3 - "${recovery}/justvoxel.conf.before" "${JV_CONFIG}" "${recovery}/state.json" <<'CHECK_CONFIG'
+import json, shlex, sys
+from pathlib import Path
+def assignments(path):
+    result = {}
+    for line in Path(path).read_text().splitlines():
+        if not line.strip() or line.lstrip().startswith('#'): continue
+        fields = shlex.split(line)
+        if len(fields) != 1 or '=' not in fields[0]: raise ValueError('configuration evidence')
+        key, value = fields[0].split('=',1)
+        if key in result: raise ValueError('duplicate configuration')
+        result[key] = value
+    return result
+before, current = assignments(sys.argv[1]), assignments(sys.argv[2])
+state = json.loads(Path(sys.argv[3]).read_text())
+expected = dict(before)
+for key, field in [('DATA_PATH','data_path'),('DATA_MOUNT_POINT','mount_point'),('DATA_EXPECTED_UUID','expected_uuid'),('DATA_EXPECTED_SOURCE','expected_source')]:
+    expected[key] = state['new'][field]
+if current != before and current != expected: raise ValueError('configuration changed outside migration')
+CHECK_CONFIG
+    emit_progress rolling_back migration_recovery 'Recovering the original appliance storage and every recorded Minecraft instance.'
+    if rollback_config; then
+        write_recovery_state rolled_back
+        emit_result rolled_back 'Original appliance storage and every recorded instance runtime state were recovered.'
+    else
+        emit_result needs_attention 'Recovery identity or runtime validation failed. Preserved migration evidence remains available for retry.'
+    fi
+    exit 0
+fi
+
+if ! jq -e '
+    type == "object"
+    and ((keys | sort) == ["config_identity","expected_minecraft_state","operation_id","participants","plan_fingerprint","players_confirmed","request","target_identity"])
+    and (.operation_id | type == "string")
+    and (.plan_fingerprint | type == "string")
+    and (.target_identity | type == "string")
+    and (.config_identity | type == "string")
+    and (.expected_minecraft_state | type == "string")
+    and (.players_confirmed | type == "boolean")
+    and (.participants | type == "array" and length > 0)
+    and (.request | type == "object")
+' >/dev/null 2>&1 <<< "${request}"; then
+    echo 'ERROR: invalid Minecraft data migration transaction request.' >&2
+    exit 1
+fi
+
+operation_id="$(jq -r '.operation_id' <<< "${request}")"
+plan_fingerprint="$(jq -r '.plan_fingerprint' <<< "${request}")"
+selected_target_identity="$(jq -r '.target_identity' <<< "${request}")"
+selected_config_identity="$(jq -r '.config_identity' <<< "${request}")"
+expected_minecraft_state="$(jq -r '.expected_minecraft_state' <<< "${request}")"
+players_confirmed="$(jq -r '.players_confirmed' <<< "${request}")"
+participants="$(jq -c .participants <<< "${request}")"
+migration_request="$(jq -c '.request' <<< "${request}")"
+
+[[ ${operation_id} =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]] || {
+    echo 'ERROR: invalid Minecraft data migration operation id.' >&2
+    exit 1
+}
+[[ ${plan_fingerprint} =~ ^sha256:[0-9a-f]{64}$ ]] || {
+    echo 'ERROR: invalid Minecraft data migration plan fingerprint.' >&2
+    exit 1
+}
+[[ ${selected_target_identity} =~ ^[0-9a-f]{64}$ ]] || {
+    echo 'ERROR: invalid reviewed target identity.' >&2
+    exit 1
+}
+[[ ${selected_config_identity} =~ ^[0-9a-f]{64}$ ]] || {
+    echo 'ERROR: invalid reviewed configuration identity.' >&2
+    exit 1
+}
+case "${expected_minecraft_state}" in
+    running|stopped) ;;
+    *) echo 'ERROR: invalid reviewed Minecraft state.' >&2; exit 1 ;;
+esac
+
+require_config
+old_data="$(realpath -m -- "${DATA_PATH}")"
+old_mount="${DATA_MOUNT_POINT:-}"
+old_uuid="${DATA_EXPECTED_UUID:-}"
+old_source="${DATA_EXPECTED_SOURCE:-}"
+
+recovery="/var/lib/justvoxel/management/data-migration-${operation_id}"
+if [[ -e ${recovery} ]]; then
+    echo 'ERROR: preserved recovery state already exists for this migration operation.' >&2
+    exit 1
+fi
+# Exclusive creation never adopts or overwrites a preserved operation directory.
+mkdir -m0700 -- "${recovery}"
+recovery_owned=yes
+sync -f "$(dirname -- "${recovery}")"
+cp -a -- "${JV_CONFIG}" "${recovery}/justvoxel.conf.before"
+chmod 0600 "${recovery}/justvoxel.conf.before"
+sync -f "${recovery}/justvoxel.conf.before"
+# Lock order matches backup/restore: exclusion, maintenance, registry.
+acquire_migration_locks
+
+emit_progress validating target_recheck 'Revalidating the reviewed migration target, configuration, capacity, and player state.'
+replan="$(printf '%s' "${migration_request}" | JV_DATA_MIGRATION_LOCKS_HELD=1 /usr/libexec/justvoxel/mjust/admin-data-migration-plan-json plan)"
+jq -e '.ok == true and .schema_version == "v1"' >/dev/null 2>&1 <<< "${replan}" || {
+    echo 'ERROR: reviewed Minecraft data migration no longer passes authoritative planning.' >&2
+    exit 1
+}
+[[ "$(jq -r '.context.target_identity' <<< "${replan}")" == "${selected_target_identity}" ]] || {
+    echo 'ERROR: migration target changed after review.' >&2
+    exit 1
+}
+[[ "$(jq -r '.context.config_identity' <<< "${replan}")" == "${selected_config_identity}" ]] || {
+    echo 'ERROR: JustVoxel configuration changed after migration review.' >&2
+    exit 1
+}
+[[ "$(jq -r '.requirements.minecraft_state' <<< "${replan}")" == "${expected_minecraft_state}" ]] || {
+    echo 'ERROR: Minecraft service state changed after migration review.' >&2
+    exit 1
+}
+if [[ "$(jq -r '.requirements.players_confirmation_required' <<< "${replan}")" == true && ${players_confirmed} != true ]]; then
+    echo 'ERROR: players are online and interruption confirmation was not provided.' >&2
+    exit 1
+fi
+
+[[ "$(jq -cS '.context.participants' <<< "${replan}")" == "$(jq -cS . <<< "${participants}")" ]] || {
+    echo 'ERROR: appliance migration participants changed after review.' >&2
+    exit 1
+}
+
+operation="$(jq -r '.normalized.operation' <<< "${replan}")"
+device="$(jq -r '.normalized.device' <<< "${replan}")"
+new_mount="$(jq -r '.normalized.mount_point' <<< "${replan}")"
+new_data="$(jq -r '.normalized.path' <<< "${replan}")"
+free_start="$(jq -r '.normalized.free_start // empty' <<< "${replan}")"
+planned_end="$(jq -r '.normalized.planned_end // empty' <<< "${replan}")"
+data_bytes="$(jq -r '.normalized.data_bytes' <<< "${replan}")"
+
+write_recovery_state capturing
+printf '%s' "${participants}" | runtime capture >/dev/null 2>&1
+participants_captured=yes
+write_recovery_state captured
+
+emit_progress running target_prepare 'Preparing the reviewed Minecraft data storage target.'
+target_prepared=yes
+case "${operation}" in
+    erase_disk)
+        storage_validate_disk "${device}" >/dev/null 2>&1
+        ! storage_disk_is_system "${device}"
+        ! storage_has_mounted_children "${device}"
+        wipefs -a -- "${device}" >/dev/null 2>&1
+        parted -s -a optimal -- "${device}" mklabel gpt >/dev/null 2>&1
+        storage_create_partition "${device}" 1MiB 100% >/dev/null 2>&1
+        partprobe "${device}" >/dev/null 2>&1
+        udevadm settle >/dev/null 2>&1
+        target_partition="$(lsblk -nrpo NAME,TYPE "${device}" | awk '$2 == "part" {print $1; exit}')"
+        [[ -b ${target_partition} ]]
+        storage_mkfs_xfs JV_DATA "${target_partition}" >/dev/null 2>&1
+        storage_mount_local "${target_partition}" "${new_mount}" >/dev/null 2>&1
+        ;;
+    use_partition)
+        storage_validate_partition "${device}" >/dev/null 2>&1
+        current_mount="$(lsblk -nro MOUNTPOINT "${device}" 2>/dev/null | sed '/^$/d' | head -n1)"
+        current_fs="$(blkid -s TYPE -o value "${device}" 2>/dev/null || true)"
+        case "${current_fs}" in xfs|ext4|btrfs) ;; *) exit 1 ;; esac
+        if [[ -n ${current_mount} ]]; then
+            [[ "$(realpath -m -- "${current_mount}")" == "${new_mount}" ]]
+            storage_validate_mountpoint_path "${new_mount}" >/dev/null 2>&1
+            new_uuid="$(findmnt -n -o UUID --target "${new_mount}" 2>/dev/null || true)"
+            [[ -n ${new_uuid} ]]
+            storage_write_local_fstab "${new_uuid}" "${new_mount}" "${current_fs}" >/dev/null 2>&1
+            STORAGE_MOUNT_POINT="${new_mount}"
+            STORAGE_EXPECTED_UUID="${new_uuid}"
+            STORAGE_EXPECTED_SOURCE="$(findmnt -n -o SOURCE --target "${new_mount}" 2>/dev/null || true)"
+        else
+            storage_mount_local "${device}" "${new_mount}" >/dev/null 2>&1
+        fi
+        ;;
+    format_partition)
+        storage_validate_partition "${device}" >/dev/null 2>&1
+        [[ -z "$(blkid -s TYPE -o value "${device}" 2>/dev/null || true)" ]]
+        [[ -z "$(lsblk -nro MOUNTPOINT "${device}" 2>/dev/null | sed '/^$/d' | head -n1)" ]]
+        storage_mkfs_xfs JV_DATA "${device}" >/dev/null 2>&1
+        storage_mount_local "${device}" "${new_mount}" >/dev/null 2>&1
+        ;;
+    create_partition)
+        storage_validate_disk "${device}" >/dev/null 2>&1
+        [[ -n ${free_start} && -n ${planned_end} ]]
+        before="$(mktemp)"
+        after="$(mktemp)"
+        lsblk -nrpo NAME,TYPE "${device}" | awk '$2 == "part" {print $1}' | sort > "${before}"
+        storage_create_partition "${device}" "${free_start}" "${planned_end}" >/dev/null 2>&1
+        partprobe "${device}" >/dev/null 2>&1
+        udevadm settle >/dev/null 2>&1
+        lsblk -nrpo NAME,TYPE "${device}" | awk '$2 == "part" {print $1}' | sort > "${after}"
+        target_partition="$(comm -13 "${before}" "${after}" | head -n1)"
+        rm -f "${before}" "${after}"
+        [[ -b ${target_partition} ]]
+        storage_mkfs_xfs JV_DATA "${target_partition}" >/dev/null 2>&1
+        storage_mount_local "${target_partition}" "${new_mount}" >/dev/null 2>&1
+        ;;
+    *)
+        echo 'ERROR: unsupported reviewed Minecraft data migration operation.' >&2
+        exit 1
+        ;;
+esac
+
+new_mount="${STORAGE_MOUNT_POINT}"
+new_uuid="${STORAGE_EXPECTED_UUID}"
+new_source="${STORAGE_EXPECTED_SOURCE}"
+[[ "$(realpath -m -- "${new_mount}")" == "$(jq -r '.normalized.mount_point' <<< "${replan}")" ]]
+case "${new_data}/" in
+    "${new_mount}/"*) ;;
+    *) echo 'ERROR: migration data path escaped the reviewed mount point.' >&2; exit 1 ;;
+esac
+if [[ -e ${new_data} ]] && find "${new_data}" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null | grep -q .; then
+    echo 'ERROR: migration target became non-empty before copy.' >&2
+    exit 1
+fi
+install -d -m0750 -o "${MINECRAFT_UID}" -g "${MINECRAFT_GID}" "${new_data}"
+write_recovery_state target_prepared
+
+emit_progress validating staging_space 'Checking exact free space on the prepared Minecraft data target.'
+available_bytes="$(df -B1 --output=avail "${new_mount}" 2>/dev/null | tail -n1 | tr -d ' ')"
+[[ ${available_bytes} =~ ^[0-9]+$ && ${data_bytes} =~ ^[0-9]+$ ]]
+(( available_bytes > data_bytes )) || {
+    echo 'ERROR: prepared migration target does not have enough free space.' >&2
+    exit 1
+}
+
+emit_progress running minecraft_stop 'Safely stopping every running managed Minecraft instance.'
+JV_MIGRATION_PLAYERS_CONFIRMED="${players_confirmed}" runtime quiesce >/dev/null 2>&1
+minecraft_stopped_by_migration=yes
+emit_progress running cold_backup 'Creating and verifying an independent cold backup for every managed instance.'
+runtime backup >/dev/null 2>&1
+write_recovery_state backed_up
+
+emit_progress running copying 'Copying Minecraft data to the reviewed storage target.'
+old_root="$(dirname -- "${old_data}")"
+new_root="$(dirname -- "${new_data}")"
+[[ ! -e ${new_root}/minecraft-instances && ! -L ${new_root}/minecraft-instances ]]
+install -d -m0700 -o root -g root "${new_root}/minecraft-instances"
+rsync -aHAX --numeric-ids --delete "${old_root}/minecraft-instances/" "${new_root}/minecraft-instances/" >/dev/null 2>&1
+if [[ -d ${old_data} ]]; then
+    rsync -aHAX --numeric-ids --delete "${old_data}/" "${new_data}/" >/dev/null 2>&1
+fi
+
+emit_progress running copy_verification 'Verifying the copied Minecraft data before configuration switch.'
+diff_output="$(rsync -aHAXn --numeric-ids --delete --itemize-changes "${old_root}/minecraft-instances/" "${new_root}/minecraft-instances/")"
+if [[ -d ${old_data} ]]; then diff_output+="$(rsync -aHAXn --numeric-ids --delete --itemize-changes "${old_data}/" "${new_data}/")"; fi
+[[ -z ${diff_output} ]] || {
+    echo 'ERROR: migration copy verification found differences.' >&2
+    exit 1
+}
+
+[[ "$(sha256sum "${JV_CONFIG}" | awk '{print $1}')" == "${selected_config_identity}" ]] || {
+    echo 'ERROR: JustVoxel configuration changed while migration data was copied.' >&2
+    exit 1
+}
+
+sync -f "${new_root}"
+write_recovery_state copied
+
+emit_progress running switching 'Switching JustVoxel to the verified Minecraft data copy.'
+DATA_PATH="${new_data}"
+DATA_MOUNT_POINT="${new_mount}"
+DATA_EXPECTED_UUID="${new_uuid}"
+DATA_EXPECTED_SOURCE="${new_source}"
+# A failure anywhere in config publication enters rollback, including after
+# the atomic config rename but before the next shell statement.
+config_switched=yes
+write_recovery_state switching
+write_main_config >/dev/null 2>&1
+sync -f "${JV_CONFIG}"
+write_recovery_state switched
+# Preserve rsync xattrs and the established independent-volume Podman :Z model.
+# Do not regenerate the obsolete fixed-server runtime or relabel unrelated data.
+runtime relocate >/dev/null 2>&1
+emit_progress verifying minecraft_runtime 'Validating every migrated instance and restoring its original running or stopped state.'
+restore_participant_states
+runtime finish >/dev/null 2>&1
+
+validated=yes
+write_recovery_state validated
+# Retain terminal evidence across the final shell/Agent journal handoff.
+emit_result succeeded 'Minecraft data migration completed and validated successfully. The old Minecraft data was intentionally retained.'
+trap - EXIT
+exit 0

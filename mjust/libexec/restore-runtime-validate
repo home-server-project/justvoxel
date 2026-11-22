@@ -1,0 +1,21 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/common.sh
+require_root
+require_config
+
+/usr/libexec/justvoxel/mjust/validate-data-mount
+
+if ! systemctl is-active --quiet minecraft.service; then
+    echo 'ERROR: minecraft.service is not active after restore.' >&2
+    exit 1
+fi
+
+if ! wait_for_rcon 900; then
+    echo 'ERROR: Minecraft did not become ready through RCON after restore.' >&2
+    exit 1
+fi
+
+players="$(podman exec minecraft rcon-cli 'list' 2>/dev/null)" || { echo 'ERROR: Minecraft player query failed after restore.' >&2; exit 1; }
+printf 'RCON: %s\n' "${players}"
+JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack "${1:-${MINECRAFT_VERSION}}"

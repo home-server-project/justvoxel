@@ -1,0 +1,250 @@
+package server
+
+import (
+	"bytes"
+	"context"
+	"strings"
+	"testing"
+)
+
+func TestWorkspaceWindowStateIsScopedToAuthenticatedUser(t *testing.T) {
+	app, err := New(&fakeAPI{}, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := app.dashboardData(context.Background(), "session-token", "csrf", selectedServerContext{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data.Username != "admin" {
+		t.Fatalf("dashboard username = %q, want authenticated username", data.Username)
+	}
+	var markup bytes.Buffer
+	if err := app.templates.ExecuteTemplate(&markup, "dashboard.html", data); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(markup.String(), `data-workspace-username="admin"`) {
+		t.Fatal("dashboard must expose the authenticated username for workspace persistence")
+	}
+
+	source, err := englishPresentationAsset("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(source)
+	start := strings.Index(script, "const workspaceUsername =")
+	end := strings.Index(script, "// Browser presentation state only;")
+	if start < 0 || end <= start {
+		t.Fatal("shared workspace persistence missing")
+	}
+	persistence := script[start:end]
+	for _, want := range []string{
+		`const workspaceUsername = selectionDashboard?.dataset.workspaceUsername || "";`,
+		"const workspaceWindowStateKey = (id) => workspaceUsername\n  ? `justvoxel-workspace-window-${id === \"system-monitor\" ? \"v2\" : \"v1\"}:${encodeURIComponent(workspaceUsername)}:${id}`\n  : null;",
+		"const readWorkspaceWindowState = (id) => {\n  const key = workspaceWindowStateKey(id);\n  if (!key) return {};",
+		"const writeWorkspaceWindowState = (id, patch) => {\n  const key = workspaceWindowStateKey(id);\n  if (!key) return;",
+		`window.localStorage.getItem(key)`,
+		`window.localStorage.setItem(key, JSON.stringify({ ...current, ...patch }))`,
+		`["/login", "/password"].includes(window.location.pathname)`,
+		`!document.querySelector("[data-credential-boundary]")`,
+		`workspaceRestoreAllowed() ? saved : { ...saved, open: false }`,
+	} {
+		if !strings.Contains(persistence, want) {
+			t.Fatalf("user-scoped workspace persistence missing %q", want)
+		}
+	}
+	if strings.Count(persistence, "justvoxel-workspace-window-") != 1 ||
+		strings.Count(persistence, "localStorage.getItem(") != 1 ||
+		strings.Contains(persistence, "localStorage.removeItem(") {
+		t.Fatal("workspace persistence must ignore old unscoped keys without migration or deletion")
+	}
+}
+
+func TestCredentialPagesIgnorePersistedWorkspaceOpenState(t *testing.T) {
+	source, err := englishPresentationAsset("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(source)
+	for _, required := range []string{
+		`["/login", "/password"].includes(window.location.pathname)`,
+		`workspaceRestoreAllowed() ? saved : { ...saved, open: false }`,
+		`if (readWorkspaceWindowState("system").open) workspaceWindow?.open();`,
+		`if (readWorkspaceWindowState("minecraft").open) workspaceWindow?.open();`,
+	} {
+		if !strings.Contains(script, required) {
+			t.Fatalf("workspace restore boundary missing %q", required)
+		}
+	}
+}
+
+func TestFirstRunConfiguredStateOverridesExploreInvitation(t *testing.T) {
+	scriptSource, err := englishPresentationAsset("static/first-run.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(scriptSource)
+	configured := strings.Index(script, "if (configured === true)")
+	explored := strings.Index(script, "let explored = false")
+	if configured < 0 || explored < 0 || configured > explored {
+		t.Fatalf("configured state must be handled before Explore-first preference")
+	}
+	for _, want := range []string{
+		"hideFirstRunUI()",
+		"window.localStorage.removeItem(exploreStorageKey)",
+		"stopRefreshTimer()",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("configured first-run cleanup missing %q", want)
+		}
+	}
+
+	templateSource, err := englishPresentationAsset("templates/dashboard.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(templateSource), `data-dashboard-setup-area {{if .Status.Minecraft.Configured}}hidden{{end}}`) {
+		t.Fatal("Workspace setup invitation must follow the configured state")
+	}
+}
+
+func TestFirstRunWorkspaceChoiceIsNonBlockingAndConfigurationDriven(t *testing.T) {
+	templateSource, err := englishPresentationAsset("templates/dashboard.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	templateText := string(templateSource)
+	for _, want := range []string{
+		"data-first-run-choice",
+		"data-first-run-explore",
+		"data-first-run-setup",
+		"data-minecraft-setup-invitation",
+		"href=\"/setup\"",
+	} {
+		if !strings.Contains(templateText, want) {
+			t.Fatalf("dashboard first-run markup missing %q", want)
+		}
+	}
+
+	scriptSource, err := englishPresentationAsset("static/first-run.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scriptText := string(scriptSource)
+	if strings.Contains(scriptText, "window.location.replace(\"/setup\")") {
+		t.Fatal("first-run flow must not force unconfigured administrators into setup")
+	}
+	for _, want := range []string{
+		"role !== \"administrator\"",
+		"configured === true",
+		"window.localStorage.setItem(exploreStorageKey, \"true\")",
+		"window.localStorage.removeItem(exploreStorageKey)",
+		"showChoice()",
+		"showInvitation()",
+		"15000",
+	} {
+		if !strings.Contains(scriptText, want) {
+			t.Fatalf("first-run behavior missing %q", want)
+		}
+	}
+
+	styleSource, err := englishPresentationAsset("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	styleText := string(styleSource)
+	for _, want := range []string{
+		".first-run-choice",
+		".minecraft-setup-invitation",
+		"@keyframes setup-invite-shimmer",
+		"@media(prefers-reduced-motion:reduce)",
+	} {
+		if !strings.Contains(styleText, want) {
+			t.Fatalf("first-run styling missing %q", want)
+		}
+	}
+}
+
+func TestMinecraftResetReopensExistingFirstRunChoice(t *testing.T) {
+	appSource, err := englishPresentationAsset("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := string(appSource)
+	start := strings.Index(app, "const renderResetOperation = (operation) => {")
+	if start < 0 {
+		t.Fatal("reset operation renderer missing")
+	}
+	end := strings.Index(app[start:], "const resetCurrentOperation = async () => {")
+	if end < 0 {
+		t.Fatal("reset operation renderer missing")
+	}
+	reset := app[start : start+end]
+	for _, want := range []string{
+		`operation.operation_type === "minecraft_reset" && operation.state === "succeeded"`,
+		"workspaceWindow?.close()",
+		`window.dispatchEvent(new Event("justvoxel:minecraft-reset-complete"))`,
+	} {
+		if !strings.Contains(reset, want) {
+			t.Fatalf("Minecraft Reset handoff missing %q", want)
+		}
+	}
+	if strings.Index(reset, "workspaceWindow?.close()") > strings.Index(reset, `window.dispatchEvent(new Event("justvoxel:minecraft-reset-complete"))`) {
+		t.Fatal("Reset workspace must close before the Welcome choice reopens")
+	}
+	if strings.Contains(reset, "window.location.reload()") || strings.Contains(reset, "window.location.assign(") {
+		t.Fatal("Minecraft Reset handoff must retain the current page and session")
+	}
+	if !strings.Contains(reset, `if (operation.operation_type === "factory_reset")`) ||
+		!strings.Contains(reset, "this WebUI session will be signed out") {
+		t.Fatal("Full Factory Reset session warning must remain separate")
+	}
+	if !strings.Contains(app, `window.location.assign(target.pathname + target.search)`) ||
+		!strings.Contains(app, `window.location.assign("/login")`) {
+		t.Fatal("Full Factory Reset authentication redirects must remain available")
+	}
+	if !strings.Contains(app, `window.addEventListener("justvoxel:minecraft-reset-complete", () => void refreshDashboard())`) {
+		t.Fatal("Minecraft Reset must refresh the dashboard without waiting for its poll")
+	}
+
+	firstRunSource, err := englishPresentationAsset("static/first-run.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstRun := string(firstRunSource)
+	listener := strings.Index(firstRun, `window.addEventListener("justvoxel:minecraft-reset-complete", () => {`)
+	if listener < 0 {
+		t.Fatal("first-run UI does not listen for Minecraft Reset completion")
+	}
+	handoff := firstRun[listener:]
+	for _, want := range []string{
+		"window.localStorage.removeItem(exploreStorageKey)",
+		"resetWelcome = true",
+		"statusGeneration += 1",
+		"configured = false",
+		"if (role) applyFirstRunState()",
+		"else {\n      showChoice();",
+	} {
+		if !strings.Contains(handoff, want) {
+			t.Fatalf("first-run Reset handoff missing %q", want)
+		}
+	}
+	if strings.Contains(handoff, "void loadConfigurationState()") {
+		t.Fatal("Minecraft Reset must not immediately trust a potentially stale configured status")
+	}
+	if !strings.Contains(firstRun, `const exploreStorageKey = "justvoxel:first-run:explore"`) ||
+		!strings.Contains(firstRun, `(!resetWelcome && new URLSearchParams(window.location.search).has("workspace"))`) ||
+		!strings.Contains(firstRun, "else showChoice()") ||
+		!strings.Contains(firstRun, "configured = Boolean(snapshot?.status?.minecraft?.configured)") ||
+		!strings.Contains(firstRun, "if (generation !== statusGeneration) return;") ||
+		!strings.Contains(firstRun, "if (configured) resetWelcome = false;") {
+		t.Fatal("Minecraft Reset must show Welcome immediately, discard stale status, and later reconcile")
+	}
+	styleSource, err := englishPresentationAsset("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(styleSource), ".first-run-choice{position:fixed;inset:0;z-index:950;") {
+		t.Fatal("Welcome choice must appear over remaining workspace windows")
+	}
+}

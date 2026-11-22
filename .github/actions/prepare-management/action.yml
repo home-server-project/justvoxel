@@ -1,0 +1,141 @@
+name: Prepare verified Management Agent
+description: Reuse or publish the signed Management Agent for the workflow channel
+inputs:
+  signing-key:
+    description: Private key for publishing a rebuilt package
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Resolve Management package inputs
+      id: management-inputs
+      shell: bash
+      run: |
+        set -euo pipefail
+        base_digest="$(skopeo inspect --authfile "${HOME}/.docker/config.json" --raw "docker://${HOME_SERVER_BASE_IMAGE}" | sha256sum | cut -d ' ' -f 1)"
+        [[ "${base_digest}" =~ ^[0-9a-f]{64}$ ]]
+        base_identity="${HOME_SERVER_BASE_IMAGE%:*}@sha256:${base_digest}"
+        cosign verify --new-bundle-format=false --key cosign.pub "${base_identity}" >/dev/null
+        echo "HOME_SERVER_BASE_IMAGE=${base_identity}" >> "${GITHUB_ENV}"
+        # Git tree entries include paths, modes and blob IDs, never timestamps.
+        input_identity="$({
+          git ls-files --stage -z -- .go-version \
+            ':(glob)management/**/*.go' management/go.mod management/go.sum \
+            ':(glob)templates/**/*.in' \
+            .github/actions/build-management/action.yml \
+            build_files/build-management-agent.sh \
+            build_files/build-common.sh \
+            build_files/management-agent-package.Containerfile \
+            tests/run-pam-integration-alma.sh \
+            system_files/etc/pam.d/justvoxel \
+            runtime/system-update-reboot-worker \
+            mjust/libexec/minecraft-container-update \
+            mjust/libexec/minecraft-container-plan.sh \
+            mjust/libexec/instance-context.sh \
+            mjust/libexec/migration-instance.sh \
+            mjust/libexec/interrupt-safety.sh \
+            mjust/libexec/operation-trace.sh \
+            mjust/libexec/admin-factory-reset-json \
+            mjust/libexec/update-minecraft-backend \
+            mjust/libexec/system-display \
+            mjust/libexec/system-update-api.sh \
+            mjust/libexec/instance-host-shutdown-prepare \
+            mjust/libexec/admin-system-update-reboot-json \
+            mjust/libexec/managed-crossplay-mod-ownership \
+            system_files/usr/libexec/justvoxel/ups-schedule-event \
+            system_files/usr/libexec/justvoxel/ups-primary-fsd \
+            system_files/usr/libexec/justvoxel/ups-emergency-poweroff \
+            system_files/usr/lib/systemd/system/justvoxel-management.service \
+            system_files/usr/lib/systemd/system/justvoxel-system-update-stage.service \
+            system_files/usr/lib/systemd/system/justvoxel-system-update-stage.timer \
+            system_files/usr/share/justvoxel/filebrowser/config.yaml \
+            system_files/usr/lib/tmpfiles.d/justvoxel.conf
+          printf '%s\0' "${base_identity}" 'management-api=v1'
+        } | sha256sum | cut -d ' ' -f 1)"
+        echo "identity=${input_identity}" >> "${GITHUB_OUTPUT}"
+        echo "base=${base_identity}" >> "${GITHUB_OUTPUT}"
+
+    - name: Inspect internal Management package
+      id: management-package
+      shell: bash
+      env:
+        INPUT_IDENTITY: ${{ steps.management-inputs.outputs.identity }}
+        BASE_IDENTITY: ${{ steps.management-inputs.outputs.base }}
+      run: |
+        set -euo pipefail
+        metadata="${RUNNER_TEMP}/management-package.json"
+        echo 'rebuild=true' >> "${GITHUB_OUTPUT}"
+        authfile="${HOME}/.docker/config.json"
+        if digest="$(skopeo inspect --authfile "${authfile}" --format '{{.Digest}}' "docker://${MANAGEMENT_PACKAGE}")" &&
+           [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+          package_ref="${MANAGEMENT_PACKAGE%:*}@${digest}"
+          if skopeo inspect --authfile "${authfile}" "docker://${package_ref}" >"${metadata}" &&
+             jq -e --arg input "${INPUT_IDENTITY}" --arg base "${BASE_IDENTITY}" '
+               .Labels["io.home-server-project.justvoxel.management-input"] == $input and
+               .Labels["io.home-server-project.justvoxel.management-base"] == $base and
+               .Labels["io.home-server-project.justvoxel.management-api"] == "v1"
+             ' "${metadata}" >/dev/null &&
+             cosign verify --new-bundle-format=false --key cosign.pub "${package_ref}" >/dev/null; then
+            echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+            echo 'rebuild=false' >> "${GITHUB_OUTPUT}"
+          fi
+        fi
+
+    - name: Extract cached Management Agent
+      id: cached
+      if: steps.management-package.outputs.rebuild == 'false'
+      continue-on-error: true
+      shell: bash
+      env:
+        DIGEST: ${{ steps.management-package.outputs.digest }}
+      run: |
+        bash "${GITHUB_ACTION_PATH}/extract.sh"
+
+    - name: Build Management Agent from source
+      if: steps.cached.outcome != 'success'
+      uses: ./.github/actions/build-management
+
+    - name: Publish internal Management package
+      id: management-push
+      if: steps.cached.outcome != 'success'
+      shell: bash
+      env:
+        INPUT_IDENTITY: ${{ steps.management-inputs.outputs.identity }}
+        BASE_IDENTITY: ${{ steps.management-inputs.outputs.base }}
+      run: |
+        set -euo pipefail
+        sudo podman build --format oci \
+          --build-arg "MANAGEMENT_INPUT_IDENTITY=${INPUT_IDENTITY}" \
+          --build-arg "HOME_SERVER_BASE_IDENTITY=${BASE_IDENTITY}" \
+          --build-arg "SOURCE_COMMIT=${GITHUB_SHA}" \
+          --tag "${MANAGEMENT_PACKAGE}" \
+          --file "${GITHUB_WORKSPACE}/build_files/management-agent-package.Containerfile" \
+          build_artifacts/management
+        sudo podman push --authfile "${HOME}/.docker/config.json" \
+          --digestfile "${RUNNER_TEMP}/management-package.digest" "${MANAGEMENT_PACKAGE}"
+        digest="$(cat "${RUNNER_TEMP}/management-package.digest")"
+        [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
+        echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+
+    - name: Sign and verify internal Management package digest
+      if: steps.cached.outcome != 'success'
+      shell: bash
+      env:
+        COSIGN_PRIVATE_KEY: ${{ inputs.signing-key }}
+        DIGEST: ${{ steps.management-push.outputs.digest }}
+      run: |
+        set -euo pipefail
+        package_ref="${MANAGEMENT_PACKAGE%:*}@${DIGEST}"
+        cosign sign -y \
+          --new-bundle-format=false \
+          --use-signing-config=false \
+          --key env://COSIGN_PRIVATE_KEY "${package_ref}"
+        cosign verify --new-bundle-format=false --key cosign.pub "${package_ref}" >/dev/null
+
+    - name: Extract published Management Agent
+      if: steps.cached.outcome != 'success'
+      shell: bash
+      env:
+        DIGEST: ${{ steps.management-push.outputs.digest }}
+      run: |
+        bash "${GITHUB_ACTION_PATH}/extract.sh"

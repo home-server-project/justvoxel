@@ -1,0 +1,33 @@
+/* Reproduce Advanced Setup's lanes and card presentation in the dashboard. */
+.migration-switch .setup-software-lanes{display:grid;gap:.5rem;grid-template-columns:1fr;grid-auto-rows:auto;align-content:start;align-items:start}
+.migration-switch .setup-software-lanes .setup-server-types{grid-template-columns:repeat(5,minmax(0,1fr));grid-auto-rows:1fr;align-content:start;min-width:0;margin:0}
+.migration-switch .setup-server-types{display:grid;gap:.35rem;border:0;padding:0}
+.migration-switch .setup-server-types legend{margin-bottom:.2rem;color:#c8d0d6;font-size:.9rem;font-weight:800}
+.migration-switch .server-software-card{grid-template-columns:40px minmax(0,1fr);gap:.7rem;height:104px;min-height:104px;max-height:104px;padding:.65rem .75rem;box-sizing:border-box;align-items:start;align-content:start;margin:0}
+.migration-switch .server-software-icon,.migration-switch .server-software-icon img{width:40px;min-width:40px;height:40px}
+.migration-switch .server-software-copy{min-width:0;overflow-wrap:anywhere;gap:var(--jv-space-xs)}
+.migration-switch .server-software-copy strong{font-size:1rem}
+.migration-switch .server-software-copy small{font-size:.82rem}
+.migration-switch .server-software-icon img[src$="/paper.svg"]{transform:scale(.82);transform-origin:center}
+.migration-switch .server-software-icon img[src$="/purpur.svg"]{transform:scale(.90);transform-origin:center}
+.migration-switch .migration-switch-legend{display:flex;flex-wrap:wrap;gap:.35rem .8rem;font-size:.82rem}
+.migration-switch .migration-switch-legend>span{display:inline-flex;align-items:center;gap:.3rem}
+.migration-switch .migration-switch-icon-column{display:grid;justify-items:center;gap:.25rem;width:40px}
+.migration-switch .migration-switch-status-dot{display:inline-grid;place-items:center;width:22px;height:22px;box-sizing:border-box;border-radius:999px;padding:0;font-weight:800;line-height:1}
+.migration-switch .migration-switch-status-dot:not(.plugins-badge-enabled,.plugins-badge-disabled){background:#343a40}
+.migration-switch .is-pending .migration-switch-status-dot{visibility:hidden}
+.migration-switch .is-current{border-color:#e5bb40;background:color-mix(in srgb,#e5bb40 12%,var(--jv-surface-sunken));opacity:1}
+.migration-switch .is-unsupported{filter:brightness(.82);opacity:.72;cursor:default}
+.migration-switch .server-software-card:disabled:hover{border-color:var(--jv-border-strong);background:var(--jv-surface-sunken)}
+.migration-switch .is-current:disabled:hover{border-color:#e5bb40;background:color-mix(in srgb,#e5bb40 12%,var(--jv-surface-sunken))}
+.migration-switch .server-software-card.is-selected:not(.is-current){border-color:var(--jv-success);background:color-mix(in srgb,var(--jv-success) 18%,var(--jv-surface-sunken))}
+@media(prefers-color-scheme:light){
+  .migration-switch .setup-server-types legend{color:#34414a}
+  .migration-switch .migration-switch-status-dot:not(.plugins-badge-enabled,.plugins-badge-disabled){background:#e9ecef}
+}
+@media(max-width:1000px){
+  .migration-switch .setup-software-lanes .setup-server-types{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:430px){
+  .migration-switch .setup-software-lanes .setup-server-types{grid-template-columns:1fr}
+}

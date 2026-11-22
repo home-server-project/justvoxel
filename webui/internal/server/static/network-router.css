@@ -1,0 +1,146 @@
+.network-workspace-view > .network-tabs:has([data-network-tab="Router"]) {
+  overflow-x: auto;
+}
+
+.network-router-lane {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) fit-content(50%);
+  align-items: center;
+  gap: var(--jv-space-sm);
+}
+
+.network-router-lane > .state-text {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.network-router-lane > button {
+  justify-self: end;
+}
+
+.network-router-lane > button,
+.network-router-endpoint-row button {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.network-router-connection {
+  display: grid;
+  gap: var(--jv-space-sm);
+  overflow-wrap: anywhere;
+}
+
+.network-router-credentials-row,
+.network-router-endpoint-row {
+  grid-column: 1 / -1;
+  gap: var(--jv-space-xs) var(--jv-space-md);
+}
+
+.network-router-credentials-row {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.network-router-credentials-row > label {
+  flex: 1 1 12rem;
+}
+
+.network-router-endpoint-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+}
+
+.network-router-endpoint-row > label {
+  flex: 1 1 14rem;
+}
+
+.network-router-endpoint-row > .network-inline-actions {
+  flex: 0 1 auto;
+  margin-inline-start: auto;
+}
+
+.network-router-trust {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--jv-space-xs) var(--jv-space-md);
+}
+
+.network-router-trust button {
+  max-width: 100%;
+  white-space: normal;
+}
+
+.network-router-forwarding:not(:empty) {
+  display: grid;
+  gap: var(--jv-space-xs);
+}
+
+.network-router-forwarding :is(h3, p),
+.network-router-lane > h2 {
+  margin: 0;
+}
+
+.network-router-forwarding label {
+  display: grid;
+  min-width: 0;
+}
+
+.network-router-forwarding :is(select, input) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.network-router-forwarding .network-detail-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: var(--jv-space-xs);
+}
+
+.network-router-forwarding .network-detail-row > strong {
+  max-width: 100%;
+  text-align: start;
+}
+
+.network-router-connection :is(.network-connect-hint, .network-router-forwarding):empty {
+  display: none;
+}
+
+.network-router-guide {
+  display: grid;
+  justify-items: start;
+  gap: .65rem;
+  overflow-wrap: anywhere;
+}
+
+.network-router-guide section {
+  width: 100%;
+  padding-top: .65rem;
+}
+
+.network-router-guide p {
+  margin: .25rem 0 0;
+}
+
+.network-router-token {
+  padding-inline: .15em;
+  border-radius: .2em;
+  background: var(--jv-surface-sunken);
+  font-family: monospace;
+}
+
+.network-router-guide pre .network-router-token {
+  padding-inline: 0;
+  background: var(--jv-surface);
+}
+
+.network-router-guide pre {
+  margin: .55rem 0 0;
+  padding: .55rem .65rem;
+  border-radius: var(--jv-radius);
+  background: var(--jv-surface-sunken);
+  white-space: pre-wrap;
+}

@@ -1,0 +1,174 @@
+package server
+
+import (
+	"context"
+	"errors"
+	"net/http"
+
+	"github.com/home-server-project/justvoxel-webui/internal/api"
+)
+
+type dataMigrationPlanApplyAPI interface {
+	AdminDataMigrationPlan(ctx context.Context, session string, request api.AdminDataMigrationPlanRequest) (api.AdminDataMigrationPlanResponse, error)
+	AdminDataMigrationApply(ctx context.Context, session string, request api.AdminDataMigrationApplyRequest) (api.AdminDataMigrationApplyResponse, error)
+}
+
+type dataMigrationOperationAPI interface {
+	AdminCurrentDataMigrationOperation(ctx context.Context, session string) (api.PersistentOperationResponse, error)
+	AdminOperation(ctx context.Context, session, id string) (api.PersistentOperationResponse, error)
+}
+
+type dataMigrationOrchestrationAPI interface {
+	dataMigrationPlanApplyAPI
+	dataMigrationOperationAPI
+}
+
+type dataMigrationApplyProof struct {
+	PlanFingerprint    string
+	MigrationConfirmed bool
+	Confirmation       string
+	PlayersConfirmed   bool
+}
+
+type dataMigrationOrchestrationError struct {
+	StatusCode int
+	Message    string
+	Plan       api.AdminDataMigrationPlanResponse
+}
+
+func (e *dataMigrationOrchestrationError) Error() string {
+	return e.Message
+}
+
+func dataMigrationPlanReviewed(ctx context.Context, client dataMigrationPlanApplyAPI, session string, request api.AdminDataMigrationPlanRequest) (api.AdminDataMigrationPlanResponse, error) {
+	plan, err := client.AdminDataMigrationPlan(ctx, session, request)
+	if err != nil {
+		return plan, &dataMigrationOrchestrationError{
+			StatusCode: dataMigrationErrorStatus(err),
+			Message:    apiMessage(err, uiText("ui.1c31a7a8ff49")),
+			Plan:       plan,
+		}
+	}
+	if !plan.OK || plan.Normalized == nil || plan.Requirements == nil {
+		return plan, &dataMigrationOrchestrationError{
+			StatusCode: http.StatusBadGateway,
+			Message:    uiText("ui.e2c9a06cdb68"),
+			Plan:       plan,
+		}
+	}
+	return plan, nil
+}
+
+func dataMigrationApplyReviewed(ctx context.Context, client dataMigrationPlanApplyAPI, session string, request api.AdminDataMigrationPlanRequest, proof dataMigrationApplyProof) (api.AdminDataMigrationPlanResponse, *api.PersistentOperation, error) {
+	plan, err := dataMigrationPlanReviewed(ctx, client, session, request)
+	if err != nil {
+		return plan, nil, err
+	}
+	if proof.PlanFingerprint == "" || proof.PlanFingerprint != plan.PlanFingerprint {
+		return plan, nil, &dataMigrationOrchestrationError{
+			StatusCode: http.StatusConflict,
+			Message:    uiText("ui.06253675a04c"),
+			Plan:       plan,
+		}
+	}
+	if !proof.MigrationConfirmed {
+		return plan, nil, &dataMigrationOrchestrationError{
+			StatusCode: http.StatusBadRequest,
+			Message:    uiText("ui.5055ed51ad2a"),
+			Plan:       plan,
+		}
+	}
+	if plan.Requirements.PlayersConfirmationRequired && !proof.PlayersConfirmed {
+		return plan, nil, &dataMigrationOrchestrationError{
+			StatusCode: http.StatusBadRequest,
+			Message:    uiText("ui.3c7f61aaf681"),
+			Plan:       plan,
+		}
+	}
+	if plan.Requirements.DestructiveConfirmationRequired && proof.Confirmation != plan.Requirements.ConfirmationPhrase {
+		return plan, nil, &dataMigrationOrchestrationError{
+			StatusCode: http.StatusBadRequest,
+			Message:    uiText("ui.1ab8cf459954"),
+			Plan:       plan,
+		}
+	}
+	result, err := client.AdminDataMigrationApply(ctx, session, api.AdminDataMigrationApplyRequest{
+		PlanFingerprint:    plan.PlanFingerprint,
+		Request:            request,
+		MigrationConfirmed: true,
+		Confirmation:       proof.Confirmation,
+		PlayersConfirmed:   proof.PlayersConfirmed,
+	})
+	if err != nil {
+		return plan, nil, &dataMigrationOrchestrationError{
+			StatusCode: dataMigrationErrorStatus(err),
+			Message:    apiMessage(err, uiText("ui.3bc4fd9254b3")),
+			Plan:       plan,
+		}
+	}
+	if !result.OK || result.Operation == nil || result.Operation.OperationType != "data_migration" {
+		return plan, nil, &dataMigrationOrchestrationError{
+			StatusCode: http.StatusBadGateway,
+			Message:    uiText("ui.aa9162cf694f"),
+			Plan:       plan,
+		}
+	}
+	return plan, result.Operation, nil
+}
+
+func dataMigrationCurrentOperation(ctx context.Context, client dataMigrationOperationAPI, session string) (*api.PersistentOperation, error) {
+	response, err := client.AdminCurrentDataMigrationOperation(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	if response.Operation == nil {
+		return nil, nil
+	}
+	if response.Operation.OperationType != "data_migration" {
+		return nil, &dataMigrationOrchestrationError{
+			StatusCode: http.StatusBadGateway,
+			Message:    uiText("ui.5425e36b1921"),
+		}
+	}
+	return response.Operation, nil
+}
+
+func dataMigrationOperation(ctx context.Context, client dataMigrationOperationAPI, session, id string) (*api.PersistentOperation, error) {
+	response, err := client.AdminOperation(ctx, session, id)
+	if err != nil {
+		return nil, err
+	}
+	if response.Operation == nil || response.Operation.OperationType != "data_migration" {
+		return nil, &dataMigrationOrchestrationError{
+			StatusCode: http.StatusNotFound,
+			Message:    uiText("ui.8167e35f373e"),
+		}
+	}
+	return response.Operation, nil
+}
+
+func dataMigrationErrorStatus(err error) int {
+	var orchestrationErr *dataMigrationOrchestrationError
+	if errors.As(err, &orchestrationErr) && orchestrationErr.StatusCode >= 400 && orchestrationErr.StatusCode <= 599 {
+		return orchestrationErr.StatusCode
+	}
+	var responseErr *api.ResponseError
+	if errors.As(err, &responseErr) && responseErr.StatusCode >= 400 && responseErr.StatusCode <= 599 {
+		return responseErr.StatusCode
+	}
+	if errors.Is(err, api.ErrUnauthorized) {
+		return http.StatusUnauthorized
+	}
+	if errors.Is(err, api.ErrPasswordChangeRequired) {
+		return http.StatusForbidden
+	}
+	return http.StatusBadGateway
+}
+
+func dataMigrationErrorMessage(err error, fallback string) string {
+	var orchestrationErr *dataMigrationOrchestrationError
+	if errors.As(err, &orchestrationErr) && orchestrationErr.Message != "" {
+		return orchestrationErr.Message
+	}
+	return apiMessage(err, fallback)
+}

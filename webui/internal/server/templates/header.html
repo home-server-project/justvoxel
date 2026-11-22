@@ -1,0 +1,923 @@
+{{define "app-header"}}
+<header class="app-header topbar"{{if developmentProfile}} data-development-profile{{end}}>
+  <a class="brand-link brand-mark" href="/" aria-label="{{t "ui.6e76c1a4edf1"}}">
+    <img class="brand-logo" src="/static/justvoxel-logo.png" alt="JustVoxel">
+  </a>
+
+  <div class="topbar-time"><div class="topbar-clock" data-topbar-clock data-system-timezone="{{systemTimezone}}" data-system-now="{{systemNow}}" aria-label="{{t "ui.6bcb1a3e7432"}}">--:--</div></div>
+  <script src="/static/timezone-search.js"></script>
+  <script src="/static/date-time.js" defer></script>
+  <script src="/static/version-workspace.js" defer></script>
+  <script src="/static/server-migration-switch.js" defer></script>
+  <link rel="stylesheet" href="/static/server-migration-switch.css">
+  <script src="/static/minecraft-servers.js" defer></script>
+  <link rel="stylesheet" href="/static/storage-browser.css">
+  <link rel="stylesheet" href="/static/minecraft-servers.css">
+
+  <details class="control-center" data-control-center>
+    <summary class="control-center-trigger" aria-label="{{t "ui.c13476ad6812"}}">
+      <svg class="control-center-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><g transform="translate(0 1)"><path d="M10 2h4l.6 2.3a8 8 0 0 1 1.7 1l2.2-.7 2 3.5-1.7 1.6a8 8 0 0 1 0 2l1.7 1.6-2 3.5-2.2-.7a8 8 0 0 1-1.7 1L14 20h-4l-.6-2.3a8 8 0 0 1-1.7-1l-2.2.7-2-3.5 1.7-1.6a8 8 0 0 1 0-2L3.5 8.7l2-3.5 2.2.7a8 8 0 0 1 1.7-1L10 2Z"/><circle cx="12" cy="11" r="3"/></g></svg>
+      <span class="control-center-label">{{t "ui.d76f90b52444"}}</span>
+    </summary>
+
+    <div class="control-center-panel">
+      <div class="control-center-heading">
+        <div><p class="eyebrow">{{t "ui.f0c1da86478c"}}</p><h2>{{t "ui.d76f90b52444"}}</h2></div>
+      </div>
+
+      <section class="control-section control-session">
+        <div class="control-session-heading">
+          <span class="control-section-label">{{t "ui.ad39d0553216"}}</span>
+          <span class="control-battery-indicators control-section-label" data-power-indicators hidden></span>
+        </div>
+        <div class="control-quick-actions">
+          <div class="control-power-actions nav-admin-only" data-system-power>
+            <button class="control-icon-button" type="button" data-system-action="reboot" aria-label="{{t "ui.fba023ca78eb"}}" data-tooltip="{{t "ui.fba023ca78eb"}}">
+              <svg class="control-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M20 11a8 8 0 1 1-2.34-5.66L20 7"></path>
+                <path d="M20 3v4h-4"></path>
+              </svg>
+            </button>
+            <button class="control-icon-button" type="button" data-system-action="firmware-reboot" aria-label="{{t "ui.b098f557fbb4"}}" data-tooltip="{{t "ui.b098f557fbb4"}}" hidden disabled>
+              <svg class="control-action-icon control-action-icon-firmware" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 8a8 8 0 0 1 13-3"></path>
+                <path d="M18 2v4h-4"></path>
+                <rect x="8" y="9" width="8" height="8" rx="1"></rect>
+                <path d="M10 6v3M14 6v3M10 17v3M14 17v3M5 11h3M5 15h3M16 11h3M16 15h3"></path>
+              </svg>
+            </button>
+            <button class="control-icon-button system-power-danger" type="button" data-system-action="poweroff" aria-label="{{t "ui.2089aa6cd044"}}" data-tooltip="{{t "ui.2089aa6cd044"}}">
+              <svg class="control-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 3v9"></path>
+                <path d="M7.05 5.75a8 8 0 1 0 9.9 0"></path>
+              </svg>
+            </button>
+            <button class="control-icon-button" type="button" data-display-open aria-label="{{t "ui.34e108c0896d"}}" data-tooltip="{{t "ui.34e108c0896d"}}" hidden>
+              <svg class="control-action-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="13" rx="1"></rect><path d="M12 16v5M8 21h8"></path></svg>
+            </button>
+            <p class="system-power-error" data-system-action-error hidden>{{t "ui.9b593ad265a1"}}</p>
+          </div>
+          <div class="control-session-actions"><span class="language-control">{{template "language-button" .}}</span>
+          <form class="nav-logout" method="post" action="/logout">
+            <input type="hidden" name="csrf" value="{{.CSRF}}">
+            <button class="secondary control-icon-button" type="submit" aria-label="{{t "ui.49616145514e"}}" data-tooltip="{{t "ui.49616145514e"}}">
+              <svg class="control-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M10 4H5v16h5"></path>
+                <path d="M14 8l4 4-4 4"></path>
+                <path d="M18 12H8"></path>
+              </svg>
+            </button>
+          </form>
+          </div>
+        </div>
+      </section>
+
+      <nav class="control-navigation" aria-label="{{t "ui.b133391563fc"}}">
+        <section class="control-section">
+          <span class="control-section-label">Minecraft</span>
+          <div class="control-tile-grid">
+            <button class="control-tile" type="button" data-minecraft-open title="{{t "ui.b7a110689d82"}}"><strong>{{t "ui.d3e658e0b991"}}</strong></button>
+            <button class="control-tile nav-admin-only" type="button" data-minecraft-servers-open><strong>{{t "ui.d9d8bd931a78"}}</strong></button>
+            <button class="control-tile nav-admin-only" type="button" data-version-open title="{{t "ui.a950cf76f6dc"}}"><strong>{{t "ui.dc0e3d9898f6"}}</strong></button>
+            <button class="control-tile nav-admin-only" type="button" data-minecraft-network-open><strong>{{t "ui.60d8c0cc037f"}}</strong></button>
+            <button class="control-tile nav-admin-only" type="button" data-backups-open title="{{t "ui.500d9699300b"}}"><strong>{{t "ui.3334fee2c77f"}}</strong></button>
+            <button class="control-tile nav-admin-only" type="button" data-migration-open title="{{t "ui.d18a11b8deec"}}"><strong>{{t "ui.cc149190687e"}}</strong></button>
+            <button class="control-tile nav-admin-only" type="button" data-plugins-open title="{{t "ui.7b4cde542125"}}"><strong>{{t "ui.70171ec7a356"}}</strong></button>
+            <a class="control-tile button-link" href="/minecraft/how-to-connect{{if .SelectedMinecraftID}}?server={{.SelectedMinecraftID}}{{end}}" target="_blank" rel="noopener" title="{{t "ui.f1accd8f5e4f"}}"><strong>{{t "ui.2198ec8ff357"}}</strong></a>
+          </div>
+        </section>
+
+        <section class="control-section">
+          <span class="control-section-label">{{t "ui.6725e7bbcd28"}}</span>
+          <div class="control-tile-grid">
+            <button class="control-tile" type="button" data-system-open title="{{t "ui.ca11b33f686d"}}"><strong>{{t "ui.1f87f883cc7e"}}</strong></button>
+            <button class="control-tile" type="button" data-system-monitor-open title="{{t "ui.41dba5fd3301"}}"><strong>{{t "ui.b288d256878b"}}</strong></button>
+            <button class="control-tile nav-admin-only" type="button" data-system-update-open title="{{t "ui.7418662342fc"}}"><strong>{{t "ui.ed64017ed1a3"}}</strong></button>
+            <button class="control-tile" type="button" data-network-open title="{{t "ui.ef0c27b98e7d"}}"><strong>{{t "ui.ae717cc04c83"}}</strong></button>
+            <button class="control-tile nav-admin-only" type="button" data-storage-open title="{{t "ui.da07e015496d"}}"><strong>{{t "ui.a69c4dece144"}}</strong></button>
+            <button class="control-tile nav-admin-only" type="button" data-primary-admin-only data-files-open title="{{t "ui.9a44418db28d"}}"><strong>{{t "ui.33b8a7901c02"}}</strong></button>
+            <button class="control-tile nav-admin-only" type="button" data-primary-admin-only data-terminal-open title="{{t "ui.948cdecea388"}}"><strong>{{t "ui.e0926fdac700"}}</strong></button>
+            <button class="control-tile nav-admin-only" type="button" data-primary-admin-only data-agent-gateway-open><strong>{{t "ui.afa62eaba92d"}}</strong></button>
+          </div>
+        </section>
+      </nav>
+    </div>
+  </details>
+</header>
+
+  <section class="quick-look" data-quick-look aria-label="{{t "ui.371e34282d2a"}}">
+    <div class="quick-look-panel" id="quick-look-panel" data-quick-look-panel inert aria-hidden="true">
+      <div class="quick-look-grid">
+        <article class="quick-look-tile">
+          <div class="quick-look-tile-heading">
+            <span>Minecraft</span>
+            <details class="quick-look-actions nav-operator-plus" data-quick-look-actions>
+              <summary aria-label="{{t "ui.bfab7ec41090"}}" title="{{t "ui.bfab7ec41090"}}">⋯</summary>
+              <div class="quick-look-action-menu">
+                <form method="post" action="/minecraft/start" class="action-form role-admin-or-operator" data-progress="{{t "ui.bbe5fc3b9ef3"}}" data-minecraft-action="start">
+                  <input type="hidden" name="csrf" value="{{.CSRF}}">
+                  {{if .SelectedMinecraftID}}<input type="hidden" name="server" value="{{.SelectedMinecraftID}}">{{end}}
+                  <button type="submit">{{t "ui.e4bb9f1ece9a"}}</button>
+                </form>
+                <form method="post" action="/minecraft/stop" class="action-form role-admin" data-progress="{{t "ui.bbe8574175ab"}}" data-minecraft-action="stop">
+                  <input type="hidden" name="csrf" value="{{.CSRF}}">
+                  {{if .SelectedMinecraftID}}<input type="hidden" name="server" value="{{.SelectedMinecraftID}}">{{end}}
+                  <button type="submit">{{t "ui.cae7d57bc067"}}</button>
+                </form>
+                <form method="post" action="/minecraft/restart" class="action-form role-admin-or-operator" data-progress="{{t "ui.75d0f1469d16"}}" data-minecraft-action="restart">
+                  <input type="hidden" name="csrf" value="{{.CSRF}}">
+                  {{if .SelectedMinecraftID}}<input type="hidden" name="server" value="{{.SelectedMinecraftID}}">{{end}}
+                  <button type="submit">{{t "ui.6b983a81e5e8"}}</button>
+                </form>
+              </div>
+            </details>
+          </div>
+          <span data-server-selector-slot data-server-workspace="minecraft" data-server-selector-compact></span>
+          <strong data-quick-look-minecraft>—</strong>
+        </article>
+        <article class="quick-look-tile"><span>{{t "ui.dd167905de0d"}}</span><strong data-quick-look-version>—</strong></article>
+        <article class="quick-look-tile"><span>{{t "ui.84e12ac655dd"}}</span><strong data-quick-look-players>—</strong></article>
+        <article class="quick-look-tile"><span>{{t "ui.6725e7bbcd28"}}</span><strong data-quick-look-system>—</strong></article>
+        <article class="quick-look-tile quick-look-network-tile"><div class="quick-look-network-row"><span>{{t "ui.b12b510bd093"}}</span><strong data-quick-look-ipv4>—</strong></div><div class="network-overlay-list" data-quick-look-overlays></div></article>
+        <article class="quick-look-tile"><div class="quick-look-tile-heading"><span>{{t "ui.838557924a5c"}}</span><button class="quick-look-backup-action nav-operator-only" type="button" data-quick-look-backup-create>{{t "ui.85fb487f030a"}}</button><input type="hidden" value="{{.CSRF}}" data-quick-look-backup-csrf></div><strong data-quick-look-backup>—</strong></article>
+      </div>
+    </div>
+    <button class="quick-look-handle" type="button" data-quick-look-toggle aria-expanded="false" aria-controls="quick-look-panel" aria-label="{{t "ui.bbab84dfeb6f"}}">
+      <span aria-hidden="true">⌄</span>
+    </button>
+  </section>
+
+  <input type="hidden" value="{{.CSRF}}" data-minecraft-workspace-csrf>
+  <input type="hidden" value="{{.CSRF}}" data-system-workspace-csrf>
+  <input type="hidden" value="{{.CSRF}}" data-system-actions-csrf>
+  <input type="hidden" value="{{.CSRF}}" data-system-update-csrf>
+  <input type="hidden" value="{{.CSRF}}" data-system-monitor-csrf>
+  <input type="hidden" value="{{.CSRF}}" data-system-ups-csrf>
+  <input type="hidden" value="{{.CSRF}}" data-network-csrf>
+
+  <dialog class="workspace-window network-workspace-dialog" data-workspace-window="network" data-network-workspace-dialog aria-labelledby="network-workspace-title">
+    <div class="network-workspace-shell">
+      <div class="network-workspace-header" data-workspace-drag-handle>
+        <div>
+          <p class="eyebrow">JustVoxel</p>
+          <h2 id="network-workspace-title">{{t "ui.ae717cc04c83"}}</h2>
+        </div>
+        <div class="network-workspace-header-actions">
+          <button class="system-monitor-header-button workspace-header-refresh" type="button" data-network-refresh aria-label="{{t "ui.99c1b985e87d"}}" title="{{t "ui.99c1b985e87d"}}">{{t "ui.0e9161011702"}}</button>
+          <button class="system-monitor-header-button workspace-header-close" type="button" data-network-close aria-label="{{t "ui.637ff3ea572a"}}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M5 5l14 14M19 5L5 19"/></svg></button>
+        </div>
+      </div>
+      <div class="network-workspace-body">
+        <p class="network-workspace-state" data-network-state role="status" aria-live="polite">{{t "ui.edc8339db826"}}</p>
+        <div class="network-workspace-content" data-network-content></div>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="workspace-window system-workspace-dialog" data-workspace-window="system" data-system-workspace-dialog aria-labelledby="system-workspace-title">
+    <div class="system-workspace-shell">
+      <div class="system-workspace-header" data-workspace-drag-handle>
+        <div>
+          <p class="eyebrow">JustVoxel</p>
+          <h2 id="system-workspace-title">{{t "ui.1f87f883cc7e"}}</h2>
+        </div>
+        <div class="system-workspace-header-actions">
+          <button class="system-monitor-header-button workspace-header-refresh" type="button" data-system-refresh aria-label="{{t "ui.a044417623c0"}}" title="{{t "ui.a044417623c0"}}">{{t "ui.0e9161011702"}}</button>
+          <button class="system-monitor-header-button workspace-header-close" type="button" data-system-close aria-label="{{t "ui.5925b82cc82e"}}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M5 5l14 14M19 5L5 19"/></svg></button>
+        </div>
+      </div>
+      <nav class="system-workspace-tabs" aria-label="{{t "ui.d1fe9d6eb813"}}">
+        <button class="nav-admin-only" type="button" data-system-tab="health" aria-selected="true">{{t "ui.55898449eb74"}}</button>
+        <button type="button" data-system-tab="history" aria-selected="false">{{t "ui.0e7696009337"}}</button>
+        <button type="button" data-system-tab="users" aria-selected="false">{{t "ui.6b0cc904d081"}}</button>
+        <button class="nav-admin-only" type="button" data-system-tab="logs" aria-selected="false">{{t "ui.ea2100dc89ae"}}</button>
+        <button class="nav-admin-only" type="button" data-system-tab="date-time" aria-selected="false">{{t "ui.a217562db538"}}</button>
+        <button type="button" data-system-tab="wallpaper" aria-selected="false">{{t "ui.a7f173cdaae4"}}</button>
+        <button class="nav-admin-only" type="button" data-system-tab="reset" aria-selected="false">{{t "ui.dd7d67617fa7"}}</button>
+        <button type="button" data-system-tab="ups" data-system-ups-tab aria-selected="false" hidden>UPS</button>
+        <button type="button" data-system-tab="about" aria-selected="false">{{t "ui.4efca0d10c5f"}}</button>
+      </nav>
+      <div class="system-workspace-body">
+        <p class="system-workspace-state" data-system-state>{{t "ui.78c3166b8a7e"}}</p>
+        <div class="system-workspace-content" data-system-workspace-content></div>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="workspace-window system-workspace-dialog" data-workspace-window="agent-gateway" data-agent-gateway-dialog aria-labelledby="agent-gateway-title">
+    <div class="system-workspace-shell">
+      <div class="system-workspace-header" data-workspace-drag-handle>
+        <div><p class="eyebrow">JustVoxel</p><h2 id="agent-gateway-title">{{t "ui.afa62eaba92d"}}</h2></div>
+        <div class="system-workspace-header-actions">
+          <button class="system-monitor-header-button workspace-header-refresh" type="button" data-gateway-refresh>{{t "ui.0e9161011702"}}</button>
+          <button class="system-monitor-header-button workspace-header-close" type="button" data-gateway-close aria-label="{{t "ui.2932c32cea06"}}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M5 5l14 14M19 5L5 19"/></svg></button>
+        </div>
+      </div>
+      <nav class="minecraft-workspace-tabs gateway-navigation" aria-label="{{t "ui.afa62eaba92d"}}">
+        <button type="button" data-gateway-connections aria-selected="true">{{t "ui.dc273117482b"}}</button>
+        <button type="button" data-gateway-add aria-selected="false">{{t "ui.9fd728c66c9a"}}</button>
+        <button type="button" data-gateway-help-open aria-selected="false">{{t "ui.b79cac926e0b"}}</button>
+        <div class="gateway-navigation-controls">
+          <label class="gateway-switch gateway-global-switch"><span>{{t "ui.8ea0c356176e"}}</span><input class="date-time-switch" type="checkbox" role="switch" aria-label="{{t "ui.d208ebc625e1"}}" data-gateway-enabled><span class="gateway-visually-hidden" data-gateway-state>{{t "ui.dffa4e230ede"}}</span></label>
+          <label class="gateway-switch gateway-global-switch" data-telegram-global hidden><img class="gateway-provider-icon" src="/static/ai-providers/telegram.svg" alt=""><span>Telegram</span><input class="date-time-switch" type="checkbox" role="switch" aria-label="Telegram" data-telegram-enabled disabled></label>
+          <label class="gateway-switch gateway-global-switch" data-discord-global hidden><img class="gateway-provider-icon" src="/static/ai-providers/discord.svg" alt=""><span>Discord</span><input class="date-time-switch" type="checkbox" role="switch" aria-label="Discord" data-discord-enabled disabled></label>
+        </div>
+      </nav>
+      <div class="system-workspace-body">
+        <p data-gateway-feedback role="status"></p>
+        <div class="system-workspace-content" data-gateway-content data-gateway-csrf="{{.CSRF}}">
+          <section data-gateway-overview>
+            <div class="minecraft-server-inventory"><div class="minecraft-server-entries" data-gateway-cards></div></div>
+          </section>
+          <section class="panel" data-gateway-details hidden></section>
+          <section data-gateway-telegram hidden aria-labelledby="telegram-title">
+            <div data-telegram-content data-telegram-csrf="{{.CSRF}}">
+              <div class="integration-lane integration-header">
+                <div class="integration-title"><img class="gateway-provider-icon" src="/static/ai-providers/telegram.svg" alt="">
+                <h3 id="telegram-title">Telegram</h3></div>
+                <span class="gateway-connection-state" data-telegram-status>{{t "ui.04dfac3671b4"}}</span>
+              </div>
+              <div class="integration-lane">
+                <strong>{{t "ui.cf8c0ac670d1"}}</strong>
+                <form class="integration-controls" data-telegram-token-form autocomplete="off">
+                  <input type="password" name="token" aria-label="{{t "ui.cf8c0ac670d1"}}" autocomplete="off" data-password-ui="off" spellcheck="false" autocapitalize="off" data-telegram-token required>
+                  <button class="button" type="submit">{{t "ui.1509f561f241"}}</button>
+                  <button class="button" type="button" data-telegram-token-cancel hidden>{{t "ui.19766ed6ccb2"}}</button>
+                </form>
+                <div class="integration-controls" data-telegram-bot-actions hidden>
+                  <button class="button" type="button" data-telegram-verify hidden>{{t "ui.942087cc2d41"}}</button>
+                  <button class="button" type="button" data-telegram-replace>{{t "ui.82f2449b3fb3"}}</button>
+                  <button class="button" type="button" data-telegram-disconnect>{{t "ui.acfc5be785a9"}}</button>
+                </div>
+              </div>
+              <div class="integration-lane">
+                <strong>{{t "ui.ec5ba0abb717"}}</strong>
+                <button class="button" type="button" data-telegram-pair>{{t "ui.9995f295df20"}}</button>
+                <div class="integration-controls" data-telegram-pending></div>
+                <code data-telegram-challenge></code>
+                <button class="button" type="button" data-telegram-copy hidden>{{t "ui.e21f935f11d7"}}</button>
+                <small class="muted" data-telegram-expiry></small>
+              </div>
+              <div data-telegram-users></div>
+              <p class="telegram-status">{{t "ui.755c8b2a9fb1"}} <span data-telegram-operation>{{t "ui.d54609390f7a"}}</span></p>
+              <p role="status" data-telegram-feedback></p>
+            </div>
+          </section>
+          <section data-gateway-discord hidden aria-labelledby="discord-title">
+            <div data-discord-content data-discord-csrf="{{.CSRF}}">
+              <div class="integration-lane integration-header">
+                <div class="integration-title"><img class="gateway-provider-icon" src="/static/ai-providers/discord.svg" alt="">
+                <h3 id="discord-title">Discord</h3></div>
+                <span class="gateway-connection-state" data-discord-status>{{t "ui.04dfac3671b4"}}</span>
+              </div>
+              <div class="integration-lane">
+                <strong>{{t "ui.cf8c0ac670d1"}}</strong>
+                <form class="integration-controls" data-discord-token-form autocomplete="off">
+                  <input type="password" name="token" aria-label="{{t "ui.cf8c0ac670d1"}}" autocomplete="off" data-password-ui="off" spellcheck="false" autocapitalize="off" data-discord-token required>
+                  <button class="button" type="submit">{{t "ui.1509f561f241"}}</button>
+                  <button class="button" type="button" data-discord-token-cancel hidden>{{t "ui.19766ed6ccb2"}}</button>
+                </form>
+                <div class="integration-controls" data-discord-bot-actions hidden>
+                  <button class="button" type="button" data-discord-verify hidden>{{t "ui.942087cc2d41"}}</button>
+                  <button class="button" type="button" data-discord-replace>{{t "ui.82f2449b3fb3"}}</button>
+                  <button class="button" type="button" data-discord-disconnect>{{t "ui.acfc5be785a9"}}</button>
+                </div>
+              </div>
+              <div class="integration-lane">
+                <strong>{{t "ui.3a9884e3ad9a"}}</strong>
+                <a class="button" data-discord-install hidden target="_blank" rel="noopener noreferrer">{{t "ui.9dfb6febed84"}}</a>
+                <select aria-label="{{t "ui.3a9884e3ad9a"}}" data-discord-guild disabled><option value="">{{t "ui.55ec560f5aa3"}}</option></select>
+                <button class="button" type="button" data-discord-bind disabled>{{t "ui.8eb48b422d9f"}}</button>
+                <p>{{t "ui.ea5fdbed627f"}} <span data-discord-bound>{{t "ui.dc937b598926"}}</span></p>
+                <p data-discord-empty hidden>{{t "ui.0d40a5fe25fa"}}</p>
+                <p data-discord-bound-unavailable hidden>{{t "ui.9ad3735384dc"}}</p>
+              </div>
+              <div data-discord-pending></div>
+              <div data-discord-administrators></div>
+              <p role="status" data-discord-feedback></p>
+            </div>
+          </section>
+          <section data-gateway-help hidden>
+            <h3>{{t "ui.b79cac926e0b"}}</h3>
+            <p class="muted">{{t "ui.3773d68e54e8"}}</p>
+            <section class="panel" data-gateway-provider-reference><h3>{{t "ui.8faf0f99f49a"}}</h3>
+              <p class="muted">{{t "ui.bab657ea5d59"}}</p>
+              <div class="gateway-help-selector gateway-provider-grid" data-gateway-help-providers role="group" aria-label="{{t "ui.8faf0f99f49a"}}"></div>
+              <section class="gateway-guide" data-gateway-help-guide aria-live="polite"></section>
+            </section>
+            <details class="panel"><summary>{{t "ui.0d4586c13b5c"}}</summary>
+              <div class="gateway-table-scroll"><table class="gateway-access-table">
+                <caption class="gateway-visually-hidden">{{t "ui.a592b0302b53"}}</caption>
+                <thead><tr><th scope="col">{{t "ui.1709305c9fa9"}}</th><th scope="col">{{t "ui.dcd1d5223f73"}}</th><th scope="col">{{t "ui.2de2c8f7e0f1"}}</th></tr></thead>
+                <tbody>
+                  <tr><td>1</td><td>{{t "ui.ca1048507ded"}}</td><td>{{t "ui.c0d271437fa0"}}</td></tr>
+                  <tr><td>2</td><td>{{t "ui.70a6e6a44cfb"}}</td><td>{{t "ui.149e37948d2e"}}</td></tr>
+                  <tr><td>3</td><td>{{t "ui.27bfdb0ee7a3"}}</td><td>{{t "ui.0e5ec7432528"}}</td></tr>
+                  <tr><td>4</td><td>{{t "ui.f96d93f55f28"}}</td><td>{{t "ui.83c249d9f23b"}}</td></tr>
+                </tbody>
+              </table></div>
+              <p class="notice warning">{{t "ui.5f228fe0325c"}}</p>
+            </details>
+            <details class="panel"><summary>{{t "ui.6d0ce2f87051"}}</summary>
+              <div class="gateway-help-facts">
+                <div class="gateway-help-fact">
+                  <strong>{{t "ui.3205261a6537"}}</strong>
+                  <p>{{t "ui.f45809c4e37c"}}</p>
+                </div>
+                <div class="gateway-help-fact">
+                  <strong>{{t "ui.0767576cdb76"}}</strong>
+                  <p>{{t "ui.27972880af90"}}</p>
+                </div>
+              </div>
+            </details>
+            <details class="panel"><summary>{{t "ui.66880d2d8216"}}</summary>
+              <div class="gateway-help-facts">
+                <div class="gateway-help-fact">
+                  <strong>{{t "ui.f932f1c03a64"}}</strong>
+                  <p>{{t "ui.6bb6871dcea9"}}</p>
+                </div>
+                <div class="gateway-help-fact">
+                  <strong>{{t "ui.9c8ccf4685a4"}}</strong>
+                  <p>{{t "ui.f98f7906a4ca"}}</p>
+                </div>
+              </div>
+              <p>{{t "ui.a04a2ae49518"}}</p>
+            </details>
+            <details class="panel"><summary>{{t "ui.0226fc91b55c"}}</summary>
+              <div class="gateway-help-facts">
+                <div class="gateway-help-fact">
+                  <strong>{{t "ui.e0afbd208820"}}</strong>
+                  <p>{{t "ui.92c73337c38d"}}</p>
+                </div>
+                <div class="gateway-help-fact">
+                  <strong>{{t "ui.14806da5fdd3"}}</strong>
+                  <p>{{t "ui.b2d29c9b4c6f"}}</p>
+                </div>
+              </div>
+              <p>{{t "ui.a96ff14ec3cc"}}</p>
+            </details>
+            <details class="panel"><summary>{{t "ui.089c44d4f0bf"}}</summary>
+              <p>{{t "ui.41f263a1e174"}}</p><div class="gateway-address"><input type="text" class="gateway-copy-field" readonly aria-label="{{t "ui.973480a1f339"}}" data-gateway-mcp><button type="button" class="secondary" data-gateway-copy-label="Selected" data-gateway-copy-address="mcp">{{t "ui.e21f935f11d7"}}</button></div>
+              <p>{{t "ui.017990755c53"}}</p><div class="gateway-address"><input type="text" class="gateway-copy-field" readonly aria-label="{{t "ui.28eae9f3fe0c"}}" data-gateway-rest><button type="button" class="secondary" data-gateway-copy-label="Selected" data-gateway-copy-address="rest">{{t "ui.e21f935f11d7"}}</button></div>
+              <p class="gateway-visually-hidden" data-gateway-address-status role="status"></p>
+              <p>{{t "ui.3fb518f7fba6"}} <a data-gateway-openapi target="_blank" rel="noopener"></a> {{t "ui.fcab54b6195f"}}</p>
+              <p>{{t "ui.b0ca04742dcc"}} <code data-gateway-metadata></code>{{t "ui.c4c31e6a8c56"}} <code>{{t "ui.57856b5c2d9b"}}</code>.</p>
+              <p>{{t "ui.58f4552562eb"}}</p>
+              <p>{{t "ui.6d1f28035425"}}</p>
+              <p>{{t "ui.13581135e1a9"}}</p>
+              <p>{{t "ui.c636d734b570"}}</p>
+            </details>
+          </section>
+        </div>
+      </div>
+    </div>
+  </dialog>
+  <template data-gateway-settings-template>
+    <form data-gateway-settings>
+      <section class="panel gateway-native-frame" data-gateway-native-integrations><h3>{{t "ui.1478ed09ee34"}}</h3>
+        <div class="gateway-native-grid">
+          <label class="gateway-provider-card" data-telegram-card><input type="radio" name="integration" value="telegram" data-telegram-select><img class="gateway-provider-icon" src="/static/ai-providers/telegram.svg" alt=""><span><strong>Telegram</strong></span></label>
+          <label class="gateway-provider-card" data-discord-card><input type="radio" name="integration" value="discord" data-discord-select><img class="gateway-provider-icon" src="/static/ai-providers/discord.svg" alt=""><span><strong>Discord</strong></span></label>
+        </div>
+      </section>
+      <section class="gateway-connection-frame" data-gateway-connection-frame>
+        <h3 data-gateway-connection-title>{{t "ui.f0038c45b5ed"}}</h3>
+      <section class="gateway-primary">
+        <div class="gateway-name-access-row">
+          <label><span data-gateway-name-label>{{t "ui.dcd1d5223f73"}}</span><input name="name" placeholder="{{t "ui.7b3ccb959f64"}}" required maxlength="100" autocomplete="off"></label>
+          <label><span data-gateway-level-label>{{t "ui.86da9c960cf9"}}</span><select name="level"><option value="1">{{t "ui.1e92289bd9c3"}}</option><option value="2">{{t "ui.a2c65e3bcfbe"}}</option><option value="3">{{t "ui.58e87c126588"}}</option><option value="4">{{t "ui.d382211e05c4"}}</option></select></label>
+          <div class="gateway-enabled-control"><label class="gateway-switch"><input class="date-time-switch" type="checkbox" role="switch" name="enabled" aria-label="{{t "ui.0198f34074d5"}}"><span class="gateway-connection-state error" data-gateway-connection-state>{{t "ui.b7e3e4aa4257"}}</span></label></div>
+        </div>
+        <section role="group" aria-labelledby="gateway-provider-label"><h4 id="gateway-provider-label" data-gateway-purpose-label>{{t "ui.de21fb5d4198"}}</h4>
+          <div class="gateway-provider-grid" data-gateway-providers>
+            <label class="gateway-provider-card"><input type="radio" name="purpose" value="OpenAI" checked><img class="gateway-provider-icon" src="/static/ai-providers/openai.svg" alt=""><span><strong>OpenAI</strong><small>{{t "ui.27f0f7393c73"}}</small></span></label>
+            <label class="gateway-provider-card"><input type="radio" name="purpose" value="Claude"><img class="gateway-provider-icon" src="/static/ai-providers/claude.svg" alt=""><span><strong>{{t "ui.0615570f9ea1"}}</strong><small>{{t "ui.46bbfcd46443"}}</small></span></label>
+            <label class="gateway-provider-card"><input type="radio" name="purpose" value="Grok"><img class="gateway-provider-icon" src="/static/ai-providers/grok.svg" alt=""><span><strong>{{t "ui.dca61d32363b"}}</strong></span></label>
+            <label class="gateway-provider-card"><input type="radio" name="purpose" value="Gemini"><img class="gateway-provider-icon" src="/static/ai-providers/googlegemini.svg" alt=""><span><strong>{{t "ui.f6ece80b88d6"}}</strong><small>{{t "ui.d1f40ecdf296"}}</small></span></label>
+            <label class="gateway-provider-card"><input type="radio" name="purpose" value="GitHub Copilot"><img class="gateway-provider-icon" src="/static/ai-providers/githubcopilot.svg" alt=""><span><strong>{{t "ui.ed249d417dcd"}}</strong><small>{{t "ui.a46c86c8dfe5"}}</small></span></label>
+            <label class="gateway-provider-card"><input type="radio" name="purpose" value="OpenClaw"><img class="gateway-provider-icon" src="/static/ai-providers/openclaw.svg" alt=""><span><strong>{{t "ui.a7b90ee8facf"}}</strong><small>{{t "ui.e6f8e976a215"}}</small></span></label>
+            <label class="gateway-provider-card"><input type="radio" name="purpose" value="Other AI / MCP app"><img class="gateway-provider-icon" src="/static/justvoxel-logo.png" alt=""><span><strong>{{t "ui.7658e93fa9fd"}}</strong></span></label>
+            <label class="gateway-provider-card"><input type="radio" name="purpose" value="Automation / REST API"><img class="gateway-provider-icon" src="/static/justvoxel-logo.png" alt=""><span><strong>{{t "ui.1e94ea6baaaf"}}</strong></span></label>
+          </div>
+          <p class="muted gateway-compatibility-summary" data-gateway-compatibility-summary aria-live="polite" hidden></p>
+        </section>
+        <section role="group" aria-labelledby="gateway-scope-label"><h4 id="gateway-scope-label">{{t "ui.1f8cd22bff22"}}</h4>
+          <input type="hidden" name="server_scope" value="all">
+          <div class="gateway-server-lane" data-gateway-scope data-gateway-instance-options>
+            <label class="gateway-server-item gateway-all-servers"><input class="date-time-switch" type="checkbox" role="switch" data-gateway-all-servers checked><span>{{t "ui.3205261a6537"}}</span></label>
+          </div>
+        </section>
+      </section>
+      <section data-gateway-status hidden><div data-gateway-status-details><input class="gateway-expiration" type="datetime-local" name="expires_at" aria-label="{{t "ui.f38d6e0e9b08"}}" title="{{t "ui.b28e273057d7"}}"></div></section>
+      <div class="gateway-actions-lane">
+        <div class="action-row gateway-credential-actions" data-gateway-actions hidden>
+          <button type="button" class="secondary" data-gateway-rotate>{{t "ui.4ade788283fe"}}</button><button type="button" class="secondary" data-gateway-revoke>{{t "ui.14683b379324"}}</button>
+        </div>
+        <p data-gateway-live-note hidden>{{t "ui.bce546b184d0"}}</p>
+        <div class="action-row gateway-save"><button type="button" class="danger" data-gateway-delete hidden>{{t "ui.e2d0a54968ea"}}</button><button type="submit" data-gateway-save>{{t "ui.4759498ac2a7"}}</button></div>
+      </div>
+      <details data-gateway-advanced hidden><summary>{{t "ui.808c589d091c"}}</summary>
+        <dl data-gateway-safe-details></dl>
+        <section data-gateway-oauth hidden><h4>{{t "ui.089c44d4f0bf"}}</h4>
+          <p>{{t "ui.ee2cf08e1c31"}}</p>
+          <label>{{t "ui.0b8e7201f46f"}}<input name="issuer" type="url"><small>{{t "ui.a2f482704af5"}}</small></label>
+          <label>{{t "ui.14c6404668f1"}}<input name="audience" type="url"><small>{{t "ui.f9ae39abdf03"}}</small></label>
+          <label>{{t "ui.914c64d46777"}}<input name="jwks_uri" type="url"><small>{{t "ui.65fde2234e44"}}</small></label>
+          <label>{{t "ui.a11e88041820"}}<input name="scope" value="justvoxel:connect" readonly><small>{{t "ui.20da9dd5fcf0"}}</small></label>
+          <label>{{t "ui.6ab67c8ac19a"}}<input name="subject" maxlength="512" autocomplete="off"><small>{{t "ui.e061f0cd49e9"}}</small></label>
+          <label>{{t "ui.e8c32c0e6606"}}<input name="client_id" maxlength="512" autocomplete="off"><small>{{t "ui.06284ad6f80e"}}</small></label>
+          <p>{{t "ui.84c38d4d4f00"}}</p>
+        </section>
+      </details>
+      </section>
+    </form>
+  </template>
+  <dialog class="minecraft-delete-dialog" data-gateway-level4-dialog aria-labelledby="gateway-level4-title">
+    <form class="minecraft-delete-card" data-gateway-level4-form>
+      <h2 id="gateway-level4-title">{{t "ui.3a752935f458"}}</h2>
+      <p class="notice warning">{{t "ui.dc1b7df5f012"}}</p>
+      <div class="destructive-confirmation" data-destructive-confirmation data-destructive-idle="{{t "ui.003d9e199467"}}">
+        <p class="minecraft-delete-selected">{{t "ui.ff43c892f8af"}}<strong data-gateway-level4-name></strong></p>
+        <div class="destructive-confirm-slider" data-destructive-slider-shell>
+          <span class="destructive-confirm-slider-text" data-destructive-slider-text>{{t "ui.003d9e199467"}}</span><span class="destructive-confirm-slider-thumb" aria-hidden="true">›</span>
+          <input type="range" min="0" max="100" value="0" data-destructive-slider aria-label="{{t "ui.003d9e199467"}}">
+        </div>
+        <label class="destructive-confirm-toggle-row" data-destructive-toggle-row hidden><span class="destructive-confirm-toggle-callout">{{t "ui.6abbf7964ac5"}}</span><input type="checkbox" role="switch" class="destructive-confirm-toggle" data-destructive-toggle aria-label="{{t "ui.2b1be36c13ca"}}"></label>
+      </div>
+      <div class="action-row"><button type="button" class="secondary" data-gateway-level4-cancel>{{t "ui.19766ed6ccb2"}}</button><button type="submit" class="danger" data-destructive-submit disabled>{{t "ui.3a752935f458"}}</button></div>
+    </form>
+  </dialog>
+  <dialog class="system-action-dialog" data-gateway-token-dialog aria-labelledby="gateway-token-title">
+    <div class="system-action-dialog-content">
+      <h2 id="gateway-token-title">{{t "ui.0436ddf92c74"}}</h2><p>{{t "ui.3fedcb0276ed"}}</p>
+      <pre data-gateway-token></pre><p data-gateway-copy-status role="status"></p>
+      <div class="action-row"><button type="button" data-gateway-token-copy>{{t "ui.d35b4ef7c618"}}</button><button type="button" class="secondary" data-gateway-token-done>{{t "ui.11a6767d5674"}}</button></div>
+    </div>
+  </dialog>
+  <link rel="stylesheet" href="/static/agent-gateway.css">
+  <script src="/static/agent-gateway.js" defer></script>
+  <script src="/static/telegram.js" defer></script>
+  <script src="/static/discord.js" defer></script>
+
+  <dialog class="workspace-window system-workspace-dialog" data-workspace-window="terminal" data-terminal-workspace-dialog aria-labelledby="terminal-workspace-title">
+    <div class="system-workspace-shell">
+      <div class="system-workspace-header" data-workspace-drag-handle>
+        <div>
+          <p class="eyebrow">JustVoxel</p>
+          <h2 id="terminal-workspace-title">{{t "ui.e0926fdac700"}}</h2>
+        </div>
+        <div class="system-workspace-header-actions">
+          <button class="system-monitor-header-button system-monitor-settings-button" type="button" data-terminal-settings-toggle aria-haspopup="dialog">{{t "ui.74a883a037bc"}}</button>
+          <button class="system-monitor-header-button workspace-header-refresh" type="button" data-terminal-refresh aria-label="{{t "ui.3650ceabb0eb"}}" title="{{t "ui.3650ceabb0eb"}}">{{t "ui.0e9161011702"}}</button>
+          <button class="system-monitor-header-button workspace-header-close" type="button" data-terminal-close aria-label="{{t "ui.5f05f40f4fb5"}}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M5 5l14 14M19 5L5 19"/></svg></button>
+        </div>
+      </div>
+      <div class="system-workspace-body terminal-workspace-body">
+        <p class="system-workspace-state" data-terminal-state></p>
+        <button class="secondary" type="button" data-terminal-retry hidden>{{t "ui.942087cc2d41"}}</button>
+        <iframe title="{{t "ui.773486c4fe68"}}" data-terminal-frame hidden></iframe>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="system-action-dialog" data-terminal-settings-dialog aria-labelledby="terminal-settings-title">
+    <div class="system-action-dialog-content">
+      <p class="eyebrow">{{t "ui.e0926fdac700"}}</p>
+      <h2 id="terminal-settings-title">{{t "ui.f1f3b733d184"}}</h2>
+      <label>{{t "ui.6d784d95c638"}}
+        <select data-terminal-font-size>
+          <option value="">{{t "ui.21b111cbfe6e"}}</option>
+          <option value="12">12</option>
+          <option value="14">14</option>
+          <option value="16">16</option>
+          <option value="18">18</option>
+          <option value="20">20</option>
+          <option value="22">22</option>
+        </select>
+      </label>
+      <label>{{t "ui.ea2b8a878841"}}
+        <select data-terminal-background>
+          <option value="">{{t "ui.21b111cbfe6e"}}</option>
+          <option value="black">{{t "ui.c6cfe6e4f129"}}</option>
+          <option value="dark-gray">{{t "ui.a70adec38980"}}</option>
+        </select>
+      </label>
+      <p class="muted compact">{{t "ui.b157e3537a38"}}</p>
+      <p class="system-action-dialog-error" data-terminal-settings-error role="status" hidden></p>
+      <div class="action-row">
+        <button class="secondary" type="button" data-terminal-settings-reset>{{t "ui.4542d49a5205"}}</button>
+        <button type="button" data-terminal-settings-apply>{{t "ui.31e392d1c037"}}</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="workspace-window minecraft-workspace-dialog" data-workspace-window="minecraft-servers" data-minecraft-servers-workspace-dialog aria-labelledby="minecraft-servers-workspace-title">
+    <div class="minecraft-workspace-shell">
+      <div class="minecraft-workspace-header" data-workspace-drag-handle>
+        <div>
+          <p class="eyebrow">JustVoxel</p>
+          <h2 id="minecraft-servers-workspace-title">{{t "ui.d9d8bd931a78"}}</h2>
+        </div>
+        <div class="minecraft-workspace-header-actions">
+          <button class="system-monitor-header-button workspace-header-refresh" type="button" data-minecraft-servers-refresh aria-label="{{t "ui.93c873763566"}}" title="{{t "ui.93c873763566"}}">{{t "ui.0e9161011702"}}</button>
+          <button class="system-monitor-header-button workspace-header-close" type="button" data-minecraft-servers-close aria-label="{{t "ui.36ea8fdb590d"}}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M5 5l14 14M19 5L5 19"/></svg></button>
+        </div>
+      </div>
+      <div data-minecraft-servers-actions></div>
+      <div class="minecraft-workspace-body minecraft-servers-body">
+        <p data-minecraft-servers-state role="status"></p>
+        <div data-minecraft-servers-content></div>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="workspace-window system-workspace-dialog" data-workspace-window="minecraft-network" data-minecraft-network-workspace-dialog aria-labelledby="minecraft-network-workspace-title">
+    <div class="system-workspace-shell">
+      <div class="system-workspace-header" data-workspace-drag-handle>
+        <div>
+          <p class="eyebrow">{{t "ui.f0c1da86478c"}}</p>
+          <h2 id="minecraft-network-workspace-title">{{t "ui.60d8c0cc037f"}}</h2>
+        </div>
+        <div class="system-workspace-header-actions">
+          <button class="system-monitor-header-button workspace-header-refresh" type="button" data-minecraft-network-refresh aria-label="{{t "ui.e93bbc30bd13"}}" title="{{t "ui.e93bbc30bd13"}}">{{t "ui.0e9161011702"}}</button>
+          <button class="system-monitor-header-button workspace-header-close" type="button" data-minecraft-network-close aria-label="{{t "ui.a4188d59a7b4"}}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M5 5l14 14M19 5L5 19"/></svg></button>
+        </div>
+      </div>
+      <div class="system-workspace-body">
+        <p class="system-workspace-state" data-minecraft-network-state role="status" aria-live="polite">{{t "ui.806380e70fd8"}}</p>
+        <div class="system-workspace-content" data-minecraft-network-content></div>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="workspace-window minecraft-workspace-dialog" data-workspace-window="minecraft" data-minecraft-workspace-dialog aria-labelledby="minecraft-workspace-title">
+    <div class="minecraft-workspace-shell">
+      <div class="minecraft-workspace-header" data-workspace-drag-handle>
+        <div>
+          <p class="eyebrow">JustVoxel</p>
+          <h2 id="minecraft-workspace-title">{{t "ui.d3e658e0b991"}}</h2>
+        </div>
+        <div class="minecraft-workspace-header-actions selected-server-header-actions">
+          <span data-server-selector-slot data-server-workspace="minecraft"></span>
+          <button class="system-monitor-header-button workspace-header-refresh" type="button" data-minecraft-refresh aria-label="{{t "ui.901efca2234c"}}" title="{{t "ui.901efca2234c"}}">{{t "ui.0e9161011702"}}</button>
+          <button class="system-monitor-header-button workspace-header-close" type="button" data-minecraft-close aria-label="{{t "ui.00017020a2b9"}}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M5 5l14 14M19 5L5 19"/></svg></button>
+        </div>
+      </div>
+      <nav class="minecraft-workspace-tabs" aria-label="{{t "ui.fdbb745d2556"}}">
+        <button type="button" data-minecraft-tab="overview" aria-selected="true">{{t "ui.d4b1ea5708dd"}}</button>
+        <button class="nav-operator-plus" type="button" data-minecraft-tab="logs" aria-selected="false">{{t "ui.fa64465e21e1"}}</button>
+        <button class="nav-admin-only" type="button" data-minecraft-tab="memory" aria-selected="false">{{t "ui.c3963aedaac6"}}</button>
+        <button class="nav-admin-only" type="button" data-minecraft-tab="gameplay" aria-selected="false">{{t "ui.31bcb8940fff"}}</button>
+        <button class="nav-operator-plus" type="button" data-minecraft-tab="players" aria-selected="false">{{t "ui.84e12ac655dd"}}</button>
+        <button class="nav-admin-only" type="button" data-minecraft-tab="crossplay" aria-selected="false">{{t "ui.3ea657a3bed3"}}</button>
+        <button class="nav-admin-only" type="button" data-minecraft-tab="rcon" aria-selected="false">RCON</button>
+      </nav>
+      <div class="minecraft-workspace-body">
+        <p class="minecraft-workspace-state" data-minecraft-state>{{t "ui.78c3166b8a7e"}}</p>
+        <div class="minecraft-workspace-content" data-minecraft-workspace-content></div>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="workspace-window plugins-workspace-dialog" data-workspace-window="plugins" data-plugins-workspace-dialog aria-labelledby="plugins-workspace-title">
+    <div class="plugins-workspace-shell">
+      <div class="plugins-workspace-header" data-workspace-drag-handle>
+        <div><p class="eyebrow">JustVoxel</p><h2 id="plugins-workspace-title">{{t "ui.70171ec7a356"}}</h2></div>
+        <div class="selected-server-header-actions"><span data-server-selector-slot data-server-workspace="plugins"></span><button class="system-monitor-header-button workspace-header-refresh" type="button" data-plugins-refresh aria-label="{{t "ui.6d6c51d9095c"}}">{{t "ui.0e9161011702"}}</button><button class="system-monitor-header-button workspace-header-close" type="button" data-plugins-close aria-label="{{t "ui.42032ab7d3b6"}}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M5 5l14 14M19 5L5 19"/></svg></button></div>
+      </div>
+      <nav class="plugins-workspace-tabs" aria-label="{{t "ui.e4fbc426fd8d"}}"><button type="button" data-plugins-tab="discover" aria-selected="true">{{t "ui.d4a33d5b78bc"}}</button><button type="button" data-plugins-tab="installed" aria-selected="false">{{t "ui.f8b32f4e92bd"}}</button><button type="button" data-plugins-tab="addons" aria-selected="false">{{t "ui.ccfc53fcbd49"}}</button><button type="button" data-plugins-tab="curseforge-api" aria-selected="false">{{t "ui.f6124327c249"}}</button></nav>
+      <div class="plugins-workspace-body">
+        <form class="plugins-search" data-plugins-search role="search">
+          <label class="plugins-search-field"><input aria-label="{{t "ui.2d3a28cab149"}}" name="q" type="search" maxlength="200" placeholder="{{t "ui.2d3a28cab149"}}" autocomplete="off"></label>
+          <div class="plugins-search-filters">
+            <label class="plugins-filter"><input type="checkbox" role="switch" name="modrinth" data-plugins-modrinth disabled><img class="plugins-provider-mark" src="/static/providers/modrinth.svg" alt="" aria-hidden="true">Modrinth</label>
+            <label class="plugins-filter"><input type="checkbox" role="switch" name="hangar" data-plugins-hangar disabled><img class="plugins-provider-mark" src="/static/providers/hangar.svg" alt="" aria-hidden="true">Hangar</label>
+            <div class="plugins-curseforge-source">
+              <label class="plugins-filter"><input type="checkbox" role="switch" name="curseforge" data-plugins-curseforge disabled><img class="plugins-provider-mark" src="/static/providers/curseforge.svg" alt="" aria-hidden="true">{{t "ui.123d19ada233"}}</label>
+              <aside class="plugins-curseforge-notice" data-plugins-curseforge-notice role="status" hidden><button type="button" data-curseforge-notice-dismiss aria-label="{{t "ui.a586c55a56ca"}}">×</button><p>{{t "ui.8d5f302c1e9e"}}</p><button type="button" data-curseforge-notice-configure>{{t "ui.4dde93a21768"}}</button></aside>
+            </div>
+            <label class="plugins-filter"><input role="switch" name="compatible_only" type="checkbox" checked>{{t "ui.3ca7301bac2d"}}</label>
+            <label class="plugins-filter"><input role="switch" name="release_only" type="checkbox" checked>{{t "ui.b262260fea22"}}</label>
+          </div>
+        </form>
+        <p class="plugins-curseforge-info" data-plugins-curseforge-info role="status" hidden></p>
+        <section data-plugins-curseforge-section hidden>
+          <h3>{{t "ui.f6124327c249"}}</h3>
+          <p>{{t "ui.df05486025f3"}}</p>
+          <p>{{t "ui.3ca591db3194"}}</p>
+          <p><a href="https://console.curseforge.com/" target="_blank" rel="noopener noreferrer">{{t "ui.ca9669745872"}}</a></p>
+          <form data-curseforge-key-form>
+            <label>{{t "ui.16f0ee47f993"}}
+              <input type="password" data-curseforge-key data-password-ui="off" autocomplete="off" spellcheck="false" autocapitalize="off" maxlength="1024" required>
+            </label>
+            <p data-curseforge-mask hidden>{{t "ui.7f1ed62acf34"}} <span>••••••••••••••••</span></p>
+            <p data-curseforge-key-feedback role="status"></p>
+            <div class="plugins-curseforge-key-actions">
+              <button type="submit" data-curseforge-save>{{t "ui.826590b6b7b2"}}</button>
+              <button type="button" data-curseforge-remove hidden>{{t "ui.ccec3fcd8c6d"}}</button>
+            </div>
+          </form>
+          <p data-curseforge-status role="status">{{t "ui.2b0ed71bd135"}}</p>
+        </section>
+        <p class="plugins-workspace-state" data-plugins-state role="status" aria-live="polite"></p>
+        <div class="plugins-results" data-plugins-results></div>
+        <div class="plugins-pagination" data-plugins-pagination>
+          <span class="plugins-pagination-support">{{t "ui.151edcaf77c3"}} <a href="https://github.com/home-server-project/justvoxel/issues/new?template=minecraft.yml" target="_blank" rel="noopener noreferrer">{{t "ui.635ae219ad13"}}</a></span>
+          <div class="plugins-pagination-controls"><span data-plugins-page>{{t "ui.d6e19ce6ca28"}}</span><button type="button" data-plugins-previous disabled>{{t "ui.a57b08a480b8"}}</button><button type="button" data-plugins-next>{{t "ui.1ff57a29d7c9"}}</button></div>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="workspace-window version-workspace-dialog" data-workspace-window="version" data-version-workspace-dialog aria-labelledby="version-workspace-title">
+    <div class="version-workspace-shell">
+      <div class="version-workspace-header" data-workspace-drag-handle><div><p class="eyebrow">JustVoxel</p><h2 id="version-workspace-title">{{t "ui.dc0e3d9898f6"}}</h2></div><div class="selected-server-header-actions"><span data-server-selector-slot data-server-workspace="version"></span><button class="system-monitor-header-button workspace-header-refresh" type="button" data-version-refresh aria-label="{{t "ui.9dac0b24375a"}}">{{t "ui.0e9161011702"}}</button><button class="system-monitor-header-button workspace-header-close" type="button" data-version-close aria-label="{{t "ui.a70f28efd8a6"}}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M5 5l14 14M19 5L5 19"/></svg></button></div></div>
+      <nav class="version-workspace-tabs" aria-label="{{t "ui.72ec7d213939"}}"><button type="button" data-version-tab="container" aria-selected="true">{{t "ui.0c7823e8c759"}}</button><button type="button" data-version-tab="minecraft" aria-selected="false">{{t "ui.dd167905de0d"}}</button></nav>
+      <div class="version-workspace-body"><p data-version-state></p><div data-version-content></div></div>
+    </div>
+  </dialog>
+
+  <section class="panel date-time-panel" data-system-settings-panel="date-time" data-date-time-panel aria-label="{{t "ui.a217562db538"}}" hidden>
+    <form class="system-action-dialog-content" data-date-time-form><p class="muted" data-date-time-state></p>
+      <label class="setup-timezone-field">{{t "ui.4ceca1d52ced"}}<input name="timezone" data-timezone-search autocomplete="off" aria-autocomplete="list" aria-controls="date-time-timezone-results" aria-expanded="false" required placeholder="{{t "ui.62d3dcdcb4ea"}}"><div class="setup-timezone-results" id="date-time-timezone-results" data-timezone-results role="listbox" hidden></div></label>
+      <div data-timezone-options hidden></div><p class="muted compact">{{t "ui.b8b88014c3c0"}} <strong data-date-time-canonical>—</strong></p>
+      <label class="date-time-automatic"><span>{{t "ui.ad6a3e0956fb"}}</span><input class="date-time-switch" type="checkbox" name="automatic" data-date-time-automatic></label>
+      <div class="date-time-manual" data-date-time-manual><label>{{t "ui.99c40ab40592"}}<input type="date" name="date" required></label><label>{{t "ui.33b93476cf59"}}<input type="time" name="time" required></label></div>
+      <div class="date-time-format-fields">
+        <label>{{t "ui.80d7dcf22747"}}<select name="time_format" data-topbar-time-format><option value="12">{{t "ui.c3a5f1416316"}}</option><option value="24">{{t "ui.0a56a0dde3d9"}}</option></select></label>
+        <label>{{t "ui.43123f5ccaa8"}}<select name="date_format" data-topbar-date-format><option value="dmy">{{t "ui.29be6dc2a1e0"}}</option><option value="mdy">{{t "ui.447003364861"}}</option></select></label>
+      </div>
+      <p class="muted compact" data-date-time-warning hidden>{{t "ui.776198570030"}}</p>
+      <p class="alert" data-date-time-error hidden></p><div class="action-row"><button class="secondary" type="button" data-date-time-cancel>{{t "ui.29582b700adf"}}</button><button type="submit">{{t "ui.85045ccc0567"}}</button></div>
+    </form>
+  </section>
+
+  <dialog class="workspace-window system-monitor-dialog" data-workspace-window="system-monitor" data-system-monitor-dialog aria-labelledby="system-monitor-title">
+    <div class="system-monitor-shell">
+      <div class="system-monitor-header" data-workspace-drag-handle>
+        <div>
+          <p class="eyebrow">JustVoxel</p>
+          <h2 id="system-monitor-title">{{t "ui.b288d256878b"}}</h2>
+        </div>
+        <div class="system-monitor-header-actions">
+          <button class="system-monitor-header-button system-monitor-settings-button system-monitor-admin-only" type="button" data-system-monitor-profile-toggle>{{t "ui.74a883a037bc"}}</button>
+          <button class="system-monitor-header-button workspace-header-close" type="button" data-system-monitor-close aria-label="{{t "ui.b2805fa1cfbe"}}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M5 5l14 14M19 5L5 19"/></svg></button>
+        </div>
+      </div>
+
+      <section class="system-monitor-profile" data-system-monitor-profile hidden>
+        <strong>{{t "ui.da3cd28fb08b"}}</strong>
+        <div class="system-monitor-profile-grid">
+          <label><input type="checkbox" data-monitor-profile="system"> {{t "ui.6725e7bbcd28"}}</label>
+          <label><input type="checkbox" data-monitor-profile="cpu"> CPU</label>
+          <label><input type="checkbox" data-monitor-profile="memory"> {{t "ui.c3963aedaac6"}}</label>
+          <label><input type="checkbox" data-monitor-profile="load"> {{t "ui.8a6bdb6b18da"}}</label>
+          <label><input type="checkbox" data-monitor-profile="filesystem"> {{t "ui.e231fa34bece"}}</label>
+          <label><input type="checkbox" data-monitor-profile="diskio"> {{t "ui.26b891891b3c"}}</label>
+          <label><input type="checkbox" data-monitor-profile="network"> {{t "ui.1744b96470b5"}}</label>
+          <label><input type="checkbox" data-monitor-profile="processes"> {{t "ui.4a81a7ba5358"}}</label>
+          <label><input type="checkbox" data-monitor-profile="containers"> {{t "ui.a22daa7f02a2"}}</label>
+          <label><input type="checkbox" data-monitor-profile="sensors"> {{t "ui.76140e34f635"}}</label>
+          <label><input type="checkbox" data-monitor-profile="alerts"> {{t "ui.f62e9267d196"}}</label>
+        </div>
+        <label class="system-monitor-process-count">{{t "ui.c176917bb20c"}}
+          <select data-monitor-process-count>
+            <option value="5">5</option>
+            <option value="10">10</option>
+            <option value="15">15</option>
+          </select>
+        </label>
+        <div class="system-monitor-profile-actions">
+          <button class="secondary" type="button" data-system-monitor-reset>{{t "ui.87b44e113a1a"}}</button>
+          <button type="button" data-system-monitor-save>{{t "ui.1509f561f241"}}</button>
+          <span class="system-monitor-profile-status" data-system-monitor-profile-status></span>
+        </div>
+      </section>
+
+      <div class="system-monitor-body">
+        <p class="system-monitor-state" data-system-monitor-state>{{t "ui.a6bc1a4d4491"}}</p>
+        <p class="system-monitor-error" data-system-monitor-error hidden></p>
+        <div class="system-monitor-grid" data-system-monitor-grid>
+          <section class="system-monitor-card" data-monitor-card="system"><span>{{t "ui.6725e7bbcd28"}}</span><strong data-monitor-system-host>—</strong><div class="system-monitor-lines" data-monitor-system-lines></div></section>
+          <section class="system-monitor-card" data-monitor-card="cpu"><span>CPU</span><strong data-monitor-cpu-total>—</strong><div class="system-monitor-lines" data-monitor-cpu-lines></div></section>
+          <section class="system-monitor-card" data-monitor-card="memory"><span>{{t "ui.c3963aedaac6"}}</span><strong data-monitor-memory-main>—</strong><div class="system-monitor-lines" data-monitor-memory-lines></div></section>
+          <section class="system-monitor-card" data-monitor-card="load"><span>{{t "ui.8a6bdb6b18da"}}</span><strong data-monitor-load-main>—</strong><div class="system-monitor-lines" data-monitor-load-lines></div></section>
+          <section class="system-monitor-card system-monitor-card-wide" data-monitor-card="filesystem"><span>{{t "ui.e231fa34bece"}}</span><div class="system-monitor-table" data-monitor-filesystem></div></section>
+          <section class="system-monitor-card system-monitor-card-wide" data-monitor-card="diskio"><span>{{t "ui.26b891891b3c"}}</span><div class="system-monitor-table" data-monitor-diskio></div></section>
+          <section class="system-monitor-card system-monitor-card-wide" data-monitor-card="network"><span>{{t "ui.1744b96470b5"}}</span><div class="system-monitor-table" data-monitor-network></div></section>
+          <section class="system-monitor-card system-monitor-card-wide" data-monitor-card="processes"><span>{{t "ui.4a81a7ba5358"}}</span><div class="system-monitor-table" data-monitor-processes></div></section>
+          <section class="system-monitor-card system-monitor-card-wide" data-monitor-card="containers"><span>{{t "ui.a22daa7f02a2"}}</span><div class="system-monitor-table" data-monitor-containers></div></section>
+          <section class="system-monitor-card system-monitor-card-wide" data-monitor-card="sensors"><span>{{t "ui.76140e34f635"}}</span><div class="system-monitor-table" data-monitor-sensors></div></section>
+          <section class="system-monitor-card system-monitor-card-wide" data-monitor-card="alerts"><span>{{t "ui.f62e9267d196"}}</span><div class="system-monitor-table" data-monitor-alerts></div></section>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="workspace-window storage-workspace-dialog" data-workspace-window="files" data-files-dialog aria-labelledby="files-workspace-title">
+    <div class="storage-workspace-shell">
+      <div class="storage-workspace-header" data-workspace-drag-handle>
+        <div><p class="eyebrow">JustVoxel</p><h2 id="files-workspace-title">{{t "ui.33b8a7901c02"}}</h2></div>
+        <div class="storage-workspace-header-actions">
+          <button class="system-monitor-header-button system-monitor-settings-button" type="button" data-files-settings-toggle aria-haspopup="dialog">{{t "ui.74a883a037bc"}}</button>
+          <button class="system-monitor-header-button workspace-header-refresh" type="button" data-files-refresh aria-label="{{t "ui.0689e898a83f"}}" title="{{t "ui.0689e898a83f"}}">{{t "ui.0e9161011702"}}</button>
+          <button class="system-monitor-header-button workspace-header-close" type="button" data-files-close aria-label="{{t "ui.acd8fe311193"}}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M5 5l14 14M19 5L5 19"/></svg></button>
+        </div>
+      </div>
+      <input type="hidden" data-files-csrf value="{{.CSRF}}">
+      <div class="files-workspace-body">
+        <p class="storage-workspace-state" data-files-state role="status"></p>
+        <button class="secondary" type="button" data-files-retry hidden>{{t "ui.942087cc2d41"}}</button>
+        <iframe class="files-workspace-frame" data-files-frame title="{{t "ui.33b8a7901c02"}}" hidden></iframe>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="system-action-dialog" data-files-settings-dialog aria-labelledby="files-settings-title">
+    <div class="system-action-dialog-content">
+      <p class="eyebrow">{{t "ui.abc7e9892806"}}</p>
+      <h2 id="files-settings-title">{{t "ui.255f9ae59fdb"}}</h2>
+      <p id="files-availability-title">{{t "ui.12f67f8539c4"}}</p>
+      <div class="files-settings-choices" role="radiogroup" aria-labelledby="files-availability-title">
+        <label><input type="radio" name="filebrowser-availability" value="on-demand" data-files-mode checked><span><strong>{{t "ui.7be15cd189a3"}}</strong><small class="muted">{{t "ui.bfb3d23f6f7d"}}</small></span></label>
+        <label><input type="radio" name="filebrowser-availability" value="always" data-files-mode><span><strong>{{t "ui.0fda37724cde"}}</strong><small class="muted">{{t "ui.ee72fa971caf"}}</small></span></label>
+      </div>
+      <p data-files-settings-status role="status"></p>
+      <div class="action-row"><button class="secondary" type="button" data-files-settings-dismiss>{{t "ui.7d9eb7acb13e"}}</button></div>
+    </div>
+  </dialog>
+
+  <dialog class="workspace-window storage-workspace-dialog" data-workspace-window="storage" data-storage-workspace-dialog aria-labelledby="storage-workspace-title">
+    <div class="storage-workspace-shell">
+      <div class="storage-workspace-header" data-workspace-drag-handle>
+        <div>
+          <p class="eyebrow">JustVoxel</p>
+          <h2 id="storage-workspace-title">{{t "ui.a69c4dece144"}}</h2>
+        </div>
+        <div class="storage-workspace-header-actions">
+          <button class="system-monitor-header-button workspace-header-refresh" type="button" data-storage-refresh aria-label="{{t "ui.c709240632ec"}}" title="{{t "ui.c709240632ec"}}">{{t "ui.0e9161011702"}}</button>
+          <button class="system-monitor-header-button workspace-header-close" type="button" data-storage-close aria-label="{{t "ui.faaf6c395534"}}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M5 5l14 14M19 5L5 19"/></svg></button>
+        </div>
+      </div>
+      <div class="storage-workspace-body">
+        <p class="storage-workspace-state" data-storage-state>{{t "ui.c3cf107b0c71"}}</p>
+        <div data-storage-workspace-content></div>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="workspace-window backups-workspace-dialog" data-workspace-window="backups" data-backups-workspace-dialog aria-labelledby="backups-workspace-title">
+    <div class="backups-workspace-shell">
+      <div class="backups-workspace-header" data-workspace-drag-handle>
+        <div>
+          <p class="eyebrow">JustVoxel</p>
+          <h2 id="backups-workspace-title">{{t "ui.3334fee2c77f"}}</h2>
+        </div>
+        <div class="backups-workspace-header-actions selected-server-header-actions">
+          <span data-server-selector-slot data-server-workspace="backups"></span>
+          <button class="system-monitor-header-button workspace-header-refresh" type="button" data-backups-refresh aria-label="{{t "ui.47e8b196a14c"}}" title="{{t "ui.47e8b196a14c"}}">{{t "ui.0e9161011702"}}</button>
+          <button class="system-monitor-header-button workspace-header-close" type="button" data-backups-close aria-label="{{t "ui.b7582786e34e"}}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M5 5l14 14M19 5L5 19"/></svg></button>
+        </div>
+      </div>
+      <div class="backups-workspace-body">
+        <p class="backups-workspace-state" data-backups-state>{{t "ui.2a83d3dac079"}}</p>
+        <div data-backups-workspace-content></div>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="workspace-window migration-workspace-dialog" data-workspace-window="migration" data-migration-workspace-dialog aria-labelledby="migration-workspace-title">
+    <div class="migration-workspace-shell">
+      <div class="migration-workspace-header" data-workspace-drag-handle>
+        <div>
+          <p class="eyebrow">JustVoxel</p>
+          <h2 id="migration-workspace-title">{{t "ui.0f8e0d8c6039"}}</h2>
+        </div>
+        <div class="migration-workspace-header-actions selected-server-header-actions">
+          <span data-server-selector-slot data-server-workspace="migration"></span>
+          <button class="system-monitor-header-button workspace-header-refresh" type="button" data-migration-refresh aria-label="{{t "ui.9935b243480b"}}" title="{{t "ui.9935b243480b"}}">{{t "ui.0e9161011702"}}</button>
+          <button class="system-monitor-header-button workspace-header-close" type="button" data-migration-close aria-label="{{t "ui.2563f5732246"}}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M5 5l14 14M19 5L5 19"/></svg></button>
+        </div>
+      </div>
+      <nav class="migration-workspace-tabs" aria-label="{{t "ui.a2b3e33f74ac"}}">
+        <button type="button" data-migration-tab="export" aria-selected="true">{{t "ui.3664895579f0"}}</button>
+        <button type="button" data-migration-tab="import" aria-selected="false">{{t "ui.2cff9baabf56"}}</button>
+        <button type="button" data-migration-tab="switch" aria-selected="false">{{t "ui.39921a740bf2"}}</button>
+      </nav>
+      <div class="migration-workspace-body">
+        <p class="migration-workspace-state" data-migration-state>{{t "ui.caadd8d491dd"}}</p>
+        <div data-migration-workspace-content></div>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="workspace-window system-update-dialog" data-workspace-window="system-update" data-system-update-dialog aria-labelledby="system-update-title">
+    <div class="system-update-dialog-shell">
+      <div class="system-update-dialog-header" data-workspace-drag-handle>
+        <div>
+          <p class="eyebrow">JustVoxel</p>
+          <h2 id="system-update-title">{{t "ui.ed64017ed1a3"}}</h2>
+        </div>
+        <div class="system-update-header-actions">
+          <button class="system-monitor-header-button workspace-header-refresh" type="button" data-system-update-refresh aria-label="{{t "ui.f26f3275e735"}}" title="{{t "ui.f26f3275e735"}}">{{t "ui.0e9161011702"}}</button>
+          <button class="system-monitor-header-button workspace-header-close" type="button" data-system-update-close aria-label="{{t "ui.27a25a3974db"}}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false"><path d="M5 5l14 14M19 5L5 19"/></svg></button>
+        </div>
+      </div>
+      <div class="system-update-dialog-body">
+        <div class="system-update-deployment-grid">
+          <section class="system-update-deployment">
+            <span>{{t "ui.f4ccae29e1bb"}}</span>
+            <strong data-system-update-running>{{t "ui.ba3bbbe10d8b"}}</strong>
+            <small data-system-update-running-image></small>
+          </section>
+          <section class="system-update-deployment">
+            <span>{{t "ui.daec459ab6cc"}}</span>
+            <strong data-system-update-staged>{{t "ui.ba3bbbe10d8b"}}</strong>
+            <small data-system-update-staged-image></small>
+          </section>
+          <section class="system-update-deployment">
+            <span>{{t "ui.2a4729fa7647"}}</span>
+            <strong data-system-update-available>{{t "ui.ec963ffc911b"}}</strong>
+            <small data-system-update-available-image></small>
+          </section>
+        </div>
+        <p class="system-update-state" data-system-update-state>{{t "ui.0014c7e7704f"}}</p>
+        <p class="system-update-error" data-system-update-error hidden></p>
+
+        <section class="system-update-reboot-panel" data-system-update-reboot hidden>
+          <div class="system-update-reboot-heading">
+            <strong data-system-update-reboot-title>{{t "ui.a0a382d6f42f"}}</strong>
+            <small>{{t "ui.fec4caabfa45"}}</small>
+          </div>
+
+          <label class="system-update-option system-ups-shutdown-switch">
+            <span><strong>{{t "ui.d9747aef629d"}}</strong><small>{{t "ui.8fd9d6bc0167"}}</small></span>
+            <input type="checkbox" role="switch" data-system-update-backup disabled>
+          </label>
+
+          <label class="system-update-option system-ups-shutdown-switch">
+            <span><strong>{{t "ui.3b042a93efac"}}</strong><small>{{t "ui.5140328b272b"}}</small></span>
+            <input type="checkbox" role="switch" data-system-update-quick>
+          </label>
+
+          <p class="system-update-warning" data-system-update-warning>{{t "ui.b2d3efa1f961"}}</p>
+          <div class="system-update-reboot-players" data-system-update-reboot-players hidden></div>
+          <div class="system-update-reboot-progress" data-system-update-reboot-progress hidden>
+            <strong data-system-update-countdown></strong>
+            <span data-system-update-reboot-message></span>
+          </div>
+
+        </section>
+
+        <div class="system-update-actions">
+          <button class="secondary system-update-force-button" type="button" data-system-update-force hidden>{{t "ui.72b480ec2e9f"}}</button>
+          <button class="secondary system-update-reboot-button" type="button" data-system-update-reboot-button>{{t "ui.71fb283ae756"}}</button>
+          <button type="button" data-system-update-button disabled>{{t "ui.2f0480a1438d"}}</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="system-action-dialog" data-display-dialog aria-labelledby="display-power-title">
+    <div class="system-action-dialog-content">
+      <h2 id="display-power-title">{{t "ui.b65dc0816911"}}</h2>
+      <div class="display-setting-row">
+        <label for="display-delay"><span aria-hidden="true">⏱</span> {{t "ui.595d446ff298"}}</label>
+        <div class="display-setting-controls">
+          <input id="display-delay" type="number" min="1" max="999" step="1" value="10" data-display-delay disabled>
+          <input type="checkbox" role="switch" aria-label="{{t "ui.ebfda061f669"}}" data-display-timer>
+        </div>
+      </div>
+      <div class="display-setting-row">
+        <label for="display-command"><span aria-hidden="true">▣</span> {{t "ui.b65dc0816911"}}</label>
+        <input id="display-command" type="checkbox" role="switch" title="{{t "ui.3c2db4cbdd58"}}" data-display-command>
+      </div>
+      <div class="display-setting-row" data-lid-option hidden>
+        <label for="display-lid-ignore"><span aria-hidden="true">💻</span> {{t "ui.edd6ba0aa979"}}</label>
+        <input id="display-lid-ignore" type="checkbox" role="switch" data-lid-ignore>
+      </div>
+      <p data-display-status role="status"></p>
+      <div class="action-row">
+        <button class="secondary" type="button" data-display-cancel>{{t "ui.19766ed6ccb2"}}</button>
+        <button type="button" data-display-apply>{{t "ui.31e392d1c037"}}</button>
+      </div>
+    </div>
+  </dialog>
+  <script src="/static/system-hardware.js" defer></script>
+
+  <dialog class="system-action-dialog" data-system-action-dialog>
+    <div class="system-action-dialog-content">
+      <p class="eyebrow">{{t "ui.a5e8bcc9f7e8"}}</p>
+      <h2 data-system-action-title>{{t "ui.6175d7ac230c"}}</h2>
+      <p data-system-action-message></p>
+      <div class="player-list" data-system-action-players hidden></div>
+      <div class="notice warning" data-system-action-update hidden>{{t "ui.3fdf97690b64"}}</div>
+      <p class="system-action-dialog-error" data-system-action-dialog-error hidden></p>
+      <div class="action-row">
+        <button class="secondary" type="button" data-system-action-cancel>{{t "ui.19766ed6ccb2"}}</button>
+        <button class="danger" type="button" data-system-action-confirm>{{t "ui.31fbef162594"}}</button>
+      </div>
+    </div>
+  </dialog>
+  <script src="/static/network-workspace.js" defer></script>
+{{end}}

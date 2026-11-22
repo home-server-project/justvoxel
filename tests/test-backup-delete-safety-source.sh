@@ -1,0 +1,78 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+common="${repo_root}/mjust/libexec/admin-backup-delete-common.sh"
+apply="${repo_root}/mjust/libexec/admin-backup-delete-apply.sh"
+entry="${repo_root}/mjust/libexec/admin-backup-delete-json"
+
+for script in "${common}" "${apply}" "${entry}"; do
+    bash -n "${script}"
+done
+
+grep -Fq 'jv_instance_backup_valid_archive_id "${ref#*/}"' "${common}" || {
+    echo 'ERROR: backup deletion lost strict JustVoxel archive naming.' >&2
+    exit 1
+}
+source "${repo_root}/mjust/libexec/backup-common.sh"
+for id in minecraft-2026-09-15-043000.tar.gz minecraft-paper-2026-10-09-1506.tar.gz minecraft-kids-purpur-2026-10-09-1506-2.tar.gz; do
+    jv_backup_valid_archive_id "${id}" || { echo "ERROR: valid archive name rejected: ${id}" >&2; exit 1; }
+done
+for id in ../minecraft-paper-2026-10-09-1506.tar.gz minecraft-paper-2026-10-09-1506.tar.gz.partial minecraft-paper-2026-10-09-1506.tar.gz/../other minecraft-bad.tar.gz; do
+    if jv_backup_valid_archive_id "${id}"; then echo "ERROR: unsafe archive name accepted: ${id}" >&2; exit 1; fi
+done
+for id in 'jv-abc123/Paper1-backup-paper-2026-10-28-0831.tar.gz' 'jv-abc123/Family Server-backup-paper-2026-10-28-0831-2.tar.gz' 'jv-abc123/家族-backup-paper-2026-10-28-0831.tar.gz' jv-abc123/instance-backup-paper-2026-10-28-0831.tar.gz jv-abc123/minecraft-paper-2026-10-09-1506.tar.gz jv-abc123/minecraft-2026-09-15-043000.tar.gz; do
+    jv_backup_valid_archive_ref "${id}" || { echo "ERROR: valid instance backup ref rejected: ${id}" >&2; exit 1; }
+done
+for id in '/jv-abc123/Paper1-backup-paper-2026-10-28-0831.tar.gz' 'jv-abc123/../Paper1-backup-paper-2026-10-28-0831.tar.gz' 'other/Paper1-backup-paper-2026-10-28-0831.tar.gz' 'jv-abc123/Paper1-backup-paper-2026-10-28-0831.tar.gz/extra' 'jv-abc123/bad!name-backup-paper-2026-10-28-0831.tar.gz' jv-abc123/../minecraft-paper-2026-10-09-1506.tar.gz other/minecraft-paper-2026-10-09-1506.tar.gz jv-abc123/nested/minecraft-paper-2026-10-09-1506.tar.gz; do
+    if jv_backup_valid_archive_ref "${id}"; then echo "ERROR: unsafe backup ref accepted: ${id}" >&2; exit 1; fi
+done
+# Test deletion's narrower contract, leaving shared inventory/restore naming alone.
+source <(sed -n '/^backup_delete_validate_id() {/,/^}/p' "${common}")
+for id in 'jv-abc123/Paper1-backup-paper-2026-10-28-0831.tar.gz' 'jv-abc123/Family Server-backup-spigot-2026-10-28-0831-2.tar.gz' 'jv-abc123/家族-backup-forge-2026-10-28-0831.tar.gz' 'jv-abc123/Vanilla-backup-vanilla-2026-10-28-0831.tar.gz'; do
+    backup_delete_validate_id "${id}" || { echo "ERROR: modern delete ref rejected: ${id}" >&2; exit 1; }
+done
+for id in minecraft-paper-2026-10-09-1506.tar.gz jv-abc123/minecraft-paper-2026-10-09-1506.tar.gz jv-abc123/instance-backup-paper-2026-10-28-0831.tar.gz '/jv-abc123/Paper1-backup-paper-2026-10-28-0831.tar.gz' 'jv-abc123/../Paper1-backup-paper-2026-10-28-0831.tar.gz' 'other/Paper1-backup-paper-2026-10-28-0831.tar.gz' 'jv-abc123/Paper1-backup-paper-2026-10-28-0831.tar.gz/extra' 'jv-abc123/bad!name-backup-paper-2026-10-28-0831.tar.gz'; do
+    if backup_delete_validate_id "${id}"; then echo "ERROR: unsafe/legacy delete ref accepted: ${id}" >&2; exit 1; fi
+done
+if grep -Eq 'require_config|jv_backup_load_config|minecraft-backup.env' "${common}" "${apply}"; then
+    echo 'ERROR: deletion depends on global backup configuration.' >&2
+    exit 1
+fi
+grep -Fq 'jv_instance_backup_load_target "${instance}"' "${common}"
+[[ "$(MINECRAFT_SERVER_TYPE=purpur jv_archive_server_label)" == minecraft-purpur ]] || { echo 'ERROR: configured Minecraft type missing from archive label' >&2; exit 1; }
+
+grep -Fq '! -L ${archive}' "${common}" || {
+    echo 'ERROR: backup deletion lost archive symlink rejection.' >&2
+    exit 1
+}
+grep -Fq '${real} == "${root}/${id}"' "${common}" || {
+    echo 'ERROR: backup deletion lost backup-directory path confinement.' >&2
+    exit 1
+}
+grep -Fq 'confirmation="DELETE ' "${common}" || {
+    echo 'ERROR: backup deletion lost exact typed confirmation.' >&2
+    exit 1
+}
+grep -Fq 'BACKUP_DELETE_PLAN_JSON' "${common}" || {
+    echo 'ERROR: backup deletion lost reviewed plan generation.' >&2
+    exit 1
+}
+grep -Fq 'flock -n 9' "${apply}" || {
+    echo 'ERROR: backup deletion lost the JustVoxel maintenance lock.' >&2
+    exit 1
+}
+grep -Fq 'submitted_fingerprint' "${apply}" || {
+    echo 'ERROR: backup deletion lost reviewed fingerprint verification.' >&2
+    exit 1
+}
+grep -Fq 'changed after Review. Nothing was deleted' "${apply}" || {
+    echo 'ERROR: backup deletion lost bounded changed-selection failure.' >&2
+    exit 1
+}
+grep -Fq 'rm -f -- "${metadata}"' "${apply}" || {
+    echo 'ERROR: backup deletion no longer removes matching metadata sidecars.' >&2
+    exit 1
+}
+
+echo 'New Backups delete safety source checks passed.'

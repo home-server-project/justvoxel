@@ -1,0 +1,34 @@
+[Unit]
+Description=JustVoxel Management API
+Documentation=https://github.com/home-server-project/justvoxel
+After=local-fs.target
+
+[Service]
+Type=simple
+User=root
+Group=justvoxel-web
+UMask=0007
+RuntimeDirectory=justvoxel
+RuntimeDirectoryMode=0750
+ExecStart=/usr/libexec/justvoxel/management-agent serve /run/justvoxel/management.sock
+Restart=on-failure
+RestartSec=2s
+# Fixed Podman-backed helpers require the SELinux transition into container_runtime_t.
+NoNewPrivileges=no
+ProtectSystem=true
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+# bootc uses openat2() while resolving /run,/etc,/usr/lib ostree auth files.
+# RestrictSUIDSGID=yes blocks openat2 with ENOSYS under systemd seccomp, so keep
+# this one restriction disabled while retaining the other Management Agent hardening.
+RestrictSUIDSGID=no
+LockPersonality=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

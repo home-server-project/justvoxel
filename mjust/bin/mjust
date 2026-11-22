@@ -1,0 +1,45 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+if [[ ${1:-} == --list ]]; then
+    /usr/bin/just --justfile /usr/share/justvoxel/mjust/justfile --list
+    cat <<'TEXT'
+
+Additional command forms:
+  mjust configure [--instance jv-...] [backup]
+  mjust configure-max-players [--instance jv-...]
+  mjust status --details
+  mjust web status
+  mjust web enable
+  mjust web disable
+  mjust password-reset
+  mjust minecraft-network status
+TEXT
+    exit 0
+fi
+
+if [[ ${1:-} == status ]]; then
+    shift
+    case "${1:-}" in
+        '') exec sudo /usr/libexec/justvoxel/mjust/status ;;
+        --details)
+            shift
+            (( $# == 0 )) || { echo 'Usage: mjust status [--details]' >&2; exit 2; }
+            exec sudo /usr/libexec/justvoxel/mjust/status --details
+            ;;
+        *)
+            echo 'Usage: mjust status [--details]' >&2
+            exit 2
+            ;;
+    esac
+fi
+
+case "${1:-}" in
+    minecraft-network|configure|configure-max-players)
+        command="$1"
+        shift
+        exec sudo "/usr/libexec/justvoxel/mjust/${command}" "$@"
+        ;;
+esac
+
+exec /usr/bin/just --justfile /usr/share/justvoxel/mjust/justfile "$@"

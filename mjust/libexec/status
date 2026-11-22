@@ -1,0 +1,245 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/status-lib.sh
+
+readonly api_client=/usr/libexec/justvoxel/mjust/api-client
+
+if (( EUID != 0 )); then
+    echo 'ERROR: this operation must run as root.' >&2
+    exit 1
+fi
+
+details=no
+if [[ ${1:-} == --details ]]; then
+    details=yes
+    shift
+fi
+if (( $# > 0 )); then
+    echo 'Usage: mjust status [--details]' >&2
+    exit 2
+fi
+
+if [[ -t 1 && ${TERM:-dumb} != dumb ]]; then
+    c_label=$'\033[38;5;45m'
+    c_value=$'\033[97m'
+    c_good=$'\033[38;5;82m'
+    c_warn=$'\033[38;5;220m'
+    c_bad=$'\033[38;5;196m'
+    c_dim=$'\033[38;5;245m'
+    c_bold=$'\033[1m'
+    c_reset=$'\033[0m'
+else
+    c_label='' c_value='' c_good='' c_warn='' c_bad='' c_dim='' c_bold='' c_reset=''
+fi
+
+section() {
+    printf '\n%s%s%s\n' "${c_bold}" "$1" "${c_reset}"
+}
+
+row() {
+    local label="$1" value="$2" color="${3:-${c_value}}"
+    printf '  %s%-22s%s %s%s%s\n' "${c_label}" "${label}:" "${c_reset}" "${color}" "${value}" "${c_reset}"
+}
+
+format_kib() {
+    jv_status_format_kib "${1:-0}"
+}
+
+path=/v1/status
+[[ ${details} == yes ]] && path='/v1/status?details=1'
+
+set +e
+response="$("${api_client}" GET "${path}")"
+rc=$?
+set -e
+if (( rc != 0 )); then
+    if jq -e 'type == "object" and (.error | type == "string")' <<<"${response}" >/dev/null 2>&1; then
+        printf 'ERROR: %s\n' "$(jq -r '.error' <<<"${response}")" >&2
+    else
+        echo 'ERROR: status information is unavailable from the JustVoxel Management API.' >&2
+    fi
+    exit 1
+fi
+
+if ! jq -e 'type == "object" and (.system | type == "object") and
+    (.extended | type == "object")' <<<"${response}" >/dev/null 2>&1; then
+    echo 'ERROR: JustVoxel Management API returned invalid host status information.' >&2
+    exit 1
+fi
+
+# Failed independent reads stay unavailable; never consult another instance.
+read_instance_data() {
+    local result
+    result="$("${api_client}" GET "$1" 2>/dev/null)" || return 1
+    jq -e 'type == "object" and (has("error") | not)' <<<"${result}" >/dev/null 2>&1 || return 1
+    printf '%s' "${result}"
+}
+
+valid_inventory() {
+    jq -e '(.instances | type == "array") and
+        all(.instances[]; (.id | type == "string" and test("^jv-[a-z0-9]{6,12}$"))) and
+        ([.instances[].id] | length == (unique | length))' >/dev/null 2>&1
+}
+
+# Correlate registry and runtime by immutable ID, never by display name.
+overall="$(jq -r '.system.health // "Unknown"' <<<"${response}")"
+registry='{"instances":[]}'
+runtimes='{"instances":[]}'
+inventory_note=''
+if ! registry="$(read_instance_data /v1/minecraft/instances)" || ! valid_inventory <<<"${registry}"; then
+    registry='{"instances":[]}'
+    inventory_note='Registered server inventory unavailable.'
+    overall='Attention needed'
+fi
+if ! runtimes="$(read_instance_data /v1/minecraft/instances/runtime)" || ! valid_inventory <<<"${runtimes}"; then
+    runtimes='{"instances":[]}'
+    inventory_note+=" Runtime inventory unavailable."
+    overall='Attention needed'
+fi
+unregistered="$(jq -cn --argjson registry "${registry}" --argjson runtimes "${runtimes}" '
+    [$runtimes.instances[] | .id as $id | select(any($registry.instances[]; .id == $id) | not) | .id]')"
+if [[ $(jq 'length' <<<"${unregistered}") != 0 ]]; then
+    inventory_note+=' Runtime identities do not match the registered inventory.'
+    overall='Attention needed'
+fi
+
+servers='[]'
+while IFS= read -r instance; do
+    instance_id="$(jq -r '.id' <<<"${instance}")"
+    runtime="$(jq -c --arg id "${instance_id}" '[.instances[] | select(.id == $id)] | .[0] // {}' <<<"${runtimes}")"
+    state="$(jq -r '.state // "unavailable"' <<<"${runtime}")"
+    configuration='{}' players='{}' backup_settings='{}' backup_status='{}'
+    base="/v1/minecraft/instances/${instance_id}"
+    if ! configuration="$(read_instance_data "${base}/configuration")" ||
+        ! jq -e --arg id "${instance_id}" '.id == $id and (.runtime | type == "object") and
+            (.runtime.software | type == "string") and (.runtime.java_port | type == "number")' <<<"${configuration}" >/dev/null; then
+        configuration='{}'
+        state=unavailable
+    fi
+    if ! players="$(read_instance_data "${base}/players")" ||
+        ! jq -e --arg id "${instance_id}" '.id == $id and (.state | type == "string")' <<<"${players}" >/dev/null; then
+        players='{}'
+    fi
+    if ! backup_settings="$(read_instance_data "${base}/backups/settings")" ||
+        ! jq -e '(.enabled | type == "boolean") and (.time | type == "string")' <<<"${backup_settings}" >/dev/null; then
+        backup_settings='{}'
+    fi
+    if ! backup_status="$(read_instance_data "${base}/backups/status")" ||
+        ! jq -e '(.state | type == "string")' <<<"${backup_status}" >/dev/null; then
+        backup_status='{}'
+    fi
+    case "${state}" in
+        running|stopped|configured|starting|stopping) ;;
+        failed|unavailable|invalid_configuration|recovery_required|*) overall='Attention needed' ;;
+    esac
+    if jq -e '.state == "failed" or .state == "interrupted" or .restart_required == true' <<<"${backup_status}" >/dev/null; then
+        overall='Attention needed'
+    fi
+    servers="$(jq -c --argjson instance "${instance}" --arg state "${state}" \
+        --argjson configuration "${configuration}" --argjson players "${players}" \
+        --argjson settings "${backup_settings}" --argjson backup "${backup_status}" \
+        '. + [{id:$instance.id,name:$instance.display_name,state:$state,
+            configuration:$configuration.runtime,players:$players,settings:$settings,backup:$backup}]' <<<"${servers}")"
+done < <(jq -c '.instances[]' <<<"${registry}")
+
+case "${overall}" in
+    Healthy) overall_color="${c_good}" ;;
+    'Attention needed') overall_color="${c_bad}" ;;
+    *) overall_color="${c_warn}" ;;
+esac
+
+hostname_value="$(jq -r '.extended.system.hostname // "Unknown"' <<<"${response}")"
+variant="$(jq -r '.system.variant // "Unknown"' <<<"${response}")"
+host_uptime="$(jv_status_format_duration "$(jq -r '.extended.system.uptime_seconds // 0' <<<"${response}")")"
+physical_ram="$(format_kib "$(jq -r '.extended.system.physical_ram_kib // 0' <<<"${response}")")"
+failed_count="$(jq -r '.extended.system.failed_count // 0' <<<"${response}")"
+if (( failed_count == 0 )); then services_summary='Healthy - no failed services'; else services_summary="${failed_count} failed service(s)"; fi
+host_ip="$(jq -r '.system.ipv4 // "Unknown"' <<<"${response}")"
+
+printf '%s%s================ JUSTVOXEL STATUS ================%s\n' "${c_bold}" "${c_label}" "${c_reset}"
+row 'Overall' "${overall}" "${overall_color}"
+
+section 'System'
+row 'Hostname' "${hostname_value}"
+row 'Variant' "${variant}"
+row 'Uptime' "${host_uptime}"
+row 'Physical RAM' "${physical_ram}"
+if (( failed_count == 0 )); then row 'System services' "${services_summary}" "${c_good}"; else row 'System services' "${services_summary}" "${c_bad}"; fi
+
+section 'Minecraft servers'
+if [[ -n ${inventory_note} ]]; then
+    row 'Inventory' "${inventory_note}" "${c_bad}"
+    while IFS= read -r unmatched_id; do
+        row 'Unregistered runtime' "${unmatched_id}" "${c_bad}"
+    done < <(jq -r '.[]' <<<"${unregistered}")
+fi
+if [[ $(jq 'length' <<<"${servers}") == 0 && -z ${inventory_note} ]]; then
+    echo '  No Minecraft servers configured.'
+fi
+
+# Render only public fields, including in details mode.
+server_value() {
+    jq -r "$1" <<<"${server}"
+}
+while IFS= read -r server; do
+    printf '\n  %s (%s)\n' "$(server_value '.name // "Unnamed server"')" "$(server_value '.id')"
+    row 'State' "$(server_value '.state')"
+    row 'Players' "$(server_value 'if (.players.state == "running" and (.players.online | type == "number") and (.players.maximum | type == "number")) then "\(.players.online) / \(.players.maximum)" elif .players.state == "offline" or .players.state == "stopped" then "Not running" else "Unavailable" end')"
+    row 'Software/version' "$(server_value 'if .configuration == null then "Unavailable" else (.configuration.software // "Unavailable") + " / " + (.configuration.version // "Unavailable") end')"
+    row 'Version policy' "$(server_value '.configuration.version_policy // "Unavailable"')"
+    java_port="$(server_value '.configuration.java_port // "Unavailable"')"
+    java_address=Unavailable
+    if [[ ${java_port} =~ ^[0-9]+$ && ${java_port} != 0 ]]; then java_address="${host_ip}:${java_port}"; fi
+    row 'Java address' "${java_address}"
+    bedrock_enabled="$(server_value '.configuration.bedrock_enabled | if . == null then "Unavailable" else tostring end')"
+    bedrock_address=Unavailable
+    if [[ ${bedrock_enabled} == false ]]; then
+        bedrock_address=Disabled
+    elif [[ ${bedrock_enabled} == true ]]; then
+        bedrock_port="$(server_value '.configuration.bedrock_port // "Unavailable"')"
+        if [[ ${bedrock_port} =~ ^[0-9]+$ && ${bedrock_port} != 0 ]]; then bedrock_address="${host_ip}:${bedrock_port}"; fi
+    fi
+    row 'Bedrock enabled' "${bedrock_enabled}"
+    row 'Bedrock address' "${bedrock_address}"
+    row 'Java heap' "$(server_value '.configuration.java_memory // "Unavailable"')"
+    row 'Container memory' "$(server_value '.configuration.container_memory // "Unavailable"')"
+    row 'Start on boot' "$(server_value '.configuration.start_on_boot | if . == null then "Unavailable" elif . then "Enabled" else "Disabled" end')"
+    row 'Image tag' "$(server_value '.configuration.image_tag // "Unavailable"')"
+    row 'Automatic backups' "$(server_value '.settings.enabled | if . == null then "Unavailable" elif . then "Enabled" else "Disabled" end')"
+    row 'Backup daily time' "$(server_value '.settings.time // "Unavailable"')"
+    row 'Last backup success' "$(server_value '.backup.last_success // (if .backup.state then "None recorded" else "Unavailable" end)')"
+    row 'Backup state' "$(server_value '.backup.state // "Unavailable"')"
+done < <(jq -c '.[]' <<<"${servers}")
+
+section 'Network'
+row 'Interface' "$(jq -r '.extended.network.interface // "Unknown"' <<<"${response}")"
+row 'IPv4' "${host_ip}"
+row 'Tailscale' "$(jq -r '.system.tailscale // "Unavailable"' <<<"${response}")"
+row 'NetBird' "$(jq -r '.system.netbird // "Unavailable"' <<<"${response}")"
+row 'Gateway' "$(jq -r '.extended.network.gateway // "Unknown"' <<<"${response}")"
+row 'DNS' "$(jq -r '.extended.network.dns // "Unknown"' <<<"${response}")"
+
+section 'Storage'
+system_source="$(jq -r '.extended.storage.system.source // "Unknown"' <<<"${response}")"
+system_mount="$(jq -r '.extended.storage.system.mount // "Unknown"' <<<"${response}")"
+system_available="$(format_kib "$(jq -r '.extended.storage.system.available_kib // 0' <<<"${response}")")"
+system_used="$(jq -r '.extended.storage.system.used // "Unknown"' <<<"${response}")"
+row 'System/container' "${system_source} at ${system_mount}"
+row 'Available' "${system_available} (${system_used} used)"
+
+if [[ ${details} == yes ]]; then
+    section 'Advanced details'
+    for detail in failed_services storage network; do
+        printf '\n%s\n' "${detail}"
+        jq -r --arg detail "${detail}" '.extended.details[$detail] // "Unavailable" | .[:32768]' <<<"${response}"
+    done
+    section 'Server details'
+    while IFS= read -r server; do
+        printf '\n  %s (%s)\n' "$(server_value '.name // "Unnamed server"')" "$(server_value '.id')"
+        row 'Timezone' "$(server_value '.configuration.timezone // "Unavailable"')"
+        row 'Backup retention' "$(server_value '.settings.retention // "Unavailable"')"
+        row 'Last backup attempt' "$(server_value '.backup.last_attempt // "Unavailable"')"
+        row 'Backup stage' "$(server_value '.backup.stage // "Unavailable"')"
+        row 'Restart required' "$(server_value '.backup.restart_required | if . == null then "Unavailable" else tostring end')"
+    done < <(jq -c '.[]' <<<"${servers}")
+fi

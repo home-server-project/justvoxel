@@ -1,0 +1,1879 @@
+package main
+
+import (
+	"bytes"
+	"crypto/rand"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+)
+
+const (
+	operationSchemaVersion         = "v1"
+	operationStateDir              = "/var/lib/justvoxel/management"
+	operationTypeSetup             = "setup"
+	operationTypeRestore           = "restore"
+	operationTypeDataMigration     = "data_migration"
+	operationTypeMinecraftReset    = "minecraft_reset"
+	operationTypeMinecraftUpdate   = "minecraft_update"
+	operationTypeMinecraftSwitch   = "minecraft_switch"
+	operationTypePluginInstall     = "plugin_install"
+	operationTypePluginEnable      = "plugin_enable"
+	operationTypePluginDisable     = "plugin_disable"
+	operationTypePluginRemove      = "plugin_remove"
+	operationTypeFactoryReset      = "factory_reset"
+	operationTypeMigrationExport   = "migration_export"
+	operationTypeMigrationImport   = "migration_import"
+	operationTypeMigrationRecovery = "migration_recovery"
+)
+
+type operationState string
+
+const (
+	operationQueued                         operationState = "queued"
+	operationValidating                     operationState = "validating"
+	operationRunning                        operationState = "running"
+	operationVerifying                      operationState = "verifying"
+	operationSucceeded                      operationState = "succeeded"
+	operationFailed                         operationState = "failed"
+	operationRollingBack                    operationState = "rolling_back"
+	operationRolledBack                     operationState = "rolled_back"
+	operationNeedsAttention                 operationState = "needs_attention"
+	operationResolved                       operationState = "resolved"
+	legacyFactoryResetAwaitingPasswordState operationState = "awaiting_password"
+)
+
+var (
+	operationIDPattern          = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+	operationFingerprintPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+	operationStagePattern       = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+
+	errOperationNotFound           = errors.New("operation not found")
+	errSetupOperationBusy          = errors.New("another setup operation is already active")
+	errSetupLockBusy               = errors.New("setup operation lock is already held")
+	errRestoreOperationBusy        = errors.New("another restore operation is already active")
+	errRestoreLockBusy             = errors.New("restore operation lock is already held")
+	errDataMigrationOperationBusy  = errors.New("another data migration operation is already active")
+	errDataMigrationLockBusy       = errors.New("data migration operation lock is already held")
+	errMinecraftResetOperationBusy = errors.New("another operation prevents Minecraft reset")
+	errFactoryResetOperationBusy   = errors.New("another operation prevents full factory reset")
+	errMigrationOperationBusy      = errors.New("another server migration operation is already active")
+	errMigrationLockBusy           = errors.New("server migration operation lock is already held")
+)
+
+type operationRollback struct {
+	State  string `json:"state"`
+	Result string `json:"result,omitempty"`
+}
+
+type operationJournal struct {
+	InstanceSetup   bool              `json:"instance_setup,omitempty"`
+	InstanceID      string            `json:"instance_id,omitempty"`
+	SchemaVersion   string            `json:"schema_version"`
+	OperationID     string            `json:"operation_id"`
+	OperationType   string            `json:"operation_type"`
+	PlanFingerprint string            `json:"plan_fingerprint"`
+	State           operationState    `json:"state"`
+	Stage           string            `json:"stage"`
+	Status          string            `json:"status"`
+	StartedAt       string            `json:"started_at"`
+	UpdatedAt       string            `json:"updated_at"`
+	FinishedAt      string            `json:"finished_at,omitempty"`
+	InterruptedAt   string            `json:"interrupted_at,omitempty"`
+	Rollback        operationRollback `json:"rollback"`
+}
+
+type operationStore struct {
+	mu                      sync.Mutex
+	traceMu                 sync.Mutex
+	pluginRecoveryMu        sync.Mutex
+	diagnosticMu            sync.Mutex
+	baseDir                 string
+	operationsDir           string
+	setupLogsDir            string
+	logsDir                 string
+	diagnosticHostname      string
+	lockFile                *os.File
+	restoreLockFile         *os.File
+	dataMigrationLockFile   *os.File
+	migrationLockFile       *os.File
+	setupLockHeld           bool
+	restoreLockHeld         bool
+	dataMigrationLockHeld   bool
+	migrationLockHeld       bool
+	currentSetupID          string
+	currentRestoreID        string
+	currentDataMigrationID  string
+	currentMinecraftResetID string
+	currentFactoryResetID   string
+	currentMigrationID      string
+	operations              map[string]operationJournal
+	now                     func() time.Time
+}
+
+func openOperationStore(baseDir string) (*operationStore, error) {
+	if baseDir == "" {
+		return nil, errors.New("operation state directory is required")
+	}
+	if err := ensurePrivateDirectory(baseDir); err != nil {
+		return nil, err
+	}
+	logsDir := filepath.Join(baseDir, "logs")
+	if err := ensurePrivateDirectory(logsDir); err != nil {
+		return nil, err
+	}
+	operationsDir := filepath.Join(logsDir, "operations")
+	setupLogsDir := filepath.Join(logsDir, "setup-logs")
+	legacyOperationLogsDir := filepath.Join(logsDir, "operation-logs")
+	legacyOperationsDir := filepath.Join(baseDir, "operations")
+	legacySetupLogsDir := filepath.Join(baseDir, "setup-logs")
+	if err := validateLegacyManagementLogDirectoryMigration(legacyOperationsDir, operationsDir); err != nil {
+		return nil, fmt.Errorf("preflight operation journal migration: %w", err)
+	}
+	if err := validateLegacyManagementLogDirectoryMigration(legacySetupLogsDir, setupLogsDir); err != nil {
+		return nil, fmt.Errorf("preflight setup log migration: %w", err)
+	}
+	if err := validateOperationDiagnosticMigration(legacyOperationLogsDir, logsDir); err != nil {
+		return nil, fmt.Errorf("preflight operation log migration: %w", err)
+	}
+	if err := migrateLegacyManagementLogDirectory(legacyOperationsDir, operationsDir); err != nil {
+		return nil, fmt.Errorf("migrate operation journals: %w", err)
+	}
+	if err := migrateLegacyManagementLogDirectory(legacySetupLogsDir, setupLogsDir); err != nil {
+		return nil, fmt.Errorf("migrate setup logs: %w", err)
+	}
+	if err := ensurePrivateDirectory(operationsDir); err != nil {
+		return nil, err
+	}
+	if err := ensurePrivateDirectory(setupLogsDir); err != nil {
+		return nil, err
+	}
+	if err := migrateOperationDiagnostics(legacyOperationLogsDir, logsDir); err != nil {
+		return nil, err
+	}
+	for _, category := range []string{"migration-logs", "restore-logs", "plugins-logs", "reset-logs", "network-logs", "update-logs", "support"} {
+		if err := ensurePrivateDirectory(filepath.Join(logsDir, category)); err != nil {
+			return nil, err
+		}
+	}
+	hostname, _ := os.Hostname()
+	lockPath := filepath.Join(baseDir, "setup.lock")
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open setup operation lock: %w", err)
+	}
+	if err := lockFile.Chmod(0o600); err != nil {
+		lockFile.Close()
+		return nil, fmt.Errorf("protect setup operation lock: %w", err)
+	}
+	restoreLockPath := filepath.Join(baseDir, "restore.lock")
+	restoreLockFile, err := os.OpenFile(restoreLockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		lockFile.Close()
+		return nil, fmt.Errorf("open restore operation lock: %w", err)
+	}
+	if err := restoreLockFile.Chmod(0o600); err != nil {
+		restoreLockFile.Close()
+		lockFile.Close()
+		return nil, fmt.Errorf("protect restore operation lock: %w", err)
+	}
+	dataMigrationLockPath := filepath.Join(baseDir, "data-migration.lock")
+	dataMigrationLockFile, err := os.OpenFile(dataMigrationLockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		restoreLockFile.Close()
+		lockFile.Close()
+		return nil, fmt.Errorf("open data migration operation lock: %w", err)
+	}
+	if err := dataMigrationLockFile.Chmod(0o600); err != nil {
+		dataMigrationLockFile.Close()
+		restoreLockFile.Close()
+		lockFile.Close()
+		return nil, fmt.Errorf("protect data migration operation lock: %w", err)
+	}
+	migrationLockPath := filepath.Join(baseDir, "server-migration.lock")
+	migrationLockFile, err := os.OpenFile(migrationLockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		dataMigrationLockFile.Close()
+		restoreLockFile.Close()
+		lockFile.Close()
+		return nil, fmt.Errorf("open server migration operation lock: %w", err)
+	}
+	if err := migrationLockFile.Chmod(0o600); err != nil {
+		migrationLockFile.Close()
+		dataMigrationLockFile.Close()
+		restoreLockFile.Close()
+		lockFile.Close()
+		return nil, fmt.Errorf("protect server migration operation lock: %w", err)
+	}
+
+	s := &operationStore{
+		baseDir:               baseDir,
+		operationsDir:         operationsDir,
+		setupLogsDir:          setupLogsDir,
+		logsDir:               logsDir,
+		diagnosticHostname:    strings.TrimSpace(hostname),
+		lockFile:              lockFile,
+		restoreLockFile:       restoreLockFile,
+		dataMigrationLockFile: dataMigrationLockFile,
+		migrationLockFile:     migrationLockFile,
+		operations:            make(map[string]operationJournal),
+		now:                   time.Now,
+	}
+	if err := s.loadAndRecover(); err != nil {
+		migrationLockFile.Close()
+		dataMigrationLockFile.Close()
+		restoreLockFile.Close()
+		lockFile.Close()
+		return nil, err
+	}
+	return s, nil
+}
+
+func validateLegacyManagementLogDirectoryMigration(legacyPath, currentPath string) error {
+	legacyInfo, legacyErr := os.Lstat(legacyPath)
+	if legacyErr != nil && !errors.Is(legacyErr, os.ErrNotExist) {
+		return legacyErr
+	}
+	currentInfo, currentErr := os.Lstat(currentPath)
+	if currentErr != nil && !errors.Is(currentErr, os.ErrNotExist) {
+		return currentErr
+	}
+
+	if legacyErr == nil && (legacyInfo.Mode()&os.ModeSymlink != 0 || !legacyInfo.IsDir()) {
+		return fmt.Errorf("legacy path %s is not a directory", legacyPath)
+	}
+	if currentErr == nil && (currentInfo.Mode()&os.ModeSymlink != 0 || !currentInfo.IsDir()) {
+		return fmt.Errorf("current path %s is not a directory", currentPath)
+	}
+	if legacyErr != nil || currentErr != nil {
+		return nil
+	}
+
+	legacyEntries, err := os.ReadDir(legacyPath)
+	if err != nil {
+		return fmt.Errorf("read legacy directory %s: %w", legacyPath, err)
+	}
+	currentEntries, err := os.ReadDir(currentPath)
+	if err != nil {
+		return fmt.Errorf("read current directory %s: %w", currentPath, err)
+	}
+	if len(legacyEntries) > 0 && len(currentEntries) > 0 {
+		return fmt.Errorf("both legacy path %s and current path %s contain data", legacyPath, currentPath)
+	}
+	return nil
+}
+
+func migrateLegacyManagementLogDirectory(legacyPath, currentPath string) error {
+	legacyInfo, legacyErr := os.Lstat(legacyPath)
+	if legacyErr != nil && !errors.Is(legacyErr, os.ErrNotExist) {
+		return legacyErr
+	}
+	currentInfo, currentErr := os.Lstat(currentPath)
+	if currentErr != nil && !errors.Is(currentErr, os.ErrNotExist) {
+		return currentErr
+	}
+
+	legacyExists := legacyErr == nil
+	currentExists := currentErr == nil
+
+	if legacyExists && (legacyInfo.Mode()&os.ModeSymlink != 0 || !legacyInfo.IsDir()) {
+		return fmt.Errorf("legacy path %s is not a directory", legacyPath)
+	}
+	if currentExists && (currentInfo.Mode()&os.ModeSymlink != 0 || !currentInfo.IsDir()) {
+		return fmt.Errorf("current path %s is not a directory", currentPath)
+	}
+	if !legacyExists {
+		return nil
+	}
+	if !currentExists {
+		if err := os.Rename(legacyPath, currentPath); err != nil {
+			return fmt.Errorf("move %s to %s: %w", legacyPath, currentPath, err)
+		}
+		return nil
+	}
+
+	legacyEntries, err := os.ReadDir(legacyPath)
+	if err != nil {
+		return fmt.Errorf("read legacy directory %s: %w", legacyPath, err)
+	}
+	currentEntries, err := os.ReadDir(currentPath)
+	if err != nil {
+		return fmt.Errorf("read current directory %s: %w", currentPath, err)
+	}
+	if len(legacyEntries) > 0 && len(currentEntries) > 0 {
+		return fmt.Errorf("both legacy path %s and current path %s contain data", legacyPath, currentPath)
+	}
+	if len(legacyEntries) == 0 {
+		if err := os.Remove(legacyPath); err != nil {
+			return fmt.Errorf("remove empty legacy directory %s: %w", legacyPath, err)
+		}
+		return nil
+	}
+
+	if err := os.Remove(currentPath); err != nil {
+		return fmt.Errorf("remove empty current directory %s: %w", currentPath, err)
+	}
+	if err := os.Rename(legacyPath, currentPath); err != nil {
+		return fmt.Errorf("move %s to %s: %w", legacyPath, currentPath, err)
+	}
+	return nil
+}
+
+func ensurePrivateDirectory(path string) error {
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return fmt.Errorf("create operation state directory %s: %w", path, err)
+	}
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("unsafe operation state directory %s", path)
+	}
+	if err := os.Chmod(path, 0o700); err != nil {
+		return fmt.Errorf("protect operation state directory %s: %w", path, err)
+	}
+	return nil
+}
+
+func (s *operationStore) close() error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.setupLockHeld && s.lockFile != nil {
+		_ = syscall.Flock(int(s.lockFile.Fd()), syscall.LOCK_UN)
+		s.setupLockHeld = false
+	}
+	if s.restoreLockHeld && s.restoreLockFile != nil {
+		_ = syscall.Flock(int(s.restoreLockFile.Fd()), syscall.LOCK_UN)
+		s.restoreLockHeld = false
+	}
+	if s.dataMigrationLockHeld && s.dataMigrationLockFile != nil {
+		_ = syscall.Flock(int(s.dataMigrationLockFile.Fd()), syscall.LOCK_UN)
+		s.dataMigrationLockHeld = false
+	}
+	if s.migrationLockHeld && s.migrationLockFile != nil {
+		_ = syscall.Flock(int(s.migrationLockFile.Fd()), syscall.LOCK_UN)
+		s.migrationLockHeld = false
+	}
+
+	var firstErr error
+	if s.migrationLockFile != nil {
+		if err := s.migrationLockFile.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		s.migrationLockFile = nil
+	}
+	if s.dataMigrationLockFile != nil {
+		if err := s.dataMigrationLockFile.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		s.dataMigrationLockFile = nil
+	}
+	if s.restoreLockFile != nil {
+		if err := s.restoreLockFile.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		s.restoreLockFile = nil
+	}
+	if s.lockFile != nil {
+		if err := s.lockFile.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		s.lockFile = nil
+	}
+	return firstErr
+}
+
+func (s *operationStore) loadAndRecover() error {
+	entries, err := os.ReadDir(s.operationsDir)
+	if err != nil {
+		return fmt.Errorf("read operation journals: %w", err)
+	}
+	activeSetup := ""
+	activeRestore := ""
+	activeDataMigration := ""
+	activeMinecraftReset := ""
+	activeFactoryReset := ""
+	activeMigration := ""
+
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return fmt.Errorf("inspect operation journal %s: %w", entry.Name(), err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return fmt.Errorf("operation journal %s is not a regular file", entry.Name())
+		}
+		path := filepath.Join(s.operationsDir, entry.Name())
+		journal, err := readOperationJournal(path)
+		if err != nil {
+			return fmt.Errorf("read operation journal %s: %w", entry.Name(), err)
+		}
+		if entry.Name() != journal.OperationID+".json" {
+			return fmt.Errorf("operation journal filename does not match operation id")
+		}
+		if err := os.Chmod(path, 0o600); err != nil {
+			return fmt.Errorf("protect operation journal %s: %w", entry.Name(), err)
+		}
+		if legacyFactoryResetPasswordJournal(journal) {
+			now := s.now().UTC().Format(time.RFC3339Nano)
+			journal.State = operationNeedsAttention
+			journal.Stage = "interrupted"
+			journal.Status = "Full factory reset used the retired password-finalization flow. Retry Full Factory Reset to finish safely."
+			journal.UpdatedAt = now
+			journal.InterruptedAt = now
+			if err := s.persist(journal); err != nil {
+				return fmt.Errorf("migrate legacy factory reset password journal %s: %w", entry.Name(), err)
+			}
+		}
+		if journal.OperationType == operationTypePluginInstall && journal.State == operationQueued {
+			// The worker cannot leave queued until durable preflight exists.
+			// No runtime mutation is possible at this boundary; no lock or
+			// administrator acknowledgement is needed to cancel it.
+			now := s.now().UTC().Format(time.RFC3339Nano)
+			journal.State = operationRolledBack
+			journal.Stage = "complete"
+			journal.Status = "Plugin installation was interrupted before validation began. Minecraft and plugin files were not changed."
+			journal.UpdatedAt = now
+			journal.InterruptedAt = now
+			journal.FinishedAt = now
+			journal.Rollback.State = "succeeded"
+			journal.Rollback.Result = "rolled_back"
+			if err := s.persist(journal); err != nil {
+				return fmt.Errorf("cancel queued plugin installation %s: %w", entry.Name(), err)
+			}
+			// Cleanup follows the durable terminal result. Its failure never
+			// reinstates maintenance exclusion or needs_attention.
+			if err := cleanupQueuedPluginStaging(s.baseDir, journal.OperationID); err != nil {
+				journal.Status += " Warning: private transaction staging cleanup failed; verified final state was kept."
+				// The terminal result is already durable. A best-effort warning
+				// must not make startup fail and block new maintenance.
+				_ = s.persist(journal)
+			}
+		}
+		if operationIsCurrent(journal.State) {
+			switch journal.OperationType {
+			case operationTypeSetup:
+				if activeSetup != "" {
+					return errors.New("multiple active setup operation journals require attention")
+				}
+				activeSetup = journal.OperationID
+			case operationTypeRestore:
+				if activeRestore != "" {
+					return errors.New("multiple active restore operation journals require attention")
+				}
+				activeRestore = journal.OperationID
+			case operationTypeDataMigration:
+				if activeDataMigration != "" {
+					return errors.New("multiple active data migration operation journals require attention")
+				}
+				activeDataMigration = journal.OperationID
+			case operationTypeMinecraftReset, operationTypeMinecraftSwitch, operationTypeMinecraftUpdate, operationTypeMinecraftContainerUpdate, operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove, operationTypePluginAddonInstall:
+				if activeMinecraftReset != "" {
+					return errors.New("multiple active Minecraft reset operation journals require attention")
+				}
+				activeMinecraftReset = journal.OperationID
+			case operationTypeFactoryReset:
+				if activeFactoryReset != "" {
+					return errors.New("multiple active factory reset operation journals require attention")
+				}
+				activeFactoryReset = journal.OperationID
+			case operationTypeMigrationExport, operationTypeMigrationImport, operationTypeMigrationRecovery:
+				if activeMigration != "" {
+					return errors.New("multiple active server migration operation journals require attention")
+				}
+				activeMigration = journal.OperationID
+			}
+		}
+		s.operations[journal.OperationID] = journal
+	}
+
+	if activeMinecraftReset != "" {
+		if activeFactoryReset != "" || activeSetup != "" || activeRestore != "" || activeDataMigration != "" || activeMigration != "" {
+			return errors.New("active Minecraft reset conflicts with another persistent operation")
+		}
+		if err := s.acquireMinecraftResetLocks(); err != nil {
+			return err
+		}
+		journal := s.operations[activeMinecraftReset]
+		if operationInterruptedByRestart(journal.State) {
+			now := s.now().UTC().Format(time.RFC3339Nano)
+			wasQueued := journal.State == operationQueued
+			journal.State = operationNeedsAttention
+			journal.Stage = "interrupted"
+			if wasQueued && isPluginOperationType(journal.OperationType) && journal.OperationType != operationTypePluginInstall {
+				journal.Stage = "interrupted_queued"
+			}
+			journal.Status = "Minecraft reset was interrupted before completion. Review appliance state before continuing."
+			if journal.OperationType == operationTypeMinecraftReset && journal.InstanceID == "" {
+				journal.Status = "Minecraft removal stopped before completion. Continue removal to finish removing the remaining servers."
+			}
+			if journal.OperationType == operationTypeMinecraftSwitch || journal.OperationType == operationTypeMinecraftUpdate || journal.OperationType == operationTypeMinecraftContainerUpdate {
+				journal.Status = "Server update was interrupted. Review Minecraft state before continuing."
+			}
+			if journal.OperationType == operationTypePluginInstall {
+				journal.Status = "Plugin installation was interrupted. Automatic recovery could not be proven; administrator attention is required. Staged transaction evidence has been preserved."
+			} else if isPluginOperationType(journal.OperationType) {
+				journal.Status = "Plugin management was interrupted. Re-check recovery uses preserved durable transaction evidence; maintenance remains reserved. See System -> Logs -> Plugins."
+			}
+			journal.UpdatedAt = now
+			journal.InterruptedAt = now
+			if err := s.persist(journal); err != nil {
+				_ = s.releaseMinecraftResetLocks()
+				return err
+			}
+			s.operations[journal.OperationID] = journal
+			if isPluginOperationType(journal.OperationType) {
+				s.appendOperationJournalDiagnosticBestEffort(journal)
+			}
+		}
+		s.currentMinecraftResetID = activeMinecraftReset
+	}
+
+	if activeFactoryReset != "" {
+		if activeMinecraftReset != "" || activeSetup != "" || activeRestore != "" || activeDataMigration != "" || activeMigration != "" {
+			return errors.New("active factory reset conflicts with another persistent operation")
+		}
+		if err := s.acquireMinecraftResetLocks(); err != nil {
+			return err
+		}
+		journal := s.operations[activeFactoryReset]
+		if operationInterruptedByRestart(journal.State) {
+			now := s.now().UTC().Format(time.RFC3339Nano)
+			journal.State = operationNeedsAttention
+			journal.Stage = "interrupted"
+			journal.Status = "Full factory reset was interrupted before completion. Review appliance state before continuing."
+			journal.UpdatedAt = now
+			journal.InterruptedAt = now
+			if err := s.persist(journal); err != nil {
+				_ = s.releaseMinecraftResetLocks()
+				return err
+			}
+			s.operations[journal.OperationID] = journal
+		}
+		s.currentFactoryResetID = activeFactoryReset
+	}
+
+	if activeSetup != "" {
+		if err := s.acquireSetupLock(); err != nil {
+			return err
+		}
+		journal := s.operations[activeSetup]
+		if operationInterruptedByRestart(journal.State) {
+			now := s.now().UTC().Format(time.RFC3339Nano)
+			interruptedStorageRecovery := journal.State == operationRollingBack && (journal.Stage == "storage_recovery" || journal.Stage == "storage_rollback")
+			interruptedRuntimeRecovery := journal.Stage == "runtime_recovery" || journal.Stage == "runtime_rollback" || journal.Stage == "runtime_config" || journal.Stage == "minecraft_verify" || journal.Stage == "final_validation"
+			journal.State = operationNeedsAttention
+			if interruptedStorageRecovery {
+				journal.Stage = "storage_rollback"
+				journal.Status = "Storage recovery was interrupted; retry recovery from the preserved transaction."
+				journal.Rollback.State = "failed"
+				journal.Rollback.Result = "needs_attention"
+			} else if interruptedRuntimeRecovery {
+				journal.Stage = "runtime_rollback"
+				journal.Status = "Minecraft setup or recovery was interrupted; retry recovery from the preserved transaction."
+				journal.Rollback.State = "failed"
+				journal.Rollback.Result = "needs_attention"
+			} else {
+				journal.Stage = "interrupted"
+				journal.Status = "Setup was interrupted before completion."
+			}
+			journal.UpdatedAt = now
+			journal.InterruptedAt = now
+			if err := s.persist(journal); err != nil {
+				_ = s.releaseSetupLock()
+				return err
+			}
+			s.operations[journal.OperationID] = journal
+		}
+		s.currentSetupID = activeSetup
+	}
+
+	if activeRestore != "" {
+		if err := s.acquireRestoreLock(); err != nil {
+			if activeSetup != "" {
+				_ = s.releaseSetupLock()
+			}
+			return err
+		}
+		journal := s.operations[activeRestore]
+		if operationInterruptedByRestart(journal.State) {
+			now := s.now().UTC().Format(time.RFC3339Nano)
+			journal.State = operationNeedsAttention
+			journal.Stage = "interrupted"
+			journal.Status = "Restore was interrupted before completion. Review preserved restore recovery state before continuing."
+			journal.UpdatedAt = now
+			journal.InterruptedAt = now
+			if err := s.persist(journal); err != nil {
+				_ = s.releaseRestoreLock()
+				if activeSetup != "" {
+					_ = s.releaseSetupLock()
+				}
+				return err
+			}
+			s.operations[journal.OperationID] = journal
+		}
+		s.currentRestoreID = activeRestore
+	}
+
+	if activeDataMigration != "" {
+		if err := s.acquireDataMigrationLock(); err != nil {
+			if activeRestore != "" {
+				_ = s.releaseRestoreLock()
+			}
+			if activeSetup != "" {
+				_ = s.releaseSetupLock()
+			}
+			return err
+		}
+		journal := s.operations[activeDataMigration]
+		if operationInterruptedByRestart(journal.State) {
+			now := s.now().UTC().Format(time.RFC3339Nano)
+			journal.State = operationNeedsAttention
+			journal.Stage = "interrupted"
+			journal.Status = "Minecraft data migration was interrupted before completion. Review preserved migration state before continuing."
+			journal.UpdatedAt = now
+			journal.InterruptedAt = now
+			if err := s.persist(journal); err != nil {
+				_ = s.releaseDataMigrationLock()
+				return err
+			}
+			s.operations[journal.OperationID] = journal
+		}
+		s.currentDataMigrationID = activeDataMigration
+	}
+
+	if activeMigration != "" {
+		if err := s.acquireMigrationLock(); err != nil {
+			if activeDataMigration != "" {
+				_ = s.releaseDataMigrationLock()
+			}
+			if activeRestore != "" {
+				_ = s.releaseRestoreLock()
+			}
+			if activeSetup != "" {
+				_ = s.releaseSetupLock()
+			}
+			return err
+		}
+		journal := s.operations[activeMigration]
+		if operationInterruptedByRestart(journal.State) {
+			now := s.now().UTC().Format(time.RFC3339Nano)
+			journal.State = operationNeedsAttention
+			journal.Stage = "interrupted"
+			if journal.OperationType == operationTypeMigrationImport {
+				journal.Status = "Server migration import was interrupted before completion. Review preserved import recovery state and the Minecraft runtime before continuing."
+			} else if journal.OperationType == operationTypeMigrationRecovery {
+				journal.Status = "Server migration recovery finalization was interrupted. Review retained recovery state before continuing."
+			} else {
+				journal.Status = "Server migration export was interrupted before completion. Review the destination and Minecraft runtime before continuing."
+			}
+			journal.UpdatedAt = now
+			journal.InterruptedAt = now
+			if err := s.persist(journal); err != nil {
+				_ = s.releaseMigrationLock()
+				return err
+			}
+			s.operations[journal.OperationID] = journal
+		}
+		if journal.InstanceID == "" && journal.State != operationNeedsAttention {
+			journal.State = operationNeedsAttention
+			journal.Stage = "instance_identity_missing"
+			journal.Status = "Migration recovery evidence has no trustworthy instance ID; no destination was selected."
+			if err := s.persist(journal); err != nil {
+				return err
+			}
+			s.operations[journal.OperationID] = journal
+		}
+		s.currentMigrationID = activeMigration
+	}
+	return nil
+}
+
+func readOperationJournal(path string) (operationJournal, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return operationJournal{}, err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var journal operationJournal
+	if err := decoder.Decode(&journal); err != nil {
+		return operationJournal{}, err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return operationJournal{}, errors.New("unexpected trailing JSON value")
+		}
+		return operationJournal{}, err
+	}
+	if err := validateOperationJournalForLoad(journal); err != nil {
+		return operationJournal{}, err
+	}
+	return journal, nil
+}
+
+func validateOperationJournalForLoad(journal operationJournal) error {
+	if legacyFactoryResetPasswordJournal(journal) {
+		journal.State = operationNeedsAttention
+	}
+	return validateOperationJournal(journal)
+}
+
+func legacyFactoryResetPasswordJournal(journal operationJournal) bool {
+	return journal.OperationType == operationTypeFactoryReset &&
+		journal.State == legacyFactoryResetAwaitingPasswordState &&
+		(journal.Stage == "awaiting_password" || journal.Stage == "changing_password")
+}
+
+func validateOperationJournal(journal operationJournal) error {
+	if journal.InstanceSetup && journal.OperationType != operationTypeSetup {
+		return errors.New("invalid instance Setup operation")
+	}
+
+	if journal.InstanceID != "" && !instanceIDPattern.MatchString(journal.InstanceID) {
+		return errInstanceID
+	}
+	if journal.SchemaVersion != operationSchemaVersion {
+		return errors.New("unsupported operation journal schema")
+	}
+	if !validOperationID(journal.OperationID) {
+		return errors.New("invalid operation id")
+	}
+	if journal.OperationType != operationTypeSetup && journal.OperationType != operationTypeRestore && journal.OperationType != operationTypeDataMigration && journal.OperationType != operationTypeMinecraftReset && journal.OperationType != operationTypeMinecraftUpdate && journal.OperationType != operationTypeMinecraftSwitch && journal.OperationType != operationTypeMinecraftContainerUpdate && !isPluginOperationType(journal.OperationType) && journal.OperationType != operationTypeFactoryReset && journal.OperationType != operationTypeMigrationExport && journal.OperationType != operationTypeMigrationImport && journal.OperationType != operationTypeMigrationRecovery {
+		return errors.New("unsupported operation type")
+	}
+	if !operationFingerprintPattern.MatchString(journal.PlanFingerprint) {
+		return errors.New("invalid operation plan fingerprint")
+	}
+	if !validOperationState(journal.State) {
+		return errors.New("invalid operation state")
+	}
+	if journal.Stage != "" && !operationStagePattern.MatchString(journal.Stage) {
+		return errors.New("invalid operation stage")
+	}
+	if !validOperationStatus(journal.Status) {
+		return errors.New("invalid operation status")
+	}
+	if journal.StartedAt == "" || journal.UpdatedAt == "" {
+		return errors.New("operation timestamps are incomplete")
+	}
+	if journal.Rollback.State == "" {
+		return errors.New("rollback state is required")
+	}
+	return nil
+}
+
+func validOperationID(value string) bool {
+	return operationIDPattern.MatchString(value)
+}
+
+func validOperationState(state operationState) bool {
+	switch state {
+	case operationQueued, operationValidating, operationRunning, operationVerifying, operationSucceeded,
+		operationFailed, operationRollingBack, operationRolledBack, operationNeedsAttention, operationResolved:
+		return true
+	default:
+		return false
+	}
+}
+
+func validOperationStatus(value string) bool {
+	return value != "" && len(value) <= 512 && !strings.ContainsAny(value, "\r\n")
+}
+
+func operationIsCurrent(state operationState) bool {
+	return state != operationSucceeded && state != operationRolledBack && state != operationResolved
+}
+
+func operationInterruptedByRestart(state operationState) bool {
+	switch state {
+	case operationQueued, operationValidating, operationRunning, operationVerifying, operationFailed, operationRollingBack:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *operationStore) beginSetup(planFingerprint string, instanceSetup ...bool) (operationJournal, bool, error) {
+	if !operationFingerprintPattern.MatchString(planFingerprint) {
+		return operationJournal{}, false, errors.New("invalid setup plan fingerprint")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.currentMinecraftResetID != "" {
+		return operationJournal{}, false, errMinecraftResetOperationBusy
+	}
+	if s.currentFactoryResetID != "" {
+		return operationJournal{}, false, errFactoryResetOperationBusy
+	}
+	if s.currentSetupID != "" {
+		current := s.operations[s.currentSetupID]
+		if current.PlanFingerprint == planFingerprint {
+			return current, false, nil
+		}
+		return operationJournal{}, false, errSetupOperationBusy
+	}
+	if err := s.acquireSetupLock(); err != nil {
+		return operationJournal{}, false, err
+	}
+
+	id, err := newOperationID()
+	if err != nil {
+		_ = s.releaseSetupLock()
+		return operationJournal{}, false, err
+	}
+	now := s.now().UTC().Format(time.RFC3339Nano)
+	journal := operationJournal{
+		SchemaVersion:   operationSchemaVersion,
+		OperationID:     id,
+		OperationType:   operationTypeSetup,
+		PlanFingerprint: planFingerprint,
+		State:           operationQueued,
+		Stage:           "queued",
+		Status:          "Setup operation queued.",
+		StartedAt:       now,
+		UpdatedAt:       now,
+		Rollback:        operationRollback{State: "not_started"},
+	}
+	if len(instanceSetup) > 0 {
+		journal.InstanceSetup = instanceSetup[0]
+	}
+	if err := s.persist(journal); err != nil {
+		_ = s.releaseSetupLock()
+		return operationJournal{}, false, err
+	}
+	s.operations[id] = journal
+	s.currentSetupID = id
+	return journal, true, nil
+}
+
+func (s *operationStore) beginRestore(planFingerprint string) (operationJournal, bool, error) {
+	if !operationFingerprintPattern.MatchString(planFingerprint) {
+		return operationJournal{}, false, errors.New("invalid restore plan fingerprint")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.currentMinecraftResetID != "" {
+		return operationJournal{}, false, errMinecraftResetOperationBusy
+	}
+	if s.currentFactoryResetID != "" {
+		return operationJournal{}, false, errFactoryResetOperationBusy
+	}
+	if s.currentRestoreID != "" {
+		current := s.operations[s.currentRestoreID]
+		if current.PlanFingerprint == planFingerprint {
+			return current, false, nil
+		}
+		return operationJournal{}, false, errRestoreOperationBusy
+	}
+	if err := s.acquireRestoreLock(); err != nil {
+		return operationJournal{}, false, err
+	}
+
+	id, err := newOperationID()
+	if err != nil {
+		_ = s.releaseRestoreLock()
+		return operationJournal{}, false, err
+	}
+	now := s.now().UTC().Format(time.RFC3339Nano)
+	journal := operationJournal{
+		SchemaVersion:   operationSchemaVersion,
+		OperationID:     id,
+		OperationType:   operationTypeRestore,
+		PlanFingerprint: planFingerprint,
+		State:           operationQueued,
+		Stage:           "queued",
+		Status:          "Restore operation queued.",
+		StartedAt:       now,
+		UpdatedAt:       now,
+		Rollback:        operationRollback{State: "not_started"},
+	}
+	if err := s.persist(journal); err != nil {
+		_ = s.releaseRestoreLock()
+		return operationJournal{}, false, err
+	}
+	s.operations[id] = journal
+	s.currentRestoreID = id
+	return journal, true, nil
+}
+
+func (s *operationStore) beginDataMigration(planFingerprint string) (operationJournal, bool, error) {
+	if !operationFingerprintPattern.MatchString(planFingerprint) {
+		return operationJournal{}, false, errors.New("invalid data migration plan fingerprint")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.currentMinecraftResetID != "" {
+		return operationJournal{}, false, errMinecraftResetOperationBusy
+	}
+	if s.currentFactoryResetID != "" {
+		return operationJournal{}, false, errFactoryResetOperationBusy
+	}
+	if s.currentDataMigrationID != "" {
+		current := s.operations[s.currentDataMigrationID]
+		if current.PlanFingerprint == planFingerprint {
+			return current, false, nil
+		}
+		return operationJournal{}, false, errDataMigrationOperationBusy
+	}
+	if s.currentSetupID != "" || s.currentRestoreID != "" || s.currentMigrationID != "" {
+		return operationJournal{}, false, errDataMigrationOperationBusy
+	}
+	if err := s.acquireDataMigrationLock(); err != nil {
+		return operationJournal{}, false, err
+	}
+
+	id, err := newOperationID()
+	if err != nil {
+		_ = s.releaseDataMigrationLock()
+		return operationJournal{}, false, err
+	}
+	now := s.now().UTC().Format(time.RFC3339Nano)
+	journal := operationJournal{
+		SchemaVersion:   operationSchemaVersion,
+		OperationID:     id,
+		OperationType:   operationTypeDataMigration,
+		PlanFingerprint: planFingerprint,
+		State:           operationQueued,
+		Stage:           "queued",
+		Status:          "Minecraft data migration operation queued.",
+		StartedAt:       now,
+		UpdatedAt:       now,
+		Rollback:        operationRollback{State: "not_started"},
+	}
+	if err := s.persist(journal); err != nil {
+		_ = s.releaseDataMigrationLock()
+		return operationJournal{}, false, err
+	}
+	s.operations[id] = journal
+	s.currentDataMigrationID = id
+	return journal, true, nil
+}
+
+func (s *operationStore) beginMigrationExport(instanceID, planFingerprint string) (operationJournal, bool, error) {
+	if !instanceIDPattern.MatchString(instanceID) || !operationFingerprintPattern.MatchString(planFingerprint) {
+		return operationJournal{}, false, errors.New("invalid server migration export plan fingerprint")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.currentMinecraftResetID != "" {
+		return operationJournal{}, false, errMinecraftResetOperationBusy
+	}
+	if s.currentFactoryResetID != "" {
+		return operationJournal{}, false, errFactoryResetOperationBusy
+	}
+	if s.currentMigrationID != "" {
+		current := s.operations[s.currentMigrationID]
+		if current.InstanceID == instanceID && current.PlanFingerprint == planFingerprint && current.OperationType == operationTypeMigrationExport {
+			return current, false, nil
+		}
+		return operationJournal{}, false, errMigrationOperationBusy
+	}
+	if err := s.acquireMigrationLock(); err != nil {
+		return operationJournal{}, false, err
+	}
+
+	id, err := newOperationID()
+	if err != nil {
+		_ = s.releaseMigrationLock()
+		return operationJournal{}, false, err
+	}
+	now := s.now().UTC().Format(time.RFC3339Nano)
+	journal := operationJournal{
+		SchemaVersion:   operationSchemaVersion,
+		InstanceID:      instanceID,
+		OperationID:     id,
+		OperationType:   operationTypeMigrationExport,
+		PlanFingerprint: planFingerprint,
+		State:           operationQueued,
+		Stage:           "queued",
+		Status:          "Server migration export operation queued.",
+		StartedAt:       now,
+		UpdatedAt:       now,
+		Rollback:        operationRollback{State: "not_started"},
+	}
+	if err := s.persist(journal); err != nil {
+		_ = s.releaseMigrationLock()
+		return operationJournal{}, false, err
+	}
+	s.operations[id] = journal
+	s.currentMigrationID = id
+	return journal, true, nil
+}
+
+func (s *operationStore) beginMigrationImport(instanceID, planFingerprint string) (operationJournal, bool, error) {
+	if !instanceIDPattern.MatchString(instanceID) || !operationFingerprintPattern.MatchString(planFingerprint) {
+		return operationJournal{}, false, errors.New("invalid server migration import plan fingerprint")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.currentMinecraftResetID != "" {
+		return operationJournal{}, false, errMinecraftResetOperationBusy
+	}
+	if s.currentFactoryResetID != "" {
+		return operationJournal{}, false, errFactoryResetOperationBusy
+	}
+	if s.currentMigrationID != "" {
+		current := s.operations[s.currentMigrationID]
+		if current.InstanceID == instanceID && current.PlanFingerprint == planFingerprint && current.OperationType == operationTypeMigrationImport {
+			return current, false, nil
+		}
+		return operationJournal{}, false, errMigrationOperationBusy
+	}
+	if err := s.acquireMigrationLock(); err != nil {
+		return operationJournal{}, false, err
+	}
+
+	id, err := newOperationID()
+	if err != nil {
+		_ = s.releaseMigrationLock()
+		return operationJournal{}, false, err
+	}
+	now := s.now().UTC().Format(time.RFC3339Nano)
+	journal := operationJournal{
+		SchemaVersion:   operationSchemaVersion,
+		InstanceID:      instanceID,
+		OperationID:     id,
+		OperationType:   operationTypeMigrationImport,
+		PlanFingerprint: planFingerprint,
+		State:           operationQueued,
+		Stage:           "queued",
+		Status:          "Server migration import operation queued.",
+		StartedAt:       now,
+		UpdatedAt:       now,
+		Rollback:        operationRollback{State: "not_started"},
+	}
+	if err := s.persist(journal); err != nil {
+		_ = s.releaseMigrationLock()
+		return operationJournal{}, false, err
+	}
+	s.operations[id] = journal
+	s.currentMigrationID = id
+	return journal, true, nil
+}
+
+func (s *operationStore) beginMigrationRecovery(instanceID, planFingerprint string) (operationJournal, bool, error) {
+	if !instanceIDPattern.MatchString(instanceID) || !operationFingerprintPattern.MatchString(planFingerprint) {
+		return operationJournal{}, false, errors.New("invalid server migration recovery plan fingerprint")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var handedOff *operationJournal
+	if s.currentMinecraftResetID != "" {
+		return operationJournal{}, false, errMinecraftResetOperationBusy
+	}
+	if s.currentFactoryResetID != "" {
+		return operationJournal{}, false, errFactoryResetOperationBusy
+	}
+	if s.currentMigrationID != "" {
+		current := s.operations[s.currentMigrationID]
+		if current.InstanceID == instanceID && current.PlanFingerprint == planFingerprint && current.OperationType == operationTypeMigrationRecovery {
+			return current, false, nil
+		}
+		if current.InstanceID != instanceID || (current.OperationType != operationTypeMigrationImport && current.OperationType != operationTypeMigrationExport) || current.State != operationNeedsAttention {
+			return operationJournal{}, false, errMigrationOperationBusy
+		}
+		original := current
+		handedOff = &original
+		now := s.now().UTC().Format(time.RFC3339Nano)
+		current.State = operationRolledBack
+		current.Stage = "recovery_handoff"
+		current.Status = "Import recovery responsibility transferred to a dedicated server migration Recovery operation."
+		current.UpdatedAt = now
+		current.FinishedAt = now
+		current.Rollback.State = "delegated"
+		current.Rollback.Result = "recovery_handoff"
+		if err := s.persist(current); err != nil {
+			return operationJournal{}, false, err
+		}
+		s.operations[current.OperationID] = current
+		s.currentMigrationID = ""
+	}
+	if err := s.acquireMigrationLock(); err != nil {
+		if handedOff != nil {
+			_ = s.persist(*handedOff)
+			s.operations[handedOff.OperationID] = *handedOff
+			s.currentMigrationID = handedOff.OperationID
+		}
+		return operationJournal{}, false, err
+	}
+	id, err := newOperationID()
+	if err != nil {
+		if handedOff != nil {
+			_ = s.persist(*handedOff)
+			s.operations[handedOff.OperationID] = *handedOff
+			s.currentMigrationID = handedOff.OperationID
+		} else {
+			_ = s.releaseMigrationLock()
+		}
+		return operationJournal{}, false, err
+	}
+	now := s.now().UTC().Format(time.RFC3339Nano)
+	journal := operationJournal{SchemaVersion: operationSchemaVersion, OperationID: id, OperationType: operationTypeMigrationRecovery, InstanceID: instanceID, PlanFingerprint: planFingerprint, State: operationQueued, Stage: "queued", Status: "Server migration recovery operation queued.", StartedAt: now, UpdatedAt: now, Rollback: operationRollback{State: "not_started"}}
+	if err := s.persist(journal); err != nil {
+		if handedOff != nil {
+			_ = s.persist(*handedOff)
+			s.operations[handedOff.OperationID] = *handedOff
+			s.currentMigrationID = handedOff.OperationID
+		} else {
+			_ = s.releaseMigrationLock()
+		}
+		return operationJournal{}, false, err
+	}
+	s.operations[id] = journal
+	s.currentMigrationID = id
+	return journal, true, nil
+}
+func (s *operationStore) beginMinecraftReset(planFingerprint string) (operationJournal, bool, error) {
+	return s.beginMinecraftMaintenance(planFingerprint, operationTypeMinecraftReset)
+}
+
+// Update, reset and plugin installation share the existing maintenance locks.
+func (s *operationStore) beginMinecraftMaintenance(planFingerprint, kind string, instanceID ...string) (operationJournal, bool, error) {
+	if kind != operationTypeMinecraftReset && kind != operationTypeMinecraftUpdate && kind != operationTypeMinecraftSwitch && kind != operationTypeMinecraftContainerUpdate && !isPluginOperationType(kind) {
+		return operationJournal{}, false, errors.New("invalid Minecraft maintenance type")
+	}
+	if !operationFingerprintPattern.MatchString(planFingerprint) {
+		return operationJournal{}, false, errors.New("invalid Minecraft reset plan fingerprint")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.currentMinecraftResetID != "" {
+		current := s.operations[s.currentMinecraftResetID]
+		if current.PlanFingerprint == planFingerprint && current.OperationType == kind && (len(instanceID) == 0 || current.InstanceID == instanceID[0]) {
+			return current, false, nil
+		}
+		return operationJournal{}, false, errMinecraftResetOperationBusy
+	}
+	if s.currentFactoryResetID != "" {
+		return operationJournal{}, false, errMinecraftResetOperationBusy
+	}
+	if s.currentSetupID != "" || s.currentRestoreID != "" || s.currentDataMigrationID != "" || s.currentMigrationID != "" {
+		return operationJournal{}, false, errMinecraftResetOperationBusy
+	}
+	if err := s.acquireMinecraftResetLocks(); err != nil {
+		return operationJournal{}, false, err
+	}
+
+	id, err := newOperationID()
+	if err != nil {
+		_ = s.releaseMinecraftResetLocks()
+		return operationJournal{}, false, err
+	}
+	now := s.now().UTC().Format(time.RFC3339Nano)
+	status := "Minecraft reset operation queued."
+	if kind == operationTypeMinecraftSwitch || kind == operationTypeMinecraftUpdate || kind == operationTypeMinecraftContainerUpdate {
+		status = "Server update operation queued."
+	}
+	if kind == operationTypePluginInstall {
+		status = "Plugin installation queued."
+	} else if isPluginOperationType(kind) {
+		status = "Plugin " + strings.TrimPrefix(kind, "plugin_") + " queued."
+	}
+	journal := operationJournal{
+		SchemaVersion: operationSchemaVersion, OperationID: id, OperationType: kind,
+		PlanFingerprint: planFingerprint, State: operationQueued, Stage: "queued",
+		Status: status, StartedAt: now, UpdatedAt: now,
+		Rollback: operationRollback{State: "not_started"},
+	}
+	if len(instanceID) > 0 {
+		if len(instanceID) != 1 || !instanceIDPattern.MatchString(instanceID[0]) {
+			_ = s.releaseMinecraftResetLocks()
+			return operationJournal{}, false, errInstanceID
+		}
+		journal.InstanceID = instanceID[0]
+	}
+	if err := s.persist(journal); err != nil {
+		_ = s.releaseMinecraftResetLocks()
+		return operationJournal{}, false, err
+	}
+	s.operations[id] = journal
+	s.currentMinecraftResetID = id
+	if isPluginOperationType(kind) || kind == operationTypeMinecraftSwitch {
+		s.appendOperationJournalDiagnosticBestEffort(journal)
+	}
+	return journal, true, nil
+}
+
+func (s *operationStore) currentMinecraftReset() (*operationJournal, error) {
+	journal, err := s.currentMinecraftMaintenance()
+	if journal != nil && journal.OperationType != operationTypeMinecraftReset {
+		journal = nil
+	}
+	return journal, err
+}
+
+func (s *operationStore) currentMinecraftMaintenance() (*operationJournal, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.currentMinecraftResetID == "" {
+		return nil, nil
+	}
+	journal, ok := s.operations[s.currentMinecraftResetID]
+	if !ok {
+		return nil, errors.New("current Minecraft reset operation journal is missing")
+	}
+	copy := journal
+	return &copy, nil
+}
+
+func (s *operationStore) retryMinecraftReset(id, planFingerprint string) (operationJournal, error) {
+	if !validOperationID(id) || !operationFingerprintPattern.MatchString(planFingerprint) {
+		return operationJournal{}, errors.New("invalid Minecraft reset retry")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.currentMinecraftResetID != id {
+		return operationJournal{}, errOperationNotFound
+	}
+	journal, ok := s.operations[id]
+	if !ok {
+		return operationJournal{}, errOperationNotFound
+	}
+	if journal.OperationType != operationTypeMinecraftReset || journal.State != operationNeedsAttention {
+		return operationJournal{}, errors.New("Minecraft reset is not retryable")
+	}
+	journal.PlanFingerprint = planFingerprint
+	journal.State = operationQueued
+	journal.Stage = "queued"
+	journal.Status = "Minecraft reset retry queued."
+	if journal.InstanceID == "" {
+		journal.Status = "Continue removal queued."
+	}
+	journal.UpdatedAt = s.now().UTC().Format(time.RFC3339Nano)
+	journal.FinishedAt = ""
+	journal.InterruptedAt = ""
+	if err := s.persist(journal); err != nil {
+		return operationJournal{}, err
+	}
+	s.operations[id] = journal
+	return journal, nil
+}
+
+func (s *operationStore) beginFactoryReset(planFingerprint string) (operationJournal, bool, error) {
+	if !operationFingerprintPattern.MatchString(planFingerprint) {
+		return operationJournal{}, false, errors.New("invalid factory reset plan fingerprint")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.currentFactoryResetID != "" {
+		current := s.operations[s.currentFactoryResetID]
+		if current.PlanFingerprint == planFingerprint {
+			return current, false, nil
+		}
+		return operationJournal{}, false, errFactoryResetOperationBusy
+	}
+	if s.currentMinecraftResetID != "" || s.currentSetupID != "" || s.currentRestoreID != "" || s.currentDataMigrationID != "" || s.currentMigrationID != "" {
+		return operationJournal{}, false, errFactoryResetOperationBusy
+	}
+	if err := s.acquireMinecraftResetLocks(); err != nil {
+		return operationJournal{}, false, err
+	}
+
+	id, err := newOperationID()
+	if err != nil {
+		_ = s.releaseMinecraftResetLocks()
+		return operationJournal{}, false, err
+	}
+	now := s.now().UTC().Format(time.RFC3339Nano)
+	journal := operationJournal{
+		SchemaVersion: operationSchemaVersion, OperationID: id, OperationType: operationTypeFactoryReset,
+		PlanFingerprint: planFingerprint, State: operationQueued, Stage: "queued",
+		Status: "Full factory reset operation queued.", StartedAt: now, UpdatedAt: now,
+		Rollback: operationRollback{State: "not_started"},
+	}
+	if err := s.persist(journal); err != nil {
+		_ = s.releaseMinecraftResetLocks()
+		return operationJournal{}, false, err
+	}
+	s.operations[id] = journal
+	s.currentFactoryResetID = id
+	return journal, true, nil
+}
+
+func (s *operationStore) currentFactoryReset() (*operationJournal, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.currentFactoryResetID == "" {
+		return nil, nil
+	}
+	journal, ok := s.operations[s.currentFactoryResetID]
+	if !ok {
+		return nil, errors.New("current factory reset operation journal is missing")
+	}
+	copy := journal
+	return &copy, nil
+}
+
+func (s *operationStore) retryFactoryReset(id, planFingerprint string) (operationJournal, error) {
+	if !validOperationID(id) || !operationFingerprintPattern.MatchString(planFingerprint) {
+		return operationJournal{}, errors.New("invalid factory reset retry")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.currentFactoryResetID != id {
+		return operationJournal{}, errOperationNotFound
+	}
+	journal, ok := s.operations[id]
+	if !ok {
+		return operationJournal{}, errOperationNotFound
+	}
+	if journal.OperationType != operationTypeFactoryReset || journal.State != operationNeedsAttention {
+		return operationJournal{}, errors.New("factory reset is not retryable")
+	}
+	journal.PlanFingerprint = planFingerprint
+	journal.State = operationQueued
+	journal.Stage = "queued"
+	journal.Status = "Full factory reset retry queued."
+	journal.UpdatedAt = s.now().UTC().Format(time.RFC3339Nano)
+	journal.FinishedAt = ""
+	journal.InterruptedAt = ""
+	if err := s.persist(journal); err != nil {
+		return operationJournal{}, err
+	}
+	s.operations[id] = journal
+	return journal, nil
+}
+
+func (s *operationStore) resolveFactoryReset(id, status string) (operationJournal, error) {
+	if !validOperationID(id) || !validOperationStatus(status) {
+		return operationJournal{}, errors.New("invalid factory reset resolution")
+	}
+	current, err := s.currentFactoryReset()
+	if err != nil {
+		return operationJournal{}, err
+	}
+	if current == nil || current.OperationID != id {
+		return operationJournal{}, errOperationNotFound
+	}
+	if current.OperationType != operationTypeFactoryReset || current.State != operationNeedsAttention {
+		return operationJournal{}, errors.New("factory reset is not resolvable")
+	}
+	return s.transition(id, operationResolved, "resolved", status)
+}
+
+func (s *operationStore) resolveMigrationImport(id, status string) (operationJournal, error) {
+	if !validOperationID(id) || !validOperationStatus(status) {
+		return operationJournal{}, errors.New("invalid server migration Import resolution")
+	}
+	current, err := s.currentMigration()
+	if err != nil {
+		return operationJournal{}, err
+	}
+	if current == nil || current.OperationID != id {
+		return operationJournal{}, errOperationNotFound
+	}
+	if current.OperationType != operationTypeMigrationImport || current.State != operationNeedsAttention {
+		return operationJournal{}, errors.New("server migration Import is not resolvable")
+	}
+	return s.transition(id, operationResolved, "resolved", status)
+}
+
+func (s *operationStore) resolveMigrationRecovery(id, status string) (operationJournal, error) {
+	if !validOperationID(id) || !validOperationStatus(status) {
+		return operationJournal{}, errors.New("invalid migration recovery resolution")
+	}
+	current, err := s.currentMigration()
+	if err != nil {
+		return operationJournal{}, err
+	}
+	if current == nil || current.OperationID != id {
+		return operationJournal{}, errOperationNotFound
+	}
+	if (current.OperationType != operationTypeMigrationRecovery && current.OperationType != operationTypeMigrationExport) || current.State != operationNeedsAttention {
+		return operationJournal{}, errors.New("migration recovery is not resolvable")
+	}
+	return s.transition(id, operationResolved, "resolved", status)
+}
+
+func (s *operationStore) get(id string) (operationJournal, error) {
+	if !validOperationID(id) {
+		return operationJournal{}, errOperationNotFound
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	journal, ok := s.operations[id]
+	if !ok {
+		return operationJournal{}, errOperationNotFound
+	}
+	return journal, nil
+}
+
+func (s *operationStore) currentSetup() (*operationJournal, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.currentSetupID == "" {
+		return nil, nil
+	}
+	journal, ok := s.operations[s.currentSetupID]
+	if !ok {
+		return nil, errors.New("current setup operation journal is missing")
+	}
+	copy := journal
+	return &copy, nil
+}
+
+func (s *operationStore) currentRestore() (*operationJournal, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.currentRestoreID == "" {
+		return nil, nil
+	}
+	journal, ok := s.operations[s.currentRestoreID]
+	if !ok {
+		return nil, errors.New("current restore operation journal is missing")
+	}
+	copy := journal
+	return &copy, nil
+}
+
+func (s *operationStore) currentDataMigration() (*operationJournal, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.currentDataMigrationID == "" {
+		return nil, nil
+	}
+	journal, ok := s.operations[s.currentDataMigrationID]
+	if !ok {
+		return nil, errors.New("current data migration operation journal is missing")
+	}
+	copy := journal
+	return &copy, nil
+}
+
+func (s *operationStore) currentMigration() (*operationJournal, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.currentMigrationID == "" {
+		return nil, nil
+	}
+	journal, ok := s.operations[s.currentMigrationID]
+	if !ok {
+		return nil, errors.New("current server migration operation journal is missing")
+	}
+	copy := journal
+	return &copy, nil
+}
+
+func (s *operationStore) transition(id string, next operationState, stage, status string) (operationJournal, error) {
+	if !validOperationID(id) {
+		return operationJournal{}, errOperationNotFound
+	}
+	if !validOperationState(next) {
+		return operationJournal{}, errors.New("invalid operation state")
+	}
+	if stage == "" || !operationStagePattern.MatchString(stage) {
+		return operationJournal{}, errors.New("invalid operation stage")
+	}
+	if !validOperationStatus(status) {
+		return operationJournal{}, errors.New("invalid operation status")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	journal, ok := s.operations[id]
+	if !ok {
+		return operationJournal{}, errOperationNotFound
+	}
+	setupRecovery := journal.OperationType == operationTypeSetup && journal.State == operationNeedsAttention && ((journal.Stage == "storage_rollback" && stage == "storage_recovery") || (journal.Stage == "runtime_rollback" && stage == "runtime_recovery")) && next == operationRollingBack
+	queuedPluginCancellation := isPluginOperationType(journal.OperationType) && journal.State == operationQueued && next == operationRolledBack && stage == "complete"
+	dataMigrationRecovery := journal.OperationType == operationTypeDataMigration && journal.State == operationNeedsAttention && next == operationRollingBack && stage == "migration_recovery"
+	setupCommitForward := journal.OperationType == operationTypeSetup && journal.State == operationRollingBack && (journal.Stage == "runtime_recovery" || journal.Stage == "runtime_rollback") && next == operationSucceeded && stage == "completed"
+	if !setupCommitForward && !dataMigrationRecovery && !setupRecovery && !queuedPluginCancellation && !operationTransitionAllowed(journal.State, next) {
+		return operationJournal{}, fmt.Errorf("invalid operation transition %s -> %s", journal.State, next)
+	}
+	recoveryFailed := journal.OperationType == operationTypeSetup && journal.State == operationRollingBack && (journal.Stage == "storage_recovery" || journal.Stage == "runtime_recovery") && next == operationNeedsAttention && (stage == "storage_rollback" || stage == "runtime_rollback")
+	journal.State = next
+	journal.Stage = stage
+	journal.Status = status
+	journal.UpdatedAt = s.now().UTC().Format(time.RFC3339Nano)
+	if next == operationRollingBack {
+		journal.Rollback.State = "running"
+	}
+	if setupCommitForward {
+		journal.Rollback = operationRollback{State: "not_started"}
+	}
+	if next == operationRolledBack {
+		journal.Rollback.State = "succeeded"
+		journal.Rollback.Result = "rolled_back"
+	}
+	if recoveryFailed {
+		journal.Rollback.State = "failed"
+		journal.Rollback.Result = "needs_attention"
+	}
+	if next == operationSucceeded || next == operationRolledBack || next == operationResolved {
+		journal.FinishedAt = journal.UpdatedAt
+	}
+	if err := s.persist(journal); err != nil {
+		return operationJournal{}, err
+	}
+	s.operations[id] = journal
+	s.appendSetupJournalDiagnosticBestEffort(journal)
+	s.appendOperationJournalDiagnosticBestEffort(journal)
+	if next == operationSucceeded || next == operationRolledBack || next == operationResolved {
+		switch journal.OperationType {
+		case operationTypeSetup:
+			s.currentSetupID = ""
+			if err := s.releaseSetupLock(); err != nil {
+				return operationJournal{}, err
+			}
+		case operationTypeRestore:
+			s.currentRestoreID = ""
+			if err := s.releaseRestoreLock(); err != nil {
+				return operationJournal{}, err
+			}
+		case operationTypeDataMigration:
+			s.currentDataMigrationID = ""
+			if err := s.releaseDataMigrationLock(); err != nil {
+				return operationJournal{}, err
+			}
+		case operationTypeMinecraftReset, operationTypeMinecraftSwitch, operationTypeMinecraftUpdate, operationTypeMinecraftContainerUpdate, operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove, operationTypePluginAddonInstall:
+			s.currentMinecraftResetID = ""
+			if err := s.releaseMinecraftResetLocks(); err != nil {
+				return operationJournal{}, err
+			}
+		case operationTypeFactoryReset:
+			s.currentFactoryResetID = ""
+			if err := s.releaseMinecraftResetLocks(); err != nil {
+				return operationJournal{}, err
+			}
+		case operationTypeMigrationExport, operationTypeMigrationImport, operationTypeMigrationRecovery:
+			s.currentMigrationID = ""
+			if err := s.releaseMigrationLock(); err != nil {
+				return operationJournal{}, err
+			}
+		}
+	}
+	return journal, nil
+}
+
+func operationTransitionAllowed(current, next operationState) bool {
+	switch current {
+	case operationQueued:
+		return next == operationValidating || next == operationFailed || next == operationNeedsAttention
+	case operationValidating:
+		return next == operationRunning || next == operationFailed || next == operationNeedsAttention
+	case operationRunning:
+		return next == operationVerifying || next == operationFailed || next == operationNeedsAttention
+	case operationVerifying:
+		return next == operationSucceeded || next == operationFailed || next == operationNeedsAttention
+	case operationFailed:
+		return next == operationRollingBack || next == operationNeedsAttention
+	case operationRollingBack:
+		return next == operationRolledBack || next == operationNeedsAttention
+	case operationNeedsAttention:
+		return next == operationResolved
+	default:
+		return false
+	}
+}
+
+func (s *operationStore) acquireMinecraftResetLocks() error {
+	if err := s.acquireSetupLock(); err != nil {
+		return err
+	}
+	if err := s.acquireRestoreLock(); err != nil {
+		_ = s.releaseSetupLock()
+		return err
+	}
+	if err := s.acquireDataMigrationLock(); err != nil {
+		_ = s.releaseRestoreLock()
+		_ = s.releaseSetupLock()
+		return err
+	}
+	if err := s.acquireMigrationLock(); err != nil {
+		_ = s.releaseDataMigrationLock()
+		_ = s.releaseRestoreLock()
+		_ = s.releaseSetupLock()
+		return err
+	}
+	return nil
+}
+
+func (s *operationStore) releaseMinecraftResetLocks() error {
+	var firstErr error
+	if err := s.releaseMigrationLock(); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	if err := s.releaseDataMigrationLock(); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	if err := s.releaseRestoreLock(); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	if err := s.releaseSetupLock(); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	return firstErr
+}
+
+func (s *operationStore) acquireSetupLock() error {
+	if s.setupLockHeld {
+		return nil
+	}
+	if err := syscall.Flock(int(s.lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
+			return errSetupLockBusy
+		}
+		return fmt.Errorf("acquire setup operation lock: %w", err)
+	}
+	s.setupLockHeld = true
+	return nil
+}
+
+func (s *operationStore) releaseSetupLock() error {
+	if !s.setupLockHeld {
+		return nil
+	}
+	if err := syscall.Flock(int(s.lockFile.Fd()), syscall.LOCK_UN); err != nil {
+		return fmt.Errorf("release setup operation lock: %w", err)
+	}
+	s.setupLockHeld = false
+	return nil
+}
+
+func (s *operationStore) acquireRestoreLock() error {
+	if s.restoreLockHeld {
+		return nil
+	}
+	if s.restoreLockFile == nil {
+		return errors.New("restore operation lock is unavailable")
+	}
+	if err := syscall.Flock(int(s.restoreLockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
+			return errRestoreLockBusy
+		}
+		return fmt.Errorf("acquire restore operation lock: %w", err)
+	}
+	s.restoreLockHeld = true
+	return nil
+}
+
+func (s *operationStore) releaseRestoreLock() error {
+	if !s.restoreLockHeld {
+		return nil
+	}
+	if s.restoreLockFile == nil {
+		return errors.New("restore operation lock is unavailable")
+	}
+	if err := syscall.Flock(int(s.restoreLockFile.Fd()), syscall.LOCK_UN); err != nil {
+		return fmt.Errorf("release restore operation lock: %w", err)
+	}
+	s.restoreLockHeld = false
+	return nil
+}
+
+func (s *operationStore) acquireDataMigrationLock() error {
+	if s.dataMigrationLockHeld {
+		return nil
+	}
+	if s.dataMigrationLockFile == nil {
+		return errors.New("data migration operation lock is unavailable")
+	}
+	if err := syscall.Flock(int(s.dataMigrationLockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
+			return errDataMigrationLockBusy
+		}
+		return fmt.Errorf("acquire data migration operation lock: %w", err)
+	}
+	s.dataMigrationLockHeld = true
+	return nil
+}
+
+func (s *operationStore) releaseDataMigrationLock() error {
+	if !s.dataMigrationLockHeld {
+		return nil
+	}
+	if s.dataMigrationLockFile == nil {
+		return errors.New("data migration operation lock is unavailable")
+	}
+	if err := syscall.Flock(int(s.dataMigrationLockFile.Fd()), syscall.LOCK_UN); err != nil {
+		return fmt.Errorf("release data migration operation lock: %w", err)
+	}
+	s.dataMigrationLockHeld = false
+	return nil
+}
+
+func (s *operationStore) acquireMigrationLock() error {
+	if s.migrationLockHeld {
+		return nil
+	}
+	if s.migrationLockFile == nil {
+		return errors.New("server migration operation lock is unavailable")
+	}
+	if err := syscall.Flock(int(s.migrationLockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
+			return errMigrationLockBusy
+		}
+		return fmt.Errorf("acquire server migration operation lock: %w", err)
+	}
+	s.migrationLockHeld = true
+	return nil
+}
+
+func (s *operationStore) releaseMigrationLock() error {
+	if !s.migrationLockHeld {
+		return nil
+	}
+	if s.migrationLockFile == nil {
+		return errors.New("server migration operation lock is unavailable")
+	}
+	if err := syscall.Flock(int(s.migrationLockFile.Fd()), syscall.LOCK_UN); err != nil {
+		return fmt.Errorf("release server migration operation lock: %w", err)
+	}
+	s.migrationLockHeld = false
+	return nil
+}
+
+func (s *operationStore) persist(journal operationJournal) error {
+	if err := validateOperationJournal(journal); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(journal, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	path := filepath.Join(s.operationsDir, journal.OperationID+".json")
+	tmp, err := os.CreateTemp(s.operationsDir, ".operation-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return err
+	}
+	dir, err := os.Open(s.operationsDir)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
+}
+
+func newOperationID() (string, error) {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	raw[6] = (raw[6] & 0x0f) | 0x40
+	raw[8] = (raw[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		raw[0:4], raw[4:6], raw[6:8], raw[8:10], raw[10:16]), nil
+}
+
+// Plugin progress changes presentation only, never the state or exclusion locks.
+func (s *operationStore) pluginProgress(id, stage, status string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	journal, ok := s.operations[id]
+	if !ok || !isPluginOperationType(journal.OperationType) || !operationInterruptedByRestart(journal.State) {
+		return errors.New("plugin operation is not active")
+	}
+	if !operationStagePattern.MatchString(stage) || !validOperationStatus(status) {
+		return errors.New("invalid plugin progress")
+	}
+	journal.Stage, journal.Status = stage, status
+	journal.UpdatedAt = s.now().UTC().Format(time.RFC3339Nano)
+	if err := s.persist(journal); err != nil {
+		return err
+	}
+	s.operations[id] = journal
+	s.appendOperationJournalDiagnosticBestEffort(journal)
+	return nil
+}
+func (s *operationStore) currentPluginInstall() (*operationJournal, error) {
+	journal, err := s.currentMinecraftMaintenance()
+	if journal != nil && journal.OperationType != operationTypePluginInstall {
+		journal = nil
+	}
+	return journal, err
+}
+
+// A terminal cleanup warning keeps the terminal state and released exclusion.
+func (s *operationStore) pluginCleanupWarning(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	journal, ok := s.operations[id]
+	if !ok || journal.OperationType != operationTypePluginInstall || (journal.State != operationSucceeded && journal.State != operationRolledBack && journal.State != operationResolved) {
+		return errors.New("plugin operation is not terminal")
+	}
+	journal.Status += " Warning: private transaction staging cleanup failed; verified final state was kept."
+	journal.UpdatedAt = s.now().UTC().Format(time.RFC3339Nano)
+	if err := s.persist(journal); err != nil {
+		return err
+	}
+	s.operations[id] = journal
+	return nil
+}
+
+func isPluginOperationType(kind string) bool {
+	switch kind {
+	case operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove, operationTypePluginAddonInstall:
+		return true
+	}
+	return false
+}
+func (s *operationStore) currentPluginOperation() (*operationJournal, error) {
+	journal, err := s.currentMinecraftMaintenance()
+	if journal != nil && !isPluginOperationType(journal.OperationType) {
+		journal = nil
+	}
+	return journal, err
+}
+
+// A worker must agree with the durable selection before disruption or file changes.
+func (s *operationStore) requireMaintenanceInstance(operationID, instanceID string) error {
+	if !instanceIDPattern.MatchString(instanceID) {
+		return errInstanceID
+	}
+	journal, err := s.get(operationID)
+	if err != nil {
+		return err
+	}
+	if journal.InstanceID != instanceID {
+		return errInstanceRecovery
+	}
+	return nil
+}

@@ -1,0 +1,27 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+state_dir="${HOME}/.config/justvoxel"
+marker="${state_dir}/no-welcome"
+
+action="${1:-show}"
+case "${action}" in
+    show)
+        exec /usr/libexec/justvoxel/motd
+        ;;
+    off)
+        install -d -m0700 "${state_dir}"
+        : > "${marker}"
+        chmod 0600 "${marker}"
+        echo 'JustVoxel welcome message disabled for this user.'
+        echo 'Run: mjust welcome-on'
+        ;;
+    on)
+        rm -f -- "${marker}"
+        echo 'JustVoxel welcome message enabled for this user.'
+        ;;
+    *)
+        echo 'Usage: mjust welcome | mjust welcome-off | mjust welcome-on' >&2
+        exit 2
+        ;;
+esac

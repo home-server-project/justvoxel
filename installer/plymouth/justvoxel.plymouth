@@ -1,0 +1,11 @@
+[Plymouth Theme]
+Name=JustVoxel Installer
+Description=JustVoxel installer boot wordmark
+ModuleName=script
+
+[script]
+# Plymouth's initrd population also uses these to include the text fonts.
+Font=Sans 16
+TitleFont=Sans Bold 36
+ImageDir=/usr/share/plymouth/themes/justvoxel
+ScriptFile=/usr/share/plymouth/themes/justvoxel/justvoxel.script

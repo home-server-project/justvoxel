@@ -1,0 +1,131 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/status-lib.sh
+
+metadata=/usr/lib/justvoxel/webui-release.json
+
+# GET /v1/status collects host/appliance facts only.
+web_status() {
+    local details="${1:-}" variant ipv4 failed_count system_state health hostname_value
+    local host_uptime_s mem_kib network_interface gateway dns_servers default_route
+    local system_source system_mount system_available_kib system_used
+    local network_state=healthy storage_state=healthy
+    local details_failed='' details_storage='' details_network=''
+    local tailscale_value netbird_value webui_version api_version justvoxel_version failed_units_json
+    local -a failed_units
+
+    variant="$(jv_variant_name)"
+    hostname_value="$(hostname -s 2>/dev/null || hostname 2>/dev/null || printf Unknown)"
+    host_uptime_s="$(awk '{print int($1)}' /proc/uptime 2>/dev/null || echo 0)"
+    [[ ${host_uptime_s} =~ ^[0-9]+$ ]] || host_uptime_s=0
+    mem_kib="$(awk '/^MemTotal:/ {print $2; exit}' /proc/meminfo 2>/dev/null || true)"
+    [[ ${mem_kib} =~ ^[0-9]+$ ]] || mem_kib=0
+
+    mapfile -t failed_units < <(systemctl --failed --type=service --no-legend --plain 2>/dev/null | awk '{print $1}' || true)
+    failed_count=${#failed_units[@]}
+    system_state="$(systemctl is-system-running 2>/dev/null || true)"
+    [[ -n ${system_state} ]] || system_state=unknown
+
+    ipv4="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i == "src") {print $(i+1); exit}}' || true)"
+    if [[ -z ${ipv4} ]]; then
+        ipv4="$(ip -o -4 addr show scope global up 2>/dev/null | awk '{split($4,a,"/"); print a[1]; exit}' || true)"
+    fi
+    [[ -n ${ipv4} ]] || ipv4='Unknown'
+
+    default_route="$(ip -4 route show default 2>/dev/null | head -n1 || true)"
+    network_interface="$(awk '{for (i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}' <<< "${default_route}")"
+    gateway="$(awk '{for (i=1;i<=NF;i++) if ($i=="via") {print $(i+1); exit}}' <<< "${default_route}")"
+    [[ -n ${network_interface} ]] || network_interface='Unknown'
+    [[ -n ${gateway} ]] || gateway='Unknown'
+    if [[ ${network_interface} != Unknown ]]; then
+        dns_servers="$(resolvectl dns "${network_interface}" 2>/dev/null | sed -n 's/^[^:]*:[[:space:]]*//p' | head -n1 || true)"
+    else
+        dns_servers=''
+    fi
+    [[ -n ${dns_servers} ]] || dns_servers='Unknown'
+    if [[ ${ipv4} == Unknown || ${gateway} == Unknown ]]; then network_state=problem; fi
+
+    tailscale_value="$(/usr/libexec/justvoxel/remote-access-status tailscale 2>/dev/null || printf '%s' 'Unavailable')"
+    netbird_value="$(/usr/libexec/justvoxel/remote-access-status netbird 2>/dev/null || printf '%s' 'Unavailable')"
+
+    system_source="$(findmnt -n -o SOURCE --target /var 2>/dev/null | head -n1 || true)"
+    system_mount="$(findmnt -n -o TARGET --target /var 2>/dev/null | head -n1 || true)"
+    system_available_kib="$(df -Pk -- /var 2>/dev/null | awk 'NR==2 {print $4}' || true)"
+    system_used="$(df -Pk -- /var 2>/dev/null | awk 'NR==2 {print $5}' || true)"
+    if [[ ! ${system_available_kib} =~ ^[0-9]+$ ]]; then system_available_kib=0; storage_state=problem; fi
+    [[ -n ${system_source} && -n ${system_used} ]] || storage_state=problem
+
+    health="$(jv_status_overall "${failed_count}" "${system_state}" "${network_state}" "${storage_state}")"
+
+    webui_version='Unknown'
+    api_version='v1'
+    if [[ -r ${metadata} ]]; then
+        webui_version="$(jq -r '.version // "Unknown"' "${metadata}" 2>/dev/null || echo Unknown)"
+        api_version="$(jq -r '.management_api // "v1"' "${metadata}" 2>/dev/null || echo v1)"
+    fi
+    justvoxel_version='10'
+    if [[ -r /etc/os-release ]]; then
+        # shellcheck disable=SC1091
+        source /etc/os-release
+        justvoxel_version="${VERSION_ID:-10}"
+    fi
+
+    failed_units_json="$(printf '%s\n' "${failed_units[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')"
+
+    if [[ ${details} == --details ]]; then
+        details_failed="$(systemctl --failed --type=service --no-pager --full 2>&1 | head -c 16384 || true)"
+        details_storage="$(findmnt --target /var 2>&1 | head -c 8192 || true)"
+        details_storage+=$'\n'"$(df -h /var 2>&1 | head -c 8192 || true)"
+        details_network="$(ip -brief address 2>&1 | head -c 8192 || true)"
+        details_network+=$'\n'"$(ip route 2>&1 | head -c 8192 || true)"
+        details_network+=$'\n'"$(resolvectl status 2>&1 | head -c 16384 || true)"
+    fi
+
+    jq -n \
+        --arg variant "${variant}" \
+        --arg health "${health}" \
+        --arg ipv4 "${ipv4}" \
+        --arg tailscale "${tailscale_value}" \
+        --arg netbird "${netbird_value}" \
+        --arg hostname "${hostname_value}" \
+        --arg system_state "${system_state}" \
+        --argjson uptime_seconds "${host_uptime_s}" \
+        --argjson physical_ram_kib "${mem_kib}" \
+        --argjson failed_count "${failed_count}" \
+        --argjson failed_services "${failed_units_json}" \
+        --arg interface "${network_interface}" \
+        --arg gateway "${gateway}" \
+        --arg dns "${dns_servers}" \
+        --arg system_source "${system_source}" \
+        --arg system_mount "${system_mount}" \
+        --argjson system_available_kib "${system_available_kib}" \
+        --arg system_used "${system_used}" \
+        --arg justvoxel_version "${justvoxel_version}" \
+        --arg webui_version "${webui_version}" \
+        --arg api_version "${api_version}" \
+        --arg details_failed "${details_failed}" \
+        --arg details_storage "${details_storage}" \
+        --arg details_network "${details_network}" \
+        '{
+          system:{variant:$variant,health:$health,ipv4:$ipv4,tailscale:$tailscale,netbird:$netbird},
+          justvoxel:{version:$justvoxel_version,webui:$webui_version,management_api:$api_version},
+          extended:{
+            system:{hostname:$hostname,state:$system_state,uptime_seconds:$uptime_seconds,physical_ram_kib:$physical_ram_kib,failed_count:$failed_count,failed_services:$failed_services},
+            network:{interface:$interface,ipv4:$ipv4,gateway:$gateway,dns:$dns},
+            storage:{system:{source:$system_source,mount:$system_mount,available_kib:$system_available_kib,used:$system_used}},
+            details:{failed_services:$details_failed,storage:$details_storage,network:$details_network}
+          }
+        }'
+}
+
+if (( $# == 0 )); then
+    web_status
+elif [[ $1 == status && $# == 1 ]]; then
+    web_status
+elif [[ $1 == status && $# == 2 && $2 == --details ]]; then
+    web_status --details
+else
+    echo 'Usage: web-status-json [status [--details]]' >&2
+    exit 4
+fi

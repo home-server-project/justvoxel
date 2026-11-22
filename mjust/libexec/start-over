@@ -1,0 +1,56 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/ui.sh
+require_root
+[[ -t 0 && -t 1 ]] || { echo 'ERROR: Start Over needs an interactive terminal.' >&2; exit 1; }
+readonly api=/usr/libexec/justvoxel/mjust/api-client
+
+if ! plan="$("${api}" GET /v1/admin/start-over/plan)"; then
+    echo 'ERROR: Start Over could not be planned. Resolve the reported recovery state and review again.' >&2
+    exit 1
+fi
+jq -e '.ok == true and .mode == "start_over"' <<<"${plan}" >/dev/null
+
+echo 'Start Over returns JustVoxel Minecraft to first-setup state.'
+echo 'ALL configured Minecraft servers will be retired from JustVoxel.'
+echo 'Every world/data tree and every backup archive will remain on disk.'
+echo
+jq -r '.participants[] | "  \(.display_name) [\(.id)] — \(.state), \(.players_online) players online"' <<<"${plan}"
+echo
+backup_choice="$(jui_choose 'Configuration backup' \
+    'Save a backup of the current JustVoxel configuration (recommended)' \
+    'Continue without a configuration backup' \
+    'Cancel')" || exit 0
+case "${backup_choice}" in
+    'Save a backup of the current JustVoxel configuration (recommended)') save_config=true ;;
+    'Continue without a configuration backup') save_config=false ;;
+    *) echo 'Start Over cancelled.'; exit 0 ;;
+esac
+confirm_players=false
+if (( $(jq -r '.total_players_online' <<<"${plan}") > 0 )); then
+    echo 'Online players are present. Each running server uses its normal graceful shutdown and player countdown.'
+    jq -r '.participants[] | select(.players_online > 0) | "  \(.display_name) [\(.id)]: \(.players_online) online; \(.players | join(", "))"' <<<"${plan}"
+    read -r -p 'Interrupt online players? [yes/no] ' interrupt
+    [[ ${interrupt,,} == yes ]] || { echo 'Start Over cancelled.'; exit 0; }
+    confirm_players=true
+fi
+echo
+echo 'Worlds/data, backups, storage layout and mounts, authentication and WebUI users are preserved.'
+echo 'Managed Minecraft containers are retired. Images and unrelated containers are preserved.'
+echo 'Type exactly: START OVER'
+read -r -p '> ' confirmation
+[[ ${confirmation} == 'START OVER' ]] || { echo 'Start Over cancelled.'; exit 0; }
+request="$(jq -cn --arg fingerprint "$(jq -r '.plan_fingerprint' <<<"${plan}")" \
+    --argjson players "${confirm_players}" --argjson backup "${save_config}" \
+    '{plan_fingerprint:$fingerprint,confirm_players:$players,save_configuration_backup:$backup}')"
+if ! result="$("${api}" POST /v1/admin/start-over/apply --data <<<"${request}")"; then
+    echo 'ERROR: Start Over did not complete. Review and retry Start Over to resume exact retirement evidence.' >&2
+    exit 1
+fi
+jq -e '.ok == true' <<<"${result}" >/dev/null
+archive="$(jq -r '.configuration_backup_path // empty' <<<"${result}")"
+[[ -z ${archive} ]] || printf 'Configuration backup: %s\n' "${archive}"
+echo 'All configured Minecraft servers have been retired.'
+echo 'All worlds/data, backups, storage mounts, authentication and WebUI users remain preserved.'
+echo 'JustVoxel is ready for Setup. Run: mjust'

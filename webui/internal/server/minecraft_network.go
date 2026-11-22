@@ -1,0 +1,176 @@
+package server
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strconv"
+
+	"github.com/home-server-project/justvoxel-webui/internal/api"
+)
+
+type minecraftNetworkAPI interface {
+	MinecraftNetwork(context.Context, string) (api.MinecraftNetworkStatus, error)
+	ConfigureMinecraftNetwork(context.Context, string, api.MinecraftNetworkConfig) error
+	RecoverMinecraftNetwork(context.Context, string) error
+	MinecraftNetworkWhitelist(context.Context, string, string, string, string) error
+}
+type minecraftNetworkRow struct {
+	ID, Name, Software, SoftwareIcon, State     string
+	StateLabel, StateClass, CompatibilityReason string
+	Eligible, Selected                          bool
+}
+type minecraftNetworkPage struct {
+	Title, Version, ManagementAPI, CSRF, Error, Message string
+	Network                                             api.MinecraftNetworkStatus
+	SupportedServers, UnsupportedServers                []minecraftNetworkRow
+}
+
+func minecraftNetworkStateBadge(state string) (string, string) {
+	switch state {
+	case "running":
+		return uiText("ui.f4ccae29e1bb"), "good"
+	case "stopped":
+		return uiText("ui.1a4f630ac1b6"), "danger"
+	case "failed":
+		return uiText("ui.031a8f0f659d"), "danger"
+	case "starting":
+		return uiText("ui.aeed4d26bb5f"), "warning"
+	case "stopping":
+		return uiText("ui.a71ee1d4ac5c"), "warning"
+	default:
+		return uiText("ui.ca1844969742"), "muted"
+	}
+}
+
+func (a *App) minecraftNetwork(w http.ResponseWriter, r *http.Request) {
+	if mustChange(r) {
+		http.Redirect(w, r, "/password", http.StatusSeeOther)
+		return
+	}
+	session, _, _, ok := a.adminDiscoveryRequest(w, r)
+	if !ok {
+		return
+	}
+	if r.Method == http.MethodGet && r.URL.Path == "/minecraft/network" {
+		http.Redirect(w, r, "/?workspace=minecraft-network", http.StatusSeeOther)
+		return
+	}
+	if r.Method == http.MethodPost && !a.validCSRF(r) {
+		http.Error(w, ui(w, "ui.74bccc44f472"), http.StatusForbidden)
+		return
+	}
+	client, ok := a.api.(minecraftNetworkAPI)
+	if !ok {
+		http.Error(w, ui(w, "ui.48eb13811ccb"), 503)
+		return
+	}
+	if r.Method == http.MethodGet && r.URL.Query().Get("runtime_only") == "true" {
+		runtimeClient, ok := a.api.(interface {
+			MinecraftNetworkRuntime(context.Context, string) (api.MinecraftNetworkStatus, error)
+		})
+		if !ok {
+			http.Error(w, ui(w, "ui.6454e38a3538"), 503)
+			return
+		}
+		status, err := runtimeClient.MinecraftNetworkRuntime(r.Context(), session)
+		if err != nil {
+			http.Error(w, ui(w, "ui.6454e38a3538"), 503)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		json.NewEncoder(w).Encode(struct {
+			Servers []api.MinecraftNetworkServer `json:"servers"`
+		}{status.Servers})
+		return
+	}
+	data := minecraftNetworkPage{Title: ui(w, "ui.60d8c0cc037f"), Version: a.config.Version, ManagementAPI: a.config.ManagementAPI, CSRF: csrfFromRequest(r)}
+	if r.Method == http.MethodPost {
+		var err error
+		switch r.FormValue("action") {
+		case "configure":
+			java, e1 := strconv.Atoi(r.FormValue("java_port"))
+			bedrock, e2 := strconv.Atoi(r.FormValue("bedrock_port"))
+			if e1 != nil || e2 != nil {
+				err = errors.New("invalid ports")
+			} else {
+				err = client.ConfigureMinecraftNetwork(r.Context(), session, api.MinecraftNetworkConfig{WhitelistEnforced: r.FormValue("whitelist_enforced") == "true", Enabled: r.FormValue("enabled") == "on", JavaPort: java, BedrockPort: bedrock, Members: r.Form["members"], WelcomeMessage: r.FormValue("welcome_message")})
+			}
+		case "recover":
+			err = client.RecoverMinecraftNetwork(r.Context(), session)
+		case "add", "remove":
+			err = client.MinecraftNetworkWhitelist(r.Context(), session, r.FormValue("platform"), r.FormValue("action"), r.FormValue("name"))
+		default:
+			http.Error(w, ui(w, "ui.bf4ce85ab01d"), 400)
+			return
+		}
+		if err != nil {
+			data.Error = ui(w, "ui.18aada9a9c04")
+			if message, ok := api.ErrorMessage(err); ok {
+				data.Error = message
+			}
+		} else {
+			data.Message = ui(w, "ui.faaadd021144")
+		}
+	}
+	network, err := client.MinecraftNetwork(r.Context(), session)
+	if err != nil {
+		http.Error(w, ui(w, "ui.6454e38a3538"), 503)
+		return
+	}
+	if data.Message != "" && r.FormValue("action") == "configure" && !network.Config.Enabled {
+		data.Message = ui(w, "ui.0cd43827d23e")
+	}
+	data.Network = network
+	inventory, err := a.independentServerInventory(r.Context(), session)
+	if err != nil {
+		http.Error(w, ui(w, "ui.d8eb66798ffa"), 503)
+		return
+	}
+	names := map[string]string{}
+	for _, instance := range inventory {
+		names[instance.ID] = instance.DisplayName
+	}
+	for _, server := range network.Servers {
+		selected := false
+		for _, id := range network.Config.Members {
+			if id == server.ID {
+				selected = true
+			}
+		}
+		row := minecraftNetworkRow{ID: server.ID, Name: names[server.ID], Software: serverSoftware(server.Software), SoftwareIcon: serverSoftwareIcon(server.Software), State: server.State, Eligible: server.Eligible, Selected: selected}
+		row.StateLabel, row.StateClass = minecraftNetworkStateBadge(server.State)
+		row.CompatibilityReason = server.CompatibilityReason
+		if row.CompatibilityReason == "" {
+			row.CompatibilityReason = ui(w, "ui.9f0c91726736")
+		}
+		if server.Eligible {
+			data.SupportedServers = append(data.SupportedServers, row)
+		} else {
+			data.UnsupportedServers = append(data.UnsupportedServers, row)
+		}
+	}
+	a.renderAdminDiscovery(w, "minecraft_network.html", data)
+}
+
+// Only connection/invitation presentation changes. Stored per-instance settings
+// continue to show and preserve each server's standalone port choices.
+func (a *App) minecraftConnectionSettings(ctx context.Context, session, id string, c api.InstanceRuntimeSettings) (api.InstanceRuntimeSettings, error) {
+	client, ok := a.api.(interface {
+		MinecraftInstanceConnection(context.Context, string, string) (api.MinecraftConnection, error)
+	})
+	if !ok {
+		return c, nil
+	}
+	connection, err := client.MinecraftInstanceConnection(ctx, session, id)
+	if err != nil {
+		return c, err
+	}
+	if connection.ID != id {
+		return c, errors.New("connection identity mismatch")
+	}
+	c.JavaPort, c.BedrockPort, c.BedrockEnabled = connection.JavaPort, connection.BedrockPort, connection.BedrockEnabled
+	return c, nil
+}

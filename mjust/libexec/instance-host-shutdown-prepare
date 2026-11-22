@@ -1,0 +1,330 @@
+#!/usr/bin/bash
+set -u
+# One bounded window for all independent instances; no maintenance lock while
+# systemd drains services. Guard failures preserve the normal stop delay;
+# explicit operations fail closed and their callers restore running intent.
+# Guard mode keeps its original short, non-blocking safety window. Explicit
+# requests use the same discovery and player parser, with bounded graceful stops.
+mode="${1:-guard}"
+window=180s
+case "${mode}" in guard|status|check) window=8s ;; esac
+timeout "${window}" python3 - "$@" <<'PY'
+import datetime, concurrent.futures, hashlib, json, os, re, stat, subprocess, sys, time
+
+root = '/etc/justvoxel/instances'
+registry = '/var/lib/justvoxel/instances'
+mode = sys.argv[1] if len(sys.argv) > 1 else 'guard'
+deadline = time.monotonic() + (6 if mode in ('guard', 'status', 'check') else 150)
+pattern = re.compile(r'^jv-[a-z0-9]{6,12}$')
+players = re.compile(r'^There are ([0-9]+) of a max of ([0-9]+) players online:?[ \t]*([^\r\n]*)$')
+
+def private(path, directory=False):
+    if os.path.realpath(path) != path:
+        raise ValueError('path')
+    info = os.lstat(path)
+    if info.st_uid != 0 or info.st_gid != 0 or stat.S_IMODE(info.st_mode) != (0o700 if directory else 0o600):
+        raise ValueError('ownership')
+    if not (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode)):
+        raise ValueError('type')
+
+def read(path):
+    private(path)
+    with open(path, 'rb') as stream:
+        data = stream.read(65537)
+    if len(data) > 65536:
+        raise ValueError('size')
+    return data
+
+def run(*args, execution_window=None):
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise ValueError('deadline')
+    # stdout files bound capture even if an unhealthy tool produces excess data.
+    import tempfile
+    with tempfile.TemporaryFile() as output:
+        subprocess.run(args, check=True, stdout=output, stderr=subprocess.DEVNULL,
+                       timeout=min(execution_window if execution_window is not None else (2 if mode in ('guard', 'status', 'check') else 10), remaining))
+        output.seek(0)
+        data = output.read(8193)
+    if len(data) > 8192:
+        raise ValueError('output')
+    return data.decode('utf-8').strip()
+
+def validate(instance):
+    if not pattern.fullmatch(instance):
+        raise ValueError('identity')
+    directory = root + '/' + instance
+    private(directory, True)
+    identity = json.loads(read(registry + '/' + instance + '.json'))
+    record = json.loads(read(directory + '/config.json'))
+    if identity != {'id': instance} or record.get('schema_version') != 1 or record['runtime']['id'] != instance:
+        raise ValueError('record')
+    for key, path in [('environment_sha256', directory + '/minecraft.env'),
+                      ('quadlet_sha256', '/etc/containers/systemd/minecraft-' + instance + '.container')]:
+        if hashlib.sha256(read(path)).hexdigest() != record.get(key):
+            raise ValueError('commitment')
+    return record['runtime'].get('software', 'paper')
+
+def native_bedrock(instance):
+    return json.loads(read(root + '/' + instance + '/config.json'))['runtime'].get('software','paper') == 'bedrock'
+
+def graceful_request(instance, software):
+    if software == 'bedrock':
+        run('podman', 'exec', 'minecraft-' + instance, 'send-command', 'stop')
+    else:
+        # Java mc-server-runner's graceful announcement-delay bypass.
+        run('podman', 'kill', '--signal', 'SIGUSR1', 'minecraft-' + instance)
+
+def shutdown_announcement(instance, point):
+    software = json.loads(read(root + '/' + instance + '/config.json'))['runtime'].get('software', 'paper')
+    args = ('podman', 'exec', 'minecraft-' + instance,
+            'send-command' if software == 'bedrock' else 'rcon-cli',
+            'say Server shutting down in ' + str(point) + (' second' if point == 1 else ' seconds'))
+    if software in ('forge', 'neoforge'):
+        try:
+            # Bound the process inside the container as well as podman exec.
+            bounded = args[:3] + ('timeout', '--kill-after=0.1s', '0.25s') + args[3:]
+            run(*bounded, execution_window=1)
+        except subprocess.CalledProcessError as error:
+            if error.returncode not in (124, 137):
+                raise
+        except subprocess.TimeoutExpired:
+            if time.monotonic() >= deadline:
+                raise ValueError('deadline')
+            # say is delivered before these servers hang waiting for a reply.
+    else:
+        run(*args)
+
+def player_state(instance):
+    if native_bedrock(instance):
+        since = datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00','Z')
+        run('podman','exec','minecraft-'+instance,'send-command','list')
+        for _ in range(5):
+            raw = run('podman','logs','--since',since,'--tail','40','minecraft-'+instance)
+            matches = re.findall(r'There are ([0-9]+)/([0-9]+) players online',raw)
+            if matches:
+                online, maximum = map(int,matches[-1])
+                if not 0 <= online <= maximum <= 1000 or maximum == 0: raise ValueError('players')
+                return online, []
+            time.sleep(0.1)
+        raise ValueError('Bedrock player status unavailable')
+    raw = run('podman', 'exec', 'minecraft-' + instance, 'rcon-cli', 'list')
+    raw = re.sub(r'\x1b\[[0-9;]*m', '', raw)
+    raw = raw.strip()
+    match = players.fullmatch(raw)
+    if not match or '\x1b' in raw:
+        raise ValueError('players')
+    online, maximum = int(match[1]), int(match[2])
+    names = [name.strip() for name in match[3].split(',')] if match[3].strip() else []
+    if not 0 <= online <= maximum <= 1000 or maximum == 0 or len(names) != online or any(not name for name in names):
+        raise ValueError('players')
+    return online, names
+
+def prepare(instance):
+    try:
+        software = validate(instance)
+        container = 'minecraft-' + instance
+        if run('podman', 'inspect', '--type', 'container', '--format', '{{.State.Running}}', container) != 'true':
+            return True
+        online, names = player_state(instance)
+        if online:
+            return True
+        graceful_request(instance, software)
+        return True
+    except Exception:
+        return False
+
+def discover():
+    # Reuse committed runtime directories and immutable registry identities.
+    # Also reject orphan Quadlets: missing runtime evidence cannot mean empty.
+    instances = []
+    if os.path.lexists(root):
+        private(root, True)
+        instances = sorted(os.listdir(root))
+    if len(instances) > 1024:
+        raise ValueError('count')
+    if os.path.lexists(registry):
+        private(registry, True)
+        # A registered identity with missing runtime evidence must not silently
+        # become an empty appliance. Presentation metadata is never identity.
+        for entry in os.listdir(registry):
+            if entry.startswith('jv-'):
+                identity = entry[:-5] if entry.endswith('.json') else ''
+                if identity not in instances or not pattern.fullmatch(identity):
+                    raise ValueError('registry coverage')
+    elif instances:
+        raise ValueError('registry unavailable')
+    for instance in instances:
+        validate(instance)
+    quadlets = '/etc/containers/systemd'
+    if os.path.lexists(quadlets):
+        for entry in os.listdir(quadlets):
+            if entry.startswith('minecraft-jv-') and entry.endswith('.container'):
+                if entry[len('minecraft-'):-len('.container')] not in instances:
+                    raise ValueError('coverage')
+    return instances
+
+def running(instance):
+    unit = 'minecraft-' + instance + '.service'
+    state = run('systemctl', 'show', '--property=ActiveState', '--value', unit)
+    containers = run('podman', 'ps', '--filter', 'name=^minecraft-' + instance + '$', '--format', '{{.Names}}')
+    if state == 'active' and containers == 'minecraft-' + instance:
+        return True
+    if state in ('inactive', 'failed') and not containers:
+        return False
+    raise ValueError('runtime state')
+
+def stop_state(instance):
+    # A terminal unit still needs container evidence. Include paused and
+    # stopping containers when checking the exact name.
+    unit = 'minecraft-' + instance + '.service'
+    properties = run('systemctl', 'show', '--property=LoadState,ActiveState', '--', unit).splitlines()
+    if len(properties) != 2 or 'LoadState=loaded' not in properties:
+        raise ValueError('stop unit state')
+    active = next(prop for prop in properties if prop != 'LoadState=loaded')
+    if active in ('ActiveState=active', 'ActiveState=activating', 'ActiveState=deactivating'):
+        return None
+    if active not in ('ActiveState=inactive', 'ActiveState=failed'):
+        raise ValueError('stop unit state')
+    name = 'minecraft-' + instance
+    containers = run('podman', 'ps', '--all', '--filter', 'name=^' + name + '$', '--format', '{{.Names}}')
+    if containers:
+        if containers != name:
+            raise ValueError('stop container identity')
+        state = run('podman', 'inspect', '--type', 'container', '--format', '{{.State.Status}}', name)
+        if state in ('running', 'paused', 'stopping'):
+            return None
+        if state not in ('created', 'stopped', 'exited'):
+            raise ValueError('stop container state')
+    return active.split('=', 1)[1]
+
+def drained(instance):
+    state = stop_state(instance)
+    if state == 'failed':
+        run('systemctl', 'reset-failed', '--', 'minecraft-' + instance + '.service')
+        if stop_state(instance) != 'inactive':
+            raise ValueError('stop normalization')
+        return True
+    return state == 'inactive'
+
+def snapshot(query_players):
+    instances = discover()
+    def observe(instance):
+        active = running(instance)
+        online, names = player_state(instance) if active and query_players else (0, [])
+        return dict(id=instance, running=active, online=online, players=names)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
+        states = list(pool.map(observe, instances))
+    return dict(instances=states, online=sum(s['online'] for s in states),
+                players=[name for s in states for name in s['players']])
+
+def saved_snapshot():
+    saved = json.loads(sys.argv[2])
+    states = saved['instances']
+    if len(states) > 1024 or len({s['id'] for s in states}) != len(states):
+        raise ValueError('snapshot')
+    for state in states:
+        if not pattern.fullmatch(state['id']) or type(state['running']) is not bool:
+            raise ValueError('snapshot')
+    return saved
+
+def restore(saved):
+    if not any(state['running'] for state in saved['instances']):
+        return
+    private(root, True)
+    private(registry, True)
+    failed = False
+    for state in saved['instances']:
+        if state['running']:
+            try:
+                validate(state['id'])
+                run('systemctl', 'start', 'minecraft-' + state['id'] + '.service')
+            except Exception:
+                failed = True
+    if failed:
+        raise ValueError('restoration')
+
+def stop(saved):
+    current = snapshot(True)
+    if [(s['id'], s['running']) for s in current['instances']] != [(s['id'], s['running']) for s in saved['instances']]:
+        raise ValueError('runtime changed')
+    confirmed = len(sys.argv) > 3 and sys.argv[3] == 'confirmed'
+    if current['online'] and not confirmed:
+        raise ValueError('players changed')
+    warning = int(sys.argv[4]) if len(sys.argv) > 4 else 60
+    if warning not in (10, 60):
+        raise ValueError('warning')
+    active = [s for s in current['instances'] if s['running']]
+    empty = [s for s in active if not s['online']]
+    occupied = [s for s in active if s['online']]
+    def begin_stop(state):
+        instance = state['id']
+        software = validate(instance)
+        if software != 'neoforge':
+            graceful_request(instance, software)
+        run('systemctl', '--no-block', 'stop', 'minecraft-' + instance + '.service')
+        if software == 'neoforge':
+            try:
+                graceful_request(instance, software)
+            except (OSError, ValueError, subprocess.SubprocessError):
+                if not drained(instance):
+                    raise
+    for state in empty:
+        begin_stop(state)
+    if occupied:
+        previous = warning
+        points = ([60, 30, 15, 10] if warning == 60 else [10]) + [5, 4, 3, 2, 1, 0]
+        for point in points:
+            if previous != point:
+                time.sleep(previous - point)
+            for state in occupied:
+                if not running(state['id']):
+                    raise ValueError('countdown runtime changed')
+                if point:
+                    shutdown_announcement(state['id'], point)
+            previous = point
+        for state in occupied:
+            begin_stop(state)
+    while not all(drained(state['id']) for state in active):
+        if time.monotonic() >= deadline:
+            raise ValueError('stop timeout')
+        time.sleep(1)
+
+if mode != 'guard':
+    try:
+        if mode in ('status', 'check'):
+            print(json.dumps(snapshot(mode == 'check')))
+        elif mode == 'stop':
+            stop(saved_snapshot())
+        elif mode == 'restore':
+            restore(saved_snapshot())
+        else:
+            raise ValueError('mode')
+    except Exception:
+        print('ERROR: Authoritative instance shutdown operation could not be completed safely.', file=sys.stderr)
+        raise SystemExit(1)
+    raise SystemExit(0)
+
+try:
+    if not os.path.lexists(root):
+        raise SystemExit(0)
+    private(root, True)
+    private(registry, True)
+    instances = sorted(os.listdir(root))
+    if len(instances) > 1024:
+        raise ValueError('count')
+    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
+        results = list(pool.map(prepare, instances))
+    if not all(results):
+        print('WARNING: Some instance player states were unavailable; normal graceful shutdown delays are preserved.', flush=True)
+except Exception:
+    print('WARNING: Instance shutdown discovery was unavailable; normal graceful shutdown delays are preserved.', flush=True)
+PY
+status=$?
+if [[ ${mode} != guard ]]; then
+    exit "${status}"
+fi
+if (( status != 0 )); then
+    echo 'WARNING: Instance shutdown preparation exceeded its safety window; normal graceful shutdown continues.' >&2
+fi
+exit 0

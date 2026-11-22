@@ -1,43 +1,44 @@
----
 name: Development
-
 on:
+  pull_request:
+    branches: [testing]
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-testing
-  cancel-in-progress: true
+  group: development-testing-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
+  IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/justvoxel-dev
+  CURRENT_TAG: 'testing'
   RECHUNK_MAX_LAYERS: '127'
   OCI_LAYER_LIMIT: '128'
-  ALMA_REPOS_IMAGE: quay.io/almalinuxorg/10-base:10
-  BOOTC_IMAGECTL_IMAGE: quay.io/centos-bootc/centos-bootc:stream10
-  ALMA_BUILDER_IMAGE: quay.io/almalinuxorg/10-kitten-base:10-kitten
+  HOME_SERVER_BASE_IMAGE: ghcr.io/home-server-project/home-server-base-10:stable
+  MANAGEMENT_PACKAGE: ghcr.io/home-server-project/justvoxel-management-agent:testing
 
 jobs:
-  build:
+  source-tests:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/source-checks.yml
+
+  validate-image:
+    if: github.event_name == 'pull_request'
+    needs: source-tests
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-      packages: write
-      id-token: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - variant: vm
-            target: justvoxel-vm
-            repository: justvoxel-vm
-          - variant: baremetal
-            target: justvoxel-baremetal
-            repository: justvoxel-baremetal
-
     steps:
-      - name: Checkout testing branch
+      - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: testing
+          persist-credentials: false
+
+      - name: Set up Go for local WebUI build
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: ".go-version"
+          cache: false
 
       - name: Install build dependencies
         shell: bash
@@ -49,86 +50,56 @@ jobs:
       - name: Install Cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
-          cosign-release: 'v3.1.2'
+          cosign-release: 'v3.1.3'
 
-      - name: Resolve Alma build inputs
-        id: inputs
+      - name: Verify Home Server Base stable signature
         shell: bash
         run: |
           set -euo pipefail
-          resolve_ref() {
-            local image="$1" digest
-            digest="$(skopeo inspect --override-arch amd64 --format '{{.Digest}}' "docker://${image}")"
-            [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
-            printf '%s@%s' "${image%:*}" "${digest}"
-          }
-          echo "repos_ref=$(resolve_ref "${ALMA_REPOS_IMAGE}")" >> "${GITHUB_OUTPUT}"
-          echo "imagectl_ref=$(resolve_ref "${BOOTC_IMAGECTL_IMAGE}")" >> "${GITHUB_OUTPUT}"
-          echo "builder_ref=$(resolve_ref "${ALMA_BUILDER_IMAGE}")" >> "${GITHUB_OUTPUT}"
+          cosign verify \
+            --new-bundle-format=false \
+            --key cosign.pub \
+            "${HOME_SERVER_BASE_IMAGE}" >/dev/null
 
-      - name: Build ${{ matrix.variant }} image
+      - name: Build Management Agent from source
+        uses: ./.github/actions/build-management
+
+      - name: Build and validate Development
+        uses: ./.github/actions/build-dev
+
+  build:
+    concurrency: management-package-testing
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/testing'
+    name: Build JustVoxel development image testing
+    needs: [source-tests]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Go for local WebUI build
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: ".go-version"
+          cache: false
+
+      - name: Install build dependencies
         shell: bash
-        env:
-          ALMA_REPOS_REF: ${{ steps.inputs.outputs.repos_ref }}
-          BOOTC_IMAGECTL_REF: ${{ steps.inputs.outputs.imagectl_ref }}
-          ALMA_BUILDER_REF: ${{ steps.inputs.outputs.builder_ref }}
-          TARGET: ${{ matrix.target }}
-          VARIANT: ${{ matrix.variant }}
         run: |
           set -euo pipefail
-          image_repo="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ matrix.repository }}"
-          sudo podman build \
-            --pull=always \
-            --security-opt=label=disable \
-            --cap-add=all \
-            --device /dev/fuse \
-            --build-arg "ALMA_REPOS_IMAGE=${ALMA_REPOS_REF}" \
-            --build-arg "BOOTC_IMAGECTL_IMAGE=${BOOTC_IMAGECTL_REF}" \
-            --build-arg "ALMA_BUILDER_IMAGE=${ALMA_BUILDER_REF}" \
-            --build-arg "JUSTVOXEL_VM_REPOSITORY=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/justvoxel-vm" \
-            --build-arg "JUSTVOXEL_BAREMETAL_REPOSITORY=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/justvoxel-baremetal" \
-            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
-            --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --target "${TARGET}" \
-            --tag "justvoxel-${VARIANT}:unrechunked" \
-            --file Containerfile \
-            .
-          echo "IMAGE_REPOSITORY=${image_repo}" >> "${GITHUB_ENV}"
+          sudo apt-get update
+          sudo apt-get install -y podman skopeo jq
 
-      - name: Rechunk ${{ matrix.variant }} image
-        id: rechunk
-        shell: bash
-        env:
-          VARIANT: ${{ matrix.variant }}
-        run: |
-          set -euo pipefail
-          rechunk_tmp="${RUNNER_TEMP}/justvoxel-${VARIANT}-rechunk"
-          sudo mkdir -p "${rechunk_tmp}"
-          sudo chmod 1777 "${rechunk_tmp}"
-          sudo podman run --rm --privileged \
-            -v /var/lib/containers:/var/lib/containers \
-            -v "${rechunk_tmp}:/var/tmp" \
-            --entrypoint /usr/libexec/bootc-base-imagectl \
-            "localhost/justvoxel-${VARIANT}:unrechunked" \
-            rechunk \
-            --max-layers "${RECHUNK_MAX_LAYERS}" \
-            "localhost/justvoxel-${VARIANT}:unrechunked" \
-            "localhost/justvoxel-${VARIANT}:test"
-          layer_count="$(sudo skopeo inspect --raw "containers-storage:localhost/justvoxel-${VARIANT}:test" | jq -r '.layers | length')"
-          [[ "${layer_count}" =~ ^[0-9]+$ ]]
-          (( layer_count <= OCI_LAYER_LIMIT ))
-          echo "layers=${layer_count}" >> "${GITHUB_OUTPUT}"
-
-      - name: Validate completed image
-        shell: bash
-        env:
-          VARIANT: ${{ matrix.variant }}
-        run: |
-          set -euo pipefail
-          sudo podman run --rm \
-            --entrypoint /bin/bash \
-            "justvoxel-${VARIANT}:test" \
-            -c "/usr/libexec/justvoxel/health/common && /usr/libexec/justvoxel/health/${VARIANT} && bootc container lint --fatal-warnings"
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: 'v3.1.3'
 
       - name: Login to GHCR
         shell: bash
@@ -142,36 +113,69 @@ jobs:
             ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
           chmod 600 "${HOME}/.docker/config.json"
 
-      - name: Push testing image
+      - name: Prepare verified Management Agent
+        uses: ./.github/actions/prepare-management
+        with:
+          signing-key: ${{ secrets.SIGNING_SECRET }}
+
+      - name: Build and validate Development
+        uses: ./.github/actions/build-dev
+
+      - name: Push testing development image
         id: push
         shell: bash
-        env:
-          VARIANT: ${{ matrix.variant }}
         run: |
           set -euo pipefail
-          sudo podman tag "justvoxel-${VARIANT}:test" "${IMAGE_REPOSITORY}:testing"
+          build_tag="testing-$(date -u +%Y%m%d)-${GITHUB_SHA:0:7}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "BUILD_TAG=${build_tag}" >> "${GITHUB_ENV}"
+
+          sudo podman tag justvoxel-dev:build "${IMAGE_REPOSITORY}:${build_tag}"
+          sudo podman tag justvoxel-dev:build "${IMAGE_REPOSITORY}:${CURRENT_TAG}"
+
           sudo podman push \
             --authfile "${HOME}/.docker/config.json" \
             --digestfile /tmp/digest \
-            "${IMAGE_REPOSITORY}:testing"
+            "${IMAGE_REPOSITORY}:${build_tag}"
+          sudo podman push \
+            --authfile "${HOME}/.docker/config.json" \
+            "${IMAGE_REPOSITORY}:${CURRENT_TAG}"
+
           digest="$(cat /tmp/digest)"
           [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
           echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
 
-      - name: Sign testing image digest
+      - name: Sign testing development image digest
         shell: bash
         env:
           COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
           DIGEST: ${{ steps.push.outputs.digest }}
         run: |
           set -euo pipefail
-          cosign sign -y \
+          signing_log="$(mktemp "${RUNNER_TEMP}/cosign-sign.XXXXXX")"
+          trap 'rm -f "${signing_log}"' EXIT
+          if cosign sign -y \
             --new-bundle-format=false \
             --use-signing-config=false \
             --key env://COSIGN_PRIVATE_KEY \
-            "${IMAGE_REPOSITORY}@${DIGEST}"
+            "${IMAGE_REPOSITORY}@${DIGEST}" >"${signing_log}" 2>&1; then
+            cat "${signing_log}"
+          else
+            signing_status=$?
+            cat "${signing_log}"
+            if grep -Fq '[409]' "${signing_log}" && \
+               grep -Fq 'an equivalent entry already exists in the transparency log' "${signing_log}"; then
+              echo 'Rekor reports an equivalent entry already exists (409); verifying the exact pushed digest.'
+              cosign verify \
+                --new-bundle-format=false \
+                --key cosign.pub \
+                "${IMAGE_REPOSITORY}@${DIGEST}"
+              echo "Existing signature for the exact digest ${IMAGE_REPOSITORY}@${DIGEST} was verified."
+            else
+              exit "${signing_status}"
+            fi
+          fi
 
-      - name: Verify testing signature
+      - name: Verify testing development signature
         shell: bash
         env:
           DIGEST: ${{ steps.push.outputs.digest }}
@@ -182,20 +186,21 @@ jobs:
             --key cosign.pub \
             "${IMAGE_REPOSITORY}@${DIGEST}"
 
-      - name: Build summary
-        if: always()
-        shell: bash
-        env:
-          VARIANT: ${{ matrix.variant }}
-          LAYERS: ${{ steps.rechunk.outputs.layers }}
-          DIGEST: ${{ steps.push.outputs.digest }}
-        run: |
-          {
-            echo "## JustVoxel ${VARIANT} testing"
-            echo
-            echo "- Base: AlmaLinux 10 minimal-plus"
-            echo "- Rechunked layers: ${LAYERS:-unknown} / ${OCI_LAYER_LIMIT}"
-            echo "- Image: ${IMAGE_REPOSITORY:-unknown}:testing"
-            echo "- Digest: ${DIGEST:-not-published}"
-            echo "- GitHub Release: none (testing never creates releases)"
-          } >> "${GITHUB_STEP_SUMMARY}"
+  cleanup:
+    name: cleanup
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write
+
+    steps:
+      - name: Remove expired testing development images
+        uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          packages: justvoxel-dev
+          delete-tags: 'testing-*'
+          exclude-tags: 'testing,stable,stable-*'
+          older-than: 45 days
+          keep-n-tagged: 7
+          validate: true

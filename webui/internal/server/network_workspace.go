@@ -1,0 +1,615 @@
+package server
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/home-server-project/justvoxel-webui/internal/api"
+)
+
+type networkAPI interface {
+	NetworkStatus(ctx context.Context, session string) (api.NetworkStatus, error)
+	WiFiNetworks(ctx context.Context, session, interfaceName string) (api.WiFiNetworksResponse, error)
+	RequestWiFiScan(ctx context.Context, session, interfaceName string) error
+	CreateNetworkCheckpoint(ctx context.Context, session string, interfaces []string, timeout uint32) (api.NetworkCheckpoint, error)
+	NetworkCheckpoint(ctx context.Context, session, id string) (api.NetworkCheckpoint, error)
+	ConfirmNetworkCheckpoint(ctx context.Context, session, id string) error
+	RollbackNetworkCheckpoint(ctx context.Context, session, id string) (api.NetworkCheckpointRollback, error)
+	SetWiFiRadio(ctx context.Context, session string, enabled bool, checkpointID string) (api.NetworkWiFiMutation, error)
+	ConnectWiFi(ctx context.Context, session, interfaceName string, request api.NetworkWiFiConnectRequest) (api.NetworkWiFiMutation, error)
+	DisconnectWiFi(ctx context.Context, session, interfaceName, checkpointID string) (api.NetworkWiFiMutation, error)
+	ForgetWiFiProfile(ctx context.Context, session, profileUUID string) (api.NetworkWiFiMutation, error)
+}
+
+func (a *App) registerNetworkWorkspaceRoutes(mux *http.ServeMux) {
+	a.registerRouterOSRoutes(mux)
+	mux.HandleFunc("GET /api/network", a.networkStatus)
+	mux.HandleFunc("POST /api/network/remote-access/playit/relink", a.networkPlayitRelink)
+	mux.HandleFunc("GET /api/network/remote-access/playit/setup", a.networkPlayitSetup)
+	mux.HandleFunc("POST /api/network/remote-access/playit/setup", a.networkPlayitSetup)
+	mux.HandleFunc("POST /api/network/remote-access/nordvpn/login", a.networkNordLogin)
+	mux.HandleFunc("GET /api/network/remote-access", a.networkRemoteAccessStatus)
+	mux.HandleFunc("POST /api/network/remote-access/{provider}", a.networkConfigurationChange)
+	mux.HandleFunc("POST /api/network/ethernet/{interface}", a.networkConfigurationChange)
+	mux.HandleFunc("POST /api/network/reconnect/{interface}", a.networkConfigurationChange)
+	mux.HandleFunc("POST /api/network/connectivity-check", a.networkConfigurationChange)
+	mux.HandleFunc("GET /api/network/wifi/{interface}/networks", a.networkWiFiNetworks)
+	mux.HandleFunc("POST /api/network/wifi/{interface}/scan", a.networkWiFiScan)
+	mux.HandleFunc("POST /api/network/checkpoints", a.networkCheckpointCreate)
+	mux.HandleFunc("GET /api/network/checkpoints/{id}", a.networkCheckpointStatus)
+	mux.HandleFunc("POST /api/network/checkpoints/{id}/confirm", a.networkCheckpointConfirm)
+	mux.HandleFunc("POST /api/network/checkpoints/{id}/rollback", a.networkCheckpointRollback)
+	mux.HandleFunc("POST /api/network/wifi/radio", a.networkWiFiRadioChange)
+	mux.HandleFunc("POST /api/network/wifi/{interface}/connect", a.networkWiFiConnectChange)
+	mux.HandleFunc("POST /api/network/wifi/{interface}/disconnect", a.networkWiFiDisconnectChange)
+	mux.HandleFunc("POST /api/network/wifi/profiles/{uuid}/forget", a.networkWiFiForgetChange)
+}
+
+func (a *App) networkStatus(w http.ResponseWriter, r *http.Request) {
+	session, ok := a.networkSession(w, r)
+	if !ok {
+		return
+	}
+	client, ok := a.api.(networkAPI)
+	if !ok {
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.913e6bb55f33"))
+		return
+	}
+	status, err := client.NetworkStatus(r.Context(), session)
+	if !a.handleNetworkAPIError(w, err) {
+		return
+	}
+	identityClient, ok := a.api.(sessionIdentityAPI)
+	if !ok {
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.a140ed2343d7"))
+		return
+	}
+	identity, err := identityClient.Session(r.Context(), session)
+	if !a.handleNetworkAPIError(w, err) {
+		return
+	}
+	status.WorkspaceTabs = networkWorkspaceTabs(identity.Role)
+	if !isAdministratorLevel(identity.Role) {
+		status.PendingCheckpoints = nil
+	}
+	writeNetworkWebJSON(w, http.StatusOK, status)
+}
+
+func (a *App) networkWiFiNetworks(w http.ResponseWriter, r *http.Request) {
+	session, ok := a.networkSession(w, r)
+	if !ok {
+		return
+	}
+	client, ok := a.api.(networkAPI)
+	if !ok {
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.913e6bb55f33"))
+		return
+	}
+	networks, err := client.WiFiNetworks(r.Context(), session, r.PathValue("interface"))
+	if !a.handleNetworkAPIError(w, err) {
+		return
+	}
+	writeNetworkWebJSON(w, http.StatusOK, networks)
+}
+
+func (a *App) networkWiFiScan(w http.ResponseWriter, r *http.Request) {
+	if !a.validCSRF(r) {
+		writeNetworkWebError(w, http.StatusForbidden, "invalid CSRF token")
+		return
+	}
+	session, ok := a.networkSession(w, r)
+	if !ok {
+		return
+	}
+	client, ok := a.api.(networkAPI)
+	if !ok {
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.913e6bb55f33"))
+		return
+	}
+	if err := client.RequestWiFiScan(r.Context(), session, r.PathValue("interface")); !a.handleNetworkAPIError(w, err) {
+		return
+	}
+	writeNetworkWebJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
+}
+
+func (a *App) networkCheckpointCreate(w http.ResponseWriter, r *http.Request) {
+	if !a.validCSRF(r) {
+		writeNetworkWebError(w, http.StatusForbidden, "invalid CSRF token")
+		return
+	}
+	session, ok := a.networkAdministratorSession(w, r)
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		writeNetworkWebError(w, http.StatusBadRequest, ui(w, "ui.f854f9255b68"))
+		return
+	}
+
+	interfaces := append([]string(nil), r.Form["interface"]...)
+	if len(interfaces) == 0 {
+		for _, value := range strings.Split(r.FormValue("interfaces"), ",") {
+			if trimmed := strings.TrimSpace(value); trimmed != "" {
+				interfaces = append(interfaces, trimmed)
+			}
+		}
+	}
+	var timeout uint32
+	if raw := strings.TrimSpace(r.FormValue("rollback_timeout_seconds")); raw != "" {
+		parsed, err := strconv.ParseUint(raw, 10, 32)
+		if err != nil {
+			writeNetworkWebError(w, http.StatusBadRequest, "invalid rollback timeout")
+			return
+		}
+		timeout = uint32(parsed)
+	}
+
+	client, ok := a.api.(networkAPI)
+	if !ok {
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.913e6bb55f33"))
+		return
+	}
+	checkpoint, err := client.CreateNetworkCheckpoint(r.Context(), session, interfaces, timeout)
+	if !a.handleNetworkAPIError(w, err) {
+		return
+	}
+	writeNetworkWebJSON(w, http.StatusCreated, checkpoint)
+}
+
+func (a *App) networkCheckpointStatus(w http.ResponseWriter, r *http.Request) {
+	session, ok := a.networkAdministratorSession(w, r)
+	if !ok {
+		return
+	}
+	client, ok := a.api.(networkAPI)
+	if !ok {
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.913e6bb55f33"))
+		return
+	}
+	checkpoint, err := client.NetworkCheckpoint(r.Context(), session, r.PathValue("id"))
+	if !a.handleNetworkAPIError(w, err) {
+		return
+	}
+	writeNetworkWebJSON(w, http.StatusOK, checkpoint)
+}
+
+func (a *App) networkCheckpointConfirm(w http.ResponseWriter, r *http.Request) {
+	if !a.validCSRF(r) {
+		writeNetworkWebError(w, http.StatusForbidden, "invalid CSRF token")
+		return
+	}
+	session, ok := a.networkAdministratorSession(w, r)
+	if !ok {
+		return
+	}
+	client, ok := a.api.(networkAPI)
+	if !ok {
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.913e6bb55f33"))
+		return
+	}
+	if err := client.ConfirmNetworkCheckpoint(r.Context(), session, r.PathValue("id")); !a.handleNetworkAPIError(w, err) {
+		return
+	}
+	writeNetworkWebJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"id":     r.PathValue("id"),
+		"status": "confirmed",
+	})
+}
+
+func (a *App) networkCheckpointRollback(w http.ResponseWriter, r *http.Request) {
+	if !a.validCSRF(r) {
+		writeNetworkWebError(w, http.StatusForbidden, "invalid CSRF token")
+		return
+	}
+	session, ok := a.networkAdministratorSession(w, r)
+	if !ok {
+		return
+	}
+	client, ok := a.api.(networkAPI)
+	if !ok {
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.913e6bb55f33"))
+		return
+	}
+	result, err := client.RollbackNetworkCheckpoint(r.Context(), session, r.PathValue("id"))
+	if !a.handleNetworkAPIError(w, err) {
+		return
+	}
+	writeNetworkWebJSON(w, http.StatusOK, result)
+}
+
+func (a *App) networkWiFiRadioChange(w http.ResponseWriter, r *http.Request) {
+	if !a.validCSRF(r) {
+		writeNetworkWebError(w, http.StatusForbidden, "invalid CSRF token")
+		return
+	}
+	session, ok := a.networkAdministratorSession(w, r)
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		writeNetworkWebError(w, http.StatusBadRequest, "invalid Wi-Fi request")
+		return
+	}
+	enabled, err := strconv.ParseBool(strings.TrimSpace(r.FormValue("enabled")))
+	if err != nil {
+		writeNetworkWebError(w, http.StatusBadRequest, ui(w, "ui.852b976d8789"))
+		return
+	}
+	client, ok := a.api.(networkAPI)
+	if !ok {
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.913e6bb55f33"))
+		return
+	}
+	result, err := client.SetWiFiRadio(r.Context(), session, enabled, strings.TrimSpace(r.FormValue("checkpoint_id")))
+	if !a.handleNetworkAPIError(w, err) {
+		return
+	}
+	writeNetworkWebJSON(w, http.StatusOK, result)
+}
+
+func (a *App) networkWiFiConnectChange(w http.ResponseWriter, r *http.Request) {
+	if !a.validCSRF(r) {
+		writeNetworkWebError(w, http.StatusForbidden, "invalid CSRF token")
+		return
+	}
+	session, ok := a.networkAdministratorSession(w, r)
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		writeNetworkWebError(w, http.StatusBadRequest, "invalid Wi-Fi request")
+		return
+	}
+	client, ok := a.api.(networkAPI)
+	if !ok {
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.913e6bb55f33"))
+		return
+	}
+	request := api.NetworkWiFiConnectRequest{
+		CheckpointID:  strings.TrimSpace(r.FormValue("checkpoint_id")),
+		ProfileUUID:   strings.TrimSpace(r.FormValue("profile_uuid")),
+		SSID:          r.FormValue("ssid"),
+		BSSID:         strings.TrimSpace(r.FormValue("bssid")),
+		KeyManagement: strings.TrimSpace(r.FormValue("key_management")),
+		Password:      r.FormValue("password"),
+		Hidden:        r.FormValue("hidden") == "true",
+	}
+	result, err := client.ConnectWiFi(r.Context(), session, r.PathValue("interface"), request)
+	request.Password = ""
+	if !a.handleNetworkAPIError(w, err) {
+		return
+	}
+	writeNetworkWebJSON(w, http.StatusOK, result)
+}
+
+func (a *App) networkWiFiDisconnectChange(w http.ResponseWriter, r *http.Request) {
+	if !a.validCSRF(r) {
+		writeNetworkWebError(w, http.StatusForbidden, "invalid CSRF token")
+		return
+	}
+	session, ok := a.networkAdministratorSession(w, r)
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		writeNetworkWebError(w, http.StatusBadRequest, "invalid Wi-Fi request")
+		return
+	}
+	client, ok := a.api.(networkAPI)
+	if !ok {
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.913e6bb55f33"))
+		return
+	}
+	result, err := client.DisconnectWiFi(
+		r.Context(),
+		session,
+		r.PathValue("interface"),
+		strings.TrimSpace(r.FormValue("checkpoint_id")),
+	)
+	if !a.handleNetworkAPIError(w, err) {
+		return
+	}
+	writeNetworkWebJSON(w, http.StatusOK, result)
+}
+
+func (a *App) networkWiFiForgetChange(w http.ResponseWriter, r *http.Request) {
+	if !a.validCSRF(r) {
+		writeNetworkWebError(w, http.StatusForbidden, "invalid CSRF token")
+		return
+	}
+	session, ok := a.networkAdministratorSession(w, r)
+	if !ok {
+		return
+	}
+	client, ok := a.api.(networkAPI)
+	if !ok {
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.913e6bb55f33"))
+		return
+	}
+	result, err := client.ForgetWiFiProfile(r.Context(), session, r.PathValue("uuid"))
+	if !a.handleNetworkAPIError(w, err) {
+		return
+	}
+	writeNetworkWebJSON(w, http.StatusOK, result)
+}
+
+func (a *App) networkAdministratorSession(w http.ResponseWriter, r *http.Request) (string, bool) {
+	session, ok := a.networkSession(w, r)
+	if !ok {
+		return "", false
+	}
+	client, ok := a.api.(sessionIdentityAPI)
+	if !ok {
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.a140ed2343d7"))
+		return "", false
+	}
+	identity, err := client.Session(r.Context(), session)
+	if !a.handleNetworkAPIError(w, err) {
+		return "", false
+	}
+	if !isAdministratorLevel(identity.Role) {
+		writeNetworkWebError(w, http.StatusForbidden, ui(w, "ui.031cc7a3ec82"))
+		return "", false
+	}
+	return session, true
+}
+
+func (a *App) networkSession(w http.ResponseWriter, r *http.Request) (string, bool) {
+	if mustChange(r) {
+		writeNetworkWebError(w, http.StatusForbidden, "password change required")
+		return "", false
+	}
+	session, ok := sessionFromRequest(r)
+	if !ok {
+		writeNetworkWebError(w, http.StatusUnauthorized, "authentication required")
+		return "", false
+	}
+	return session, true
+}
+
+func (a *App) handleNetworkAPIError(w http.ResponseWriter, err error) bool {
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, api.ErrUnauthorized) {
+		writeNetworkWebError(w, http.StatusUnauthorized, "authentication required")
+		return false
+	}
+	if errors.Is(err, api.ErrPasswordChangeRequired) {
+		writeNetworkWebError(w, http.StatusForbidden, "password change required")
+		return false
+	}
+	var responseErr *api.ResponseError
+	if errors.As(err, &responseErr) {
+		status := responseErr.StatusCode
+		if status < 400 || status > 599 {
+			status = http.StatusBadGateway
+		}
+		message := responseErr.Message
+		if strings.TrimSpace(message) == "" {
+			message = ui(w, "ui.4130c162a583")
+		}
+		writeNetworkWebError(w, status, message)
+		return false
+	}
+	writeNetworkWebError(w, http.StatusBadGateway, ui(w, "ui.913e6bb55f33"))
+	return false
+}
+
+func writeNetworkWebJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
+}
+
+func writeNetworkWebError(w http.ResponseWriter, status int, message string) {
+	writeNetworkWebJSON(w, status, map[string]string{"error": message})
+}
+
+// Extensions use the existing API client and Unix-socket transport.
+type networkConfigurationAPI interface {
+	RemoteAccessStatus(context.Context, string) (api.RemoteAccessStatus, error)
+	ChangeRemoteAccess(context.Context, string, string, string) (api.RemoteAccessChange, error)
+	ConfigureEthernet(context.Context, string, string, api.EthernetSettings) (api.NetworkWiFiMutation, error)
+	CheckNetworkConnectivity(context.Context, string) error
+	ReconnectNetwork(context.Context, string, string, string, string) (api.NetworkWiFiMutation, error)
+}
+
+func (a *App) networkRemoteAccessStatus(w http.ResponseWriter, r *http.Request) {
+	session, ok := a.networkSession(w, r)
+	if !ok {
+		return
+	}
+	client, ok := a.api.(networkConfigurationAPI)
+	if !ok {
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.913e6bb55f33"))
+		return
+	}
+	status, err := client.RemoteAccessStatus(r.Context(), session)
+	if !a.handleNetworkAPIError(w, err) {
+		return
+	}
+	writeNetworkWebJSON(w, http.StatusOK, status)
+}
+
+func (a *App) networkConfigurationChange(w http.ResponseWriter, r *http.Request) {
+	if r.PathValue("provider") == "nordvpn" {
+		r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	}
+	if !a.validCSRF(r) {
+		writeNetworkWebError(w, http.StatusForbidden, "invalid CSRF token")
+		return
+	}
+	session, ok := a.networkAdministratorSession(w, r)
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		writeNetworkWebError(w, http.StatusBadRequest, "invalid network request")
+		return
+	}
+	client, ok := a.api.(networkConfigurationAPI)
+	if !ok {
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.913e6bb55f33"))
+		return
+	}
+	var result any = map[string]bool{"ok": true}
+	var err error
+	switch {
+	case r.PathValue("provider") != "":
+		if r.PathValue("provider") == "nordvpn" {
+			if r.URL.RawQuery != "" || (r.PostForm.Get("action") != "activate" && r.PostForm.Get("action") != "deactivate") {
+				writeNetworkWebError(w, http.StatusBadRequest, "invalid NordVPN action")
+				return
+			}
+			for key, values := range r.PostForm {
+				if (key != "action" && key != "csrf") || len(values) != 1 {
+					writeNetworkWebError(w, http.StatusBadRequest, "invalid NordVPN request")
+					return
+				}
+			}
+		}
+		result, err = client.ChangeRemoteAccess(r.Context(), session, r.PathValue("provider"), r.FormValue("action"))
+	case strings.HasPrefix(r.URL.Path, "/api/network/ethernet/"):
+		prefix, prefixErr := strconv.ParseUint(r.FormValue("prefix"), 10, 32)
+		mtu, mtuErr := strconv.ParseUint(r.FormValue("mtu"), 10, 32)
+		autoconnect, autoErr := strconv.ParseBool(r.FormValue("autoconnect"))
+		if prefixErr != nil || mtuErr != nil || autoErr != nil {
+			writeNetworkWebError(w, http.StatusBadRequest, ui(w, "ui.e9154784b4df"))
+			return
+		}
+		settings := api.EthernetSettings{
+			CheckpointID: r.FormValue("checkpoint_id"), ProfileUUID: r.FormValue("profile_uuid"), Method: r.FormValue("method"),
+			Address: r.FormValue("address"), Prefix: uint32(prefix), Gateway: r.FormValue("gateway"),
+			DNS: strings.FieldsFunc(r.FormValue("dns"), func(c rune) bool { return c == ',' || c == ' ' || c == '\n' || c == '\t' }),
+			MTU: uint32(mtu), Autoconnect: autoconnect,
+		}
+		result, err = client.ConfigureEthernet(r.Context(), session, r.PathValue("interface"), settings)
+	case strings.HasPrefix(r.URL.Path, "/api/network/reconnect/"):
+		result, err = client.ReconnectNetwork(r.Context(), session, r.PathValue("interface"), r.FormValue("profile_uuid"), r.FormValue("checkpoint_id"))
+	default:
+		err = client.CheckNetworkConnectivity(r.Context(), session)
+	}
+	if !a.handleNetworkAPIError(w, err) {
+		return
+	}
+	writeNetworkWebJSON(w, http.StatusOK, result)
+}
+
+func networkWorkspaceTabs(role string) []string {
+	if isAdministratorLevel(role) {
+		return []string{uiText("ui.d4b1ea5708dd"), "Ethernet", "Wi-Fi", "Troubleshoot", uiText("ui.7946a3c57900"), uiText("network.router.tab")}
+	}
+	return []string{uiText("ui.d4b1ea5708dd")}
+}
+
+type networkPlayitSetupAPI interface {
+	PlayitSetup(context.Context, string, bool) (api.PlayitSetupState, error)
+}
+
+func (a *App) networkPlayitSetup(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost && !a.validCSRF(r) {
+		writeNetworkWebError(w, http.StatusForbidden, "invalid CSRF token")
+		return
+	}
+	session, ok := a.networkAdministratorSession(w, r)
+	if !ok {
+		return
+	}
+	client, ok := a.api.(networkPlayitSetupAPI)
+	if !ok {
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.d8b364255566"))
+		return
+	}
+	status, err := client.PlayitSetup(r.Context(), session, r.Method == http.MethodPost)
+	if !a.handleNetworkAPIError(w, err) {
+		return
+	}
+	writeNetworkWebJSON(w, http.StatusOK, status)
+}
+
+type networkPlayitRelinkAPI interface {
+	PlayitRelink(context.Context, string) (api.PlayitSetupState, error)
+}
+
+func (a *App) networkPlayitRelink(w http.ResponseWriter, r *http.Request) {
+	if !a.validCSRF(r) {
+		writeNetworkWebError(w, http.StatusForbidden, "invalid CSRF token")
+		return
+	}
+	session, ok := a.networkAdministratorSession(w, r)
+	if !ok {
+		return
+	}
+	client, ok := a.api.(networkPlayitRelinkAPI)
+	if !ok {
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.3c89303b7da2"))
+		return
+	}
+	status, err := client.PlayitRelink(r.Context(), session)
+	if err != nil {
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.cbe7bce2f849"))
+		return
+	}
+	writeNetworkWebJSON(w, http.StatusOK, status)
+}
+
+type networkNordAPI interface {
+	NordVPNTokenLogin(context.Context, string, string) (api.RemoteAccessChange, error)
+}
+
+func (a *App) networkNordLogin(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 16384)
+	if !a.validCSRF(r) {
+		writeNetworkWebError(w, http.StatusForbidden, "invalid CSRF token")
+		return
+	}
+	session, ok := a.networkAdministratorSession(w, r)
+	if !ok {
+		return
+	}
+	if r.URL.RawQuery != "" || r.ParseForm() != nil {
+		writeNetworkWebError(w, http.StatusBadRequest, ui(w, "ui.3347fdbbfc43"))
+		return
+	}
+	for key, values := range r.PostForm {
+		if (key != "token" && key != "csrf") || len(values) != 1 {
+			writeNetworkWebError(w, http.StatusBadRequest, ui(w, "ui.3347fdbbfc43"))
+			return
+		}
+	}
+	token := r.PostForm.Get("token")
+	r.PostForm.Del("token")
+	r.Form.Del("token")
+	if !api.ValidNordAccessToken(token) {
+		token = ""
+		writeNetworkWebError(w, http.StatusBadRequest, ui(w, "ui.3347fdbbfc43"))
+		return
+	}
+	client, ok := a.api.(networkNordAPI)
+	if !ok {
+		writeNetworkWebError(w, http.StatusServiceUnavailable, ui(w, "ui.d7e07eefb756"))
+		return
+	}
+	result, err := client.NordVPNTokenLogin(r.Context(), session, token)
+	token = ""
+	if err != nil {
+		message := ui(w, "ui.bea0b17a3742")
+		if safeMessage, ok := api.ErrorMessage(err); ok {
+			switch safeMessage {
+			case "NordVPN login could not be completed. Check the access token and retry.",
+				ui(w, "ui.6bd3689fa539"):
+				message = safeMessage
+			}
+		}
+		writeNetworkWebError(w, http.StatusServiceUnavailable, message)
+		return
+	}
+	writeNetworkWebJSON(w, http.StatusOK, result)
+}

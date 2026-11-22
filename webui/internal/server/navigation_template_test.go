@@ -1,0 +1,1539 @@
+package server
+
+import (
+	"crypto/sha256"
+	"fmt"
+	"net/http"
+	"regexp"
+	"strings"
+	"testing"
+)
+
+func TestControlCenterNavigationUX(t *testing.T) {
+	header, err := englishPresentationAsset("templates/header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(header)
+	for _, want := range []string{
+		`href="/" aria-label="JustVoxel dashboard"`,
+		`<img class="brand-logo" src="/static/justvoxel-logo.png" alt="JustVoxel">`,
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("authenticated header branding missing %q", want)
+		}
+	}
+	if strings.Contains(markup, `<strong>JV</strong>`) {
+		t.Fatal("authenticated header must use the approved logo")
+	}
+	navigationStart := strings.Index(markup, `<nav class="control-navigation"`)
+	if navigationStart < 0 {
+		t.Fatal("Control Center navigation missing")
+	}
+	navigationEnd := strings.Index(markup[navigationStart:], `</nav>`)
+	if navigationEnd < 0 {
+		t.Fatal("Control Center navigation missing")
+	}
+	navigation := markup[navigationStart : navigationStart+navigationEnd]
+	for _, heading := range []string{"Session &amp; power", "Minecraft", "System"} {
+		if !strings.Contains(markup, `<span class="control-section-label">`+heading+`</span>`) {
+			t.Fatalf("missing Control Center group %s", heading)
+		}
+	}
+	previous := -1
+	for _, heading := range []string{"Session &amp; power", "Minecraft", "System"} {
+		position := strings.Index(markup, `<span class="control-section-label">`+heading+`</span>`)
+		if position <= previous {
+			t.Fatalf("Control Center group %s is out of order", heading)
+		}
+		previous = position
+	}
+	if strings.Contains(navigation, "Temporary") {
+		t.Fatal("workspace launchers still labeled Temporary")
+	}
+	for _, item := range []string{"data-minecraft-open", "data-plugins-open", "data-system-open", "data-network-open", "data-system-monitor-open", "data-system-update-open", "data-storage-open", "data-backups-open", "data-migration-open"} {
+		if strings.Count(navigation, item) != 1 {
+			t.Fatalf("workspace launcher %s must appear once", item)
+		}
+	}
+	for _, old := range []string{`href="/activity"`, `href="/operations`, `href="/settings/`, `href="/password"`, `href="/about"`} {
+		if strings.Contains(navigation, old) {
+			t.Fatalf("legacy standalone link remains: %s", old)
+		}
+	}
+	for _, item := range []string{`class="control-tile nav-admin-only" type="button" data-plugins-open`, `class="control-tile nav-admin-only" type="button" data-system-update-open`, `class="control-tile nav-admin-only" type="button" data-storage-open`, `class="control-tile nav-admin-only" type="button" data-backups-open`, `class="control-tile nav-admin-only" type="button" data-migration-open`} {
+		if !strings.Contains(navigation, item) {
+			t.Fatalf("administrator launcher lost role restriction: %s", item)
+		}
+	}
+	if !strings.Contains(markup, `class="nav-logout"`) || !strings.Contains(markup, `data-system-power`) {
+		t.Fatal("session and power actions missing")
+	}
+	quickLookStart := strings.Index(markup, `<section class="quick-look"`)
+	if quickLookStart < 0 {
+		t.Fatal("Quick Look missing")
+	}
+	quickLookEnd := strings.Index(markup[quickLookStart:], `</section>`)
+	if quickLookEnd < 0 {
+		t.Fatal("Quick Look closing tag missing")
+	}
+	quickLook := markup[quickLookStart : quickLookStart+quickLookEnd]
+	if !strings.Contains(quickLook, `<button class="quick-look-backup-action nav-operator-only" type="button" data-quick-look-backup-create>`) {
+		t.Fatal("operator manual backup needs an accessible native Quick Look button")
+	}
+	if strings.Contains(markup, `/operations#manual-backup`) {
+		t.Fatal("header still links to the legacy manual backup operation")
+	}
+}
+
+func TestMinecraftWorkspaceMigrationContract(t *testing.T) {
+	header, err := englishPresentationAsset("templates/header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(header)
+
+	minecraftSection := strings.Index(markup, `<span class="control-section-label">Minecraft</span>`)
+	minecraftTile := strings.Index(markup, `data-minecraft-open`)
+	if minecraftSection < 0 || minecraftTile < minecraftSection {
+		t.Fatal("Minecraft launcher is missing from its group")
+	}
+
+	for _, want := range []string{
+		`data-workspace-window="minecraft"`,
+		`data-minecraft-tab="overview"`,
+		`data-minecraft-tab="memory"`,
+		`data-minecraft-tab="gameplay"`,
+		`data-minecraft-tab="players"`,
+		`data-minecraft-tab="crossplay"`,
+		`data-version-open`,
+		`data-version-tab="container"`,
+		`data-version-tab="minecraft"`,
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("Minecraft workspace migration contract missing %q", want)
+		}
+	}
+	for _, want := range []string{`data-migration-tab="export"`, `data-migration-tab="import"`, `data-migration-tab="switch"`} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("Server Migration missing %q", want)
+		}
+	}
+	for _, contract := range []struct {
+		workspace string
+		labels    string
+	}{
+		{"version", "Container,Version"},
+		{"migration", "Export,Import,Switch"},
+	} {
+		nav := regexp.MustCompile(`(?s)<nav class="` + contract.workspace + `-workspace-tabs".*?</nav>`).FindString(markup)
+		matches := regexp.MustCompile(`data-`+contract.workspace+`-tab="[^"]+"[^>]*>([^<]+)</button>`).FindAllStringSubmatch(nav, -1)
+		labels := make([]string, 0, len(matches))
+		for _, match := range matches {
+			labels = append(labels, match[1])
+		}
+		if strings.Join(labels, ",") != contract.labels {
+			t.Fatalf("%s normal tabs = %v, want %s", contract.workspace, labels, contract.labels)
+		}
+	}
+	for _, retired := range []string{`data-version-tab="software"`, `data-version-tab="switch"`, `data-migration-tab="recovery"`} {
+		if strings.Contains(markup, retired) {
+			t.Fatalf("normal navigation contains retired tab %q", retired)
+		}
+	}
+	if strings.Contains(markup, `data-minecraft-tab="whitelist"`) {
+		t.Fatal("Minecraft workspace still contains the stale whitelist tab")
+	}
+
+	script, err := englishPresentationAsset("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	behavior := string(script)
+	for _, want := range []string{
+		`document.querySelector("[data-minecraft-open]")`,
+		`requestWorkspaceJSON("/api/dashboard-status")`,
+		`"/api/minecraft/workspace/settings"`,
+		`"/api/minecraft/workspace/settings/plan"`,
+		`"/api/minecraft/workspace/settings/apply"`,
+		`"/api/minecraft/workspace/whitelist"`,
+		`"/api/minecraft/workspace/logs"`,
+		`else if (currentTab === "logs") await renderLogs(sequence, message)`,
+		`title.textContent = "Recent Minecraft logs"`,
+		`const settingsTabs = new Set(["memory", "gameplay", "crossplay"])`,
+	} {
+		if !strings.Contains(behavior, want) {
+			t.Fatalf("Minecraft workspace behavior missing %q", want)
+		}
+	}
+}
+
+func TestSystemWorkspaceMigrationContract(t *testing.T) {
+	header, err := englishPresentationAsset("templates/header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(header)
+
+	systemSection := strings.Index(markup, `<span class="control-section-label">System</span>`)
+	systemTile := strings.Index(markup, `data-system-open`)
+	if systemSection < 0 || systemTile < systemSection {
+		t.Fatal("System launcher is missing from its group")
+	}
+
+	for _, want := range []string{
+		`data-workspace-window="system"`,
+		`data-system-tab="health"`,
+		`data-system-tab="history"`,
+		`data-system-tab="users"`,
+		`data-system-tab="about"`,
+		`data-system-tab="ups"`,
+		`data-system-ups-tab`,
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("System workspace migration contract missing %q", want)
+		}
+	}
+
+	if strings.Contains(markup, `data-system-tab="security"`) {
+		t.Fatal("Security belongs in the Users workspace")
+	}
+
+	script, err := englishPresentationAsset("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	behavior := string(script)
+	for _, want := range []string{
+		`document.querySelector("[data-system-open]")`,
+		`"/api/system/workspace/health"`,
+		`"/api/system/workspace/history"`,
+		`"/api/system/workspace/users"`,
+		`"/api/system/workspace/security"`,
+		`"/api/system/workspace/about"`,
+		`fetch("/api/ups"`,
+		`action.pathname !== "/api/ups/source"`,
+		`host.placeholder = "Hostname or IP address"`,
+		`options.textContent = "Options"`,
+		`actions.append(options, save)`,
+		`finalRow.append(nameLabel, actions)`,
+		`form.append(csrf, modeLabel, hostLabel, portLabel, driverLabel, deviceLabel, finalRow)`,
+		`title.textContent = "UPS options"`,
+		`section.textContent = "Saved UPS source"`,
+		`copy.textContent = "Remove this saved UPS connection and return to a UPS connected directly to this machine."`,
+		`forget.textContent = "Remove saved source"`,
+		`title.textContent = "Remove saved source?"`,
+		`forget.textContent = "Confirm removal"`,
+		`"/api/ups/source/forget"`,
+		`"/api/ups/shutdown"`,
+		`"/api/ups/sharing"`,
+		`shutdownTitle.textContent = "Automatic shutdown"`,
+		`"Shut down after UPS has been on battery"`,
+		`"Shutdown delay (seconds)"`,
+		`sharingTitle.textContent = "Network sharing"`,
+		`"Share this UPS over the network"`,
+		`sharingToggle.field.classList.add("system-ups-shutdown-switch")`,
+		`sharingToggle.input.setAttribute("role", "switch")`,
+		`sharingToggle.input.disabled = true`,
+		`const sharingAvailable = selectedMode === "local"`,
+		`if ((snapshot.available || development) && isAdministratorLevel(user?.role))`,
+		`for (const control of form.elements) control.disabled = true`,
+		`if (!snapshot.available) return`,
+		`name.name = "ups_name"`,
+		`driver.name = "driver"`,
+		`device.name = "device_port"`,
+		`monitorPassword = settingField("Monitor password", "monitor_password", "password", "")`,
+		`clientPassword = settingField("Client password", "client_password", "password", "")`,
+		`snapshot.source.host + ":" + snapshot.source.port`,
+		`data-system-workspace-csrf`,
+	} {
+		if !strings.Contains(behavior, want) && !strings.Contains(markup, want) {
+			t.Fatalf("System workspace behavior missing %q", want)
+		}
+	}
+	upsCSS, err := englishPresentationAsset("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`.system-ups-source-final-row{grid-column:1/-1;display:flex;align-items:end;gap:.65rem;min-width:0}`,
+		`.system-ups-source-final-row>label{flex:1;min-width:0}`,
+		`.system-ups-source-actions{display:flex;align-items:center;gap:.65rem;flex:none}`,
+		`.system-ups-source-actions button{min-height:32px;width:auto;padding:.38rem .65rem;font-size:.8rem}`,
+		`save.textContent = "Save and verify"`,
+	} {
+		if !strings.Contains(string(upsCSS), want) && !strings.Contains(behavior, want) {
+			t.Fatalf("compact UPS final row missing %q", want)
+		}
+	}
+	for _, old := range []string{"192.168.0.51", "blackbox.lan"} {
+		if strings.Contains(behavior, old) {
+			t.Fatalf("UPS UI contains private example %q", old)
+		}
+	}
+
+	systemStart := strings.Index(behavior, `const systemWorkspaceOpen = document.querySelector("[data-system-open]")`)
+	if systemStart < 0 {
+		t.Fatal("System workspace source block missing")
+	}
+	systemBlock := behavior[systemStart:]
+	for _, forbidden := range []string{
+		`new DOMParser()`,
+		`systemFetchPage("/settings/validation")`,
+		`"/settings/activity"`,
+		`systemFetchPage("/settings/users")`,
+		`systemFetchPage("/settings/authentication")`,
+		`systemFetchPage("/about")`,
+	} {
+		if strings.Contains(systemBlock, forbidden) {
+			t.Fatalf("System workspace still depends on legacy rendering path %q", forbidden)
+		}
+	}
+}
+
+func TestWorkspaceCleanupLayoutContract(t *testing.T) {
+	header, err := englishPresentationAsset("templates/header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(header)
+	headerClose := strings.Index(markup, "</header>")
+	quickLook := strings.Index(markup, `class="quick-look"`)
+	systemMonitor := strings.Index(markup, `data-workspace-window="system-monitor"`)
+	if headerClose < 0 || quickLook < 0 || systemMonitor < 0 || headerClose > quickLook || headerClose > systemMonitor {
+		t.Fatal("topbar must close before Quick Look and workspace windows")
+	}
+	if strings.Contains(markup, `data-workspace-resize-handle`) {
+		t.Fatal("workspaces must use native corner resizing")
+	}
+	styles, err := englishPresentationAsset("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{".quick-look{position:fixed", ".system-security-switcher", ".system-health-view", ".password-field-shell", ".password-reveal-button", ".destructive-confirm-slider", "min-width:min(620px"} {
+		if !strings.Contains(string(styles), want) {
+			t.Fatalf("workspace cleanup CSS missing %q", want)
+		}
+	}
+}
+
+func TestQuickLookNetworkFitsSingleTileWithoutTruncatingAddresses(t *testing.T) {
+	styles, err := englishPresentationAsset("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(styles)
+	if strings.Contains(css, ".quick-look-network-tile{grid-column:span 2") {
+		t.Fatal("network Quick Look tile still spans two columns")
+	}
+	for _, want := range []string{
+		".quick-look-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr))",
+		"@media(max-width:900px){.quick-look-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}",
+		".quick-look-network-tile{gap:.13rem;justify-content:center;height:auto",
+		".quick-look-network-tile .network-overlay-list{gap:.13rem;margin-top:0}",
+		".quick-look-network-row,.network-overlay-list>span{display:grid!important;grid-template-columns:4.25rem minmax(0,1fr);align-items:baseline;gap:.5rem",
+		".quick-look-network-row>strong,.network-overlay-list>span>strong{min-width:0;overflow-wrap:anywhere",
+	} {
+		if !strings.Contains(css, want) {
+			t.Fatalf("network Quick Look layout missing %q", want)
+		}
+	}
+}
+
+func TestBackupsLibraryLeadsWorkspaceAndOwnsActions(t *testing.T) {
+	content, err := englishPresentationAsset("templates/backups_workspace.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(content)
+	library := strings.Index(markup, `class="backup-library-section"`)
+	automatic := strings.Index(markup, `class="backup-automatic-section"`)
+	destination := strings.Index(markup, `{{template "backup_destination_content" .}}`)
+	if library < 0 || automatic < 0 || destination < 0 || !(library < destination && destination < automatic) {
+		t.Fatal("Backups sections must be ordered Library, Destination, Automatic")
+	}
+	command := strings.Index(markup, `class="backup-command-bar"`)
+	files := strings.Index(markup, `class="backup-file-grid"`)
+	if command < library || (files >= 0 && command < files) || command > destination {
+		t.Fatal("Backup controls must live inside Backup library below the backup files")
+	}
+	styles, err := englishPresentationAsset("static/new-backups.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(styles), ".backup-destination-change>summary{display:flex") {
+		t.Fatal("Change destination must be a normal right-aligned action button")
+	}
+	if got := fmt.Sprintf("%x", sha256.Sum256(styles)); got != "e414942748a1d69286bec340e0e804be95394d864139787560f3cc0cf1a761da" {
+		t.Fatal("new-backups.css must remain frozen; standard action sizing belongs in app.css")
+	}
+	for _, want := range []string{
+		`<button type="submit" class="backup-standard-action">Review settings</button>`,
+		`<summary class="button-link backup-standard-action">Change destination</summary>`,
+		`<button type="submit">Backup Now</button>`,
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("Backups standard action markup missing %q", want)
+		}
+	}
+	baseStyles, err := englishPresentationAsset("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(baseStyles), ".backups-workspace-content .backup-standard-action{min-height:0!important;padding:.5rem .8rem!important;border:0!important;border-radius:8px;font-weight:700!important}") {
+		t.Fatal("Backups standard actions must override historical sizing without changing responsive widths")
+	}
+
+	if strings.Count(string(baseStyles), ".backup-standard-action") != 1 || strings.Contains(string(baseStyles), ".backup-standard-action{min-height:0!important;padding:.72rem 1rem") {
+		t.Fatal("Backups standard actions must have one compact override, with no later forced minimum height")
+	}
+	if strings.Count(markup, `class="backup-standard-action"`) != 1 || strings.Count(markup, `class="button-link backup-standard-action"`) != 1 {
+		t.Fatal("Only Review settings and Change destination may use the compact sizing override")
+	}
+
+	for _, want := range []string{"data-backup-delete-confirmation-control", "data-destructive-slider", "data-destructive-toggle", "data-destructive-submit"} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("Backups destructive confirmation UI missing %q", want)
+		}
+	}
+	if strings.Contains(markup, "Type exactly") || strings.Contains(markup, "Type RESTORE to continue") {
+		t.Fatal("Backups workspace still requires typed destructive confirmation phrases")
+	}
+}
+
+func TestMigrationWorkspaceUsesIndependentWorkspaceRoutes(t *testing.T) {
+	header, err := englishPresentationAsset("templates/header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(header)
+	for _, want := range []string{
+		"data-migration-open",
+		`data-workspace-window="migration"`,
+		`data-migration-tab="export"`,
+		`data-migration-tab="import"`,
+		`data-migration-tab="switch"`,
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("Migration workspace markup missing %q", want)
+		}
+	}
+
+	script, err := englishPresentationAsset("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(script)
+	migrationStart := strings.Index(source, `const migrationOpen = document.querySelector("[data-migration-open]")`)
+	monitorStart := strings.Index(source, `const systemMonitorOpen = document.querySelector("[data-system-monitor-open]")`)
+	if migrationStart < 0 || monitorStart <= migrationStart {
+		t.Fatal("Migration workspace source block missing")
+	}
+	block := source[migrationStart:monitorStart]
+	if !strings.Contains(block, `const sourceKind = body.get("source_kind") || ""`) {
+		t.Fatal("Migration SMB password replay must remain scoped to the Migration workspace")
+	}
+	for _, want := range []string{
+		`document.querySelector("[data-migration-open]")`,
+		`"/workspace/migration/export"`,
+		`"/workspace/migration/import"`,
+		`"/workspace/migration/recovery"`,
+		`window.JustVoxelServerMigrationExport?.init(root)`,
+		`window.JustVoxelServerMigrationImport?.init(root)`,
+		`window.JustVoxelServerMigrationOperation?.init(root)`,
+		`let migrationSourceSMBPassword = ""`,
+		`root.querySelectorAll("[data-migration-source-password-repeat]")`,
+		`data-migration-workspace-root`,
+	} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("Migration workspace behavior missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		`/settings/server-migration`,
+		`new DOMParser()`,
+	} {
+		if strings.Contains(block, forbidden) {
+			t.Fatalf("Migration workspace still depends on legacy rendering %q", forbidden)
+		}
+	}
+
+	for _, name := range []string{
+		"migration_workspace.html",
+		"migration_workspace_export.html",
+		"migration_workspace_export_review.html",
+		"migration_workspace_import.html",
+		"migration_workspace_import_review.html",
+		"migration_workspace_recovery.html",
+		"migration_workspace_recovery_review.html",
+		"migration_workspace_progress.html",
+	} {
+		templateBytes, err := englishPresentationAsset("templates/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		template := string(templateBytes)
+		if !strings.Contains(template, "data-migration-workspace-root") {
+			t.Fatalf("Migration workspace fragment %s is missing its workspace root", name)
+		}
+		if strings.Contains(template, "/settings/server-migration") {
+			t.Fatalf("Migration workspace fragment %s still references legacy routes", name)
+		}
+	}
+}
+
+func TestAuthenticatedTemplatesUseSharedHeader(t *testing.T) {
+	templates, err := assets.ReadDir("templates")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range templates {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".html") {
+			continue
+		}
+		content, err := englishPresentationAsset("templates/" + entry.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		markup := string(content)
+		favicon := `<link rel="icon" type="image/png" href="/static/justvoxel-favicon.png">`
+		headStart := strings.Index(markup, "<head>")
+		if headStart < 0 {
+			if strings.Contains(markup, favicon) {
+				t.Fatalf("partial %s must not own a favicon", entry.Name())
+			}
+			continue
+		}
+		headEnd := strings.Index(markup[headStart:], "</head>")
+		if headEnd < 0 || !strings.Contains(markup[headStart:headStart+headEnd], favicon) {
+			t.Fatalf("full document %s must reference the approved favicon in its head", entry.Name())
+		}
+	}
+	for _, name := range []string{
+		"dashboard.html",
+		"storage_browser.html",
+	} {
+		content, err := englishPresentationAsset("templates/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		markup := string(content)
+		if !strings.Contains(markup, `{{template "app-header" .}}`) {
+			t.Fatalf("%s does not use shared appliance header", name)
+		}
+		if !strings.Contains(markup, `/static/app.js`) {
+			t.Fatalf("%s does not load shared navigation behavior", name)
+		}
+	}
+	password, err := englishPresentationAsset("templates/password.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(password), `{{template "app-header" .}}`) || strings.Contains(string(password), `/static/app.js`) {
+		t.Fatal("password page must remain outside shared navigation")
+	}
+}
+
+func TestStandaloneOperationsUIRetired(t *testing.T) {
+	app, err := New(&fakeAPI{}, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The GET / catch-all makes retired POST routes return 405, proving
+	// their POST handlers are no longer registered.
+	for _, route := range []struct {
+		method string
+		path   string
+		status int
+	}{
+		{http.MethodGet, "/operations", http.StatusNotFound},
+		{http.MethodPost, "/operations/backup", http.StatusMethodNotAllowed},
+		{http.MethodPost, "/operations/whitelist", http.StatusMethodNotAllowed},
+	} {
+		t.Run(route.method+" "+route.path, func(t *testing.T) {
+			response := httptestResponse(app, authenticatedAdminRequest(route.method, route.path, ""))
+			if response.Code != route.status {
+				t.Fatalf("retired route returned %d, want HTTP %d", response.Code, route.status)
+			}
+		})
+	}
+	script, err := englishPresentationAsset("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(script), `path === "/operations"`) {
+		t.Fatal("navigation retains the retired Operations branch")
+	}
+	header, err := englishPresentationAsset("templates/header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(header), `href="/operations`) || strings.Contains(string(header), `href='/operations`) {
+		t.Fatal("header links to retired Operations UI")
+	}
+	if _, err := englishPresentationAsset("templates/operations.html"); err == nil {
+		t.Fatal("retired Operations template remains embedded")
+	}
+}
+
+func TestSetupTemplatesUseThinTopbar(t *testing.T) {
+	for _, name := range []string{"setup_wizard.html", "setup_review.html", "setup_progress.html"} {
+		content, err := englishPresentationAsset("templates/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		markup := string(content)
+		branding := `<img class="brand-logo" src="/static/justvoxel-logo.png" alt="JustVoxel">`
+		for _, want := range []string{
+			`class="setup-header topbar setup-topbar"`,
+			`class="brand-link brand-mark"`,
+			branding,
+			`data-topbar-clock`,
+			`/static/app.js`,
+		} {
+			if !strings.Contains(markup, want) {
+				t.Fatalf("%s thin setup topbar missing %q", name, want)
+			}
+		}
+	}
+}
+
+func TestDashboardCompactResponsiveLayout(t *testing.T) {
+	content, err := englishPresentationAsset("templates/dashboard.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(content)
+	for _, want := range []string{
+		`data-configured="{{.Status.Minecraft.Configured}}"`,
+		`data-dashboard-setup-area`,
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("compact dashboard missing %q", want)
+		}
+	}
+	if strings.Contains(markup, `dashboard-summary`) {
+		t.Fatal("dashboard contains the legacy summary strip")
+	}
+	if strings.Contains(markup, "<h2>Appliance</h2>") {
+		t.Fatal("dashboard contains oversized Appliance panel")
+	}
+
+	css, err := englishPresentationAsset("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	styles := string(css)
+	for _, want := range []string{
+		".dashboard-wallpaper{position:fixed;inset:0;width:100%;height:100dvh;object-fit:cover;object-position:center",
+		"#dashboard::before{content:\"\";position:fixed;inset:0;",
+		// The 36px floating panel plus its vertical margins occupies 44px.
+		"min-height:calc(100dvh - 44px)",
+		".app-header.topbar{",
+		".dashboard-setup-area{display:grid;place-items:center",
+		"#dashboard .dashboard-setup-area .minecraft-setup-invitation{width:min(560px",
+		"@media(max-width:900px)",
+		"@media(max-width:600px){\n  .app-header.topbar{margin:4px;gap:.2rem;padding:0 .3rem}",
+		"@media(max-width:600px){.dashboard-wallpaper.wallpaper-theme-v2{object-position:78% center}}",
+		"inset:var(--jv-workspace-top-inset) .25rem .25rem .25rem!important",
+	} {
+		if !strings.Contains(styles, want) {
+			t.Fatalf("compact dashboard styling missing %q", want)
+		}
+	}
+	// Inspect the final height rule, which overrides the original full-width panel.
+	headerStart := strings.LastIndex(styles, ".app-header.topbar{height:")
+	if headerStart < 0 {
+		t.Fatal("authenticated header height rule is missing")
+	}
+	headerEnd := strings.Index(styles[headerStart:], "}")
+	if headerEnd < 0 {
+		t.Fatal("authenticated header rule is incomplete")
+	}
+	header := styles[headerStart+len(".app-header.topbar{") : headerStart+headerEnd]
+	for _, want := range []string{"height:32px", "min-height:32px", "margin:4px 8px", "padding:0 .5rem", "top:4px", "border-radius:12px"} {
+		if !strings.Contains(";"+header+";", ";"+want+";") {
+			t.Fatalf("authenticated header must retain %s", want)
+		}
+	}
+	if !strings.Contains(markup, `<img class="dashboard-wallpaper" data-dashboard-wallpaper hidden alt="" aria-hidden="true">`) {
+		t.Fatal("dashboard must leave wallpaper hidden and unset for preference restoration")
+	}
+	if _, err := englishPresentationAsset("static/justvoxel-default-wallpaper.jpg"); err == nil {
+		t.Fatal("Old JPG must not remain embedded")
+	}
+	if strings.Contains(styles, "conic-gradient(") {
+		t.Fatal("dashboard must not retain the generated voxel wallpaper")
+	}
+	for _, want := range []string{"object-fit:cover", ".dashboard-wallpaper.wallpaper-theme-v2{object-position:65% center}", `#dashboard::before`} {
+		if !strings.Contains(styles, want) {
+			t.Fatalf("dashboard wallpaper behavior missing %q", want)
+		}
+	}
+	appJS, err := englishPresentationAsset("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"const workspaceTopInset = () => {", `document.querySelector(".app-header.topbar")`, `rootStyle.getPropertyValue("--jv-panel-gap")`, "Math.round((anchor?.getBoundingClientRect().bottom || 0) + gap)", "const minTop = workspaceTopInset();"} {
+		if !strings.Contains(string(appJS), want) {
+			t.Fatalf("workspace clearance below the floating panel missing %q", want)
+		}
+	}
+	inset := strings.Split(strings.Split(string(appJS), "const workspaceTopInset =")[1], "const clampWorkspaceWindow =")[0]
+	if strings.Contains(inset, `document.querySelector(".control-center")`) || strings.Contains(styles, "--jv-panel-gap:6px") {
+		t.Fatal("desktop geometry must use the floating topbar and shared 4px gap")
+	}
+	for _, removed := range []string{"spotlightActive", "hideSpotlight", "--voxel-x", "--voxel-y", `dashboard.addEventListener("pointermove"`} {
+		if strings.Contains(string(appJS), removed) {
+			t.Fatalf("dashboard retains removed spotlight behavior %q", removed)
+		}
+	}
+	for _, removed := range []string{"#dashboard::after", "data-spotlight-active", "--voxel-x", "--voxel-y"} {
+		if strings.Contains(styles, removed) {
+			t.Fatalf("dashboard retains removed spotlight styling %q", removed)
+		}
+	}
+}
+
+func TestWallpaperSettingsUX(t *testing.T) {
+	content, err := englishPresentationAsset("templates/project_footer.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(content)
+	for _, want := range []string{
+		`name="mode" value="builtin" hidden checked`,
+		`<fieldset class="wallpaper-themes">`,
+		`<legend class="muted">Built-in</legend>`,
+		`name="theme" value="v1">V1`,
+		`name="theme" value="v2" checked>V2`,
+		`<fieldset class="wallpaper-appearance"`,
+		`<legend class="muted">Appearance</legend>`,
+		`name="appearance" value="auto" checked>Automatic`,
+		`name="appearance" value="day">Day`,
+		`name="appearance" value="night">Night`,
+		`Day starts<input type="time" name="dayStart" value="07:00"`,
+		`Night starts<input type="time" name="nightStart" value="19:00"`,
+		`<fieldset class="wallpaper-custom">`,
+		`<legend class="muted">Custom</legend>`,
+		`<input type="radio" name="mode" value="url">Web address`,
+		`<input type="radio" name="mode" value="upload">Upload picture`,
+		`data-wallpaper-reset>Reset to default</button>`,
+		`data-wallpaper-cancel>Cancel</button>`,
+		`<button type="submit">Apply</button>`,
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("wallpaper settings markup missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{`Default JustVoxel`, `value="default"`} {
+		if strings.Contains(markup, forbidden) {
+			t.Fatalf("wallpaper settings still contains duplicate default choice %q", forbidden)
+		}
+	}
+
+	content, err = englishPresentationAsset("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	styles := string(content)
+	for _, want := range []string{
+		".wallpaper-panel{width:100%;max-width:760px;margin:0 auto;overflow:visible}",
+		".wallpaper-panel .wallpaper-theme-card{display:grid",
+		".wallpaper-split-preview{display:grid;grid-template-columns:1fr 1fr",
+		".wallpaper-panel .wallpaper-appearance{grid-template-columns:repeat(3,minmax(0,1fr))}",
+		".wallpaper-schedule{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))",
+		".dashboard-wallpaper.wallpaper-theme-v1{object-position:",
+		".dashboard-wallpaper.wallpaper-theme-v2{object-position:",
+	} {
+		if !strings.Contains(styles, want) {
+			t.Fatalf("wallpaper settings styling missing %q", want)
+		}
+	}
+	if strings.Contains(styles, ".wallpaper-panel{max-height:calc(100dvh - 2rem);overflow:auto}") {
+		t.Fatal("wallpaper dialog must not retain the old internal scrolling layout")
+	}
+
+	content, err = englishPresentationAsset("static/wallpaper.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(content)
+	for _, want := range []string{
+		`mode: "builtin", theme: "v2", appearance: "auto", dayStart: "07:00", nightStart: "19:00"`,
+		`if (saved.mode === "default") return defaultPreference();`,
+		"const reset = async () => {\n    preference = defaultPreference();",
+		`savePreference(preference)`,
+		`await storedImage("delete")`,
+		`try { await reset(); }`,
+		`input.checked = input.value === preference.mode`,
+		`form.querySelector('button[type="submit"]').disabled = busy;`,
+		`hidden = mode !== "url"`,
+		`hidden = mode !== "upload"`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("wallpaper settings behavior missing %q", want)
+		}
+	}
+	submitStart := strings.Index(script, `form.addEventListener("submit"`)
+	if submitStart < 0 {
+		t.Fatal("wallpaper Apply handler missing")
+	}
+	for _, want := range []string{
+		`if (!["builtin", "url", "upload"].includes(mode)) return;`,
+		`if (mode === "builtin")`,
+		`savePreference(next)`,
+		`else if (mode === "url")`,
+		`savePreference({ mode: "url", url })`,
+		`else if (mode === "upload")`,
+		`savePreference({ mode: "upload" })`,
+	} {
+		if !strings.Contains(script[submitStart:], want) {
+			t.Fatalf("wallpaper Apply behavior missing %q", want)
+		}
+	}
+}
+
+func TestStorageBrowserInteractionContract(t *testing.T) {
+	templateContent, err := englishPresentationAsset("templates/storage_browser.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(templateContent)
+	for _, want := range []string{
+		`data-storage-disk`,
+		`data-storage-partitions`,
+		`data-storage-partition`,
+		`data-storage-detail-dialog`,
+		`data-storage-detail-close`,
+		`data-storage-whole-disk`,
+		`data-storage-whole-disk-dialog`,
+		`storage-partition-swap`,
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("storage browser markup missing %q", want)
+		}
+	}
+
+	scriptContent, err := englishPresentationAsset("static/storage-browser.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(scriptContent)
+	for _, want := range []string{
+		`function showDetails(panel)`,
+		`if (options.inlineDetails) panel.hidden = false;`,
+		`else panel.showModal();`,
+		`showDetails(detailDialog);`,
+		`function hideDetails(panel)`,
+		`if (options.inlineDetails) panel.hidden = true;`,
+		`else panel.close();`,
+		`hideDetails(detailDialog);`,
+		`detailClose?.addEventListener("click"`,
+		`detailDialog?.addEventListener("cancel", closeActionMenu)`,
+		`"/api/new-storage/whole-disk/" + phase`,
+		`button.setAttribute("aria-pressed"`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("storage browser behavior missing %q", want)
+		}
+	}
+}
+
+func TestStorageBrowserResponsiveStyling(t *testing.T) {
+	content, err := englishPresentationAsset("static/storage-browser.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	styles := string(content)
+	for _, want := range []string{
+		".storage-disk-grid{display:grid",
+		".storage-partition-grid{display:grid",
+		".storage-detail-dialog::backdrop",
+		".storage-partition-swap",
+		"@media(max-width:700px)",
+		"@media(max-width:420px)",
+	} {
+		if !strings.Contains(styles, want) {
+			t.Fatalf("storage browser responsive styling missing %q", want)
+		}
+	}
+}
+
+func TestStorageBrowserReviewedActionFlow(t *testing.T) {
+	templateContent, err := englishPresentationAsset("templates/storage_browser.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(templateContent)
+	for _, want := range []string{
+		`data-storage-action-menu`,
+		`data-storage-action="mount-for-now"`,
+		`data-storage-action="mount-permanently"`,
+		`data-storage-action="make-permanent"`,
+		`data-storage-action="mount-now"`,
+		`data-storage-action="unmount-for-now"`,
+		`data-storage-action="remove-permanent"`,
+		`data-storage-action="format"`,
+		`data-storage-action-dialog`,
+		`data-storage-action-review-button`,
+		`data-storage-action-apply-button`,
+		`data-storage-confirm-slider`,
+		`data-storage-confirm-toggle`,
+		`data-storage-protected-note`,
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("storage action markup missing %q", want)
+		}
+	}
+
+	scriptContent, err := englishPresentationAsset("static/storage-browser.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(scriptContent)
+	for _, want := range []string{
+		`"/api/new-storage/" + request.family + "/" + phase`,
+		`family: "actions"`,
+		`family: "mounts"`,
+		`reviewedPlan.fingerprint`,
+		`data.system === "Yes"`,
+		`data.readonly === "Yes"`,
+		`refreshStorageWorkspace();`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("storage action behavior missing %q", want)
+		}
+	}
+
+	cssContent, err := englishPresentationAsset("static/storage-browser.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	styles := string(cssContent)
+	for _, want := range []string{
+		".storage-action-menu-popover",
+		".storage-action-dialog::backdrop",
+		".storage-action-danger",
+	} {
+		if !strings.Contains(styles, want) {
+			t.Fatalf("storage action styling missing %q", want)
+		}
+	}
+}
+
+func TestStorageBrowserMinecraftMigrationHandoff(t *testing.T) {
+	templateContent, err := englishPresentationAsset("templates/storage_browser.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(templateContent)
+	for _, want := range []string{
+		`data-minecraft-candidate=`,
+		`data-storage-minecraft-migrate`,
+		`data-storage-minecraft-dialog`,
+		`data-storage-minecraft-review`,
+		`data-storage-minecraft-apply`,
+		`data-storage-minecraft-progress`,
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("New Storage Minecraft migration handoff missing %q", want)
+		}
+	}
+	if strings.Contains(markup, "/settings/data-migration") {
+		t.Fatal("New Storage still posts Minecraft migration to the legacy Data Migration page")
+	}
+
+	scriptContent, err := englishPresentationAsset("static/storage-browser.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(scriptContent)
+	for _, want := range []string{
+		`selectedPartition.minecraftCandidate !== "Yes"`,
+		`migrationMount.readOnly = Boolean(existingMount)`,
+		`"/var/mnt/justvoxel-data"`,
+		`migrationDialog.showModal()`,
+		`"/api/new-storage/minecraft-data/plan"`,
+		`"/api/new-storage/minecraft-data/apply"`,
+		`"/api/new-storage/minecraft-data/progress/"`,
+		`showMigrationProgress(payload.operation)`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("New Storage Minecraft migration behavior missing %q", want)
+		}
+	}
+	if strings.Contains(script, "/settings/data-migration") {
+		t.Fatal("New Storage JavaScript still depends on the legacy Data Migration page")
+	}
+}
+
+func TestBackupsWorkspaceCompactLibraryLayout(t *testing.T) {
+	templateContent, err := englishPresentationAsset("templates/backups_workspace.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(templateContent)
+	loaderContent, err := englishPresentationAsset("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`loadBackupsScript("/static/new-backups.js"`,
+		`window.JustVoxelNewBackups?.init(root)`,
+	} {
+		if !strings.Contains(string(loaderContent), want) {
+			t.Fatalf("Backups workspace loader missing %q", want)
+		}
+	}
+	for _, want := range []string{
+		"Backup Now",
+		"Restore selected",
+		"backup-command-bar",
+		"backup-file-grid",
+		"backup-file-card",
+		"/workspace/backups/backup",
+		"/workspace/backups/restore/plan",
+		"/workspace/backups/restore/apply",
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("New Backups template missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{`name="backup_schedule"`, `name="backup_destination"`} {
+		if strings.Contains(markup, forbidden) {
+			t.Fatalf("New Backups unexpectedly exposes unimplemented control %q", forbidden)
+		}
+	}
+
+	cssContent, err := englishPresentationAsset("static/new-backups.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	styles := string(cssContent)
+	for _, want := range []string{
+		".backup-command-bar",
+		".backup-file-grid{display:grid",
+		"@media(max-width:700px)",
+	} {
+		if !strings.Contains(styles, want) {
+			t.Fatalf("New Backups styling missing %q", want)
+		}
+	}
+
+	baseContent, err := englishPresentationAsset("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Every link in the height chain must flex, including the loading wrapper.
+	for _, contract := range []struct {
+		css      string
+		selector string
+		contains []string
+	}{
+		{string(baseContent), ".backups-workspace-body", []string{"display:flex", "flex-direction:column", "flex:1", "min-height:0", "overflow:auto"}},
+		{string(baseContent), ".backups-workspace-body>[data-backups-workspace-content]", []string{"display:flex", "flex-direction:column", "flex:1", "min-height:0"}},
+		{string(baseContent), ".backups-workspace-body .backups-workspace-content", []string{"display:flex", "flex-direction:column", "flex:1", "min-height:0"}},
+		{string(baseContent), ".backups-workspace-body .backups-workspace-content>.backup-library-section", []string{"flex:1 1 auto", "min-height:0", "display:flex", "flex-direction:column"}},
+		{string(baseContent), ".backups-workspace-body .backups-workspace-content>:is(.backup-destination-section,.backup-automatic-section)", []string{"flex:none"}},
+		{string(baseContent), ".backups-workspace-body .backups-workspace-content .backup-file-grid", []string{"flex:1", "min-height:0", "overflow-y:auto"}},
+	} {
+		rules := regexp.MustCompile(regexp.QuoteMeta(contract.selector)+`\{([^}]*)\}`).FindAllStringSubmatch(contract.css, -1)
+		var declarations string
+		for _, rule := range rules {
+			declarations += rule[1] + ";"
+		}
+		for _, want := range contract.contains {
+			if !strings.Contains(declarations, want) {
+				t.Errorf("%s missing %s", contract.selector, want)
+			}
+		}
+		if regexp.MustCompile(`position\s*:\s*(absolute|fixed)|(?:min-|max-)?height\s*:[^;}]*(?:[0-9](?:px|d?vh)|100%)`).MatchString(declarations) {
+			t.Errorf("%s must use normal flex sizing, got %s", contract.selector, declarations)
+		}
+	}
+}
+
+func TestNewBackupsMobileLibraryStaysSingleColumn(t *testing.T) {
+	content, err := englishPresentationAsset("static/new-backups.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	styles := string(content)
+	for _, want := range []string{
+		"@media(max-width:700px)",
+		".backup-file-grid{grid-template-columns:1fr}",
+		".backup-file-status-warning",
+		".backup-command-bar{align-items:stretch;flex-direction:column}",
+	} {
+		if !strings.Contains(styles, want) {
+			t.Fatalf("New Backups mobile styling missing %q", want)
+		}
+	}
+}
+
+func TestBackupsWorkspaceReviewedMultiDeleteFlow(t *testing.T) {
+	templateContent, err := englishPresentationAsset("templates/backups_workspace.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(templateContent)
+	loaderContent, err := englishPresentationAsset("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`loadBackupsScript("/static/new-backups.js"`,
+		`window.JustVoxelNewBackups?.init(root)`,
+	} {
+		if !strings.Contains(string(loaderContent), want) {
+			t.Fatalf("Backups workspace loader missing %q", want)
+		}
+	}
+	for _, want := range []string{
+		`data-backup-select`,
+		`data-backup-delete-selected`,
+		`data-backup-delete-dialog`,
+		`data-backup-delete-confirmation-control`,
+		`data-destructive-slider`,
+		`data-destructive-toggle`,
+		`data-destructive-submit`,
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("New Backups delete UI missing %q", want)
+		}
+	}
+	if strings.Contains(markup, "data-backup-delete-confirmation-phrase") || strings.Contains(markup, "Type exactly") {
+		t.Fatal("New Backups delete UI still contains the retired typed-confirmation flow")
+	}
+
+	scriptContent, err := englishPresentationAsset("static/new-backups.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(scriptContent)
+	for _, want := range []string{
+		`"/api/new-backups/delete/plan"`,
+		`"/api/new-backups/delete/apply"`,
+		`reviewedPlan.fingerprint`,
+		`reviewedPlan.confirmation`,
+		`ids.forEach((id) => body.append("backup_id", id))`,
+		`const workspaceURL = "/workspace/backups?result=deleted&count="`,
+		`window.JustVoxelBackupsWorkspace?.reload`,
+		`await window.JustVoxelBackupsWorkspace.reload(workspaceURL)`,
+		`throw new Error("Backups Workspace reload is unavailable. Refresh the workspace to see the updated library.")`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("New Backups delete behavior missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		`/settings/new-backups`,
+		`pageURL`,
+		`window.location.assign(pageURL)`,
+		`main.new-backups-shell`,
+	} {
+		if strings.Contains(script, forbidden) {
+			t.Fatalf("Backups workspace delete behavior retains retired standalone UI %q", forbidden)
+		}
+	}
+
+	cssContent, err := englishPresentationAsset("static/new-backups.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	styles := string(cssContent)
+	for _, want := range []string{
+		".backup-file-selectable:has(.backup-file-checkbox:checked)",
+		".backup-delete-dialog::backdrop",
+		".backup-delete-review-list",
+	} {
+		if !strings.Contains(styles, want) {
+			t.Fatalf("New Backups delete styling missing %q", want)
+		}
+	}
+}
+
+func TestNewBackupsAutomaticPolicyControls(t *testing.T) {
+	templateContent, err := englishPresentationAsset("templates/backups_workspace.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(templateContent)
+	for _, want := range []string{
+		`name="automatic_enabled"`,
+		`name="daily_time" type="time"`,
+		`name="backup_keep" type="number"`,
+		`/workspace/backups/automatic/plan`,
+		`/workspace/backups/automatic/apply`,
+		"After a successful backup, JustVoxel automatically removes older backups",
+	} {
+		if !strings.Contains(markup, want) {
+			t.Fatalf("New Backups automatic policy UI missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		`name="backup_schedule"`,
+		"Systemd calendar format",
+	} {
+		if strings.Contains(markup, forbidden) {
+			t.Fatalf("New Backups exposed raw scheduler control %q", forbidden)
+		}
+	}
+
+	cssContent, err := englishPresentationAsset("static/new-backups.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	styles := string(cssContent)
+	for _, want := range []string{
+		".backup-automatic-section",
+		".backup-automatic-form{display:grid",
+		"@media(max-width:520px)",
+	} {
+		if !strings.Contains(styles, want) {
+			t.Fatalf("New Backups automatic policy styling missing %q", want)
+		}
+	}
+}
+
+func TestNewBackupsAutomaticPolicyResponsiveLayout(t *testing.T) {
+	content, err := englishPresentationAsset("static/new-backups.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	styles := string(content)
+	for _, want := range []string{
+		"@media(max-width:850px)",
+		".backup-automatic-form{grid-template-columns:1fr 1fr}",
+		"@media(max-width:520px)",
+		".backup-automatic-form{grid-template-columns:1fr}",
+	} {
+		if !strings.Contains(styles, want) {
+			t.Fatalf("New Backups automatic policy responsive styling missing %q", want)
+		}
+	}
+}
+
+func TestCompactUsersAndFiveRowMonitorContract(t *testing.T) {
+	script, err := englishPresentationAsset("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	styles, err := englishPresentationAsset("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	js, css := string(script), string(styles)
+	start := strings.Index(js, "  const renderUsers =")
+	end := strings.Index(js[start:], "  const openAccountSecurity =")
+	users := js[start : start+end]
+	for _, want := range []string{"system-users-table", "Username", "Role", "Status", "Restart", "Backup", "Actions", "storage-action-menu system-user-menu", "dialog.showModal()", "user.restart_used ?? 0", "user.backup_used ?? 0", "primary_administrator", "minimum_password_len", "restart-allowance/reset", "backup-allowance/reset", `"role", "Save role"`, `"enabled", user.enabled`, `"password", "Change password"`, `"delete", "Delete account", true`, "data-destructive-slider", "data-destructive-toggle", "submit.className = \"danger\""} {
+		if !strings.Contains(users, want) {
+			t.Fatalf("compact Users contract missing %q", want)
+		}
+	}
+	for _, removed := range []string{`card.className = "user-card"`, `quota.className = "quota-grid"`, "managementRow", "openManagement", "Primary administrator"} {
+		if strings.Contains(users, removed) {
+			t.Fatalf("Users retains expanded card presentation %q", removed)
+		}
+	}
+	for _, want := range []string{
+		`.system-users-view .user-list{display:block;min-height:0;overflow:auto`,
+		`.system-monitor-card:is([data-monitor-card="filesystem"],[data-monitor-card="diskio"],[data-monitor-card="network"]) .system-monitor-table{max-height:calc(9.36rem + 6px)}`,
+		`.system-monitor-card:is([data-monitor-card="filesystem"],[data-monitor-card="diskio"],[data-monitor-card="network"]) :is(th,td){line-height:1rem}`,
+		`.system-monitor-card[data-monitor-card="processes"] .system-monitor-table{max-height:none}`,
+		`.system-monitor-table th{position:sticky;top:0`,
+	} {
+		if !strings.Contains(css, want) {
+			t.Fatalf("compact table styling missing %q", want)
+		}
+	}
+}
+
+func TestUsersManageActionDialogPresentation(t *testing.T) {
+	script, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, users, found := strings.Cut(string(script), "  const renderUsers =")
+	dialog, _, ended := strings.Cut(users, "      const addAction =")
+	if !found || !ended {
+		t.Fatal("missing Users action dialog builder")
+	}
+	for _, want := range []string{
+		`dialog.className = "system-action-dialog system-user-dialog"`,
+		`heading.id = "system-user-action-" + index;
+        heading.className = "system-action-dialog-title";`,
+		`const eyebrow = document.createElement("span");`,
+		`eyebrow.className = "eyebrow";`,
+		`eyebrow.textContent = "JUSTVOXEL";`,
+		`const separator = document.createElement("span");`,
+		`separator.textContent = "·";`,
+		`separator.setAttribute("aria-hidden", "true");`,
+		`const actionTitle = document.createElement("span");`,
+		`actionTitle.textContent = title;`,
+		`const username = document.createElement("span");`,
+		`username.textContent = user.username;`,
+		`heading.append(eyebrow, separator, actionTitle, separator.cloneNode(true), username);`,
+		`dialog.setAttribute("aria-labelledby", heading.id);`,
+		`wrap.append(heading, form);`,
+		`actions.className = "action-row";`,
+		`cancel.type = "button";`,
+		`cancel.className = "secondary";`,
+		`submit.type = "submit";`,
+		`submit.textContent = submitText;`,
+		"if (dangerous) {\n          submit.className = \"danger\";",
+		`actions.append(cancel, submit);`,
+	} {
+		if !strings.Contains(dialog, want) {
+			t.Errorf("Users action dialog missing %q", want)
+		}
+	}
+	if strings.Contains(dialog, `heading.textContent =`) {
+		t.Error("Users action dialog still uses the concatenated heading")
+	}
+	if strings.Count(dialog, "submit.className") != 1 {
+		t.Error("the normal Users action must retain the default button style")
+	}
+
+	css := correctionSource(t, "static/app.css")
+	if !strings.Contains(css, `.system-user-dialog button:not(.password-reveal-button){min-height:34px;padding:.45rem .65rem;font-size:.8rem}`) {
+		t.Error("Users dialog action buttons must use compact sizing and exclude password reveal buttons")
+	}
+	if regexp.MustCompile(`\.system-user-dialog\s+button\s*[,\{]`).MatchString(css) {
+		t.Error("Users dialog CSS must exclude the broad button selector")
+	}
+	if !regexp.MustCompile(`button,\.button-link\{[^}]*border-radius:8px;`).MatchString(css) {
+		t.Error("Users dialog buttons must inherit the standard 8px radius")
+	}
+}
+
+func TestQuickLookMinecraftSharedSelectorPlacement(t *testing.T) {
+	content, err := englishPresentationAsset("templates/header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup := string(content)
+	start := strings.Index(markup, `<section class="quick-look"`)
+	end := strings.Index(markup[start:], `</article>`)
+	tile := markup[start : start+end]
+	heading := strings.Index(tile, `class="quick-look-tile-heading"`)
+	actions := strings.Index(tile, `data-quick-look-actions`)
+	selector := strings.Index(tile, `data-server-selector-slot data-server-workspace="minecraft" data-server-selector-compact`)
+	state := strings.Index(tile, `data-quick-look-minecraft`)
+	if heading < 0 || actions < heading || selector < actions || state < selector {
+		t.Fatal("Minecraft selector or heading actions misplaced", tile)
+	}
+	if !strings.Contains(tile[actions:selector], `</details>`) {
+		t.Fatal("actions menu moved outside heading")
+	}
+}
+
+func TestApprovedControlCenterLayout(t *testing.T) {
+	header, err := englishPresentationAsset("templates/header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css, err := englishPresentationAsset("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script, err := englishPresentationAsset("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	markup, styles := string(header), string(css)
+	if strings.Contains(markup, "Storage &amp; Data") {
+		t.Fatal("Storage & Data must be merged into Minecraft and System")
+	}
+	for heading, labels := range map[string][]string{
+		"Minecraft": {"Minecraft Settings", "Minecraft Servers", "Minecraft Update", "Minecraft Network", "Backups", "Migration", "Plugins &amp; Mods", "How to connect"},
+		"System":    {"System Settings", "System Monitor", "System Update", "System Network", "Storage", "File Browser", "Terminal", "AI &amp; API Connections"},
+	} {
+		section := strings.Split(strings.Split(markup, `<span class="control-section-label">`+heading+`</span>`)[1], `</section>`)[0]
+		matches := regexp.MustCompile(`<strong>([^<]+)</strong>`).FindAllStringSubmatch(section, -1)
+		var got []string
+		for _, match := range matches {
+			got = append(got, match[1])
+		}
+		if strings.Join(got, "|") != strings.Join(labels, "|") {
+			t.Fatalf("%s menu order: %v", heading, got)
+		}
+	}
+	// Telegram is an integration inside Add, never a Control Center workspace
+	// or an ordinary gateway connection with levels and Minecraft scope.
+	if strings.Contains(markup, `data-telegram-open`) || strings.Contains(markup, `data-workspace-window="telegram"`) || strings.Contains(markup, `data-telegram-dialog`) {
+		t.Fatal("Telegram must not have a separate Control Center tile or workspace")
+	}
+	gateway := regexp.MustCompile(`(?s)<dialog[^>]*data-agent-gateway-dialog.*?</dialog>`).FindString(markup)
+	telegram := regexp.MustCompile(`(?s)<section data-gateway-telegram.*?<section data-gateway-discord`).FindString(gateway)
+	if telegram == "" || !strings.Contains(telegram, `class="integration-lane"`) || !strings.Contains(telegram, `/static/ai-providers/telegram.svg`) {
+		t.Fatal("Telegram must use compact lanes inside AI & API Connections")
+	}
+	for _, obsolete := range []string{"data-telegram-back", "Back to Add", "Bot connection", "Approved Telegram users", "Operation status", `class="panel"`, "independently of the Gateway switch"} {
+		if strings.Contains(telegram, obsolete) {
+			t.Fatalf("obsolete Telegram surface structure: %s", obsolete)
+		}
+	}
+	for _, field := range []string{`name="name"`, `name="level"`, `name="enabled"`, `name="server_scope"`, `data-gateway-oauth`} {
+		if strings.Contains(telegram, field) {
+			t.Fatalf("ordinary connection field assigned to Telegram: %s", field)
+		}
+	}
+	for _, required := range []string{`<strong>Bot Token</strong>`, `class="integration-lane integration-header"`, `class="integration-title"`, `data-telegram-copy`, `spellcheck="false"`, `autocapitalize="off"`, `data-telegram-verify hidden>Retry`} {
+		if !strings.Contains(telegram, required) {
+			t.Fatalf("Telegram setup contract missing: %s", required)
+		}
+	}
+	if strings.Contains(telegram, `<strong>Bot</strong>`) || strings.Contains(telegram, `>Verify</button>`) {
+		t.Fatal("obsolete Telegram token setup")
+	}
+	for _, control := range []string{"status", "token", "token-cancel", "replace", "verify", "disconnect", "pair", "pending", "users", "operation"} {
+		if !strings.Contains(telegram, "data-telegram-"+control) {
+			t.Fatalf("Telegram management control missing: %s", control)
+		}
+	}
+	lane := regexp.MustCompile(`(?s)<nav class="minecraft-workspace-tabs gateway-navigation"[^>]*>.*?</nav>`).FindString(gateway)
+	for _, required := range []string{`<span>AI &amp; API Gateway</span>`, `gateway-navigation-controls`, `data-telegram-global hidden`, `/static/ai-providers/telegram.svg`, `<span>Telegram</span>`, `aria-label="Telegram" data-telegram-enabled disabled`} {
+		if !strings.Contains(lane, required) {
+			t.Fatalf("Telegram navigation contract missing: %s", required)
+		}
+	}
+	if strings.Count(gateway, "data-telegram-enabled") != 1 || strings.Contains(telegram, "data-telegram-enabled") || strings.Contains(telegram, "Enable Telegram") || strings.Contains(lane, ">Gateway</span>") {
+		t.Fatal("Telegram must have exactly one enable control in navigation with the approved labels")
+	}
+	grid := regexp.MustCompile(`(?s)<div class="gateway-provider-grid" data-gateway-providers>.*?</div>`).FindString(markup)
+	providerCards := regexp.MustCompile(`(?s)<label class="gateway-provider-card".*?</label>`).FindAllString(grid, -1)
+	purposes := []string{"OpenAI", "Claude", "Grok", "Gemini", "GitHub Copilot", "OpenClaw", "Other AI / MCP app", "Automation / REST API"}
+	if len(providerCards) != len(purposes) || strings.Contains(grid, "Telegram") || strings.Contains(grid, "Discord") {
+		t.Fatal("ordinary provider grid must contain exactly eight AI/API cards without native integrations")
+	}
+	for i, purpose := range purposes {
+		if !strings.Contains(providerCards[i], `name="purpose" value="`+purpose+`"`) {
+			t.Errorf("ordinary provider %d must be %s", i+1, purpose)
+		}
+	}
+	native := regexp.MustCompile(`(?s)<section class="panel gateway-native-frame"[^>]*>.*?</section>`).FindString(markup)
+	nativeCards := regexp.MustCompile(`(?s)<label class="gateway-provider-card".*?</label>`).FindAllString(native, -1)
+	if len(nativeCards) != 2 || strings.Index(markup, native) >= strings.Index(markup, `data-gateway-connection-frame`) {
+		t.Fatal("Native integrations must contain two cards above the AI/API frame")
+	}
+	for i, integration := range []string{"telegram", "discord"} {
+		if !strings.Contains(nativeCards[i], `name="integration" value="`+integration+`" data-`+integration+`-select`) || !strings.Contains(nativeCards[i], `/static/ai-providers/`+integration+`.svg`) || strings.Contains(nativeCards[i], `name="purpose"`) {
+			t.Errorf("native card %d must be %s with its local icon and independent selection", i+1, integration)
+		}
+	}
+	discord := regexp.MustCompile(`(?s)<section data-gateway-discord.*?<section data-gateway-help`).FindString(gateway)
+	for _, required := range []string{`class="integration-lane integration-header"`, `class="integration-title"`, `/static/ai-providers/discord.svg`, `id="discord-title">Discord`, `<strong>Bot Token</strong>`, `<strong>Discord server</strong>`, `data-discord-status`, `aria-label="Bot Token" autocomplete="off" data-password-ui="off" spellcheck="false" autocapitalize="off" data-discord-token`, "data-discord-token-cancel", "data-discord-replace", "data-discord-verify", "data-discord-disconnect"} {
+		if !strings.Contains(discord, required) {
+			t.Fatalf("Discord setup surface missing: %s", required)
+		}
+	}
+	for _, forbidden := range []string{`style=`, `name="purpose"`, `name="level"`, `data-gateway-oauth`, `data-discord-users`, `data-discord-pair`, `class="panel"`, `data-discord-back`, "Back to Add", "Bot connection", "Discord administrators", "independently of the Gateway switch", `name="name"`, `name="server_scope"`, `data-discord-enabled`} {
+		if strings.Contains(discord, forbidden) {
+			t.Fatalf("unexpected Discord setup control: %s", forbidden)
+		}
+	}
+	if strings.Count(gateway, "data-discord-enabled") != 1 || !strings.Contains(lane, `data-discord-global hidden`) || !strings.Contains(lane, `aria-label="Discord" data-discord-enabled disabled`) || strings.Index(lane, "data-discord-global") < strings.Index(lane, "data-telegram-global") {
+		t.Fatal("Discord must have exactly one enable control immediately after Telegram in navigation")
+	}
+
+	if !strings.Contains(markup, `<script src="/static/discord.js" defer></script>`) || strings.Contains(markup, `data-workspace-window="discord"`) || strings.Contains(markup, `data-discord-open`) {
+		t.Fatal("Discord must load inside the existing AI & API Connections workspace")
+	}
+	gatewayScript, err := englishPresentationAsset("static/agent-gateway.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{"renderDiscordHelpGuide", "else if (purpose === 'Discord') renderDiscordHelpGuide(guide)", "['Telegram', 'Discord', ...providers.keys()]"} {
+		if !strings.Contains(string(gatewayScript), required) {
+			t.Fatalf("dedicated Discord Help missing: %s", required)
+		}
+	}
+
+	telegramScript, err := englishPresentationAsset("static/telegram.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	selection := regexp.MustCompile(`(?s)else form.querySelector\('\[data-telegram-select\]'\).*?\n    \}\);`).FindString(string(gatewayScript))
+	if !strings.Contains(selection, "details.replaceChildren();") || !strings.Contains(selection, "showSurface('telegram')") || strings.Contains(selection, "mutate(") || strings.Contains(selection, "snapshot.enabled") {
+		t.Fatal("selecting Telegram must replace the ordinary form without creating a gateway connection or requiring Gateway enabled")
+	}
+	for _, required := range []string{"[data-agent-gateway-dialog]", "[data-gateway-telegram]", "fetch('/api/telegram'", "['read_only', 'Read Only']", "['server_management', 'Server Management']"} {
+		if !strings.Contains(string(telegramScript), required) {
+			t.Fatalf("Telegram integration contract missing: %s", required)
+		}
+	}
+	for _, forbidden := range []string{"setupWorkspaceWindow", "/api/agent-gateway", "data-gateway-enabled"} {
+		if strings.Contains(string(telegramScript), forbidden) {
+			t.Fatalf("Telegram must retain independent API and enable state: %s", forbidden)
+		}
+	}
+	for id, label := range map[string]string{"version": "Minecraft Update", "system": "System Settings", "network": "System Network", "files": "File Browser"} {
+		if !strings.Contains(markup, `<h2 id="`+id+`-workspace-title">`+label+`</h2>`) ||
+			!strings.Contains(markup, `data-workspace-window="`+id+`"`) ||
+			!strings.Contains(markup, `data-`+id+`-open`) {
+			t.Fatalf("display label or original workspace identity missing: %s", id)
+		}
+	}
+	if !strings.Contains(markup, `<a class="control-tile button-link" href="/minecraft/how-to-connect{{if .SelectedMinecraftID}}?server={{.SelectedMinecraftID}}{{end}}" target="_blank" rel="noopener"`) {
+		t.Fatal("How to connect must reuse shared button styling and retain its destination")
+	}
+	if !strings.Contains(styles, `.control-center-heading{display:flex;align-items:center;justify-content:space-between;height:36px;min-height:36px;margin:-.8rem -.8rem .8rem;padding:0 var(--jv-workspace-edge);border-bottom:1px solid var(--jv-border);border-radius:13px 13px 0 0}`) {
+		t.Fatal("Control Center title lane must share the 36px workspace header rhythm")
+	}
+
+	headingGap := strings.Split(strings.Split(markup, `<h2>Control Center</h2>`)[1], `<section class="control-section control-session">`)[0]
+	if strings.Contains(headingGap, "<hr") {
+		t.Fatal("extra divider before Session & Power")
+	}
+	if !strings.Contains(styles, `.control-tile-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))`) {
+		t.Fatal("desktop menu must retain two columns")
+	}
+	terminal := regexp.MustCompile(`<button[^>]*data-terminal-open[^>]*>`).FindString(markup)
+	if terminal != `<button class="control-tile nav-admin-only" type="button" data-primary-admin-only data-terminal-open title="Open a command-line session on JustVoxel">` {
+		t.Fatal("Terminal must remain a normal menu tile with its role restrictions")
+	}
+	for _, rule := range regexp.MustCompile(`([^{}]+)\{([^{}]*)\}`).FindAllStringSubmatch(styles, -1) {
+		if (strings.Contains(rule[1], "control-tile") || strings.Contains(rule[1], "data-terminal-open")) && strings.Contains(rule[2], "grid-column") {
+			t.Fatal("menu tiles must occupy one normal grid cell")
+		}
+	}
+	for _, want := range []string{`:root{--jv-panel-gap:4px}`, `top:calc(100% + var(--jv-panel-gap))`} {
+		if !strings.Contains(styles, want) {
+			t.Fatalf("shared Control Center/workspace top gap missing: %s", want)
+		}
+	}
+	if !strings.Contains(string(script), `element.style.top = workspaceTopInset() + "px";`) {
+		t.Fatal("new desktop windows must start at the Control Center top offset")
+	}
+}
+
+func TestWebUIAdminUsersRoleControls(t *testing.T) {
+	source, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, options, ok := strings.Cut(string(source), "const webUserRoleLabels =")
+	options, _, ended := strings.Cut(options, "const renderUsers =")
+	if !ok || !ended || strings.Contains(options, `"administrator"`) {
+		t.Fatal("invalid WebUI role selector")
+	}
+	for _, role := range []string{"webui-admin", "operator", "viewer"} {
+		if !strings.Contains(options, role) {
+			t.Fatalf("missing role %s", role)
+		}
+	}
+	for _, want := range []string{`webUserRoleOptions(roleLabels, "operator")`, `webUserRoleOptions(roleLabels, user.role)`,
+		`"webui-admin": jvT("role.webui_admin")`, ` : roleLabels[user.role]`, `const unlimited = isPrimary || isAdministratorLevel(user.role);`,
+		"unlimited ? \"-\" : `${user.restart_used",
+		"unlimited ? \"-\" : `${user.backup_used",
+		`(action !== "password" || payload.username !== primary.username)`,
+		`openAccountSecurity(trigger)`, `"password", jvT("ui.3f9c991f63a9")`,
+	} {
+		if !strings.Contains(string(source), want) {
+			t.Fatalf("missing Users control %q", want)
+		}
+	}
+}

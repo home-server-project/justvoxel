@@ -1,0 +1,928 @@
+# Plugins & Mods workspace
+
+Administrators open **Control Center → Minecraft → Plugins & Mods**. The selected
+server determines the content directory and available catalog providers.
+
+| Server software | Content | Providers |
+| --- | --- | --- |
+| Paper, Purpur, Pufferfish, Leaf | Plugins | Modrinth, Hangar, configured CurseForge |
+| Spigot | Plugins | Modrinth and configured CurseForge; explicit Bukkit compatibility |
+| Fabric, Forge, NeoForge, Quilt | Mods | Modrinth and configured CurseForge; exact loader and Minecraft version |
+| Vanilla Java, native Bedrock | Unavailable | No plugin/mod catalog |
+
+Supported providers default on when selecting a server; CurseForge requires a
+configured API key. Unsupported providers stay off. Search and cursor history
+reset when the selected server context changes. Provider icons and the shorter
+search field fit within the existing workspace and wrap on smaller screens.
+
+Mod inventory reads only the real `mods` directory. Installation resolves bounded
+required dependencies, verifies exact provider/game/loader evidence, stages JARs,
+creates the existing verified cold backup, and records private transaction evidence
+before placement. It never overwrites or adopts unmanaged JARs. Modrinth SHA-512
+and CurseForge SHA-1 downloads are verified; ownership always records exact local
+SHA-512. Static loader descriptors are bounded and checked without executing JAR
+code. Minecraft runtime health is verified after restart, which does not prove
+individual mod functionality. Failure removes only unchanged transaction artifacts
+and restores the original service state using the existing recovery model.
+
+Discover remains a catalog view. Exact compatibility preflight identifies client-only
+releases before maintenance. Review inspects automatic JARs, and Apply inspects
+any exact CurseForge JARs supplied by the user. Both paths verify size and SHA-1 for
+CurseForge files. CurseForge CDN redirects stay within the validated HTTPS
+`forgecdn.net` domain.
+
+Dependency handling applies to Fabric, NeoForge, Forge, and Quilt. Dependencies
+already supplied by another verified JustVoxel runtime component are reused
+rather than duplicated, with provider compatibility and exact local ownership
+rechecked before changes and after startup. Manual/unmanaged JARs are never
+silently adopted as dependency ownership; conflicting or unverifiable identities
+block Review.
+
+Verified Plugins-managed mods support Remove only. Enable/Disable remain
+plugin-only; mod updates are not available yet. Manual/unmanaged and JustVoxel
+runtime-managed mods remain read only. Add-ons remain
+available only for supported Bukkit plugin hosts. Existing plugin descriptor,
+lifecycle, backup, and recovery behavior remains authoritative.
+
+Ownership keeps schema `v1`: omitted target means `plugins`, explicit `plugins`
+means `plugins`, and `mods` means `mods`. Other targets are rejected. Target is
+part of artifact identity and transaction fingerprints; identical plugin and mod
+basenames are distinct objects. Older omitted-target evidence remains readable.
+
+The following sections describe the established plugin behavior and its history.
+
+## Cycle 1 — read-only discovery and inventory
+
+Administrators can open **Control Center → Minecraft → Plugins**. The movable,
+resizable window has Discover, Installed and Add-ons tabs. The original Cycle 1 capability is read only:
+it cannot install, download, update, remove or hot load plugins, change server
+configuration, or interrupt Minecraft.
+
+Discover has one compact desktop toolbar: a growing search field
+with independent Modrinth and Hangar source switches. Modrinth defaults ON and
+Hangar defaults OFF. Either source can be used alone, or both can populate the
+same grid. With both OFF, Discover makes no upstream catalog request and shows
+“Enable Modrinth or Hangar to browse plugins.” Source changes reset pagination.
+The toolbar may wrap in a genuinely narrow workspace.
+
+Modrinth and Hangar share the information/install overlay. Hangar retains native
+Channel terminology; Modrinth uses Release type. Install appears only when the
+Agent proves compatibility and complete direct download metadata for the selected
+release. Source identities stay explicit: similarly named projects from different
+catalogs are separate records. All catalog and icon reads pass through the
+same-origin WebUI, the Management Agent Unix API and fixed HTTPS sources; the
+browser never contacts an upstream catalog or image server directly. Icons use
+initials when metadata, validation or retrieval fails. Passive information footer Close actions
+use the normal green button styling shared by Previous and Next.
+
+Discover marks provider-aware `(Source, ProjectID)` ownership from the existing
+Plugins v1 manifest as **Installed**; source-less v1 entries mean Modrinth.
+Verified locations show Enabled or Disabled; uncertain local files show Needs
+attention while remaining Installed. These selections open read-only information
+with **Managed by Plugins** and **Updates are not available yet**. Install and
+install-plan are suppressed even if the catalog release differs. Manual JARs
+are not matched by name, and JustVoxel-managed projects retain their special treatment.
+
+Pagination displays **Page X of Y** with **Previous** and **Next** navigation
+using authoritative composite Modrinth/Hangar cursors. Next uses the returned
+next cursor; Previous uses an already-known cursor and freshly fetches that page.
+Only cursors are kept temporarily in memory; catalog payloads and cards are never
+cached. Refresh, search changes/submission, source/filter changes, authoritative
+server-context changes, capacity changes and workspace close/reopen clear cursor
+history and return to page 1.
+
+Plugin identity/status badges use restrained semantic colors in dark and light
+mode: blue for version, violet for server software, teal for Minecraft version,
+green for Installed/Enabled, amber for Disabled, and red/orange for Needs attention.
+Every authoritative server software label uses the same server badge treatment.
+Plugins-managed installed projects show a non-clickable green **Installed** status
+in the information overlay's top-right action position, with no Install action.
+Manual/unmanaged plugins and JustVoxel-managed components retain their presentation.
+
+Hangar's exact validated `https://hangarcdn.papermc.io/avatars/default/default.webp?v=0`
+uses the JustVoxel initials tile. The Agent rechecks authoritative metadata and
+returns no custom icon without contacting the CDN. Real project and user fallback
+WebP avatars remain strictly validated and proxied.
+
+Plugin results use compact cards of uniform height, with a fixed-size logo,
+clamped name and description, release/platform/Minecraft badges and a short
+status or dependency summary. The entire card opens its overlay by click, Enter
+or Space. Keyboard focus is visible; selection uses the green Server Software
+card language and stays visible while the overlay is open. There are no separate
+Info or Install card buttons. Closing the overlay returns focus to the card;
+details never expand inside the results grid. Installed uses the same
+whole-card selection and information/status overlays. Managed lifecycle actions
+are described in the current cycle below; updates remain unavailable. Installable Discover cards open one combined information/install
+overlay; JustVoxel-managed and unavailable selections remain read only.
+Supported versions appear as compact slash-separated text that wraps when
+needed. Supported platforms use the same compact presentation. Publisher
+dependencies are grouped into compact rows, including cross-loader required
+metadata that will not be installed. Actual install dependencies remain explicit.
+Installed information has separate sections for JAR,
+Metadata, Management and Update status. Installed cards show ownership
+and a compact status; updates remain unavailable.
+Discover uses three columns in wide windows, two in medium windows and one in
+narrow windows. Buttons stay distinct from badges. Authoritative provider/project
+identities use real publisher logos through the Administrator-only same-origin
+`GET /api/plugins/workspace/icon?source=<Modrinth|Hangar>&project_id=<id>` route and the Agent's
+`GET /v1/admin/plugins/icon?source=<Modrinth|Hangar>&project_id=<id>` route. Modrinth Discover first passes a validated
+search `icon_url` with `project_id` to the
+same-origin proxy. If that image fails, it retries exactly once using only
+`project_id`, allowing the Agent to look up fresh project metadata. Missing search
+icons begin with that metadata lookup. Installed uses project ID only. Initials
+stay visible until a logo loads and are the final fallback if metadata or image
+retrieval fails. The browser never uses a CDN URL as `img.src`.
+All documented Modrinth extensions are accepted: `png`, `jpg`, `jpeg`, `bmp`,
+`gif`, `webp`, `svg`, `svgz` and `rgb` (case-sensitive). Project-bound URL
+validation remains strict: HTTPS on exactly `cdn.modrinth.com`, the matching
+`/data/<project_id>/<filename>` path, a bounded URL length, and no credentials,
+ports, queries, fragments, encoded alternate paths or traversal. Filename
+extensions remain a path safety rule; neither they nor CDN response headers prove
+the delivered raster representation. Actual PNG/JPEG/BMP/GIF/WebP byte signatures
+are authoritative, and the Agent derives canonical browser MIME from those bytes
+without transcoding. Upstream Content-Type is advisory, including when missing or
+malformed, and is never forwarded. The Agent requests no specific CDN image format.
+SVG/SVGZ and SGI RGB use bounded PNG conversion only when the CDN delivers source
+representations rather than an already verified supported raster. Conversion uses
+fixed image-composition tooling, private bounded buffers and a short timeout.
+SVGZ decompression is bounded; RGB headers and dimensions are checked before
+conversion. Browsers never receive raw SVG, SVGZ or RGB. Source and final image
+bytes are limited to 512 KiB, with no redirects or persistent image cache. This
+improves compatibility with Modrinth CDN transforms while preserving the
+same-origin proxy and security boundary.
+Hangar icon requests send `source=Hangar` and the numeric project ID only. The
+Agent re-fetches official project metadata and takes `avatarUrl` from that exact
+project. Only HTTPS `hangarcdn.papermc.io` WebP avatar paths are approved: project avatars
+(`/avatars/project/<positive-bounded-decimal-id>.webp`), owner/user fallback avatars
+(`/avatars/user/<canonical-UUID>.webp`), or the Hangar default avatar
+(`/avatars/default/default.webp`). Each requires exactly one bounded decimal `v`
+query value; the default requires exactly `v=0`. No caller URL is
+accepted, redirects are rejected, and the same 512 KiB byte/signature bounds apply.
+Project and user fallback avatars remain Agent-proxied fixed-CDN images. The
+exact default avatar returns HTTP 404 without a CDN fetch and uses initials;
+metadata/image validation or retrieval failures also use initials. Hangar SVG/source
+conversions are not supported. Modrinth icon behavior is unchanged.
+Information and installation reuse the card identity tile.
+On hover-capable pointers, the existing green card frame/background follows the
+pointer. Cards begin unselected; selection can remain while their overlay is
+open. Closing clears every selected card and resets `aria-pressed` to false,
+so the green selection does not remain stale. Keyboard focus-visible styling
+remains available.
+Progress and terminal results retain the selected identity in browser memory,
+bound to the returned operation ID; after reload they use fallback. Inventory
+exposes the existing manifest project/release IDs only after exact
+filename, SHA-512 and descriptor ownership verification. Installed
+reuses the same-origin logo helper, preferring the verified `project_id`, then the
+display-only `IconProjectID` (`icon_project_id` on the wire), then initials.
+JustVoxel-managed components receive explicit official Modrinth display identities
+from the existing exact trusted filename/main-class classification: Geyser
+`wKkoqHrH`, Floodgate `bWrNNfkb`, and ViaVersion `P1OZGk5p`. Floodgate's identity
+is visual only and does not change its source or management. `IconProjectID`
+does not alter ownership, adoption, update ownership, install eligibility,
+manifest verification or artifact verification. Manual/unmanaged plugins receive
+no display identity and are never searched by name or filename, or guessed, to
+obtain a logo. Unidentified JARs retain initials without ownership changes.
+The combined overlay keeps one compact column, with metadata pairs sharing
+lines where they fit and each install file showing its filename and size in one
+row. Successful review places Install at the top-right of the identity header,
+on the same horizontal row as the logo and plugin name. The action keeps a fixed
+flex size while the identity uses the remaining width; description and version
+badges stay below. There is no separate Install lane or Cancel/Install footer.
+Info and terminal Done/Close actions align to the right. The compact layout is designed to fit the normal FHD workspace
+without an internal scrollbar. Overflow remains auto as a safety fallback so
+content is never clipped. Normal-FHD visual acceptance remains a human real-VM
+check.
+
+Passive Info, read-only rejected information, pre-install Review and review
+preparation close by clicking directly on the dark backdrop or pressing Esc.
+Clicks inside the content never dismiss the overlay. Submitting an installation
+and operation rendering, including backup, install, restart, verification,
+rollback and needs-attention, are not backdrop-dismissible. Existing explicit
+Close/Done controls and Esc behavior remain, with keyboard focus restored.
+Plugins tabs use the same shared workspace geometry as System, Minecraft,
+Migration and Version: minimum height 34px, padding `.38rem .7rem`, radius 8px
+and font size `.86rem`. Header Refresh/Close and normal actions retain their
+shared workspace button styling. Source/filter switches remain switches;
+whole-card article selections retain their card geometry.
+
+The selected `pluginContext()` / `pluginServerContext` is authoritative for both
+providers: immutable instance ID, ServerType, ServerSoftware, and MinecraftVersion.
+Paper, Purpur, and Spigot are supported, and the current server selector supplies
+that exact context; changing selection discards stale results. Neither provider
+parses visible header text. Modrinth maps Paper to paper/spigot/bukkit, Purpur to
+purpur/paper/spigot/bukkit, and Spigot only to explicit spigot/bukkit releases.
+Hangar maps Paper and Purpur to PAPER at its provider boundary and remains
+unavailable for Spigot. Any additional server type requires an explicit provider
+mapping and otherwise fails closed. Vanilla and mod-loader/native Bedrock servers
+are unsupported. The workspace reuses the selected instance's configuration and
+runtime status for software, Minecraft version, and configured data location.
+
+Discover qualifies provider hits in order, scanning at most eight times the
+requested capacity per provider (up to 96 projects each). Partial or empty pages
+can retain a Next cursor. Combined pages alternate sources, preserving each
+provider's order and carrying the next turn across pages, including capacity 1.
+Unconsumed hits are revisited, never skipped to the end of a fetched batch.
+`total` is the sum of enabled providers' raw totals (`total_hits` for Modrinth,
+`pagination.count` for Hangar), not a count of eligible projects. The UI shows
+**Page X of Y**, **Previous**, **Next**, with Y calculated from that raw catalog
+total and the current page capacity rather than an eligible-result count.
+
+The bounded Discover query accepts `q` (up to 200 bytes), `compatible_only`,
+`release_only`, `modrinth`, `hangar`, `hangar_first` (literal `true`/`false`),
+`modrinth_offset` and `hangar_offset` (0–10000), and `limit` (1–24, default 8).
+Omitted filters default ON; omitted sources default Modrinth ON/Hangar OFF;
+omitted offsets and turn default zero/Modrinth first. Unknown/repeated fields,
+legacy scalar `offset` or `source`, and malformed values are rejected.
+Responses contain enabled-source booleans, `cursor` and nullable `next_cursor`,
+each cursor carrying both offsets and `hangar_first`, plus projects and raw total.
+Previous/Next use the actual in-memory composite history. Search/filter/source
+changes, Refresh, authoritative server-context changes and workspace close/reopen
+reset it. Capacity changes also discard history and restart both provider cursors
+at page 1.
+
+Live search retains its 250 ms debounce, stale-request cancellation and immediate
+Enter submission. Compatible only and Release only start enabled and apply to
+each enabled provider. Modrinth discovery uses the fixed HTTPS API
+`https://api.modrinth.com/v2` and the search facet `all_project_types:plugin`.
+Compatible only adds one OR group of the selected JustVoxel server's compatible
+loader facets and the exact `versions:<MinecraftVersion>` facet from the
+authoritative context above. With Compatible only off, the loader OR group covers
+paper/purpur/spigot/bukkit and no active-version facet is sent. Release only selects
+`version_type == release` from project versions; it is a version-level filter,
+so the provider Total remains the raw search candidate count, not an exact
+post-release-filter count. Installability is intentionally narrower than
+discoverability: a compatible release, supported server, valid direct artifact,
+non-JustVoxel-managed project, and all installer safety checks are required.
+Hangar reads
+`GET https://hangar.papermc.io/api/v1/projects` with bounded `q`, `offset`, `limit`
+and `platform=PAPER`. Compatible-only project search also sends
+`version=<active-version>` when the authoritative server version is known; it
+omits `version` when Compatible only is off. Exact release inspection remains
+authoritative afterward: `/projects/<numeric-id>/versions` uses `platform=PAPER`
+and, when compatible-only, `platformVersion=<active-version>`. Discovery attempts
+to fill the workspace page while inspecting at most `8 × limit` upstream projects
+per request, stopping when full, exhausted, or at the absolute cursor bound.
+Rejected projects advance the cursor; eligible unconsumed projects remain for the
+next page. Budget exhaustion may return a short page. It inspects up to
+75 versions per project in bounded pages. Exact `platformDependencies.PAPER`
+membership determines publisher compatibility; other platforms never qualify.
+Release only requires an explicit channel flags list without `UNSTABLE` or unknown
+flags. Native channel names are displayed; no release/beta/alpha equivalence is
+claimed. Missing stability evidence fails the release filter. Direct download file metadata controls install availability. Required internal
+Hangar project dependencies enter its narrow planner; optional dependencies are
+displayed only. External downloads and external-only required dependencies are not
+followed. Numeric project/release IDs remain separate from Modrinth identities. Hangar uses the existing no-redirect,
+bounded-timeout client with a 2 MiB JSON body cap and needs no API key.
+
+Exact Modrinth plugin compatibility, including required dependencies, comes from
+exact Minecraft version and accepted Bukkit/Spigot/Paper-family loader metadata.
+An unknown or absent `environment` does not erase that explicit platform evidence.
+Explicit client-only and singleplayer-only environments remain excluded; unrecognized
+non-empty environment values fail closed. Mods still require an explicitly recognized
+server-capable environment: unknown, empty and unrecognized values remain rejected.
+Downloaded JAR validation before downtime and runtime activation proof after restart
+remain mandatory.
+
+CurseForge Minecraft/loader compatibility does not establish server eligibility.
+For mods, Discover needs candidate identity and Minecraft/loader release metadata;
+missing artifact filenames, sizes, hashes or download URLs do not suppress Review.
+Exact Review independently re-fetches the file and requires its identity, filename,
+size, and SHA-1. Review checks bounded declarative metadata for automatic downloads.
+When Review requires JARs from the user, Apply checks the same metadata before
+creating a maintenance operation or starting downtime: Fabric `environment="client"` and Forge
+file-level `clientSideOnly=true` are rejected. Fabric defaults to `"*"` when the
+field is absent; malformed environment evidence fails closed. No side field is
+invented for Quilt or NeoForge. Unknown side evidence retains final runtime
+verification. Hangar retains its authoritative server-platform checks.
+
+Server capability inheritance is normalized centrally for every catalog result.
+Compatibility requires exact provider release Minecraft-version evidence and a
+matching accepted platform: Spigot accepts Bukkit/Spigot, never Paper-only;
+Paper-family software accepts its applicable inherited platforms. Mod loaders
+remain separate families. These rules are independent of Minecraft release number.
+CurseForge file platform markers are normalized case-insensitively. A Bukkit
+project classification alone does not establish file platform compatibility.
+Files without explicit platform evidence stay compatibility unknown in broad
+Discover and are excluded by Compatible only. They may proceed to exact artifact
+Review; vague metadata is never promoted to positive compatibility. Explicit
+incompatible platform evidence blocks installation. Downloaded JAR structure is
+checked before downtime: Spigot requires a direct usable Bukkit `plugin.yml`,
+while Paper-family descriptor acceptance is preserved. Runtime activation proof
+remains mandatory after restart and provider metadata cannot override failure.
+
+Compatibility means publisher Minecraft/loader compatibility, never verified
+third-party runtime compatibility. With Compatible only OFF, other Paper versions
+can be browsed without claiming compatibility. Unknown active Minecraft versions
+require that filter OFF. Upstream failures are reported as unavailable, not as
+proven incompatibility. Discover measures grid columns and available height for
+1–12 cards per page; a capacity change resets both provider cursors and history
+to page 1. Installed has no catalog pagination.
+
+Installed reads regular JARs under the configured data directory's `plugins`
+folder. It refuses a symlinked plugin folder and skips symlinked JARs and unrelated
+files. Metadata reads inspect simple, bounded top-level name/version scalars in
+`paper-plugin.yml` and `plugin.yml`; unreadable, malformed, unusually large or
+complex metadata may leave the version or name unknown. This does not prevent
+other JARs from appearing. No ownership database is created.
+
+Geyser, Floodgate and ViaVersion are displayed as JustVoxel managed. Their
+existing server update mechanism remains authoritative. All other JARs are
+Manual / unmanaged. Installed shows their unknown update status. Future
+**Update available** status belongs on Installed cards; no update action exists
+yet. Plugin names are never used to guess a Modrinth project identity.
+
+The visible workspace calls Administrator-only `/api/plugins/workspace/{discover,installed}`
+WebUI routes. The existing `updates` routes/contracts remain for compatibility;
+there is no visible Updates view. The WebUI calls `/v1/admin/plugins/{discover,installed,updates}` over
+the existing Management API Unix socket. The Management Agent alone reads local
+JARs and contacts Modrinth's fixed HTTPS API. Requests have bounded timeouts and
+responses, send a JustVoxel User-Agent, require no API key and reject redirects.
+There are no mutation endpoints in this cycle.
+
+## Stage 2 — third-party installation
+
+Managed installation permits compatible third-party Modrinth and Hangar releases
+on Paper and Purpur when the current Minecraft version is known and publisher
+file metadata is complete. Clicking an installable Discover card fetches the
+authoritative plan and opens a single-column combined information/install
+overlay. Turning off Compatible only or Release only still permits browsing;
+incompatible and JustVoxel-managed selections have read-only
+information overlays with no generic Install action. Modrinth beta/alpha releases
+remain read only; Hangar keeps native channels and requires exact compatible
+direct artifact metadata for installation.
+
+The combined overlay shows About this version, Compatibility, Dependencies,
+Files to install, Installation and Restart as normal restrained information
+sections. Required dependencies show their exact planned name/version and
+**Already satisfied** or **Will be installed** status. Optional/incompatible
+publisher entries remain informational without duplicating required entries.
+Restart explains the verified cold backup, Minecraft start/restart for plugin
+verification and return to an original stopped state; it does not promise
+continuous uptime. Players appears only when the plan requires player-aware
+confirmation, with online count and available names. Install appears at the
+top-right of the identity header; read-only information has no Install button.
+This source implementation still requires human real-VM visual acceptance.
+
+Installation uses an authoritative Management Agent plan. The browser supplies
+an explicit canonical source (`Modrinth` or `Hangar`) and exact project/version IDs; it cannot choose download URLs, filenames,
+hashes, paths or dependency lists. Review shows the selected release, publisher
+compatibility, active server/Minecraft version, required dependencies, exact
+files and sizes, and the configured `<DataPath>/plugins` location. Publisher
+compatibility is a prerequisite, not a promise that the plugin will run.
+
+Only **required** dependencies are resolved recursively and automatically
+installed. Exact dependency versions must belong to the declared project. Required
+Modrinth metadata is scoped to the active Paper-family loaders: exact versions
+with no loader overlap, and project-only dependencies whose authoritative project
+loaders have no overlap, remain publisher information and are not installed.
+For example, a multi-loader Paper plugin does not cause Fabric API to be installed
+on Paper. Required dependencies with target-loader support still need a compatible
+release for the active Minecraft version; missing releases fail closed with the
+dependency and compatibility problem identified. Project-only dependencies select
+the newest compatible release. Optional, incompatible and embedded entries remain
+display-only Info metadata and are not automatically downloaded. Cycles, conflicting versions,
+filename-only requirements and unresolved identities block installation. Bounds
+are six dependency levels, sixteen artifacts, 128 MiB per JAR and 256 MiB combined.
+
+A deterministic SHA-256 fingerprint binds server type, Minecraft version, data
+path, provider, selected files, authoritative provider hashes/download identities, plus
+dependency relationships. Apply re-resolves the plan and requires that exact
+fingerprint. Player snapshots are excluded from the fingerprint and checked
+separately. Artifact URLs and private transaction evidence are never returned to
+the browser. Modrinth's catalog API remains fixed HTTPS; Hangar's catalog API is
+fixed at `hangar.papermc.io` through the Management Agent. Modrinth icons remain on `cdn.modrinth.com`; Hangar icons use the approved project and user fallback
+avatar sources; the exact generic default uses initials as described above. Redirects are rejected, and response sizes and
+timeouts are bounded.
+
+Hangar installation re-fetches exact project and version metadata under
+`https://hangar.papermc.io/api/v1`, verifies bounded positive decimal numeric IDs,
+and requires the selected Minecraft version in the mapped platform's
+`platformDependencies`. Exact releases are re-fetched by numeric ID; dependencies use bounded compatible
+release metadata and then exact numeric release lookups. Direct
+`downloads.PAPER.fileInfo` supplies the safe filename, exact size and SHA-256.
+The Agent constructs the fixed HTTPS `hangarcdn.papermc.io/plugins/` endpoint from
+the trusted project namespace, release name, mapped platform and filename, and
+requires `downloadUrl` to match exactly. The API download route redirects to this
+CDN, so the Agent requests the validated CDN endpoint directly. ExternalUrl-only
+releases are rejected. Redirects are never followed. Download
+before downtime verifies the exact size and upstream SHA-256 while calculating
+SHA-512 locally. That local SHA-512 is the ownership/runtime evidence. Staged JAR
+inspection, player checks, durable evidence, verified cold backup, atomic placement,
+Minecraft start, stack/startup verification, original stopped-state restoration and
+rollback are the existing shared installer flow.
+
+Required Hangar dependencies with an internal numeric project ID resolve through
+Hangar using the same selected server type and Minecraft version. Required
+external-only dependencies block review with an explanation; optional dependencies
+are displayed without automatic installation. Provider identity participates in
+parents and duplicate/reuse checks. Cycle, depth, artifact-count, combined-download
+and filename-collision limits are preserved.
+
+Before returning an install review, the Agent downloads only the exact selected
+root artifact into private temporary staging, using the existing bounded CDN,
+size, SHA-512 and timeout checks, then applies the existing strict Paper/Bukkit
+descriptor inspection. Temporary review material is removed immediately; there is
+no persistent artifact cache or catalog-wide download. A zero-byte descriptor
+provides no usable plugin identity. A rejected direct-plugin review opens the
+existing read-only project Info with the rejection explanation and no Install
+action. Review starts no operation, backup or Minecraft mutation. Publisher loader
+tags alone do not authorize an Install action. Modrinth platform metadata listing
+Paper support is not proof that the artifact is a direct Paper plugin. Direct
+artifact inspection remains authoritative for plugins-directory installs.
+When no valid direct descriptor exists, exact known JAR entries
+`fabric.mod.json`, `quilt.mod.json`, `META-INF/mods.toml`,
+`META-INF/neoforge.mods.toml` and `META-INF/sponge_plugins.json` identify a
+loader-based server mod. Their presence only improves classification and the
+read-only rejection explanation on plugin servers. On mod servers the selected
+loader descriptor is inspected statically; JAR code is never executed by validation.
+A valid direct Paper/Bukkit descriptor remains authoritative, and normal strict
+descriptor validation still applies. Unknown JARs retain the generic rejection.
+On plugin servers, loader-based mods require the matching mod-loader server rather
+than a Bukkit directory. Unsupported loader systems such as Ignite remain outside
+this workspace. Publisher plugin metadata alone never makes such a JAR installable.
+The Agent and WebUI use the same rejection:
+“This loader mod cannot be installed into a plugin server. Select a compatible mod-loader server.”
+For Fabric, Forge, NeoForge and Quilt servers, the workspace instead checks the
+matching loader descriptor and installs verified mods into `mods`.
+Install-time inspection remains independent and authoritative.
+
+All needed JARs are downloaded, size/hash checked and inspected in private Agent
+staging **before Minecraft downtime**. Staged Paper/Bukkit descriptors must provide
+an unambiguous usable plugin name. The installer rejects manual filename or
+plugin-identity collisions and never adopts, overwrites or deletes a manual JAR.
+A previously managed dependency is reused only for the exact required version,
+filename and verified hash. A different installed version blocks installation;
+Stage 2 does not upgrade dependencies.
+
+Geyser, Floodgate and ViaVersion remain **JustVoxel managed**, owned by their
+existing server mechanisms. Their canonical catalog slugs suppress generic
+Install. Independently, the backend checks canonical filenames and actual JAR
+main-class identities. A managed root JAR is rejected even when renamed. A
+required managed component is satisfied only by an existing valid component;
+if unavailable, installation fails instead of adding a generic copy. Built-in
+components never enter the generic ownership manifest. Existing reserved paths
+`geyser-spigot.jar`, `floodgate-spigot.jar` and `viaversion.jar` (case-insensitive)
+are excluded from generic identity-collision parsing after regular-file and
+no-symlink safety checks. Complex metadata in those appliance JARs does not block
+an unrelated install. All other existing/manual JARs still require safe identity
+inspection. Reserved JARs are never overwritten, deleted or adopted, and staged
+managed identities remain subject to the independent strict checks above.
+
+After staging, the installer revalidates the reviewed plan and authoritative
+context. It shares persistent Minecraft maintenance exclusion with reset/update
+and acquires `/run/justvoxel-minecraft-maintenance.lock`, coordinating with CLI
+maintenance. A busy lock leaves Minecraft and plugin files untouched.
+The final player check runs under that lock immediately before backup. Unknown
+player status fails closed. Review shows online player count/names and warns
+about interruption; its final Install action confirms the existing player-aware
+shutdown only when that review required confirmation. If players join after an
+unconfirmed zero-player review, installation cancels safely for another review.
+
+Before JAR placement the installer calls the existing verified cold backup,
+`minecraft-backup --leave-stopped`, using its caller-held-lock contract. It does
+not change backup format or retention. A zero helper exit status proves backup
+creation and archive verification succeeded; non-zero blocks plugin placement.
+Human-readable helper output is not a success contract. Minecraft must be stopped
+before placement.
+Each JAR is copied to a unique temporary file within the pinned, no-follow plugin
+directory, hash checked and fsynced. Its already-open destination descriptor is
+explicitly set to mode `0644` before closing and atomic rename without replacement;
+a mode-setting error fails placement. This makes the published JAR readable to
+Minecraft despite the Agent's intentional service-wide `UMask=0007`, which remains
+unchanged. Ownership, parent permissions and SELinux labeling remain unchanged.
+The plugin directory is fsynced after publication. Every potential
+placement has private durable transaction evidence under
+`/var/lib/justvoxel/management/plugin-install/<operation-id>/`.
+
+Minecraft starts for bounded RCON `rcon-cli list` readiness and the existing
+`verify-minecraft-stack` checks. Activation proof is selected from authoritative
+server software, independently of Minecraft release number. Spigot uses a bounded,
+direct `podman exec minecraft-<instance> rcon-cli plugins` command without a shell.
+Every newly installed plugin/dependency must appear by exact normalized
+`plugin.yml` identity in that live enabled inventory. Disabled entries, malformed
+or oversized responses, duplicate identities and incomplete inventories fail
+verification. Formatting cannot manufacture a matching identity. Installation
+and recovery re-check use the same software-aware contract.
+
+For Paper, Purpur, Pufferfish and Leaf, every newly installed plugin/dependency
+must appear by exact descriptor name in the current Paper startup log, `<DataPath>/logs/latest.log`: both a Paper or
+Bukkit PluginInitializerManager inventory entry and `[PluginName] Enabling ...`
+evidence are required. The logger identity is authoritative even if the enable
+message spells the name differently. Only evidence after the last
+`[PluginInitializerManager] Initializing plugins...` marker counts. Reads are
+bounded and confined to a regular file without symlinks; malformed, incomplete,
+duplicate or detected load/enable failure evidence fails closed and runs the
+existing rollback.
+File existence or publisher metadata alone is insufficient. If Minecraft was
+running before maintenance, successful installation leaves it running. If it
+was intentionally stopped, it starts temporarily for verification and returns
+to stopped **before** ownership commit; completion reports the actual final state.
+
+After runtime/plugin verification and restoration of the original service state,
+the Agent atomically commits `<DataPath>/.justvoxel/plugins.json`. This explicit
+`v1` manifest records provider project/version, filename, SHA-512, parsed plugin
+name/main class, requested/dependency status and relationships. The directory and
+manifest cannot be symlinks; unsafe/malformed evidence blocks installation.
+Writes are private, atomic and fsynced. The existing full cold backup naturally
+includes the manifest with Minecraft data; backup code is unchanged.
+
+Ownership is `(Source, ProjectID)`, not project ID alone. The optional `source`
+field uses canonical `Modrinth` or `Hangar`. Existing v1 entries without source
+mean Modrinth in memory and are not rewritten or migrated by reads or inventory.
+New entries explicitly store their source. Hangar project/release IDs are bounded
+positive decimal identities; Modrinth keeps its existing ID rules. Legacy bare
+`required_by` parents mean Modrinth, and Hangar parents use `Hangar:<project-id>`.
+Install reuse, lifecycle actions/recovery, manifest commits, transaction evidence,
+and preserved-data Reset Minecraft cleanup use these provider-aware identities.
+
+Installed distinguishes **JustVoxel managed**, **Managed by Plugins**, and
+**Manual / unmanaged**. Generic ownership is trusted only for a valid manifest
+entry, exact filename and current matching JAR hash. Changed or unavailable files
+show ownership attention instead of silently being adopted. Generic update and
+removal are not available yet.
+
+A transaction JAR can temporarily exist before runtime verification and ownership
+manifest commit. Installed checks the current installation operation
+and intentionally hide inventory during unverified or unresolved operations,
+including `needs_attention`, clearing stale cards and showing a verification/recovery
+message. This prevents transaction-created artifacts from being misrepresented as
+manual/unmanaged. Refresh and tabs remain usable, and Discover remains available.
+No current operation, or `succeeded`, `rolled_back` and `resolved` states, expose
+stable inventory again. A lightweight re-check runs only while Installed
+is blocked, and automatically loads that requested inventory once the operation
+is settled. Switching to Discover or closing Plugins clears this timer.
+Rollback semantics are unchanged.
+
+A failure after placement stops the failed runtime and removes only JARs created
+by that transaction whose current SHA-512 still matches. Changed files are never
+deleted. Normal rollback keeps the transaction cold backup; it does not restore
+an archive automatically. It restores the original running/stopped state and,
+when originally running, verifies the previous runtime with the existing stack
+verifier. Proven recovery ends `rolled_back`; unproven recovery ends
+`needs_attention`, with clear administrator guidance and preserved evidence.
+An Agent restart/reboot during installation also becomes `needs_attention` with
+plugin-specific interruption status. It never claims success or deletes unknown
+transaction artifacts automatically.
+
+Administrators can use **Re-check recovery** for a matching `needs_attention`
+plugin operation. This strictly decoded acknowledgement re-checks private
+transaction evidence, files, ownership and the original service state. It accepts
+only all expected installed files with exact hashes and ownership, or all
+transaction-created files absent with no manifest claim on those artifacts.
+Running Minecraft must pass the existing stack verifier; an installed state must
+also prove the expected active plugin identities from the current startup log
+using the same inventory-plus-enable checks. If Minecraft is in a different
+running or stopped state than before the installation, the re-check offers
+**Start Minecraft and re-check** or **Stop Minecraft and re-check**. The
+Running switches in Minecraft Servers and the selected Minecraft Overview open
+the same recovery when a matching installation blocks normal controls. If
+players are online, an administrator must confirm the stop before Minecraft
+warns and disconnects them.
+
+Recovery uses the recorded state for that server. Evidence saved before the
+original runtime state was recorded supports re-check only. Neither action
+changes plugin files, retries installation, or restores a backup. Proven states
+become `resolved`, release maintenance exclusion and record an audit event.
+Unproven states retain their evidence and maintenance exclusion.
+
+Private transaction staging is removed after persisted success, verified clean
+rollback, or a safe untouched terminal failure. It is preserved for
+`needs_attention`, including interrupted operations, until a successful re-check.
+Cleanup failure adds a terminal status warning and audit event; it does not undo
+verified plugin/runtime state or retain maintenance exclusion. Cold backups are
+not touched.
+
+Review, real persistent progress, completion and failure share one workspace
+panel. Progress uses recorded stages/status, without invented timing. Reopening
+the workspace automatically resumes only a non-settled installation, including
+`needs_attention`; prior `succeeded`, `rolled_back` or `resolved` operations do
+not reopen automatically. Review and final Install both check for an existing
+non-settled operation and resume it instead of starting another installation.
+Progress updates retain the same operation identity header and logo.
+Success offers View in
+Installed as a secondary/dark action and Done as the primary/green action.
+View in Installed closes the overlay and selects Installed; Done closes it and
+refreshes the current workspace state. Failure reports restored prior state
+or administrator attention; it never displays fake success. Terminal results use
+the existing audit event mechanism with `plugin_install` and the requested
+selected project ID as target; failed/rolled-back installs are not successes.
+
+Administrator-only WebUI routes are
+`POST /api/plugins/workspace/install/plan`,
+`POST /api/plugins/workspace/install`,
+`POST /api/plugins/workspace/install/acknowledge`, and
+`GET /api/plugins/workspace/install-operation` (optionally `?id=<operation-id>`).
+POSTs reuse existing CSRF/session protection. The existing Unix-socket client
+mirrors `POST /v1/admin/plugins/install/plan`,
+`POST /v1/admin/plugins/install`,
+`POST /v1/admin/plugins/install/acknowledge` (JSON `operation_id` only), and
+`GET /v1/admin/plugins/install-operation`; polling by ID reuses generic AdminOperation.
+Only the privileged Management Agent accesses provider APIs, artifacts or the filesystem.
+
+Stage 2 adds no plugin update/removal, user batching, other marketplaces, Version
+Workspace integration, or multi-instance support. It makes **no SELinux policy,
+label, mount-label or Quadlet changes**. If the existing environment cannot consume
+new JARs, verification fails and rollback runs; labeling changes require a separate
+human-approved task.
+
+
+## Managed Enable, Disable and Remove
+
+Mod removal verifies the exact `mods/<filename>` against the ownership manifest,
+SHA-512 and selected loader descriptor. There is no disabled-mod directory.
+A still-installed verified managed mod recorded as a provider-aware `required_by`
+parent blocks removal and is named in the error. Dependencies and parents are
+never removed automatically. Configuration and data directories are preserved.
+The existing transaction records the loader as optional v1 evidence for mods;
+previous plugin evidence remains readable. Removal takes a verified cold backup,
+proves Minecraft stopped, stages only the exact JAR privately, starts Minecraft
+and runs strict stack verification. It proves the mod absent and the staged JAR
+unchanged before committing only that manifest entry. Bukkit startup-name checks
+apply only to plugins. The original running/stopped state is restored, and the
+rollback JAR is retained through durable success. Failure restores the exact JAR
+and original ownership, strictly verifies the original runtime, and restores its
+running/stopped state. Interrupted operations use the same durable recovery;
+unproven recovery retains evidence and maintenance protection as `needs_attention`.
+
+Only entries whose ownership is verified as **Managed by Plugins** receive
+lifecycle actions. Enabled entries show **Enabled** and one yellow **Disable**
+action; disabled entries show **Disabled** and one yellow **Enable** action.
+Both offer red **Remove**. Disabled is a normal state. Manual/unmanaged plugins
+and JustVoxel-managed Geyser, Floodgate and ViaVersion stay read only.
+Verified Plugins-managed mods show **Installed**, **Managed by Plugins**, and
+**Remove** only, using the same destructive slider and final confirmation.
+Manual/unmanaged and JustVoxel runtime-owned mods stay read only.
+
+The existing `<DataPath>/.justvoxel/plugins.json` **v1 schema remains backward compatible**.
+Enabled/disabled state is never persisted in that JSON: an enabled JAR is in
+`<DataPath>/plugins/<filename>`, and a disabled JAR is in the root-private,
+mode-0700 `<DataPath>/.justvoxel/disabled-plugins/<filename>` directory. Both
+locations use pinned directory access, no symlink following, the same filename
+rules and exact manifest SHA-512/name/main-class verification. A duplicate,
+missing, changed or unsafe JAR becomes Attention and cannot receive lifecycle
+mutations. Arbitrary files in the disabled store are never adopted.
+
+Enable returns the same verified stored JAR to `/plugins`; Disable moves that
+exact JAR out of the active set. Neither changes the ownership manifest. Remove
+stages the exact JAR privately on the data filesystem and commits only removal
+of that project's manifest entry after runtime verification. The staged rollback
+copy survives until the success journal is durable. **All plugin configuration
+and data directories remain untouched**, and dependencies are never removed
+automatically. An enabled managed parent recorded in `required_by` blocks Disable
+and Remove of its dependency. A verified disabled parent does not block; unsafe
+or ambiguous parent state fails closed. Orphan dependencies remain installed.
+
+There is no hot plugin load/unload. Actions share Minecraft maintenance exclusion
+with install, reset and updates, re-resolve the exact reviewed SHA-256 plan,
+recheck players under the runtime maintenance lock, persist private synced
+transaction evidence before downtime, and use the existing verified cold backup
+with `--leave-stopped`. Minecraft starts for normal stack verification and the
+existing active-plugin startup proof for Enable. Disable/Remove require absence
+from the final initialization inventory. This also temporarily starts an
+originally stopped server for verification and returns it to stopped afterward.
+Failures stop the failed runtime, restore the exact original JAR location and
+ownership, and verify the original runtime. Unproven recovery retains
+`needs_attention`, evidence and maintenance exclusion after restart.
+
+**Re-check recovery** for lifecycle operations uses durable evidence, never
+browser memory. It verifies a complete target state or performs a bounded exact
+rollback and verifies the original state. It cannot resolve ambiguous copies,
+changed hashes/descriptors or unexplained manifest changes. No terminal cleanup
+is part of the WebUI recovery workflow.
+
+The administrator-only Agent endpoints are `POST /v1/admin/plugins/manage/plan`,
+`POST /v1/admin/plugins/manage`, `POST /v1/admin/plugins/manage/acknowledge`, and
+`GET /v1/admin/plugins/operation`. Requests are bounded and reject unknown fields;
+only `enable`, `disable` and `remove` are supported. Matching CSRF-protected WebUI
+routes live under `/api/plugins/workspace/`. The workspace uses the generic
+current Plugin operation contract for install and all lifecycle actions; prior
+install endpoints remain available for compatibility. Installed inventory stays
+blocked until a mutation has a verified terminal state. Lifecycle progress uses
+Prepare, Backup, Change, Restart and Verify from the persisted operation journal.
+Administrator audit events use `plugin_enable`, `plugin_disable` and
+`plugin_remove`, the project ID, and the actual success/failure outcome.
+
+### Exact BlueMap addon classification
+
+Only Modrinth project `99IreA6y` **and** descriptor main class
+`de.bluecolored.bluemap.entities.PaperEntrypoint` together receive the dedicated
+root-artifact review rejection:
+
+> BlueMap native add-on belongs in Plugins -> Add-ons -> BlueMap Add-ons. Select its local file there.
+
+This add-on is not installed into `/plugins`. Administrators select its local JAR
+in Add-ons → BlueMap Add-ons; no automatic provider download or handoff is performed. Either identity alone continues through normal strict
+validation. Names, descriptions and loader tags do not trigger this special
+case. PlayerDataSync has no special rejection, and Purpur compatibility and
+active-plugin verification remain unchanged.
+
+### Plugins diagnostics
+
+**System → Logs → Plugins** lists, reads and downloads the private Agent log for
+`plugin_install`, `plugin_enable`, `plugin_disable`, `plugin_remove` and
+`plugin_addon_install`.
+`plugins-logs` uses the same private protections as other operation logs.
+Operation journals provide real stage/status history. Failed final startup
+verification adds only a small sanitized excerpt from the bounded final
+PluginInitializerManager initialization segment, limited to the expected plugin
+identities. Standard load/enable/disable/failure messages and safely identified
+plugin logger explanations can explain storage/configuration failures or a
+plugin disabling itself. Evidence is capped at 64 lines and 16 KiB, including
+its diagnostic framing; control corruption is rejected, sensitive lines are
+redacted, and URLs, connection strings and stack frames are excluded. Host
+identity uses existing diagnostic sanitation. The full server log is never
+exposed and raw Minecraft logs remain untouched. Read-only catalog compatibility
+rejections do not create persistent operations or logs. Plan and Review failures
+show their actionable error without directing users to a nonexistent Plugins log.
+Operation failures retain log guidance. Stack-verifier failures record the generic
+reason and up to the existing 64 KiB command-output bound through the private
+diagnostic sanitizer; full verifier output is never returned to the browser.
+Install failures also record rollback causes and results.
+
+### Reset Minecraft cleanup
+
+The authoritative reset plan includes fingerprinted `plugins_action`:
+`delete_with_internal_data` keeps existing whole internal-data deletion;
+`remove_managed_jars` removes exact Plugins-managed JAR ownership while external,
+network or unknown data is preserved. Preserved-data resets verify every manifest
+plugin entry in exactly one active/disabled location and every mod entry in `mods`,
+persist private cleanup evidence,
+and atomically stage those JARs before the destructive helper. Unsafe evidence
+blocks reset. Helper failure restores and verifies the staged JARs. Successful
+completion removes the manifest and empty disabled ownership store before
+discarding staging. Retry recognizes existing staged files and durable helper
+completion rather than duplicating or losing JARs. Manual plugins and plugin
+configuration/data folders remain when the data path is preserved. Internal
+reset verifies that manifest/disabled ownership state did not survive deletion.
+Mods use a private `mods/` child beneath the existing reset staging area; plugins
+retain their deployed flat staging layout. Both sets must be verified and staged
+before ownership is removed. Rollback restores exact originals, and replay is
+idempotent. Unmanaged mods and the real `mods` directory remain untouched. Whole
+data deletion still uses the existing authoritative whole-tree path without
+separate artifact cleanup. Full Factory Reset policy is unchanged.
+
+
+## Managed Add-ons — local content uploads
+
+**Plugins → Add-ons** supports exactly five hosted content kinds. All destinations
+are relative to the configured Minecraft data root and are chosen by the Agent:
+
+| Kind | File | Authoritative destination |
+| --- | --- | --- |
+| PlaceholderAPI expansion | `.jar` | `plugins/PlaceholderAPI/expansions/` |
+| Geyser extension | `.jar` | `plugins/Geyser-Spigot/extensions/` |
+| BlueMap native add-on | `.jar` | `plugins/BlueMap/packs/` |
+| Skript script | `.sk` | `plugins/Skript/scripts/` |
+| WorldEdit schematic | `.schem`, `.schematic` | `plugins/WorldEdit/<saveDir>/` |
+
+An administrator chooses a **local file** and selects **Review / Install** in
+that host's section. There is no Add-ons catalog, arbitrary URL download or
+editable destination. The host must be identified by the existing plugin
+inventory/metadata and have a safe real data directory. Geyser uses the existing
+JustVoxel Geyser-Spigot classification. A directory name alone does not establish
+an installed host. Disabled Plugins-managed hosts are unavailable until enabled.
+Installed host metadata does not claim the host is currently runtime-active.
+
+Review and Install are separate bounded multipart uploads; both send the selected
+file. The browser keeps it only in memory. The unprivileged WebUI checks the
+Administrator role, CSRF cookie/origin and fixed field/type contract, then streams
+to the Agent over the Unix socket without a staging copy. The Agent creates a
+private temporary file, validates and hashes it, and deletes review staging before
+returning. Apply creates a fresh upload, repeats all validation and environment
+checks, and compares the fingerprint. Filename, SHA-512, size, authoritative
+relative target, host identity/hash/status, safe parent identity, WorldEdit saveDir,
+server context and current ownership evidence are bound to the plan. Player
+confirmation uses the existing live player checks rather than freezing player
+counts in the fingerprint. Uploads are limited to 128 MiB plus bounded multipart
+framing; scripts are limited to 4 MiB and descriptors to 32 KiB.
+
+JARs require a bounded structurally valid ZIP with readable entries. PlaceholderAPI
+expansions require normal class content and reject root plugin or other hosted
+runtime descriptors. This is a **format check**, not static proof of a
+PlaceholderExpansion implementation; PlaceholderAPI performs runtime loading.
+Geyser requires root `extension.yml` with plausible non-empty `id`, `name`, `main`,
+`api` and `version`. BlueMap requires root `bluemap.addon.json` with non-empty `id`
+and `entrypoint`. Skript scripts must be non-empty UTF-8 without NUL bytes; no
+Skript parser is implemented. Schematics must have a supported extension and be
+bounded and non-empty; validation does not claim full clipboard format parsing.
+Host software performs its own parsing/loading.
+
+Ownership is separate from Plugins JAR ownership:
+`<DataPath>/.justvoxel/plugin-addons.json`, schema **v1**, records only kind,
+filename, target relative path, SHA-512 and available display/descriptor identity.
+It never stores an absolute data path. Inventory verifies each exact owned file
+and hash. Missing or changed owned content shows **Needs attention** and cannot
+be silently reinstalled. Manual files are never adopted. Existing targets fail
+closed, including already-owned files; overwrite, updates and removal are not
+available in this version. Cards show filename/type, Installed, Managed by Add-ons,
+the destination and **Updates are not available yet**.
+
+Executable expansions, extensions, native add-ons and scripts share the existing
+maintenance exclusion and runtime lock. They recheck players and confirmation,
+persist synced transaction evidence, take the existing verified cold backup with
+`--leave-stopped`, atomically publish without replacement using Minecraft data
+ownership/mode, restart Minecraft and verify health. Originally stopped Minecraft
+is temporarily started for verification and returned to stopped. Success proves
+the exact file was installed and Minecraft returned healthy; it does not claim
+that the hosted add-on itself loaded. Failures remove only the exact new
+transaction-owned inode/hash and restore the original service state. Durable
+journal/log evidence remains available, including across Agent restart.
+**Retry recovery** uses that evidence; uncertain state retains maintenance
+exclusion and never deletes unknown content.
+
+WorldEdit schematics share the operation gate and atomic non-overwriting placement,
+but require **no restart, no player confirmation and no cold backup** solely for
+this additive passive content. Final placement verifies the exact hash; rollback
+removes only the newly created exact file and does not change Minecraft's state.
+
+WorldEdit reads only the root `saveDir` scalar from
+`plugins/WorldEdit/config.yml`, defaulting to `schematics` when absent. A safe
+custom relative value such as `custom/schematics` is resolved beneath
+`plugins/WorldEdit`; simple quoted values are accepted. Explicit empty values,
+absolute paths, traversal, control garbage, duplicate settings and unsafe/symlinked
+parents are rejected. The browser never supplies this setting or a target path.
+
+Administrator-only Agent routes are `GET /v1/admin/plugins/addons`,
+`POST /v1/admin/plugins/addons/plan`, `POST /v1/admin/plugins/addons/install` and
+`POST /v1/admin/plugins/addons/recover`. Corresponding WebUI routes live under
+`/api/plugins/workspace/addons`. Uploads use `X-CSRF-Token` with the established
+cookie/origin policy before streaming. Polling reuses the existing Plugins operation
+surface with operation type `plugin_addon_install`. There are no changes to the
+existing Plugins ownership schema, runtime targets or SELinux policy.
+
+## CurseForge API configuration
+
+Plugins & Mods includes **CurseForge API** following
+Discover, Installed and Add-ons. Administrators can configure, replace or remove
+a CurseForge API key there to enable CurseForge plugin and mod discovery and
+installation. Sign in or create a CurseForge for Studios account, then open
+API keys and generate an API key if you do not already have one. The tab contains
+the password field directly and links to the
+[CurseForge API Console](https://console.curseforge.com/).
+Saving a key does not validate it against CurseForge.
+
+The Discover CurseForge switch defaults on for a supported server when a key is
+configured. Without a key it stays off and attempts to enable it show the existing
+inline configuration notice. The catalog resolves the official Minecraft game
+and content class, filters exact game/loader compatibility, and uses bounded
+pagination and dependency resolution. API requests use a fixed HTTPS origin,
+private authentication header, bounded responses and timeouts, and no redirects.
+Automatic CurseForge downloads use the official artifact URL from file metadata
+or the CurseForge download-URL endpoint. Official CurseForge CDN requests receive
+the configured key and may follow at most five redirects within the validated
+HTTPS `forgecdn.net` domain. Other providers and icons never receive the key.
+
+When CurseForge supplies no official URL for an exact file, JustVoxel tries a
+ForgeCDN URL derived from the authoritative file ID and exact filename. If that
+does not supply the exact binary, JustVoxel looks up the CurseForge SHA-1 on
+Modrinth and tries an exact match from a compatible, server-capable release.
+Review asks for the exact CurseForge JAR only after all automatic sources for
+that file are exhausted. The same order applies to each required dependency.
+Every alternate source must match the authoritative CurseForge file identity,
+SHA-1, and size. Apply verifies the reviewed filename, JAR compatibility, and
+collisions before creating a maintenance operation for uploads. Automatic installs
+also verify compatibility and collisions before downtime. Ownership records
+the original CurseForge project and release for every source.
+Provider failures return an error without exposing keys. Configuration removal takes effect for subsequent requests; failed lookups
+do not poison later retries. Provider cursors preserve unconsumed positions and
+rotate fairly across enabled catalogs. CurseForge project cards use initials
+when no local project icon is available.
+
+The Management Agent stores the key at
+`/var/lib/justvoxel/management/curseforge/api-key`. The containing directory must
+be root:root `0700`; the single-link regular key file must be root:root `0600`.
+All path components are opened without following symlinks. Unsafe paths or
+permissions fail closed. Replacement writes and syncs a private temporary file,
+then atomically renames it and syncs the directory. Removal unlinks the file and
+syncs the directory; this does not claim physical erasure from storage media.
+Keys must contain 1–1024 bytes, must not be whitespace-only, and must contain no
+control characters or line separators. Only the privileged Agent uses the key; runtime/container configuration never receives it.
+
+Authenticated administrator-only `GET`, `PUT`, and `DELETE` requests to
+`/api/plugins/workspace/curseforge-api` proxy to the same methods at
+`/v1/admin/plugins/curseforge-api`. This is appliance configuration independent
+of the selected Minecraft server. WebUI writes require the existing session CSRF
+token. PUT accepts a form `key` (forwarded once as strict JSON `{"key":"…"}`);
+DELETE accepts only the CSRF form field. Query parameters are rejected.
+Every successful response contains only `{"configured":true}` or
+`{"configured":false}` and is marked `no-store`. Status does not read key
+contents. Inputs are never prefilled and are cleared as soon as submission starts
+and when the workspace closes. Replacements require a complete key. The UI displays only a fixed mask.
+The key is never returned, logged, included in diagnostic contents, placed in
+browser storage or URLs, or passed to Minecraft. Removing it turns the switch
+off without changing installed plugins or manifests.
+
+JustVoxel directly installs official Modrinth, Hangar, or CurseForge artifacts into
+the administrator’s selected Minecraft server. Provider policies concerning
+third-party redistribution, mirroring, marketplace publication, or separate
+downloads are not installation eligibility gates because JustVoxel does not
+redistribute those artifacts. Eligibility uses technical identity, compatibility,
+official artifact availability, bounded actual byte counts, provider hashes, JAR
+inspection, and runtime verification. HTTP Content-Length is advisory; exact
+provider size and hash verification remain mandatory.
+
+Failed provider review/download and runtime-start attempts produce sanitized,
+downloadable diagnostic logs under **System -> Logs -> Plugins**. When a log was
+recorded, **Open Plugins logs** opens that exact file. Start failures retain bounded
+start-command output, selected service state, the exact instance service’s recent
+journal, and available Minecraft startup evidence before rollback.

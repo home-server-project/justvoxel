@@ -1,0 +1,262 @@
+(() => {
+  function setPartitionSelection(buttons, selected = null) {
+    buttons.forEach(button => {
+      const isSelected = button === selected;
+      button.classList.toggle('is-selected', isSelected);
+      button.setAttribute('aria-pressed', String(isSelected));
+      const badge = button.querySelector('.storage-partition-state');
+      if (badge) badge.textContent = isSelected ? jvT("ui.57fd7a0cf33f") : button.dataset.role;
+    });
+  }
+
+  // Compact destination browser; details and preparations use shared modal dialogs.
+  function diskBrowser(form, selectedDevice) {
+    const group = [...form.querySelectorAll('[data-storage-partitions]')].find(panel => [...panel.querySelectorAll('[data-device]')].some(button => button.dataset.device === selectedDevice));
+    if (group) {
+      form.querySelectorAll('[data-storage-disk]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.storageDisk === group.dataset.storagePartitions)));
+    }
+  }
+
+  function initSetupStorage(root = document) {
+    const storageForm = root.querySelector('[data-setup-storage-form]');
+    if (storageForm) {
+      const type = storageForm.querySelector('[data-setup-storage-type]');
+      const device = storageForm.querySelector('[data-setup-storage-device]');
+      const mount = storageForm.querySelector('[data-setup-storage-mount]');
+      const path = storageForm.querySelector('[data-setup-storage-path]');
+      diskBrowser(storageForm, device?.value);
+      const systemButton = storageForm.querySelector('[data-setup-storage-system]');
+      const internalButton = storageForm.querySelector('[data-setup-storage-internal]');
+      const systemPanel = storageForm.querySelector('[data-setup-storage-system-panel]');
+      const internalPanel = storageForm.querySelector('[data-setup-storage-internal-panel]');
+      const existingButtons = Array.from(storageForm.querySelectorAll('[data-setup-existing-partition]'));
+      setPartitionSelection(existingButtons);
+      const selectedBox = storageForm.querySelector('[data-setup-storage-selected]');
+      const selectedDevice = storageForm.querySelector('[data-setup-storage-selected-device]');
+      const selectedPath = storageForm.querySelector('[data-setup-storage-selected-path]');
+
+      function minecraftPath(mountPoint) {
+        return mountPoint.replace(/\/$/, '') + '/minecraft';
+      }
+
+      function setPanels(kind) {
+        if (systemPanel) systemPanel.hidden = kind !== 'system';
+        if (internalPanel) internalPanel.hidden = kind === 'system';
+        systemButton?.classList.toggle('is-selected', kind === 'system');
+        internalButton?.classList.toggle('is-selected', kind !== 'system');
+      }
+
+      function selectSystem() {
+        if (type) type.value = 'system';
+        if (device) device.value = '';
+        if (mount) mount.value = '';
+        if (path) path.value = systemButton?.dataset.systemPath || '/var/lib/justvoxel/minecraft';
+        setPartitionSelection(existingButtons);
+        if (selectedBox) selectedBox.hidden = true;
+        setPanels('system');
+      }
+
+      function selectExisting(button) {
+        const selectedMount = button.dataset.mountpoint || '/var/mnt/justvoxel-data';
+        const selectedDeviceValue = button.dataset.device || '';
+        if (type) type.value = 'partition';
+        if (device) device.value = selectedDeviceValue;
+        if (mount) mount.value = selectedMount;
+        if (path) path.value = minecraftPath(selectedMount);
+        setPartitionSelection(existingButtons, button);
+        if (selectedBox) selectedBox.hidden = false;
+        if (selectedDevice) selectedDevice.textContent = selectedDeviceValue;
+        if (selectedPath) selectedPath.textContent = minecraftPath(selectedMount);
+        setPanels('partition');
+      }
+
+      function chooseInternal() {
+        const current = existingButtons.find(button => button.dataset.device === device?.value);
+        if (current) { selectExisting(current); return; }
+        setPanels('partition');
+        if (type) type.value = 'partition';
+        if (device) device.value = '';
+        if (mount) mount.value = '';
+        if (path) path.value = '';
+        setPartitionSelection(existingButtons);
+        if (selectedBox) selectedBox.hidden = true;
+      }
+
+      existingButtons.filter(button => button.hasAttribute('data-setup-select-existing')).forEach(button => button.addEventListener('click', () => selectExisting(button)));
+      systemButton?.addEventListener('click', selectSystem);
+      internalButton?.addEventListener('click', chooseInternal);
+      storageForm.addEventListener('setup-destination-select', event => {
+        const button = existingButtons.find(candidate => candidate.dataset.device === event.detail);
+        if (button) selectExisting(button);
+      });
+
+      if (type?.value === 'partition') {
+        setPanels('partition');
+        if (type) type.value = 'partition';
+        const current = existingButtons.find((button) => button.dataset.device === device?.value);
+        if (current) selectExisting(current);
+        else {
+          // A refreshed inventory may no longer contain the draft's old partition.
+          if (device) device.value = '';
+          if (mount) mount.value = '';
+          if (path) path.value = '';
+          if (selectedBox) selectedBox.hidden = true;
+        }
+      } else {
+        selectSystem();
+      }
+    }
+
+    const backupForm = root.querySelector('[data-setup-backup-form]');
+    if (backupForm) {
+      const type = backupForm.querySelector('[data-setup-backup-type]');
+      const device = backupForm.querySelector('[data-setup-backup-device]');
+      const mount = backupForm.querySelector('[data-setup-backup-mount]');
+      const path = backupForm.querySelector('[data-setup-backup-path]');
+      diskBrowser(backupForm, device?.value);
+      const source = backupForm.querySelector('[data-setup-backup-source]');
+      const username = backupForm.querySelector('[data-setup-backup-username]');
+      const domain = backupForm.querySelector('[data-setup-backup-domain]');
+      const choices = Array.from(backupForm.querySelectorAll('[data-setup-backup-choice]'));
+      const panels = Array.from(backupForm.querySelectorAll('[data-setup-backup-panel]'));
+      const existingButtons = Array.from(backupForm.querySelectorAll('[data-setup-backup-existing]'));
+      setPartitionSelection(existingButtons);
+      const selectedBox = backupForm.querySelector('[data-setup-backup-selected]');
+      const selectedDevice = backupForm.querySelector('[data-setup-backup-selected-device]');
+      const selectedPath = backupForm.querySelector('[data-setup-backup-selected-path]');
+      const sameDiskWarning = backupForm.querySelector('[data-setup-same-disk-warning]');
+      const warningType = type?.value;
+      const warningDevice = device?.value;
+
+      const backupPath = (mountPoint) => mountPoint.replace(/\/$/, '') + '/backups';
+
+      function clearLocalSelection() {
+        setPartitionSelection(existingButtons);
+        if (device) device.value = '';
+        if (selectedBox) selectedBox.hidden = true;
+      }
+
+      function showKind(kind) {
+        if (type) type.value = kind;
+        choices.forEach((choice) => choice.classList.toggle('is-selected', choice.dataset.setupBackupChoice === kind));
+        panels.forEach((panel) => {
+          panel.hidden = panel.dataset.setupBackupPanel !== kind;
+        });
+        if (kind !== 'partition') clearLocalSelection();
+        else if (selectedBox) selectedBox.hidden = !device?.value;
+        syncNetworkFields(kind);
+        if (sameDiskWarning) sameDiskWarning.hidden = kind !== warningType || (kind === 'partition' && device?.value !== warningDevice);
+      }
+
+      function selectSystem(choice) {
+        showKind('system');
+        if (mount) mount.value = '';
+        if (path) path.value = choice?.dataset.systemPath || '/var/lib/justvoxel/backups';
+        if (source) source.value = '';
+        if (username) username.value = '';
+        if (domain) domain.value = '';
+      }
+
+      function selectExisting(button) {
+        showKind('partition');
+        const targetDevice = button.dataset.device || '';
+        const targetMount = button.dataset.mountpoint || (targetDevice === backupForm.dataset.dataDevice && backupForm.dataset.dataMount
+          ? backupForm.dataset.dataMount : '/var/mnt/justvoxel-backup');
+        if (device) device.value = targetDevice;
+        if (mount) mount.value = targetMount;
+        if (path) path.value = backupPath(targetMount);
+        if (source) source.value = '';
+        if (username) username.value = '';
+        if (domain) domain.value = '';
+        setPartitionSelection(existingButtons, button);
+        if (selectedBox) selectedBox.hidden = false;
+        if (selectedDevice) selectedDevice.textContent = targetDevice;
+        if (selectedPath) selectedPath.textContent = backupPath(targetMount);
+        if (sameDiskWarning) sameDiskWarning.hidden = targetDevice !== warningDevice;
+      }
+
+      function syncNetworkFields(kind) {
+        if (kind !== 'nfs' && kind !== 'smb') return;
+        const sourceInput = backupForm.querySelector('[data-setup-network-source="' + kind + '"]');
+        const mountInput = backupForm.querySelector('[data-setup-network-mount="' + kind + '"]');
+        const pathInput = backupForm.querySelector('[data-setup-network-path="' + kind + '"]');
+        const fallback = '/var/mnt/justvoxel-backup';
+        if (mountInput && !mountInput.value) mountInput.value = fallback;
+        if (pathInput && !pathInput.value) pathInput.value = backupPath(mountInput?.value || fallback);
+        if (source) source.value = sourceInput?.value || '';
+        if (mount) mount.value = mountInput?.value || '';
+        if (path) path.value = pathInput?.value || '';
+        if (kind === 'smb') {
+          if (username) username.value = backupForm.querySelector('[data-setup-smb-username]')?.value || '';
+          if (domain) domain.value = backupForm.querySelector('[data-setup-smb-domain]')?.value || '';
+        } else {
+          if (username) username.value = '';
+          if (domain) domain.value = '';
+        }
+        if (device) device.value = '';
+      }
+
+      existingButtons.filter(button => button.hasAttribute('data-setup-select-existing')).forEach(button => button.addEventListener('click', () => selectExisting(button)));
+      choices.forEach((choice) => {
+        choice.addEventListener('click', () => {
+          const kind = choice.dataset.setupBackupChoice || 'system';
+          if (kind === 'system') {
+            selectSystem(choice);
+            return;
+          }
+          showKind(kind);
+          if (kind === 'partition') {
+            if (type) type.value = 'partition';
+            if (!device?.value) {
+              if (mount) mount.value = '';
+              if (path) path.value = '';
+            }
+          }
+        });
+      });
+      backupForm.addEventListener('setup-destination-select', event => {
+        const button = existingButtons.find(candidate => candidate.dataset.device === event.detail);
+        if (button) selectExisting(button);
+      });
+
+      ['nfs', 'smb'].forEach((kind) => {
+        backupForm.querySelector('[data-setup-network-source="' + kind + '"]')?.addEventListener('input', () => syncNetworkFields(kind));
+        const mountInput = backupForm.querySelector('[data-setup-network-mount="' + kind + '"]');
+        const pathInput = backupForm.querySelector('[data-setup-network-path="' + kind + '"]');
+        mountInput?.addEventListener('input', () => {
+          if (pathInput && (!pathInput.value || pathInput.value.endsWith('/backups'))) {
+            pathInput.value = backupPath(mountInput.value || '/var/mnt/justvoxel-backup');
+          }
+          syncNetworkFields(kind);
+        });
+        pathInput?.addEventListener('input', () => syncNetworkFields(kind));
+      });
+      backupForm.querySelector('[data-setup-smb-username]')?.addEventListener('input', () => syncNetworkFields('smb'));
+      backupForm.querySelector('[data-setup-smb-domain]')?.addEventListener('input', () => syncNetworkFields('smb'));
+
+
+      backupForm.addEventListener('submit', () => syncNetworkFields(type?.value || 'system'));
+
+      if (type?.value === 'partition') {
+        showKind('partition');
+        const current = existingButtons.find((button) => button.dataset.device === device?.value);
+        if (current) selectExisting(current);
+        else {
+          if (device) device.value = '';
+          if (mount) mount.value = '';
+          if (path) path.value = '';
+          if (selectedBox) selectedBox.hidden = true;
+        }
+      } else if (type?.value === 'nfs' || type?.value === 'smb') {
+        showKind(type.value);
+      } else {
+        const systemChoice = choices.find((choice) => choice.dataset.setupBackupChoice === 'system');
+        selectSystem(systemChoice);
+      }
+    }
+
+    window.JustVoxelSetupDiskActions?.init(root);
+  }
+  window.JustVoxelSetupStorage = { init: initSetupStorage };
+  initSetupStorage();
+})();

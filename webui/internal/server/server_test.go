@@ -1,0 +1,633 @@
+package server
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/home-server-project/justvoxel-webui/internal/api"
+)
+
+type fakeAPI struct {
+	authenticated bool
+	mustChange    bool
+	statusResult  api.Status
+	playersResult api.Players
+	playersErr    error
+	actionResult  api.MinecraftActionResponse
+	actionErr     error
+	action        string
+	confirmed     bool
+}
+
+func (f *fakeAPI) Login(_ context.Context, username, password string) (api.LoginResponse, error) {
+	if username == "admin" && password == "secret" {
+		f.authenticated = true
+		return api.LoginResponse{Session: "session-token", ManagementAPI: "v1", MustChange: f.mustChange}, nil
+	}
+	return api.LoginResponse{}, api.ErrUnauthorized
+}
+
+func (f *fakeAPI) Logout(_ context.Context, _ string) error { f.authenticated = false; return nil }
+
+func (f *fakeAPI) ChangePassword(_ context.Context, session, currentPassword, newPassword string) error {
+	if session != "session-token" || currentPassword != "secret" || len(newPassword) < 12 {
+		return api.ErrUnauthorized
+	}
+	f.mustChange = false
+	return nil
+}
+
+func defaultStatus() api.Status {
+	var s api.Status
+	s.System.Variant = "VM"
+	s.System.Health = "Healthy"
+	s.System.IPv4 = "192.0.2.10"
+	s.Minecraft.Configured = true
+	s.Minecraft.State = "Running"
+	s.Minecraft.Players = 2
+	s.Minecraft.MaxPlayers = 10
+	s.Minecraft.Version = "1.21.8"
+	s.Backup.Enabled = true
+	s.JustVoxel.Version = "10-test"
+	return s
+}
+
+func defaultPlayers() api.Players {
+	return api.Players{Configured: true, State: "running", Online: 2, Max: 10, Names: []string{"Alex", "Steve"}}
+}
+
+func (f *fakeAPI) Session(_ context.Context, session string) (api.SessionInfo, error) {
+	if session != "session-token" {
+		return api.SessionInfo{}, api.ErrUnauthorized
+	}
+	return api.SessionInfo{Username: "admin", Role: "administrator", AuthSource: "system"}, nil
+}
+
+func (f *fakeAPI) Status(_ context.Context, session string) (api.Status, error) {
+	if session != "session-token" {
+		return api.Status{}, api.ErrUnauthorized
+	}
+	if f.statusResult.Minecraft.State != "" {
+		return f.statusResult, nil
+	}
+	return defaultStatus(), nil
+}
+
+func TestUnauthenticatedDashboardRedirects(t *testing.T) {
+	app, err := New(&fakeAPI{}, Config{Version: "1.0.0", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://example/", nil)
+	app.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("got %d", rr.Code)
+	}
+	if rr.Header().Get("Location") != "/login" {
+		t.Fatalf("unexpected redirect %q", rr.Header().Get("Location"))
+	}
+}
+
+func TestLoginSetsLocalHTTPSession(t *testing.T) {
+	app, err := New(&fakeAPI{}, Config{Version: "1.0.0", ManagementAPI: "v1", ExternalScheme: "http"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	form := strings.NewReader("username=admin&password=secret")
+	req := httptest.NewRequest(http.MethodPost, "http://example/login", form)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("got %d", rr.Code)
+	}
+	found := false
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == sessionCookie {
+			found = true
+			if c.Secure || !c.HttpOnly || c.SameSite != http.SameSiteStrictMode {
+				t.Fatalf("local HTTP session cookie has unexpected security attributes: %#v", c)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("session cookie not set")
+	}
+}
+
+func TestCSRFAcceptsSameHTTPOrigin(t *testing.T) {
+	app, err := New(&fakeAPI{}, Config{ExternalScheme: "http"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "http://example/logout", strings.NewReader("csrf=token"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "http://example")
+	req.AddCookie(&http.Cookie{Name: csrfCookie, Value: "token"})
+	if !app.validCSRF(req) {
+		t.Fatal("same-origin HTTP CSRF token was rejected")
+	}
+}
+
+func TestCSRFAcceptsNullOriginWithValidToken(t *testing.T) {
+	app, err := New(&fakeAPI{}, Config{ExternalScheme: "http"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "http://example/logout", strings.NewReader("csrf=token"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "null")
+	req.AddCookie(&http.Cookie{Name: csrfCookie, Value: "token"})
+	if !app.validCSRF(req) {
+		t.Fatal("null Origin with valid CSRF token was rejected")
+	}
+}
+
+func TestCSRFRejectsForeignOrigin(t *testing.T) {
+	app, err := New(&fakeAPI{}, Config{ExternalScheme: "http"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, origin := range []string{"https://example", "http://other.example"} {
+		req := httptest.NewRequest(http.MethodPost, "http://example/logout", strings.NewReader("csrf=token"))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Origin", origin)
+		req.AddCookie(&http.Cookie{Name: csrfCookie, Value: "token"})
+		if app.validCSRF(req) {
+			t.Fatalf("foreign Origin %q was accepted", origin)
+		}
+	}
+}
+
+func TestCSRFRejectsMissingOrWrongToken(t *testing.T) {
+	app, err := New(&fakeAPI{}, Config{ExternalScheme: "http"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name        string
+		form        string
+		cookieValue string
+	}{
+		{name: "missing form token", form: "", cookieValue: "token"},
+		{name: "wrong form token", form: "csrf=wrong", cookieValue: "token"},
+		{name: "missing cookie", form: "csrf=token", cookieValue: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "http://example/logout", strings.NewReader(tc.form))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			req.Header.Set("Origin", "null")
+			if tc.cookieValue != "" {
+				req.AddCookie(&http.Cookie{Name: csrfCookie, Value: tc.cookieValue})
+			}
+			if app.validCSRF(req) {
+				t.Fatal("invalid CSRF request was accepted")
+			}
+		})
+	}
+}
+
+func TestFirstLoginRequiresPasswordChange(t *testing.T) {
+	app, err := New(&fakeAPI{mustChange: true}, Config{Version: "1.0.0", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	form := strings.NewReader("username=admin&password=secret")
+	req := httptest.NewRequest(http.MethodPost, "http://example/login", form)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/password" {
+		t.Fatalf("expected password redirect, got %d %q", rr.Code, rr.Header().Get("Location"))
+	}
+}
+
+func TestDashboardUsesWorkspaceControlsAndQuickLook(t *testing.T) {
+	app, err := New(&fakeAPI{}, Config{Version: "1.0.0", Commit: "abc123", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "http://example/", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("got %d", rr.Code)
+	}
+	body := rr.Body.String()
+	for _, want := range []string{`data-quick-look`, `data-quick-look-minecraft`, `data-quick-look-players`, `data-workspace-window="minecraft"`, "/minecraft/start", "/minecraft/stop", "/minecraft/restart", `data-dashboard-status="/api/dashboard-status?server=jv-a1b2c3"`, `data-configured="true"`, "dashboard-attention"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("missing %q in response", want)
+		}
+	}
+	if strings.Contains(body, "<h2>Appliance</h2>") {
+		t.Fatal("dashboard still renders the removed Appliance panel")
+	}
+	if strings.Contains(body, `id="minecraft-players-summary"`) {
+		t.Fatal("dashboard still renders the duplicate Players summary tile")
+	}
+	if strings.Contains(body, `dashboard-summary`) {
+		t.Fatal("dashboard still renders the legacy summary strip")
+	}
+	if strings.Contains(body, "Server control") || strings.Contains(body, "Online now") {
+		t.Fatal("dashboard still renders legacy control or player cards")
+	}
+}
+
+func TestUnconfiguredDashboardShowsSetupWithoutLivePanels(t *testing.T) {
+	status := defaultStatus()
+	status.Minecraft.Configured = false
+	status.Minecraft.State = "Not configured"
+	app, err := New(&fakeAPI{statusResult: status, playersResult: api.Players{State: "not_configured"}}, Config{ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/", ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("dashboard returned %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{`data-dashboard-setup-area`, `href="/setup"`, "Minecraft is not configured", "Set up your Minecraft server", "Start setup when you are ready"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("setup invitation missing %q", want)
+		}
+	}
+	if !strings.Contains(body, `data-configured="false"`) || strings.Contains(body, `data-dashboard-live-panels`) {
+		t.Fatal("unconfigured dashboard contains legacy live panels")
+	}
+	if strings.Contains(body, `dashboard-summary`) {
+		t.Fatal("legacy summary strip remains")
+	}
+}
+
+func TestDashboardStatusRequiresAuthentication(t *testing.T) {
+	app, err := New(&fakeAPI{}, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://example/api/dashboard-status", nil)
+	app.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rr.Code)
+	}
+}
+
+func TestDashboardStatusReturnsLiveJSON(t *testing.T) {
+	app, err := New(&fakeAPI{}, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://example/api/dashboard-status", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+	app.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("unexpected content type %q", got)
+	}
+	body := rr.Body.String()
+	for _, want := range []string{`"state":"Running"`, `"online":2`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("missing %q in status response: %s", want, body)
+		}
+	}
+}
+
+func TestDashboardResultMarksPendingAction(t *testing.T) {
+	app, err := New(&fakeAPI{}, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://example/?result=restart", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+	app.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, `data-pending-action="restart"`) {
+		t.Fatalf("missing pending restart state: %s", body)
+	}
+	if !strings.Contains(body, "Minecraft restart requested.") {
+		t.Fatalf("missing restart request message: %s", body)
+	}
+}
+
+func TestDashboardShowsNotConfiguredExplicitly(t *testing.T) {
+	var status api.Status
+	status.System.Variant = "VM"
+	status.System.Health = "Healthy"
+	status.Minecraft.State = "Not configured"
+	status.Minecraft.Version = "Not configured"
+	players := api.Players{State: "not_configured"}
+	app, err := New(&fakeAPI{statusResult: status, playersResult: players}, Config{Version: "1.0.0", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "http://example/", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("got %d", rr.Code)
+	}
+	body := rr.Body.String()
+	for _, want := range []string{`data-dashboard-setup-area`, `href="/setup"`, "Minecraft is not configured", "Set up your Minecraft server", `data-quick-look`, `data-backups-workspace-dialog`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("unconfigured dashboard missing %q", want)
+		}
+	}
+	if !strings.Contains(body, `data-configured="false"`) || strings.Contains(body, `data-dashboard-live-panels`) {
+		t.Fatal("unconfigured dashboard still contains legacy panels")
+	}
+	if strings.Contains(body, "dashboard-summary") {
+		t.Fatal("unconfigured dashboard still shows legacy summary cards")
+	}
+}
+
+func TestMinecraftActionRequiresCSRF(t *testing.T) {
+	fake := &fakeAPI{}
+	app, err := New(fake, Config{ExternalScheme: "http"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "http://example/minecraft/restart", strings.NewReader(""))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", rr.Code)
+	}
+	if fake.action != "" {
+		t.Fatal("Minecraft action reached API without CSRF")
+	}
+}
+
+func TestMinecraftRestartRendersPlayerConfirmation(t *testing.T) {
+	fake := &fakeAPI{actionResult: api.MinecraftActionResponse{
+		Action: "restart", ConfirmationRequired: true, Reason: "players_online", Online: 2, Players: []string{"Alex", "Steve"},
+	}}
+	app, err := New(&dashboardRestartAPI{fakeAPI: fake}, Config{Version: "1.0.0", ManagementAPI: "v1", ExternalScheme: "http"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := actionRequest("http://example/minecraft/restart?server=jv-a1b2c3", "csrf=token")
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{"Confirmation required", "Restart anyway", "Alex", "Steve", `name="confirm_players" value="yes"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("missing %q in confirmation page", want)
+		}
+	}
+}
+
+func TestMinecraftConfirmedRestartRedirectsAfterSuccess(t *testing.T) {
+	fake := &fakeAPI{actionResult: api.MinecraftActionResponse{OK: true, Action: "restart", Message: "Minecraft restart requested."}}
+	app, err := New(&dashboardRestartAPI{fakeAPI: fake}, Config{ExternalScheme: "http"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := actionRequest("http://example/minecraft/restart?server=jv-a1b2c3", "csrf=token&confirm_players=yes")
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/?result=restart&server=jv-a1b2c3" {
+		t.Fatalf("unexpected result %d %q", rr.Code, rr.Header().Get("Location"))
+	}
+	if fake.action != "restart" || !fake.confirmed {
+		t.Fatalf("confirmation not forwarded correctly: action=%q confirmed=%v", fake.action, fake.confirmed)
+	}
+}
+
+func TestMinecraftActionErrorRendersFriendlyMessage(t *testing.T) {
+	fake := &fakeAPI{
+		actionResult: api.MinecraftActionResponse{Action: "stop", Message: "Could not confirm player status through RCON. Minecraft was not interrupted."},
+		actionErr:    errors.New("rejected"),
+	}
+	app, err := New(&dashboardRestartAPI{fakeAPI: fake}, Config{ExternalScheme: "http"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := actionRequest("http://example/minecraft/stop?server=jv-a1b2c3", "csrf=token")
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), "Minecraft was not interrupted") {
+		t.Fatalf("friendly failure message missing: %s", rr.Body.String())
+	}
+}
+
+func actionRequest(target, form string) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "null")
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+	req.AddCookie(&http.Cookie{Name: csrfCookie, Value: "token"})
+	return req
+}
+
+type fakeDashboardOperationAPI struct {
+	fakeAPI
+	migration *api.PersistentOperation
+	restore   *api.PersistentOperation
+	reset     *api.PersistentOperation
+}
+
+func (f *fakeDashboardOperationAPI) AdminCurrentMigrationOperation(_ context.Context, _ string) (api.PersistentOperationResponse, error) {
+	return api.PersistentOperationResponse{Operation: f.migration}, nil
+}
+func (f *fakeDashboardOperationAPI) AdminCurrentRestoreOperation(_ context.Context, _ string) (api.PersistentOperationResponse, error) {
+	return api.PersistentOperationResponse{Operation: f.restore}, nil
+}
+func (f *fakeDashboardOperationAPI) AdminCurrentFactoryResetOperation(_ context.Context, _ string) (api.PersistentOperationResponse, error) {
+	return api.PersistentOperationResponse{Operation: f.reset}, nil
+}
+
+func TestDashboardSurfacesMigrationNeedsAttention(t *testing.T) {
+	client := &fakeDashboardOperationAPI{migration: &api.PersistentOperation{
+		OperationID:   "f75ce69d-e30d-4ea4-b402-ba301a8098fb",
+		OperationType: "migration_import",
+		State:         "needs_attention",
+		Status:        "Server migration Import backend stopped unexpectedly; preserved Import or runtime state requires administrator attention.",
+	}}
+	app, err := New(client, Config{Version: "1.0.0", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "http://example/", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("dashboard returned %d: %s", rr.Code, rr.Body.String())
+	}
+	for _, want := range []string{"Server Migration needs attention", "Review Migration Recovery", "/?workspace=migration&amp;tab=recovery"} {
+		if !strings.Contains(rr.Body.String(), want) {
+			t.Fatalf("dashboard attention missing %q: %s", want, rr.Body.String())
+		}
+	}
+	if strings.Contains(rr.Body.String(), "/workspace/migration/recovery") || strings.Contains(rr.Body.String(), "/settings/server-migration/recovery") {
+		t.Fatalf("dashboard must not navigate directly to a workspace fragment: %s", rr.Body.String())
+	}
+}
+
+func TestDashboardRecoveryAttentionOpensRecoveryWorkspace(t *testing.T) {
+	for _, operationType := range []string{"migration_import", "migration_recovery"} {
+		t.Run(operationType, func(t *testing.T) {
+			attention := dashboardCurrentAttention(context.Background(), &fakeDashboardOperationAPI{migration: &api.PersistentOperation{
+				OperationType: operationType, State: "needs_attention", Status: "Recovery needs review.",
+			}}, "session-token")
+			if attention == nil || attention.Action != "/?workspace=migration&tab=recovery" || attention.Label != "Review Migration Recovery" || attention.Status != "Recovery needs review." {
+				t.Fatalf("unexpected Migration attention: %#v", attention)
+			}
+			if operationType == "migration_recovery" && attention.Title != "Migration Recovery needs attention" {
+				t.Fatalf("Recovery attention title = %q", attention.Title)
+			}
+		})
+	}
+}
+
+func TestWallpaperContentSecurityPolicy(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	securityHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})).ServeHTTP(recorder, request)
+	want := "default-src 'self'; style-src 'self' 'sha256-ypuHOrHdFK0ra+bQlE+zbe2vHCx4oWqJLuhMbpi6gms='; script-src 'self'; img-src 'self' http: https: blob:; form-action 'self'; frame-ancestors 'none'"
+	if got := recorder.Header().Get("Content-Security-Policy"); got != want {
+		t.Fatalf("CSP must allow only the fixed Playit initial styles and preserve other restrictions: got %q", got)
+	}
+}
+
+func TestPlayitInitialStylesMatchCSP(t *testing.T) {
+	data, err := englishPresentationAsset("static/network-workspace.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(data)
+	recorder := httptest.NewRecorder()
+	securityHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
+	writes := strings.Split(script, "playitPopup.document.write(`")
+	if len(writes) != 3 {
+		t.Fatal("Both fixed Playit documents must retain initial styling")
+	}
+	for _, document := range writes[1:] {
+		_, rest, ok := strings.Cut(document, "<style>")
+		if !ok {
+			t.Fatal("Playit needs immediate dark styling")
+		}
+		style, _, ok := strings.Cut(rest, "</style>")
+		if !ok {
+			t.Fatal("Incomplete initial styles")
+		}
+		sum := sha256.Sum256([]byte(style))
+		allowed := "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+		if !strings.Contains(recorder.Header().Get("Content-Security-Policy"), allowed) {
+			t.Fatal("Initial styles are blocked by CSP")
+		}
+		if strings.Contains(style, "url(") || strings.Contains(style, "@import") {
+			t.Fatal("Initial styling must not wait for external resources")
+		}
+	}
+}
+
+// Two registered instances ensure the dashboard never guesses the first server.
+type dashboardRestartAPI struct {
+	*fakeAPI
+	selectedID string
+}
+
+func (f *dashboardRestartAPI) MinecraftInstances(context.Context, string) ([]api.RegisteredMinecraftInstance, error) {
+	return []api.RegisteredMinecraftInstance{{ID: "jv-a1b2c3"}, {ID: "jv-b1b2c3"}}, nil
+}
+func (f *dashboardRestartAPI) MinecraftInstanceRuntimes(context.Context, string) ([]string, error) {
+	return []string{"jv-a1b2c3", "jv-b1b2c3"}, nil
+}
+func (f *dashboardRestartAPI) MinecraftInstanceActionConfirmed(ctx context.Context, session, id, action string, confirm bool) (api.MinecraftActionResponse, error) {
+	f.selectedID = id
+	if session != "session-token" {
+		return api.MinecraftActionResponse{}, api.ErrUnauthorized
+	}
+	f.action = action
+	f.confirmed = confirm
+	if f.actionResult.Action != "" || f.actionResult.ConfirmationRequired || f.actionResult.Message != "" {
+		return f.actionResult, f.actionErr
+	}
+	return api.MinecraftActionResponse{OK: true, Action: action}, f.actionErr
+}
+
+func TestDashboardRestartConfirmationKeepsResolvedID(t *testing.T) {
+	fake := &dashboardRestartAPI{fakeAPI: &fakeAPI{actionResult: api.MinecraftActionResponse{Action: "restart", ConfirmationRequired: true, Reason: "players_online", Online: 1, Players: []string{"Alex"}}}}
+	app, err := New(fake, Config{ExternalScheme: "http"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, actionRequest("http://example/minecraft/restart?server=jv-b1b2c3", "csrf=token"))
+	if rr.Code != 200 || fake.selectedID != "jv-b1b2c3" || !strings.Contains(rr.Body.String(), `name="server" value="jv-b1b2c3"`) {
+		t.Fatal(rr.Code, fake.selectedID, rr.Body.String())
+	}
+	fake.actionResult = api.MinecraftActionResponse{OK: true, Action: "restart"}
+	rr = httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, actionRequest("http://example/minecraft/restart", "csrf=token&confirm_players=yes&server=jv-b1b2c3"))
+	if rr.Code != http.StatusSeeOther || fake.selectedID != "jv-b1b2c3" || !fake.confirmed {
+		t.Fatal(rr.Code, fake.selectedID, fake.confirmed)
+	}
+}
+
+func (f *fakeAPI) MinecraftInstances(ctx context.Context, session string) ([]api.RegisteredMinecraftInstance, error) {
+	status, err := f.Status(ctx, session)
+	if err != nil || !status.Minecraft.Configured {
+		return nil, err
+	}
+	return []api.RegisteredMinecraftInstance{{ID: "jv-a1b2c3"}}, nil
+}
+func (f *fakeAPI) MinecraftInstanceRuntimes(ctx context.Context, session string) ([]string, error) {
+	instances, err := f.MinecraftInstances(ctx, session)
+	ids := []string{}
+	for _, instance := range instances {
+		ids = append(ids, instance.ID)
+	}
+	return ids, err
+}
+func (f *fakeAPI) MinecraftInstanceConfiguration(ctx context.Context, session, id string) (api.InstanceRuntimeSettings, error) {
+	status, err := f.Status(ctx, session)
+	mc := status.Minecraft
+	return api.InstanceRuntimeSettings{Software: mc.ServerSoftware, Version: mc.Version, MaxPlayers: mc.MaxPlayers, JavaPort: mc.JavaPort, BedrockEnabled: mc.Bedrock, BedrockPort: mc.BedrockPort}, err
+}
+func (f *fakeAPI) MinecraftInstanceStatus(ctx context.Context, session, id string) (api.MinecraftInstanceStatus, error) {
+	status, err := f.Status(ctx, session)
+	return api.MinecraftInstanceStatus{ID: id, State: strings.ToLower(status.Minecraft.State)}, err
+}
+func (f *fakeAPI) MinecraftInstancePlayers(ctx context.Context, session, id string) (api.InstancePlayers, error) {
+	if session != "session-token" {
+		return api.InstancePlayers{}, api.ErrUnauthorized
+	}
+	if f.playersErr != nil {
+		return api.InstancePlayers{}, f.playersErr
+	}
+	players := f.playersResult
+	if players.State == "" {
+		players = defaultPlayers()
+	}
+	return api.InstancePlayers{ID: id, State: players.State, Online: players.Online, Maximum: players.Max}, nil
+}

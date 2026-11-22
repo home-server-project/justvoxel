@@ -1,0 +1,231 @@
+package server
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/home-server-project/justvoxel-webui/internal/api"
+)
+
+type authFlowAPI struct {
+	*fakeAPI
+	identity    api.SessionInfo
+	authStatus  api.AuthStatus
+	change      api.AuthModeChange
+	changeResp  api.AuthModeChangeResponse
+	changeErr   error
+	passwordErr error
+}
+
+func newAuthFlowAPI() *authFlowAPI {
+	return &authFlowAPI{
+		fakeAPI: &fakeAPI{},
+		authStatus: api.AuthStatus{
+			Mode:               "system",
+			Username:           "voxel",
+			MinimumPasswordLen: 8,
+		},
+	}
+}
+
+func (f *authFlowAPI) Session(ctx context.Context, session string) (api.SessionInfo, error) {
+	info, err := f.fakeAPI.Session(ctx, session)
+	if err != nil || f.identity.Role == "" {
+		return info, err
+	}
+	return f.identity, nil
+}
+
+func (f *authFlowAPI) AuthStatus(_ context.Context, session string) (api.AuthStatus, error) {
+	if session != "session-token" {
+		return api.AuthStatus{}, api.ErrUnauthorized
+	}
+	return f.authStatus, nil
+}
+
+func (f *authFlowAPI) ChangeAuthMode(_ context.Context, session string, change api.AuthModeChange) (api.AuthModeChangeResponse, error) {
+	if session != "session-token" {
+		return api.AuthModeChangeResponse{}, api.ErrUnauthorized
+	}
+	f.change = change
+	if f.changeErr != nil {
+		return api.AuthModeChangeResponse{}, f.changeErr
+	}
+	if f.changeResp.AuthMode == "" {
+		return api.AuthModeChangeResponse{OK: true, AuthMode: change.Mode, Reauthenticate: true}, nil
+	}
+	return f.changeResp, nil
+}
+
+func (f *authFlowAPI) ChangePassword(ctx context.Context, session, currentPassword, newPassword string) error {
+	if f.passwordErr != nil {
+		return f.passwordErr
+	}
+	return f.fakeAPI.ChangePassword(ctx, session, currentPassword, newPassword)
+}
+
+func TestLoginPageLeavesUsernameEmpty(t *testing.T) {
+	app, err := New(newAuthFlowAPI(), Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://example/login", nil)
+	app.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("got %d", rr.Code)
+	}
+	body := rr.Body.String()
+	if strings.Contains(body, `value="voxel"`) || !strings.Contains(body, `name="username" autocomplete="username"`) {
+		t.Fatalf("login page must leave username empty: %s", body)
+	}
+}
+
+func TestPasswordPageShowsPlainLanguageRequirements(t *testing.T) {
+	fake := newAuthFlowAPI()
+	fake.authStatus.MinimumPasswordLen = 8
+	app, err := New(fake, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://example/password", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+	app.providerPasswordPage(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "Use at least 8 characters") || !strings.Contains(body, `minlength="8"`) {
+		t.Fatalf("platform password minimum missing: %s", body)
+	}
+	for _, requirement := range []string{
+		"mix letters, numbers, and symbols",
+		"simple, repeated, or predictable patterns",
+		"too similar to your current password",
+		"JustVoxel will show the reason",
+	} {
+		if !strings.Contains(body, requirement) {
+			t.Fatalf("plain-language password requirement %q missing: %s", requirement, body)
+		}
+	}
+	if !strings.Contains(body, "local console") || !strings.Contains(body, "SSH password login") {
+		t.Fatalf("system-account explanation missing: %s", body)
+	}
+}
+
+func TestPasswordChangeShowsBackendPolicyReason(t *testing.T) {
+	fake := newAuthFlowAPI()
+	fake.passwordErr = &api.ResponseError{StatusCode: http.StatusBadRequest, Message: "Password is too simple"}
+	app, err := New(fake, Config{Version: "test", ManagementAPI: "v1", ExternalScheme: "http"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	form := "csrf=token&current_password=secret&new_password=strong-enough-123&confirm_password=strong-enough-123"
+	req := httptest.NewRequest(http.MethodPost, "http://example/password", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "null")
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+	req.AddCookie(&http.Cookie{Name: csrfCookie, Value: "token"})
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "Password is too simple") {
+		t.Fatalf("backend password rejection reason not shown: %d %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `/static/password.js`) || strings.Contains(rr.Body.String(), `/static/app.js`) {
+		t.Fatal("policy error left the standalone password boundary")
+	}
+}
+
+func TestSystemWorkspaceAPIsRespectForcedPasswordChangeBoundary(t *testing.T) {
+	app, err := New(newAuthFlowAPI(), Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "http://example/api/system/workspace/about", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+	req.AddCookie(&http.Cookie{Name: mustChangeCookie, Value: "1"})
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected forced password-change boundary, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "Password change required") {
+		t.Fatalf("forced password-change boundary is not explicit: %s", rr.Body.String())
+	}
+}
+
+func TestForcedPasswordPageRemainsStandaloneRoute(t *testing.T) {
+	app, err := New(newAuthFlowAPI(), Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "http://example/password", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+	req.AddCookie(&http.Cookie{Name: mustChangeCookie, Value: "1"})
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("forced password page status=%d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "Change administrator password") || !strings.Contains(body, "action=\"/password\"") {
+		t.Fatalf("forced password page no longer renders the existing standalone form: %s", body)
+	}
+}
+
+func TestSystemWorkspaceAuthenticationWrongSystemPasswordStaysInPane(t *testing.T) {
+	fake := newAuthFlowAPI()
+	fake.identity = api.SessionInfo{Username: "voxel", Role: "administrator", AuthSource: "system"}
+	fake.changeErr = api.ErrUnauthorized
+	app, err := New(fake, Config{ExternalScheme: "http"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	form := "csrf=token&mode=system&system_password=wrong"
+	req := httptest.NewRequest(http.MethodPost, "http://example/api/system/workspace/security/authentication", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "null")
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+	req.AddCookie(&http.Cookie{Name: csrfCookie, Value: "token"})
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("wrong system password status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "System password is incorrect.") {
+		t.Fatalf("wrong system password did not remain an in-pane validation error: %s", rr.Body.String())
+	}
+}
+
+func TestWebUIAdminAccountSecurityAndCSRF(t *testing.T) {
+	fake := newAuthFlowAPI()
+	fake.identity = api.SessionInfo{Username: "manager", Role: "webui-admin", AuthSource: "webui"}
+	app, err := New(fake, Config{ExternalScheme: "http"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		method, path, body string
+		status             int
+	}{
+		{"GET", "/api/session-info", "", 200},
+		{"GET", "/api/system/workspace/security", "", 403},
+		{"POST", "/api/system/workspace/security/authentication", "csrf=csrf-token&mode=system", 403},
+		{"POST", "/api/system/workspace/users/create", "username=test&role=operator", 403},
+	} {
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, authenticatedAdminRequest(tc.method, "http://example"+tc.path, tc.body))
+		if rr.Code != tc.status {
+			t.Fatalf("%s returned %d, want %d", tc.path, rr.Code, tc.status)
+		}
+		if tc.path == "/api/session-info" && !strings.Contains(rr.Body.String(), `"role":"webui-admin"`) {
+			t.Fatal("WebUI Admin role lost in session proxy")
+		}
+	}
+}

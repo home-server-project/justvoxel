@@ -1,0 +1,329 @@
+package server
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"net/url"
+	"strings"
+
+	"github.com/home-server-project/justvoxel-webui/internal/api"
+)
+
+const migrationWorkspaceFragmentHeader = "X-JustVoxel-Migration-Fragment"
+
+func migrationWorkspaceOperationURL(id string) string {
+	return "/?workspace=migration&operation=" + url.QueryEscape(id)
+}
+
+func migrationWorkspaceRedirectBrowser(w http.ResponseWriter, r *http.Request, destination string) bool {
+	if r.Header.Get(migrationWorkspaceFragmentHeader) == "1" {
+		return false
+	}
+	http.Redirect(w, r, migrationSelectedURL(r, destination), http.StatusSeeOther)
+	return true
+}
+
+type adminMigrationWorkspaceAPI interface {
+	Session(ctx context.Context, session string) (api.SessionInfo, error)
+	AdminMigrationExportDiscovery(ctx context.Context, session string) (api.AdminMigrationExportDiscoveryResponse, error)
+	AdminMigrationImportDiscovery(ctx context.Context, session string) (api.AdminMigrationImportDiscoveryResponse, error)
+	AdminMigrationRecoveryDiscovery(ctx context.Context, session string) (api.AdminMigrationRecoveryDiscoveryResponse, error)
+	AdminCurrentMigrationOperation(ctx context.Context, session string) (api.PersistentOperationResponse, error)
+	AdminOperation(ctx context.Context, session, id string) (api.PersistentOperationResponse, error)
+}
+
+func splitMigrationSMBLocation(raw string) (string, string, error) {
+	raw = strings.TrimSpace(strings.ReplaceAll(raw, "\\", "/"))
+	raw = strings.TrimRight(raw, "/")
+	if !strings.HasPrefix(raw, "//") {
+		return "", "", errors.New("enter the SMB location as //server/share or //server/share/folder")
+	}
+	parts := strings.Split(strings.TrimPrefix(raw, "//"), "/")
+	if len(parts) < 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return "", "", errors.New("enter the SMB location as //server/share or //server/share/folder")
+	}
+	server := strings.TrimSpace(parts[0])
+	share := strings.TrimSpace(parts[1])
+	clean := make([]string, 0, len(parts)-2)
+	for _, part := range parts[2:] {
+		part = strings.TrimSpace(part)
+		if part == "" || part == "." {
+			continue
+		}
+		if part == ".." {
+			return "", "", errors.New("SMB folder path cannot contain ..")
+		}
+		clean = append(clean, part)
+	}
+	return "//" + server + "/" + share, strings.Join(clean, "/"), nil
+}
+
+type migrationWorkspacePageData struct {
+	ServerID      string
+	Title         string
+	Version       string
+	ManagementAPI string
+	CSRF          string
+	Identity      api.SessionInfo
+	Export        api.AdminMigrationExportDiscoveryResponse
+	Import        api.AdminMigrationImportDiscoveryResponse
+	Recovery      api.AdminMigrationRecoveryDiscoveryResponse
+	ExportTargets string
+	ImportSources string
+}
+
+type migrationWorkspaceProgressPageData struct {
+	ServerID          string
+	Title             string
+	Version           string
+	ManagementAPI     string
+	CSRF              string
+	Identity          api.SessionInfo
+	Operation         api.PersistentOperation
+	OperationName     string
+	StateLabel        string
+	StageLabel        string
+	CanReviewRecovery bool
+}
+
+func (a *App) registerAdminMigrationWorkspacePages(mux *http.ServeMux) {
+	mux.HandleFunc("GET /workspace/migration", a.migrationWorkspacePage)
+	mux.HandleFunc("GET /workspace/migration/progress/{id}", a.migrationWorkspaceProgressPage)
+	a.registerAdminMigrationWorkspaceExportPages(mux)
+	a.registerAdminMigrationWorkspaceImportPages(mux)
+	a.registerAdminMigrationWorkspaceRecoveryPages(mux)
+}
+
+func (a *App) migrationWorkspaceRequest(w http.ResponseWriter, r *http.Request) (string, adminMigrationWorkspaceAPI, api.SessionInfo, bool) {
+	if mustChange(r) {
+		http.Error(w, ui(w, "ui.fe5ad66e02ea"), http.StatusForbidden)
+		return "", nil, api.SessionInfo{}, false
+	}
+	session, ok := sessionFromRequest(r)
+	if !ok {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return "", nil, api.SessionInfo{}, false
+	}
+	client, ok := a.api.(adminMigrationWorkspaceAPI)
+	if !ok {
+		http.Error(w, ui(w, "ui.ea1db1932134"), http.StatusServiceUnavailable)
+		return "", nil, api.SessionInfo{}, false
+	}
+	identity, err := client.Session(r.Context(), session)
+	if err != nil {
+		a.handleMigrationWorkspaceAuthError(w, r, err)
+		return "", nil, api.SessionInfo{}, false
+	}
+	if !isAdministratorLevel(identity.Role) {
+		http.Error(w, ui(w, "ui.031cc7a3ec82"), http.StatusForbidden)
+		return "", nil, api.SessionInfo{}, false
+	}
+	selected, ok := a.selectedMinecraft(w, r, session)
+	if !ok {
+		return "", nil, api.SessionInfo{}, false
+	}
+	*r = *r.WithContext(api.WithMigrationInstance(r.Context(), selected.ID))
+	q := r.URL.Query()
+	q.Set("server", selected.ID)
+	r.URL.RawQuery = q.Encode()
+	return session, client, identity, true
+}
+
+func (a *App) migrationWorkspacePage(w http.ResponseWriter, r *http.Request) {
+	session, client, identity, ok := a.migrationWorkspaceRequest(w, r)
+	if !ok {
+		return
+	}
+	if migrationWorkspaceRedirectBrowser(w, r, "/?workspace=migration") {
+		return
+	}
+	current, err := client.AdminCurrentMigrationOperation(r.Context(), session)
+	if err != nil {
+		a.handleMigrationWorkspaceRequestError(w, r, err, ui(w, "ui.9ebe3ac32640"))
+		return
+	}
+	if current.Operation != nil {
+		http.Redirect(w, r, migrationSelectedURL(r, "/workspace/migration/progress/"+current.Operation.OperationID), http.StatusSeeOther)
+		return
+	}
+
+	exportDiscovery, err := client.AdminMigrationExportDiscovery(r.Context(), session)
+	if err != nil {
+		a.handleMigrationWorkspaceRequestError(w, r, err, ui(w, "ui.9b0f8d42e43d"))
+		return
+	}
+	importDiscovery, err := client.AdminMigrationImportDiscovery(r.Context(), session)
+	if err != nil {
+		a.handleMigrationWorkspaceRequestError(w, r, err, ui(w, "ui.11ba32d5bbba"))
+		return
+	}
+	recoveryDiscovery, err := client.AdminMigrationRecoveryDiscovery(r.Context(), session)
+	if err != nil {
+		a.handleMigrationWorkspaceRequestError(w, r, err, ui(w, "ui.5bcd2d41599b"))
+		return
+	}
+
+	a.renderMigrationWorkspace(w, "migration_workspace.html", http.StatusOK, migrationWorkspacePageData{
+		ServerID:      migrationWorkspaceSelectedID(r),
+		Title:         ui(w, "ui.0f8e0d8c6039"),
+		Version:       a.config.Version,
+		ManagementAPI: a.config.ManagementAPI,
+		CSRF:          csrfFromRequest(r),
+		Identity:      identity,
+		Export:        exportDiscovery,
+		Import:        importDiscovery,
+		Recovery:      recoveryDiscovery,
+		ExportTargets: strings.Join(exportDiscovery.TargetKinds, ", "),
+		ImportSources: strings.Join(importDiscovery.SourceKinds, ", "),
+	})
+}
+
+func (a *App) migrationWorkspaceProgressPage(w http.ResponseWriter, r *http.Request) {
+	session, client, identity, ok := a.migrationWorkspaceRequest(w, r)
+	if !ok {
+		return
+	}
+	if migrationWorkspaceRedirectBrowser(w, r, migrationWorkspaceOperationURL(r.PathValue("id"))) {
+		return
+	}
+	response, err := client.AdminOperation(r.Context(), session, r.PathValue("id"))
+	if err != nil {
+		var responseErr *api.ResponseError
+		if errors.As(err, &responseErr) && responseErr.StatusCode == http.StatusNotFound {
+			http.Error(w, ui(w, "ui.da2ab6e39c29"), http.StatusNotFound)
+			return
+		}
+		a.handleMigrationWorkspaceRequestError(w, r, err, ui(w, "ui.9ebe3ac32640"))
+		return
+	}
+	if response.Operation == nil || response.Operation.InstanceID != migrationWorkspaceSelectedID(r) || !migrationWorkspaceOperationType(response.Operation.OperationType) {
+		http.Error(w, ui(w, "ui.da2ab6e39c29"), http.StatusNotFound)
+		return
+	}
+	a.renderMigrationWorkspace(w, "migration_workspace_progress.html", http.StatusOK, migrationWorkspaceProgressPageData{
+		ServerID:          migrationWorkspaceSelectedID(r),
+		Title:             ui(w, "ui.71f3d0a2b247"),
+		Version:           a.config.Version,
+		ManagementAPI:     a.config.ManagementAPI,
+		CSRF:              csrfFromRequest(r),
+		Identity:          identity,
+		Operation:         *response.Operation,
+		OperationName:     migrationWorkspaceOperationName(response.Operation.OperationType),
+		StateLabel:        migrationWorkspaceStateLabel(response.Operation.State),
+		StageLabel:        migrationWorkspaceStageLabel(response.Operation.OperationType, response.Operation.Stage),
+		CanReviewRecovery: (response.Operation.OperationType == "migration_import" || response.Operation.OperationType == "migration_export" || response.Operation.OperationType == "migration_recovery") && response.Operation.State == "needs_attention",
+	})
+}
+
+func migrationWorkspaceOperationType(value string) bool {
+	switch value {
+	case "migration_export", "migration_import", "migration_recovery":
+		return true
+	default:
+		return false
+	}
+}
+
+func migrationWorkspaceOperationName(value string) string {
+	switch value {
+	case "migration_export":
+		return uiText("ui.d1f081749243")
+	case "migration_import":
+		return uiText("ui.ffe624a69618")
+	case "migration_recovery":
+		return uiText("ui.504ca73ba883")
+	default:
+		return uiText("ui.0f8e0d8c6039")
+	}
+}
+
+func migrationWorkspaceStateLabel(value string) string {
+	switch value {
+	case "queued":
+		return uiText("ui.661ff40a07e0")
+	case "validating":
+		return "Validating"
+	case "running":
+		return uiText("ui.f4ccae29e1bb")
+	case "verifying":
+		return "Verifying"
+	case "rolling_back":
+		return uiText("ui.8b9e964b606b")
+	case "succeeded":
+		return "Succeeded"
+	case "rolled_back":
+		return uiText("ui.71592236d852")
+	case "needs_attention":
+		return uiText("ui.c1ebc7817870")
+	default:
+		return migrationWorkspaceFriendlyToken(value)
+	}
+}
+
+func migrationWorkspaceFriendlyToken(value string) string {
+	value = strings.TrimSpace(strings.ReplaceAll(value, "_", " "))
+	if value == "" {
+		return uiText("ui.b764cdc0eab7")
+	}
+	return strings.ToUpper(value[:1]) + value[1:]
+}
+
+func (a *App) handleMigrationWorkspaceAuthError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, api.ErrUnauthorized) {
+		a.clearSessionCookies(w)
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	if errors.Is(err, api.ErrPasswordChangeRequired) {
+		http.Redirect(w, r, "/password", http.StatusSeeOther)
+		return
+	}
+	http.Error(w, ui(w, "ui.0b8e73a792bb"), http.StatusBadGateway)
+}
+
+func (a *App) handleMigrationWorkspaceRequestError(w http.ResponseWriter, r *http.Request, err error, fallback string) {
+	if errors.Is(err, api.ErrUnauthorized) || errors.Is(err, api.ErrPasswordChangeRequired) {
+		a.handleMigrationWorkspaceAuthError(w, r, err)
+		return
+	}
+	var responseErr *api.ResponseError
+	if errors.As(err, &responseErr) {
+		message := strings.TrimSpace(responseErr.Message)
+		if message == "" {
+			message = fallback
+		}
+		status := responseErr.StatusCode
+		if status < 400 || status > 599 {
+			status = http.StatusBadGateway
+		}
+		http.Error(w, message, status)
+		return
+	}
+	message := fallback
+	if detail := strings.TrimSpace(err.Error()); detail != "" {
+		message += " " + detail
+	}
+	http.Error(w, message, http.StatusBadGateway)
+}
+
+func (a *App) renderMigrationWorkspace(w http.ResponseWriter, templateName string, status int, data any) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	if err := a.executeTemplate(w, templateName, data); err != nil {
+		http.Error(w, ui(w, "ui.4a9d9119358b"), http.StatusInternalServerError)
+	}
+}
+
+func migrationWorkspaceSelectedID(r *http.Request) string { return r.URL.Query().Get("server") }
+func migrationSelectedURL(r *http.Request, destination string) string {
+	u, err := url.Parse(destination)
+	if err != nil {
+		return destination
+	}
+	q := u.Query()
+	q.Set("server", migrationWorkspaceSelectedID(r))
+	u.RawQuery = q.Encode()
+	return u.String()
+}

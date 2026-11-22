@@ -1,0 +1,69 @@
+/* Dedicated page only. Screen components use the existing JustVoxel visual system. */
+.connect-page{overflow:auto}
+.connect-page [hidden]{display:none!important}
+.connect-shell{max-width:1080px;margin:auto;padding:32px 28px 60px}
+.connect-controls,.connect-empty{padding:28px;margin-bottom:28px}
+.connect-page h1{font-size:clamp(1.8rem,4vw,2.5rem);line-height:1.15;margin:10px 0 16px}
+.connect-page h2{font-size:1.4rem;margin:0 0 16px}.connect-page h3{font-size:1.1rem;margin:0 0 12px}.connect-page h4{margin:0 0 8px}
+.connect-page p,.connect-page li{line-height:1.65}.connect-page p{margin:8px 0 14px}
+.connect-eyebrow{font-weight:800}
+.connect-title-row{align-items:center}.connect-title-row h1{margin:10px 0 16px}
+.connect-server-lane{display:flex;align-items:center;gap:.5rem;min-width:0;max-width:100%;margin-left:auto}
+.connect-server-lane>span{flex:none;white-space:nowrap}
+.connect-server-lane>details{min-width:0;max-width:calc(100vw - 8rem)}
+
+.connect-methods{display:grid;gap:10px}
+.connect-method-row{display:grid;gap:10px 24px;min-width:0}
+.connect-method-row-primary{grid-template-columns:repeat(2,minmax(0,1fr))}
+.connect-method-row-private{grid-template-columns:repeat(3,minmax(0,1fr))}
+.connect-method{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px;min-width:0;border:1px solid var(--jv-border);background:var(--jv-surface-sunken);border-radius:var(--jv-radius)}
+.connect-method-label{display:flex;align-items:center;gap:8px;margin:0;font-weight:700}
+.connect-method-icon{width:22px;height:22px;object-fit:contain;flex:none}
+.connect-actions{display:grid;width:100%;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:4px 16px;margin-top:20px}
+.connect-domain label{margin:0;font-weight:700}.connect-domain input[type=text]{width:100%;max-width:none;margin:0;min-width:0}
+.connect-domain small{grid-column:2;grid-row:2;line-height:1.5;font-size:.75rem}
+.connect-domain input[aria-invalid="true"]{border-color:var(--jv-error)}
+.connect-actions button{grid-column:4;grid-row:1;white-space:nowrap}
+.connect-guide{background:var(--jv-surface);color:var(--jv-text);border:1px solid var(--jv-border);border-radius:14px;padding:36px}
+.connect-guide-heading{display:block;position:static;z-index:auto;padding:0 0 24px;background:transparent;text-align:center;border-bottom:2px solid var(--jv-border);margin-bottom:28px}
+.connect-guide-top-row{display:flex;align-items:center;justify-content:space-between;gap:20px}.connect-guide-top-row p{margin-left:auto}
+.connect-print-logo{display:block;width:145px;height:auto}
+.connect-editions{display:inline-block;font-weight:700}
+.connect-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:20px 0 30px}
+.connect-card{border:1px solid var(--jv-border);border-top:4px solid var(--jv-success);border-radius:10px;padding:20px;background:var(--jv-surface);overflow-wrap:anywhere}
+.connect-card>p{color:var(--jv-muted);font-size:.9rem}.connect-endpoint{border-top:1px solid var(--jv-border);padding-top:14px;margin-top:14px}.connect-endpoint p{margin:4px 0}
+.connect-guide code{background:var(--jv-surface-sunken);color:var(--jv-text);padding:2px 5px;border-radius:4px;white-space:normal;overflow-wrap:anywhere}
+.connect-instructions{margin-top:28px;padding-top:24px;border-top:1px solid var(--jv-border)}.connect-instructions li{padding-left:4px;margin-bottom:7px}
+.connect-callout{background:var(--jv-surface-sunken);border-left:4px solid var(--jv-success);padding:14px}
+.connect-guide-footer{text-align:center;margin-top:30px;padding-top:18px;border-top:1px solid var(--jv-border);font-size:.85rem;color:var(--jv-muted)}.connect-print-blocked{display:none}
+@media(max-width:640px){
+ .connect-shell{padding:20px 14px 40px}.connect-controls,.connect-empty,.connect-guide{padding:20px}
+ .connect-title-row{flex-wrap:wrap;gap:.75rem}
+ .connect-method-row-primary,.connect-method-row-private,.connect-cards{grid-template-columns:1fr}.connect-method{padding:14px}
+ .connect-actions{grid-template-columns:minmax(0,1fr) auto;gap:8px 16px}.connect-domain label{grid-column:1/-1}.connect-domain small{grid-column:1;grid-row:3}.connect-actions button{grid-column:1/-1;grid-row:4}
+}
+.connect-invite-controls{margin-top:16px}
+.connect-invitation{box-sizing:border-box;width:min(540px,calc(100% - 2rem));max-height:calc(100dvh - 2rem);overflow:auto;padding:24px;border:1px solid var(--jv-border);border-radius:var(--jv-radius);background:var(--jv-surface);color:var(--jv-text)}
+.connect-invitation .action-row{justify-content:flex-end}
+.connect-invitation textarea{display:block;box-sizing:border-box;width:100%;padding:12px;background:var(--jv-surface-sunken);color:var(--jv-text);border:1px solid var(--jv-border);border-radius:var(--jv-radius);font:inherit;line-height:1.5;resize:vertical}
+@media print{
+ .connect-invitation,.connect-invite-controls{display:none!important}
+ @page{margin:16mm}
+ .connect-document{color-scheme:light;background:white!important}
+ .connect-page{background:white!important;color:#203329!important;font-size:10pt;min-height:0}
+ .connect-controls,.connect-page button,.connect-page input,.connect-page select,.connect-print-blocked{display:none!important}
+ .connect-page.connect-print-ready .connect-guide{display:block}
+ .connect-guide{color:#203329}
+ .connect-guide-heading{border-color:#c8dece}
+ .connect-guide .connect-editions{color:#203329;background:#e0eee2;padding:6px 14px}
+ .connect-card{border-color:#c6d8ca;border-top-color:#4a8a5b;background:#fff}.connect-card>p{color:#4d6656}
+ .connect-endpoint{border-color:#dfebe1}.connect-guide code{background:#e9f1e9;color:#203329}
+ .connect-instructions,.connect-guide-footer{border-color:#d0dfd3}.connect-callout{background:#e7f0e7;border-left-color:#609369}.connect-guide-footer{color:#506c58}
+ .connect-print-logo{display:block;width:145px;height:auto}
+ .connect-guide-top-row{text-align:right}.connect-guide-top-row p{color:#203329}
+ .connect-guide-heading h1{margin-top:16px}
+ .connect-shell{max-width:none;padding:0;margin:0}.connect-guide{padding:0;border:0;border-radius:0;background:white!important}
+ .connect-page h1{font-size:25pt}.connect-page h2{font-size:16pt}.connect-cards{grid-template-columns:1fr 1fr;gap:12px}
+ .connect-card,.connect-endpoint{break-inside:avoid}.connect-instructions h2,.connect-card h3,.connect-endpoint h4{break-after:avoid}.connect-guide-footer{break-inside:avoid}
+ .connect-page:not(.connect-print-ready) .connect-guide{display:none!important}.connect-page:not(.connect-print-ready) .connect-print-blocked{display:block!important}
+}

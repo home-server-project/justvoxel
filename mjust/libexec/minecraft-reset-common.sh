@@ -1,0 +1,173 @@
+#!/usr/bin/bash
+
+source "$(dirname -- "${BASH_SOURCE[0]}")/operation-trace.sh"
+
+jv_reset_remove_minecraft_container() {
+    if jv_trace_run podman rm --force --ignore minecraft >/dev/null 2>&1; then
+        return 0
+    fi
+
+    # Podman may report a removal error after the container has already gone.
+    # Only exit status 1 from `exists` confirms absence; other errors fail closed.
+    if jv_trace_run podman container exists minecraft >/dev/null 2>&1; then
+        return 1
+    else
+        [[ $? -eq 1 ]]
+    fi
+}
+
+jv_reset_path_scope() {
+    local data_path="$1" source fstype transport parent
+
+    if [[ -z ${data_path} || ${data_path} == / || ${data_path} == /var || ${data_path} == /var/lib ]]; then
+        printf 'unsafe\n'
+        return
+    fi
+    if [[ -L ${data_path} ]]; then
+        printf 'unknown\n'
+        return
+    fi
+    case "${data_path}" in
+        /var/lib/justvoxel/*)
+            printf 'internal\n'
+            return
+            ;;
+    esac
+
+    source="$(findmnt -n -o SOURCE --target "${data_path}" 2>/dev/null || true)"
+    fstype="$(findmnt -n -o FSTYPE --target "${data_path}" 2>/dev/null || true)"
+    case "${fstype,,}" in
+        nfs|nfs4|cifs|smb3)
+            printf 'network\n'
+            return
+            ;;
+    esac
+
+    if [[ ${source} == /dev/* ]]; then
+        transport="$(lsblk -ndo TRAN "${source}" 2>/dev/null | awk 'NF {print $1; exit}')"
+        if [[ -z ${transport} ]]; then
+            parent="$(lsblk -ndo PKNAME "${source}" 2>/dev/null | awk 'NF {print $1; exit}')"
+            if [[ -n ${parent} ]]; then
+                transport="$(lsblk -ndo TRAN "/dev/${parent}" 2>/dev/null | awk 'NF {print $1; exit}')"
+            fi
+        fi
+        if [[ ${transport,,} == usb ]]; then
+            printf 'external\n'
+            return
+        fi
+        if [[ -n ${transport} || ${data_path} == /var/mnt/justvoxel-data/* ]]; then
+            printf 'internal\n'
+            return
+        fi
+    fi
+
+    printf 'unknown\n'
+}
+
+jv_reset_data_scope() {
+    jv_reset_path_scope "$1"
+}
+
+jv_reset_backup_nested_in_data() {
+    local data_path="$1" backup_path="$2"
+    [[ -n ${data_path} && -n ${backup_path} ]] || return 1
+    case "${backup_path}/" in
+        "${data_path%/}/"*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+jv_reset_nested_mounts() {
+    local root="$1" target normalized_root
+    normalized_root="${root%/}"
+    while IFS= read -r target; do
+        [[ -n ${target} ]] || continue
+        [[ ${target%/} != "${normalized_root}" ]] || continue
+        case "${target%/}/" in
+            "${normalized_root}/"*) printf '%s\n' "${target}" ;;
+        esac
+    done < <(findmnt -rn -o TARGET 2>/dev/null || true)
+}
+
+jv_reset_delete_tree_same_filesystem() {
+    local root="$1" label="$2" nested
+
+    [[ -n ${root} && ${root} != / && ${root} != /var && ${root} != /var/lib ]] || {
+        echo "ERROR: refusing unsafe ${label} path." >&2
+        return 1
+    }
+    [[ ! -L ${root} ]] || {
+        echo "ERROR: refusing to delete ${label} through a symbolic link." >&2
+        return 1
+    }
+    [[ -d ${root} ]] || return 0
+
+    nested="$(jv_reset_nested_mounts "${root}")"
+    if [[ -n ${nested} ]]; then
+        echo "ERROR: refusing to delete ${label} while nested mounts are present:" >&2
+        printf '  %s\n' ${nested} >&2
+        return 1
+    fi
+
+    jv_trace_run find "${root}" -xdev -mindepth 1 -delete
+}
+
+jv_reset_delete_internal_data() {
+    local data_path="$1" backup_path="$2"
+
+    if jv_reset_backup_nested_in_data "${data_path}" "${backup_path}"; then
+        echo 'ERROR: backup path is inside the Minecraft data path; move backups before resetting Minecraft.' >&2
+        return 1
+    fi
+    jv_reset_delete_tree_same_filesystem "${data_path}" 'Minecraft data'
+}
+
+jv_reset_validate_storage_preservation() {
+    local credentials="${JV_CONFIG_DIR}/smb-backup.credentials" persisted
+    JV_RESET_PRESERVE_CREDENTIALS=no
+    [[ ! -L ${JV_CONFIG_DIR} && $(realpath -m -- "${JV_CONFIG_DIR}") == "${JV_CONFIG_DIR}" ]] || return 1
+    if [[ ${BACKUP_TYPE:-} != smb && ! -e ${credentials} && ! -L ${credentials} ]]; then
+        return 0
+    fi
+    if ! declare -F jv_storage_credentials_safe >/dev/null; then
+        source /usr/libexec/justvoxel/mjust/storage-lifecycle.sh || return 1
+    fi
+    # Adopted administrator shares with their own credentials are unaffected.
+    if [[ -f ${JV_FSTAB:-/etc/fstab} ]] && jv_storage_credentials_referenced "${JV_FSTAB:-/etc/fstab}" "${credentials}"; then
+        [[ ${BACKUP_TYPE:-} == smb ]] || return 1
+        persisted="$(jv_storage_managed_entry "${JV_FSTAB:-/etc/fstab}" "${BACKUP_MOUNT_POINT:-}" "${credentials}")" || return 1
+        [[ -n ${BACKUP_EXPECTED_SOURCE:-} && ${persisted} == "${BACKUP_EXPECTED_SOURCE}" ]] || return 1
+        jv_storage_credentials_safe "${credentials}" || return 1
+        JV_RESET_PRESERVE_CREDENTIALS=yes
+    fi
+}
+
+jv_reset_remove_active_configuration() {
+    local java_port="$1" bedrock_enabled="$2" bedrock_port="$3" storage_mode="${4:-remove}"
+    local preserve_credentials=no
+    case "${storage_mode}" in preserve-storage|remove) ;; *) return 1 ;; esac
+    if [[ ${storage_mode} == preserve-storage ]]; then
+        jv_reset_validate_storage_preservation || return 1
+        preserve_credentials="${JV_RESET_PRESERVE_CREDENTIALS}"
+    fi
+
+    jv_trace_run systemctl disable --now minecraft-backup.timer >/dev/null 2>&1 || true
+
+    jv_trace_run firewall-cmd --permanent --remove-port="${java_port}/tcp" >/dev/null 2>&1 || true
+    if [[ ${bedrock_enabled} == yes ]]; then
+        geyser_tcp_firewall_remove "${bedrock_port}" || return 1
+        jv_trace_run firewall-cmd --permanent --remove-port="${bedrock_port}/udp" >/dev/null 2>&1 || true
+    fi
+    jv_trace_run firewall-cmd --reload >/dev/null 2>&1 || true
+
+    jv_trace_run rm -f -- "${JV_QUADLET}" "${JV_BACKUP_SERVICE}" "${JV_BACKUP_TIMER}"
+    if [[ ${preserve_credentials} == yes ]]; then
+        # Keep the original private file in place; never copy its secret elsewhere.
+        jv_trace_run find "${JV_CONFIG_DIR}" -mindepth 1 -maxdepth 1 ! -name smb-backup.credentials -exec rm -rf -- {} + || return 1
+    else
+        jv_trace_run rm -rf -- "${JV_CONFIG_DIR}" || return 1
+    fi
+    jv_trace_run rm -f -- "${JV_PREVIOUS_IMAGE_STATE}"
+    jv_trace_run systemctl daemon-reload
+    jv_trace_run systemctl reset-failed minecraft.service minecraft-backup.service minecraft-backup.timer >/dev/null 2>&1 || true
+}

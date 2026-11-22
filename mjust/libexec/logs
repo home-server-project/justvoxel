@@ -1,0 +1,63 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/ui.sh
+
+readonly api_client=/usr/libexec/justvoxel/mjust/api-client
+
+if (( EUID != 0 )); then
+    echo 'ERROR: this operation must run as root.' >&2
+    exit 1
+fi
+
+instance_id=""
+if [[ ${1:-} == --instance && $# == 2 ]]; then instance_id=$2
+elif [[ $# == 1 ]]; then instance_id=$1
+elif (( $# != 0 )); then echo 'Usage: logs [--instance jv-...]' >&2; exit 2; fi
+if (( $# > 0 )) && [[ -z ${instance_id} ]]; then
+    echo 'ERROR: invalid Minecraft server ID.' >&2
+    exit 2
+fi
+source /usr/libexec/justvoxel/mjust/instance-selection.sh
+instance_id="$(jv_select_registered_instance "${instance_id}")" || exit 1
+
+set +e
+response="$("${api_client}" GET "/v1/minecraft/instances/${instance_id}/logs?limit=100&format=cat")"
+rc=$?
+set -e
+
+if (( rc != 0 )); then
+    if jq -e 'type == "object" and (.error | type == "string")' <<<"${response}" >/dev/null 2>&1; then
+        printf 'ERROR: %s\n' "$(jq -r '.error' <<<"${response}")" >&2
+    else
+        echo 'ERROR: Minecraft logs are unavailable from the JustVoxel Management API.' >&2
+    fi
+    exit 1
+fi
+
+if ! jq -e 'type == "object" and (.lines | type == "array")' <<<"${response}" >/dev/null 2>&1; then
+    echo 'ERROR: JustVoxel Management API returned invalid Minecraft logs.' >&2
+    exit 1
+fi
+
+title='Minecraft logs'
+if jui_has_tty; then
+    printf '%s\n' "${title}"
+    printf '%*s\n' "${#title}" '' | tr ' ' '-'
+    echo 'Showing the latest 100 log lines.'
+    echo 'Press q or Esc to return to JustVoxel.'
+    echo
+fi
+
+jq -r '.lines[]' <<<"${response}"
+
+if ! jui_has_tty; then
+    exit 0
+fi
+
+while true; do
+    key=''
+    IFS= read -rsn1 key </dev/tty || break
+    case "${key}" in
+        q|Q|$'\e') break ;;
+    esac
+done

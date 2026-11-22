@@ -1,0 +1,121 @@
+name: Installation / first boot problem
+description: Installer, installation, first boot, or initial WebUI access problems.
+title: "[Install]: "
+body:
+  - type: checkboxes
+    id: existing-issues
+    attributes:
+      label: Existing issues
+      options:
+        - label: I searched the existing issues in this repository for this problem.
+          required: true
+  - type: dropdown
+    id: installation-stage
+    attributes:
+      label: Where did the problem happen?
+      options:
+        - Booting the installer
+        - Installer UI
+        - Network configuration
+        - Storage / disk selection
+        - Installing JustVoxel
+        - First reboot
+        - JustVoxel boot
+        - First WebUI connection or login
+        - Other installation / first boot problem
+    validations:
+      required: true
+  - type: dropdown
+    id: edition
+    attributes:
+      label: JustVoxel edition
+      options:
+        - JustVoxel HWS
+        - JustVoxel VM
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: installation-source
+    attributes:
+      label: Installation source
+      options:
+        - Online
+        - Offline / included ISO
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Please clearly describe the problem you ran into.
+    validations:
+      required: true
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: steps-to-reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Tell us what you clicked or did before the problem happened.
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: hardware-or-vm
+    attributes:
+      label: Hardware or VM information
+      description: Tell us your physical computer model and relevant hardware, or which app runs your virtual machine (hypervisor) and its VM settings. Share what you know.
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: |
+        ### Support Report
+
+        A Support Report is useful only if JustVoxel booted far enough for the WebUI to be available.
+        If it is available, in JustVoxel open:
+
+        Control Center -> System Settings -> Logs -> Support -> Generate support report
+
+        JustVoxel generates the report locally. Download the generated report and manually attach it to this issue below.
+        You can still submit this issue without a report if the WebUI is unavailable or JustVoxel will not boot.
+  - type: dropdown
+    id: support-report-availability
+    attributes:
+      label: Support report availability
+      options:
+        - I attached the Support Report below
+        - JustVoxel never reached a usable WebUI
+        - The WebUI is available but I cannot generate the report
+        - Other / not applicable
+    validations:
+      required: true
+  - type: upload
+    id: support-report
+    attributes:
+      label: Support Report
+    validations:
+      required: false
+      accept: ".log,.txt"
+  - type: upload
+    id: installation-diagnostic
+    attributes:
+      label: Installation diagnostic or screenshot
+    validations:
+      required: false
+      accept: ".log,.txt,.png,.jpg,.jpeg,.gif,.webp"
+  - type: textarea
+    id: anything-else
+    attributes:
+      label: Anything else?
+    validations:
+      required: false

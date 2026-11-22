@@ -1,0 +1,230 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/storage-common-base.sh
+require_root
+
+action="${1:-configuration}"
+
+system_memory_mib() {
+    awk '/^MemTotal:/ {printf "%d\n", $2 / 1024; exit}' /proc/meminfo 2>/dev/null || printf '0\n'
+}
+
+configuration_values_json() {
+    jq -n \
+        --arg server_type "${MINECRAFT_SERVER_TYPE-paper}" \
+        --arg data_path "${DATA_PATH}" \
+        --arg data_mount_point "${DATA_MOUNT_POINT}" \
+        --arg data_expected_uuid "${DATA_EXPECTED_UUID}" \
+        --arg data_expected_source "${DATA_EXPECTED_SOURCE}" \
+        --arg java_memory "${JAVA_MEMORY}" \
+        --arg container_memory "${CONTAINER_MEMORY}" \
+        --argjson java_port "${JAVA_PORT}" \
+        --argjson bedrock_enabled "$([[ ${BEDROCK_ENABLED} == yes ]] && printf true || printf false)" \
+        --argjson bedrock_port "${BEDROCK_PORT}" \
+        --arg timezone "${TIMEZONE}" \
+        --argjson max_players "${MAX_PLAYERS}" \
+        --arg motd "${MOTD}" \
+        --arg image_tag "${MINECRAFT_IMAGE_TAG}" \
+        --arg version_mode "${MINECRAFT_VERSION_MODE}" \
+        --arg version "${MINECRAFT_VERSION}" \
+        --arg game_mode "${GAME_MODE}" \
+        --arg difficulty "${DIFFICULTY}" \
+        --argjson whitelist_enabled "$([[ ${WHITELIST_ENABLED} == yes ]] && printf true || printf false)" \
+        --argjson enforce_whitelist "$([[ ${ENFORCE_WHITELIST} == yes ]] && printf true || printf false)" \
+        --arg backup_type "${BACKUP_TYPE}" \
+        --arg backup_path "${BACKUP_PATH}" \
+        --arg backup_mount_point "${BACKUP_MOUNT_POINT}" \
+        --arg backup_expected_uuid "${BACKUP_EXPECTED_UUID}" \
+        --arg backup_expected_source "${BACKUP_EXPECTED_SOURCE}" \
+        --argjson backup_keep "${BACKUP_KEEP}" \
+        --arg backup_schedule "${BACKUP_SCHEDULE}" \
+        --argjson backup_timer_enabled "$([[ ${BACKUP_TIMER_ENABLED} == yes ]] && printf true || printf false)" \
+        '{
+            configured:true,
+            minecraft:{
+                server_type:$server_type,
+                data_path:$data_path,
+                data_mount_point:$data_mount_point,
+                data_expected_uuid:$data_expected_uuid,
+                data_expected_source:$data_expected_source,
+                java_memory:$java_memory,
+                container_memory:$container_memory,
+                java_port:$java_port,
+                bedrock_enabled:$bedrock_enabled,
+                bedrock_port:$bedrock_port,
+                timezone:$timezone,
+                max_players:$max_players,
+                motd:$motd,
+                image_tag:$image_tag,
+                version_mode:$version_mode,
+                version:$version,
+                game_mode:$game_mode,
+                difficulty:$difficulty,
+                whitelist_enabled:$whitelist_enabled,
+                enforce_whitelist:$enforce_whitelist
+            },
+            backup:{
+                type:$backup_type,
+                path:$backup_path,
+                mount_point:$backup_mount_point,
+                expected_uuid:$backup_expected_uuid,
+                expected_source:$backup_expected_source,
+                keep:$backup_keep,
+                schedule:$backup_schedule,
+                timer_enabled:$backup_timer_enabled
+            }
+        }'
+}
+
+configuration_json() {
+    if [[ -e ${JV_SETUP_IN_PROGRESS} ]]; then
+        jq -n '{configured:false,minecraft:{},backup:{}}'
+        return 0
+    fi
+    if [[ ! -r ${JV_CONFIG} ]]; then
+        jq -n '{configured:false,minecraft:{},backup:{}}'
+        return 0
+    fi
+    require_config
+    if [[ ${APPLIANCE_CONFIGURED:-no} == yes ]]; then
+        jq -n --arg path "${BACKUP_PATH}" --arg type "${BACKUP_TYPE}" --arg mount "${BACKUP_MOUNT_POINT}" --arg uuid "${BACKUP_EXPECTED_UUID}" --arg source "${BACKUP_EXPECTED_SOURCE}" \
+            '{configured:true,minecraft:{},backup:{path:$path,type:$type,mount_point:$mount,expected_uuid:$uuid,expected_source:$source}}'
+        return 0
+    fi
+    configuration_values_json
+}
+
+storage_json() {
+    local raw devices systems system_parts system_lines system_part_lines enriched device_json mountpoint stats
+    local fs_size fs_used fs_free usage_known free_spaces disk table record
+    local free_start free_end free_size free_size_mib free_size_bytes free_item
+
+    raw="$(nsenter --mount=/proc/1/ns/mnt -- lsblk -J -b -e7 -l -o NAME,PATH,PKNAME,TYPE,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINTS,MODEL,TRAN,RO,PTTYPE,MAJ:MIN)"
+    systems='[]'
+    system_parts='[]'
+    system_lines="$(storage_system_disks || true)"
+    if [[ -n ${system_lines} ]]; then
+        systems="$(printf '%s\n' "${system_lines}" | jq -R -s 'split("\n") | map(select(length > 0))')"
+    fi
+    system_part_lines="$(storage_system_partitions || true)"
+    if [[ -n ${system_part_lines} ]]; then
+        system_parts="$(printf '%s\n' "${system_part_lines}" | jq -R -s 'split("\n") | map(select(length > 0))')"
+    fi
+
+    devices="$(jq '[.blockdevices[] | select(((.name // "") | startswith("zram")) | not) | {
+        name:(.name // ""), path:(.path // ""), parent:(.pkname // ""), type:(.type // ""),
+        major_minor:(.["maj:min"] // ""),
+        size_bytes:(.size // 0), filesystem:(.fstype // ""), label:(.label // ""), uuid:(.uuid // ""),
+        mountpoints:((.mountpoints // []) | map(select(. != null))),
+        model:((.model // "") | gsub("^[[:space:]]+|[[:space:]]+$"; "")),
+        transport:(.tran // ""),
+        partition_table:((.pttype // "" | ascii_downcase) as $table |
+            if $table == "" or $table == "loop" then "none"
+            elif $table == "dos" then "msdos" else $table end),
+        read_only:((.ro // false) == true or (.ro // 0) == 1)
+    }]' <<< "${raw}")"
+    devices="$(jq --argjson systems "${systems}" --argjson system_parts "${system_parts}" '[.[] as $d | $d + {
+        system:(if $d.type == "disk"
+            then (($systems | index($d.path)) != null)
+            elif $d.type == "part"
+            then (($system_parts | index($d.path)) != null)
+            else false
+        end)
+    }]' <<< "${devices}")"
+
+    enriched='[]'
+    while IFS= read -r device_json; do
+        mountpoint="$(jq -r '.mountpoints[0] // ""' <<< "${device_json}")"
+        fs_size=0
+        fs_used=0
+        fs_free=0
+        usage_known=false
+        if [[ -n ${mountpoint} ]]; then
+            stats="$(nsenter --mount=/proc/1/ns/mnt -- df -B1 --output=size,used,avail -- "${mountpoint}" 2>/dev/null | awk 'NR == 2 {print $1 " " $2 " " $3}' || true)"
+            if [[ ${stats} =~ ^[0-9]+[[:space:]][0-9]+[[:space:]][0-9]+$ ]]; then
+                read -r fs_size fs_used fs_free <<< "${stats}"
+                usage_known=true
+            fi
+        fi
+        device_json="$(jq \
+            --argjson filesystem_size_bytes "${fs_size}" \
+            --argjson filesystem_used_bytes "${fs_used}" \
+            --argjson filesystem_free_bytes "${fs_free}" \
+            --argjson filesystem_usage_known "${usage_known}" \
+            '. + {
+                filesystem_size_bytes:$filesystem_size_bytes,
+                filesystem_used_bytes:$filesystem_used_bytes,
+                filesystem_free_bytes:$filesystem_free_bytes,
+                filesystem_usage_known:$filesystem_usage_known
+            }' <<< "${device_json}")"
+        enriched="$(jq --argjson item "${device_json}" '. + [$item]' <<< "${enriched}")"
+    done < <(jq -c '.[]' <<< "${devices}")
+    devices="${enriched}"
+
+    free_spaces='[]'
+    while IFS= read -r disk; do
+        [[ -n ${disk} ]] || continue
+        storage_validate_disk "${disk}" >/dev/null 2>&1 || continue
+        table="$(storage_partition_table_type "${disk}" 2>/dev/null || true)"
+        [[ ${table} == gpt || ${table} == msdos ]] || continue
+        while IFS= read -r record; do
+            [[ -n ${record} ]] || continue
+            IFS=: read -r _ free_start free_end free_size _ <<< "${record}"
+            free_size_mib="${free_size%MiB}"
+            awk -v n="${free_size_mib:-0}" 'BEGIN {exit !(n >= 1024)}' || continue
+            free_size_bytes="$(awk -v n="${free_size_mib}" 'BEGIN {printf "%.0f", n * 1048576}')"
+            free_item="$(jq -n \
+                --arg device "${disk}" \
+                --arg start "${free_start}" \
+                --arg end "${free_end}" \
+                --argjson size_bytes "${free_size_bytes}" \
+                '{device:$device,start:$start,end:$end,size_bytes:$size_bytes}')"
+            free_spaces="$(jq --argjson item "${free_item}" '. + [$item]' <<< "${free_spaces}")"
+        done < <(parted -s -m "${disk}" unit MiB print free 2>/dev/null | awk -F: '$5 == "free;" {print}')
+    done < <(jq -r '.[] | select(.type == "disk") | .path' <<< "${devices}")
+
+    jq -n \
+        --argjson system_disks "${systems}" \
+        --argjson devices "${devices}" \
+        --argjson free_spaces "${free_spaces}" \
+        '{system_disks:$system_disks,devices:$devices,free_spaces:$free_spaces}'
+}
+
+setup_defaults_json() {
+    local suggested_java suggested_container timezone total_mib
+    read -r suggested_java suggested_container < <(suggest_memory_values)
+    timezone="$(timedatectl show -p Timezone --value 2>/dev/null || true)"
+    timezone="${timezone:-UTC}"
+    total_mib="$(system_memory_mib)"
+    jq -n \
+        --arg data_path '/var/lib/justvoxel/minecraft' \
+        --arg backup_path '/var/lib/justvoxel/backups' \
+        --arg java_memory "${suggested_java}" \
+        --arg container_memory "${suggested_container}" \
+        --argjson java_port 25565 \
+        --argjson bedrock_port 19132 \
+        --arg timezone "${timezone}" \
+        --argjson max_players 10 \
+        --arg motd 'JustVoxel Java and Bedrock Server' \
+        --arg image_tag stable \
+        --arg version_mode pinned \
+        --argjson backup_keep 7 \
+        --arg backup_daily_time '04:30' \
+        --argjson system_memory_mib "${total_mib:-0}" \
+        '{data_path:$data_path,backup_path:$backup_path,java_memory:$java_memory,container_memory:$container_memory,
+          java_port:$java_port,bedrock_enabled:false,bedrock_port:$bedrock_port,timezone:$timezone,max_players:$max_players,
+          motd:$motd,image_tag:$image_tag,version_mode:$version_mode,backup_keep:$backup_keep,backup_daily_time:$backup_daily_time,
+          system_memory_mib:$system_memory_mib,system_reserve_minimum_mib:1024,system_reserve_recommended_mib:1536}'
+}
+
+case "${action}" in
+    configuration) configuration_json ;;
+    storage) storage_json ;;
+    defaults) setup_defaults_json ;;
+    *)
+        echo 'Usage: admin-discovery-json {configuration|storage|defaults}' >&2
+        exit 2
+        ;;
+esac

@@ -1,0 +1,1037 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+readonly JV_CONFIG_DIR=/etc/justvoxel
+readonly JV_CONFIG=${JV_CONFIG_DIR}/justvoxel.conf
+readonly JV_MC_ENV=${JV_CONFIG_DIR}/minecraft.env
+readonly JV_BACKUP_ENV=${JV_CONFIG_DIR}/minecraft-backup.env
+readonly JV_TEMPLATE_ROOT=/usr/share/justvoxel/templates
+readonly JV_QUADLET=/etc/containers/systemd/minecraft.container
+readonly JV_BACKUP_SERVICE=/etc/systemd/system/minecraft-backup.service
+readonly JV_BACKUP_TIMER=/etc/systemd/system/minecraft-backup.timer
+readonly JV_MAINTENANCE_LOCK=/run/justvoxel-minecraft-maintenance.lock
+readonly JV_STATE_DIR=/var/lib/justvoxel/state
+readonly JV_SETUP_IN_PROGRESS=/var/lib/justvoxel/management/setup-in-progress
+readonly JV_PREVIOUS_IMAGE_STATE=${JV_STATE_DIR}/minecraft-previous-image-id
+readonly JV_MINECRAFT_IMAGE_REPO=docker.io/itzg/minecraft-server
+readonly JV_ITZG_IMAGES_URL=https://raw.githubusercontent.com/itzg/docker-minecraft-server/refs/heads/master/images.json
+readonly JV_GEYSER_VERSIONS_URL=https://raw.githubusercontent.com/GeyserMC/GeyserWebsite/refs/heads/master/src/data/versions.json
+readonly JV_PAPER_USER_AGENT='JustVoxel/0.1 (https://github.com/home-server-project/justvoxel)'
+
+# Resolve one identity for an exact mount point. Repeated identical rows are
+# harmless; conflicting rows or a missing identity must never pass validation.
+jv_exact_mount_identity() {
+    local field="$1" mountpoint="$2" target value identity='' saw_target=false
+    case "${field}" in UUID|SOURCE) ;; *) return 1 ;; esac
+    while IFS= read -r target; do
+        [[ ${target} == "${mountpoint}" ]] || return 1
+        saw_target=true
+    done < <(findmnt -rn -o TARGET --mountpoint "${mountpoint}" 2>/dev/null)
+    [[ ${saw_target} == true ]] || return 1
+    while IFS= read -r value; do
+        [[ -n ${value} ]] || return 1
+        if [[ -n ${identity} && ${identity} != "${value}" ]]; then
+            return 1
+        fi
+        identity="${value}"
+    done < <(findmnt -rn -o "${field}" --mountpoint "${mountpoint}" 2>/dev/null)
+    [[ -n ${identity} ]] || return 1
+    printf '%s\n' "${identity}"
+}
+
+jv_variant_raw() {
+    cat /usr/lib/justvoxel/variant 2>/dev/null || printf 'unknown\n'
+}
+
+jv_variant_kind() {
+    local raw="${1:-}"
+    [[ -n ${raw} ]] || raw="$(jv_variant_raw)"
+    case "${raw}" in
+        dev|justvoxel-dev) printf 'dev\n' ;;
+        vm|justvoxel-vm) printf 'vm\n' ;;
+        hws|justvoxel-hws) printf 'hws\n' ;;
+        *) printf 'unknown\n' ;;
+    esac
+}
+
+jv_variant_name() {
+    case "$(jv_variant_kind "${1:-}")" in
+        dev) printf 'Development\n' ;;
+        vm) printf 'VM\n' ;;
+        hws) printf 'HWS\n' ;;
+        *) printf 'Unknown\n' ;;
+    esac
+}
+
+jv_variant_is_vm() {
+    [[ $(jv_variant_kind "${1:-}") == vm ]]
+}
+
+jv_variant_is_hws() {
+    [[ $(jv_variant_kind "${1:-}") == hws ]]
+}
+
+require_root() {
+    if [[ ${EUID} -ne 0 ]]; then
+        echo 'ERROR: this operation must run as root.' >&2
+        exit 1
+    fi
+}
+
+require_config() {
+    if [[ ! -r ${JV_CONFIG} ]]; then
+        echo 'ERROR: JustVoxel has not been configured yet. Run: mjust setup' >&2
+        exit 1
+    fi
+    # shellcheck disable=SC1090
+    MINECRAFT_SERVER_TYPE=paper
+    source "${JV_CONFIG}"
+    # Legacy readers may still need a timezone value, always from the appliance.
+    TIMEZONE="$(timedatectl show --property=Timezone --value 2>/dev/null || true)"
+    TIMEZONE="${TIMEZONE:-UTC}"
+
+    # Compatibility defaults for configurations created before image/version
+    # policy and portable Minecraft settings became administrator-configurable.
+    MINECRAFT_SERVER_TYPE="${MINECRAFT_SERVER_TYPE-paper}"
+    validate_server_capabilities || return 1
+    MINECRAFT_IMAGE_TAG="${MINECRAFT_IMAGE_TAG:-latest}"
+    GAME_MODE="${GAME_MODE:-survival}"
+    DIFFICULTY="${DIFFICULTY:-normal}"
+    WHITELIST_ENABLED="${WHITELIST_ENABLED:-yes}"
+    ENFORCE_WHITELIST="${ENFORCE_WHITELIST:-yes}"
+    BEDROCK_MANAGED_PLUGINS="${BEDROCK_MANAGED_PLUGINS:-yes}"
+    if [[ -z ${MINECRAFT_VERSION_MODE:-} ]]; then
+        if [[ ${MINECRAFT_VERSION:-} == LATEST ]]; then
+            MINECRAFT_VERSION_MODE=latest
+        else
+            MINECRAFT_VERSION_MODE=pinned
+        fi
+    fi
+}
+
+prompt_default() {
+    local prompt="$1" default="$2" value
+    read -r -p "${prompt} [${default}]: " value
+    printf '%s' "${value:-${default}}"
+}
+
+confirm() {
+    local prompt="$1" answer
+    read -r -p "${prompt} [y/N]: " answer
+    [[ ${answer,,} == y || ${answer,,} == yes ]]
+}
+
+# Menu/help text is deliberately written to stderr. Many callers use command
+# substitution and stdout must contain only the selected value.
+choose() {
+    local prompt="$1"
+    shift
+    local options=("$@") choice index
+    printf '%s\n' "${prompt}" >&2
+    for index in "${!options[@]}"; do
+        printf '  %d. %s\n' "$((index + 1))" "${options[index]}" >&2
+    done
+    while true; do
+        read -r -p 'Selection: ' choice
+        if [[ ${choice} =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#options[@]} )); then
+            printf '%s' "${choice}"
+            return 0
+        fi
+        echo 'Please enter a valid number.' >&2
+    done
+}
+
+# Defaults are opt-in and limited to menus where pressing Enter is safe.
+# Destructive/storage menus continue to use choose(), which has no default.
+choose_default() {
+    local prompt="$1" default="$2"
+    shift 2
+    local options=("$@") choice index
+    [[ ${default} =~ ^[0-9]+$ ]] && (( default >= 1 && default <= ${#options[@]} )) || {
+        echo 'ERROR: invalid menu default.' >&2
+        return 2
+    }
+    printf '%s\n' "${prompt}" >&2
+    for index in "${!options[@]}"; do
+        printf '  %d. %s\n' "$((index + 1))" "${options[index]}" >&2
+    done
+    while true; do
+        read -r -p "Selection [${default}]: " choice
+        choice="${choice:-${default}}"
+        if [[ ${choice} =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#options[@]} )); then
+            printf '%s' "${choice}"
+            return 0
+        fi
+        echo 'Please enter a valid number.' >&2
+    done
+}
+
+validate_port() {
+    local port="$1"
+    [[ ${port} =~ ^[0-9]+$ ]] && (( port >= 1 && port <= 65535 ))
+}
+
+validate_memory() {
+    [[ $1 =~ ^[1-9][0-9]*[MmGg]$ ]]
+}
+
+memory_to_mib() {
+    local value="${1^^}" number="${1%?}"
+    if [[ ${value} == *G ]]; then
+        printf '%d' $((number * 1024))
+    else
+        printf '%d' "${number}"
+    fi
+}
+
+suggest_memory_values() {
+    local total_mib nominal_gib heap_mib maximum_mib allowed_mib
+    total_mib=$(( $(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0) / 1024 ))
+    # Same Recommended policy as settings.js. Round only the sizing class;
+    # reserve checks always use actual MemTotal, never swap/zram.
+    nominal_gib=$(( (total_mib + 512) / 1024 ))
+    (( total_mib > 0 )) || nominal_gib=8
+    if (( nominal_gib >= 16 )); then
+        heap_mib=6144 maximum_mib=8192
+    elif (( nominal_gib >= 8 )); then
+        heap_mib=4096 maximum_mib=6144
+    elif (( nominal_gib >= 6 )); then
+        heap_mib=3072 maximum_mib=4096
+    elif (( nominal_gib >= 4 )); then
+        heap_mib=2048 maximum_mib=3072
+    else
+        heap_mib=1024 maximum_mib=2048
+    fi
+    if (( total_mib > 0 )); then
+        allowed_mib=$(( total_mib - 1024 ))
+        (( allowed_mib >= 1024 )) || return 1
+        # Preserve the tier heap when a MiB-precision container limit fits.
+        (( maximum_mib <= allowed_mib )) || maximum_mib=${allowed_mib}
+        if (( heap_mib > maximum_mib - 512 )); then
+            heap_mib=$(( maximum_mib >= 2048 ? maximum_mib - 1024 : maximum_mib / 2 ))
+        fi
+    fi
+    local heap maximum
+    if (( heap_mib % 1024 == 0 )); then heap="$((heap_mib / 1024))G"; else heap="${heap_mib}M"; fi
+    if (( maximum_mib % 1024 == 0 )); then maximum="$((maximum_mib / 1024))G"; else maximum="${maximum_mib}M"; fi
+    printf '%s %s\n' "${heap}" "${maximum}"
+}
+
+normalize_daily_backup_time() {
+    local value="$1" hour minute
+    [[ ${value} =~ ^([0-9]{1,2}):([0-9]{2})$ ]] || return 1
+    hour="${BASH_REMATCH[1]}"
+    minute="${BASH_REMATCH[2]}"
+    (( 10#${hour} <= 23 && 10#${minute} <= 59 )) || return 1
+    printf '%02d:%02d' "$((10#${hour}))" "$((10#${minute}))"
+}
+
+daily_backup_schedule_from_time() {
+    local normalized
+    normalized="$(normalize_daily_backup_time "$1")" || return 1
+    printf '*-*-* %s:00' "${normalized}"
+}
+
+validate_positive_int() {
+    [[ $1 =~ ^[1-9][0-9]*$ ]]
+}
+
+validate_nonroot_id() {
+    local value="${1:-}"
+    [[ ${value} =~ ^[0-9]+$ ]] || return 1
+    (( 10#${value} > 0 && 10#${value} <= 4294967294 ))
+}
+
+resolve_minecraft_ids() {
+    local uid gid
+
+    if validate_nonroot_id "${SUDO_UID:-}" && validate_nonroot_id "${SUDO_GID:-}"; then
+        printf '%s %s sudo\n' "${SUDO_UID}" "${SUDO_GID}"
+        return 0
+    fi
+
+    if id voxel >/dev/null 2>&1; then
+        uid="$(id -u voxel)"
+        gid="$(id -g voxel)"
+        if validate_nonroot_id "${uid}" && validate_nonroot_id "${gid}"; then
+            printf '%s %s voxel\n' "${uid}" "${gid}"
+            return 0
+        fi
+    fi
+
+    printf '1000 1000 fallback\n'
+}
+
+validate_storage_path() {
+    [[ $1 =~ ^/[A-Za-z0-9._/-]+$ && $1 != / ]]
+}
+
+validate_simple_text() {
+    local value="$1"
+    [[ ${value} != *$'\n'* && ${value} != *$'\r'* ]]
+}
+
+validate_game_mode() {
+    case "${1:-}" in
+        survival|creative|adventure|spectator) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+shell_quote_assignment() {
+    local key="$1" value="$2"
+    printf '%s=' "${key}"
+    printf '%q' "${value}"
+    printf '\n'
+}
+
+minecraft_image_ref() {
+    printf '%s:%s' "${JV_MINECRAFT_IMAGE_REPO}" "${MINECRAFT_IMAGE_TAG}"
+}
+
+validate_minecraft_image_tag() {
+    local tag="$1" catalog
+    [[ ${tag} =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || return 1
+
+    skopeo inspect "docker://${JV_MINECRAFT_IMAGE_REPO}:${tag}" >/dev/null 2>&1 || return 1
+
+    # Upstream publishes a machine-readable list of moving Java/image tags.
+    # Reject entries upstream explicitly marks deprecated. Exact release tags are
+    # not in this catalog and are accepted when the registry confirms they exist.
+    catalog="$(curl -fsSL "${JV_ITZG_IMAGES_URL}" 2>/dev/null || true)"
+    if [[ -n ${catalog} ]] && jq -e --arg tag "${tag}" \
+        '.[] | select(.tag == $tag and (.deprecated // false) == true)' \
+        <<< "${catalog}" >/dev/null 2>&1; then
+        return 2
+    fi
+    return 0
+}
+
+resolve_latest_itzg_release() {
+    curl -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" \
+        https://api.github.com/repos/itzg/docker-minecraft-server/releases/latest 2>/dev/null \
+        | jq -r '.tag_name // empty'
+}
+
+write_main_config() {
+    MINECRAFT_SERVER_TYPE="${MINECRAFT_SERVER_TYPE-paper}"
+    validate_server_capabilities || return 1
+    install -d -m0700 -o root -g root "${JV_CONFIG_DIR}"
+    local tmp
+    tmp="$(mktemp "${JV_CONFIG_DIR}/.justvoxel.conf.XXXXXX")"
+    chmod 0600 "${tmp}"
+    {
+        echo '# JustVoxel administrator-owned configuration.'
+        echo '# Generated by mjust. bootc image updates do not overwrite this file.'
+        shell_quote_assignment DATA_PATH "${DATA_PATH}"
+        shell_quote_assignment DATA_MOUNT_POINT "${DATA_MOUNT_POINT}"
+        shell_quote_assignment DATA_EXPECTED_UUID "${DATA_EXPECTED_UUID}"
+        shell_quote_assignment DATA_EXPECTED_SOURCE "${DATA_EXPECTED_SOURCE}"
+        shell_quote_assignment BACKUP_TYPE "${BACKUP_TYPE}"
+        shell_quote_assignment BACKUP_PATH "${BACKUP_PATH}"
+        shell_quote_assignment BACKUP_MOUNT_POINT "${BACKUP_MOUNT_POINT}"
+        shell_quote_assignment BACKUP_EXPECTED_UUID "${BACKUP_EXPECTED_UUID}"
+        shell_quote_assignment BACKUP_EXPECTED_SOURCE "${BACKUP_EXPECTED_SOURCE}"
+        shell_quote_assignment BACKUP_KEEP "${BACKUP_KEEP}"
+        shell_quote_assignment BACKUP_SCHEDULE "${BACKUP_SCHEDULE}"
+        shell_quote_assignment BACKUP_TIMER_ENABLED "${BACKUP_TIMER_ENABLED}"
+        shell_quote_assignment JAVA_PORT "${JAVA_PORT}"
+        shell_quote_assignment BEDROCK_ENABLED "${BEDROCK_ENABLED}"
+        shell_quote_assignment BEDROCK_PORT "${BEDROCK_PORT}"
+        shell_quote_assignment BEDROCK_MANAGED_PLUGINS "${BEDROCK_MANAGED_PLUGINS:-yes}"
+        shell_quote_assignment JAVA_MEMORY "${JAVA_MEMORY}"
+        shell_quote_assignment CONTAINER_MEMORY "${CONTAINER_MEMORY}"
+        shell_quote_assignment MINECRAFT_SERVER_TYPE "${MINECRAFT_SERVER_TYPE}"
+        shell_quote_assignment MINECRAFT_IMAGE_TAG "${MINECRAFT_IMAGE_TAG}"
+        shell_quote_assignment MINECRAFT_VERSION_MODE "${MINECRAFT_VERSION_MODE}"
+        shell_quote_assignment MINECRAFT_VERSION "${MINECRAFT_VERSION}"
+        shell_quote_assignment MINECRAFT_UID "${MINECRAFT_UID}"
+        shell_quote_assignment MINECRAFT_GID "${MINECRAFT_GID}"
+        shell_quote_assignment GAME_MODE "${GAME_MODE:-survival}"
+        shell_quote_assignment DIFFICULTY "${DIFFICULTY:-normal}"
+        shell_quote_assignment WHITELIST_ENABLED "${WHITELIST_ENABLED:-yes}"
+        shell_quote_assignment ENFORCE_WHITELIST "${ENFORCE_WHITELIST:-yes}"
+        shell_quote_assignment MAX_PLAYERS "${MAX_PLAYERS}"
+        shell_quote_assignment MOTD "${MOTD}"
+    } > "${tmp}"
+    mv -f "${tmp}" "${JV_CONFIG}"
+    chown root:root "${JV_CONFIG}"
+    chmod 0600 "${JV_CONFIG}"
+}
+
+sed_replacement_escape() {
+    local value="$1"
+    value=${value//\\/\\\\}
+    value=${value//&/\\&}
+    value=${value//|/\\|}
+    printf '%s' "${value}"
+}
+
+replace_token() {
+    local file="$1" token="$2" value="$3" escaped
+    escaped="$(sed_replacement_escape "${value}")"
+    sed -i "s|@@${token}@@|${escaped}|g" "${file}"
+}
+
+systemd_env_escape() {
+    local value="$1"
+    value=${value//\\/\\\\}
+    value=${value//\"/\\\"}
+    printf '%s' "${value}"
+}
+
+path_regex_escape() {
+    printf '%s' "$1" | sed 's/[][\\.^$*+?(){}|]/\\&/g'
+}
+
+apply_data_selinux() {
+    local escaped
+    escaped="$(path_regex_escape "${DATA_PATH}")"
+    if ! semanage fcontext -a -t container_file_t "${escaped}(/.*)?" 2>/dev/null; then
+        semanage fcontext -m -t container_file_t "${escaped}(/.*)?"
+    fi
+    restorecon -RF "${DATA_PATH}"
+}
+
+capture_backup_mount_identity() {
+    BACKUP_EXPECTED_UUID=''
+    BACKUP_EXPECTED_SOURCE=''
+    if [[ -z ${BACKUP_MOUNT_POINT} ]]; then
+        return 0
+    fi
+    if ! mountpoint -q -- "${BACKUP_MOUNT_POINT}"; then
+        echo "ERROR: selected backup mount is not mounted: ${BACKUP_MOUNT_POINT}" >&2
+        return 1
+    fi
+    BACKUP_EXPECTED_SOURCE="$(jv_exact_mount_identity SOURCE "${BACKUP_MOUNT_POINT}" 2>/dev/null || true)"
+    if [[ ${BACKUP_TYPE} == disk || ${BACKUP_TYPE} == partition ]]; then
+        BACKUP_EXPECTED_UUID="$(jv_exact_mount_identity UUID "${BACKUP_MOUNT_POINT}" 2>/dev/null || true)"
+        if [[ -z ${BACKUP_EXPECTED_UUID} ]]; then
+            echo 'ERROR: could not determine a filesystem UUID for the selected local backup mount.' >&2
+            return 1
+        fi
+    fi
+}
+
+geyser_supported_java_version_from_json() {
+    local metadata="$1" version
+    version="$(jq -er '.java.supported | select(type == "string")' <<< "${metadata}" 2>/dev/null)" || return 1
+    [[ ${version} =~ ^[0-9]+([.][0-9]+){1,2}$ ]] || return 1
+    printf '%s' "${version}"
+}
+
+resolve_geyser_supported_java_version() {
+    local metadata
+    metadata="$(curl -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" "${JV_GEYSER_VERSIONS_URL}" 2>/dev/null)" || return 1
+    geyser_supported_java_version_from_json "${metadata}"
+}
+
+bedrock_crossplay_supports_version() {
+    local minecraft_version="$1" geyser_java_version="$2"
+    [[ -n ${minecraft_version} && -n ${geyser_java_version} && ${minecraft_version} == "${geyser_java_version}" ]]
+}
+
+server_crossplay_version_compatible() {
+    if [[ ${MINECRAFT_SERVER_TYPE-paper} != spigot ]]; then bedrock_crossplay_supports_version "$1" "$2"; return; fi
+    [[ $1 =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ && $2 =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || return 1
+    [[ $(printf '%s\n' "$1" "$2" | sort -V | tail -n1) == "$2" ]] &&
+        [[ $(printf '%s\n' 1.20.5 "$1" | sort -V | tail -n1) == "$1" ]]
+}
+
+paper_version_has_stable_build() {
+    local version="$1" builds
+    builds="$(curl -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" \
+        "https://fill.papermc.io/v3/projects/paper/versions/${version}/builds" 2>/dev/null)" || return 2
+    if jq -e '.ok == false' <<< "${builds}" >/dev/null 2>&1; then
+        return 1
+    fi
+    jq -e 'any(.[]; .channel == "STABLE" and (.downloads."server:default".url // "") != "")' <<< "${builds}" >/dev/null
+}
+
+# Print the release channel of a downloadable Paper server build.
+paper_version_build_channel() {
+    local version="$1" builds
+    [[ ${version} =~ ^[0-9A-Za-z._-]+$ ]] || return 1
+    builds="$(curl -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" \
+        "https://fill.papermc.io/v3/projects/paper/versions/${version}/builds" 2>/dev/null)" || return 1
+    jq -er '[.[] | select((.downloads."server:default".url // "") != "")]
+        | (map(select(.channel == "STABLE")) | .[0]) // .[0]
+        | .channel | select(type == "string" and length > 0)' <<< "${builds}" 2>/dev/null
+}
+
+resolve_latest_available_paper_version() {
+    local project versions version
+    project="$(curl -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" https://fill.papermc.io/v3/projects/paper 2>/dev/null)" || return 1
+    versions="$(jq -r '.versions[][]' <<< "${project}")"
+    while IFS= read -r version; do
+        [[ -n ${version} ]] || continue
+        if paper_version_build_channel "${version}" >/dev/null; then
+            printf '%s' "${version}"
+            return 0
+        fi
+    done <<< "${versions}"
+    return 1
+}
+
+resolve_latest_stable_paper_version() {
+    local project versions version builds
+    project="$(curl -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" https://fill.papermc.io/v3/projects/paper 2>/dev/null)" || return 1
+    versions="$(jq -r '.versions[][]' <<< "${project}")"
+    while IFS= read -r version; do
+        [[ -n ${version} ]] || continue
+        builds="$(curl -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" \
+            "https://fill.papermc.io/v3/projects/paper/versions/${version}/builds" 2>/dev/null)" || continue
+        if jq -e 'any(.[]; .channel == "STABLE" and (.downloads."server:default".url // "") != "")' <<< "${builds}" >/dev/null; then
+            printf '%s' "${version}"
+            return 0
+        fi
+    done <<< "${versions}"
+    return 1
+}
+
+# Fixed Java implementations, with Paper compatibility for pre-existing configs.
+validate_server_type() {
+    case "$1" in paper|purpur|pufferfish|leaf|vanilla|spigot|forge|neoforge|fabric|quilt|bedrock) return 0 ;; *) return 1 ;; esac
+}
+# Preserve the deployed legacy migration/export integration boundary.
+server_supports_plugins() { [[ ${1:-${MINECRAFT_SERVER_TYPE-paper}} == paper || ${1:-${MINECRAFT_SERVER_TYPE-paper}} == purpur ]]; }
+server_supports_viaversion() {
+    case "${1:-${MINECRAFT_SERVER_TYPE-paper}}" in paper|purpur|pufferfish|leaf|spigot) return 0 ;; *) return 1 ;; esac
+}
+server_supports_managed_crossplay() {
+    case "${1:-${MINECRAFT_SERVER_TYPE-paper}}" in paper|purpur|pufferfish|leaf|spigot|fabric|neoforge) return 0 ;; *) return 1 ;; esac
+}
+server_supports_bukkit_plugins() {
+    case "${1:-${MINECRAFT_SERVER_TYPE-paper}}" in paper|purpur|pufferfish|leaf|spigot) return 0 ;; *) return 1 ;; esac
+}
+server_is_mod_loader() {
+    case "${1:-${MINECRAFT_SERVER_TYPE-paper}}" in forge|neoforge|fabric|quilt) return 0 ;; *) return 1 ;; esac
+}
+server_allows_in_place_switch() {
+    validate_server_type "$1" && validate_server_type "$2" || return 1
+    [[ $1 == "$2" ]] || { [[ $1 == paper || $1 == purpur || $1 == pufferfish || $1 == leaf ]] && [[ $2 == paper || $2 == purpur || $2 == pufferfish || $2 == leaf ]]; }
+}
+server_software_display_name() {
+    case "${1:-${MINECRAFT_SERVER_TYPE-paper}}" in paper) printf Paper ;; purpur) printf Purpur ;; pufferfish) printf Pufferfish ;; leaf) printf Leaf ;; vanilla) printf Vanilla ;; spigot) printf Spigot ;; forge) printf Forge ;; neoforge) printf NeoForge ;; fabric) printf Fabric ;; quilt) printf Quilt ;; *) return 1 ;; esac
+}
+validate_server_capabilities() {
+    validate_server_type "${MINECRAFT_SERVER_TYPE-paper}" || { echo 'ERROR: invalid Minecraft server type.' >&2; return 1; }
+    if [[ ${BEDROCK_ENABLED:-no} == yes ]] && ! server_supports_managed_crossplay; then
+        echo 'ERROR: managed Bedrock cross-play requires Paper, Purpur or Spigot.' >&2
+        return 1
+    fi
+}
+# Explicit pins use the Java generation for the game release. Availability of
+# the exact game/loader pair must still be verified against upstream metadata.
+validate_java_server_selection() {
+    local software="$1" policy="$2" version="$3" loader="$4" image="$5" required_image
+    validate_server_type "${software}" || return 1
+    case "${software}" in
+        paper|purpur|pufferfish|leaf|vanilla) [[ -z ${loader} ]]; return ;;
+    esac
+    [[ ${policy} == pinned ]] || return 1
+    if [[ ${version} =~ ^1\.(20\.[56]|21(\.([0-9]|1[01]))?)$ ]]; then
+        required_image=java21
+    elif [[ ${version} =~ ^26\.[1-9][0-9]*(\.(0|[1-9][0-9]*))?$ ]]; then
+        required_image=java25
+    else
+        return 1
+    fi
+    if [[ ${software} == spigot ]]; then
+        [[ -z ${loader} && ${image} == "${required_image}-jdk" ]]
+    else
+        [[ ${image} == "${required_image}" && ${#loader} -le 64 && ${loader} =~ ^[0-9]+(\.[0-9]+){1,3}(-[A-Za-z0-9]+([.-][A-Za-z0-9]+)*)?$ ]]
+    fi
+}
+
+# Read only safe archived server identities from the last successful Jenkins build.
+pufferfish_build_version() {
+    local branch="$1"
+    [[ ${branch} =~ ^[0-9]+[.][0-9]+$ ]] || return 1
+    curl --connect-timeout 3 --max-time 12 -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" \
+        "https://ci.pufferfish.host/job/Pufferfish-${branch}/lastSuccessfulBuild/api/json" |
+        jq -er '
+            select(.result == "SUCCESS" and
+                (.number | type == "number" and . > 0 and floor == .)) |
+            [.artifacts[] | select(.fileName | type == "string") |
+                select(.fileName | test("^pufferfish-paperclip-[0-9]+[.][0-9]+([.][0-9]+)?-R0[.]1-SNAPSHOT-(mojmap|reobf)[.]jar$"))] |
+            select(length > 0 and all(.[]; .fileName as $name |
+                (.relativePath | type == "string" and
+                    test("^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$") and
+                    (split("/") | all(.[]; . != ".." and . != ".")) and
+                    (endswith("/" + $name) or . == $name)))) |
+            map(.fileName | capture("^pufferfish-paperclip-(?<version>[0-9]+[.][0-9]+([.][0-9]+)?)-R0").version) |
+            unique | select(length == 1) | .[0]'
+}
+
+# Return the exact verified Leaf build, retaining its upstream channel for advice.
+leaf_build_metadata() {
+    local version="$1" metadata build
+    [[ ${version} =~ ^[0-9]+[.][0-9]+([.][0-9]+)?$ ]] || return 1
+    metadata="$(curl --connect-timeout 3 --max-time 12 -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" \
+        "https://api.leafmc.one/v2/projects/leaf/versions/${version}")" || return 1
+    build="$(jq -er --arg version "${version}" '
+        select(.project_id == "leaf" and .version == $version) |
+        .builds | select(type == "array" and length > 0 and
+            all(.[]; type == "number" and . > 0 and floor == .)) | max' <<< "${metadata}")" || return 1
+    curl --connect-timeout 3 --max-time 12 -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" \
+        "https://api.leafmc.one/v2/projects/leaf/versions/${version}/builds/${build}" |
+        jq -e --arg version "${version}" --argjson build "${build}" '
+            select(.project_id == "leaf" and .version == $version and .build == $build and
+                (.channel == "default" or .channel == "stable" or .channel == "experimental")) |
+            . as $metadata |
+            .downloads | select(type == "object") | to_entries |
+            map(.value | select(.name == ("leaf-" + $version + "-" + ($build | tostring) + ".jar"))) |
+            select(length == 1 and (.[0].sha256 | type == "string" and test("^[a-fA-F0-9]{64}$"))) |
+            $metadata'
+}
+
+# Verify the artifact that the runtime will actually select. Paper compatibility
+# never establishes availability of a Pufferfish or Leaf Minecraft release.
+paper_fork_version_available() {
+    local software="$1" version="$2" branch resolved
+    [[ ${version} =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || return 1
+    case "${software}" in
+        pufferfish)
+            branch="$(cut -d. -f1,2 <<< "${version}")"
+            resolved="$(pufferfish_build_version "${branch}")" || return 1
+            [[ ${resolved} == "${version}" ]]
+            ;;
+        leaf) leaf_build_metadata "${version}" >/dev/null ;;
+        *) return 1 ;;
+    esac
+}
+
+# Verify an exact pair with the selected project's own metadata/artifact
+# repository. No release synthesis, third-party jars, or alternate loader.
+java_server_version_available() {
+    local software="$1" version="$2" loader="${3:-}" url coordinate prefix patch digest java_class=65
+    [[ ${version} =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || return 1
+    case "${software}" in
+        paper|purpur|vanilla)
+            [[ -z ${loader} ]] || return 1
+            MINECRAFT_SERVER_TYPE="${software}" server_version_available "${version}"
+            return
+            ;;
+    esac
+    # Loader metadata can describe profiles independently of Mojang releases.
+    # Require the exact game release as well as the exact implementation pair.
+    curl --connect-timeout 3 --max-time 8 -fsSL https://piston-meta.mojang.com/mc/game/version_manifest_v2.json | jq -e --arg version "${version}" '
+        any(.versions[]; .id == $version and .type == "release")' >/dev/null || return 1
+    if [[ ${software} == pufferfish || ${software} == leaf ]]; then
+        [[ -z ${loader} ]] && paper_fork_version_available "${software}" "${version}"
+        return
+    fi
+    if [[ ${software} == spigot ]]; then
+        [[ -z ${loader} ]] || return 1
+        [[ ${version} != 26.* ]] || java_class=69
+        curl --connect-timeout 3 --max-time 12 -fsSL "https://hub.spigotmc.org/versions/${version}.json" | jq -e --argjson java_class "${java_class}" '
+            (.javaVersions | type == "array" and index($java_class) != null) and
+            ([.refs.BuildData,.refs.Bukkit,.refs.CraftBukkit,.refs.Spigot] | all(.[]; type == "string" and test("^[a-f0-9]{40}$")))' >/dev/null
+        return
+    fi
+    [[ ${#loader} -le 64 && ${loader} =~ ^[0-9]+(\.[0-9]+){1,3}(-[A-Za-z0-9]+([.-][A-Za-z0-9]+)*)?$ ]] || return 1
+    case "${software}" in
+        forge)
+            url="https://maven.minecraftforge.net/net/minecraftforge/forge/${version}-${loader}/forge-${version}-${loader}-installer.jar.sha1"
+            ;;
+        neoforge)
+            # 26.x includes the full game version, with an omitted patch
+            # represented by zero. Older releases omit Minecraft's leading 1.
+            if [[ ${version} =~ ^26\.([1-9][0-9]*)(\.([0-9]+))?$ ]]; then
+                prefix="26.${BASH_REMATCH[1]}.${BASH_REMATCH[3]:-0}."
+            elif [[ ${version} =~ ^1\.(20|21)(\.([0-9]+))?$ ]]; then
+                patch=${BASH_REMATCH[3]:-0}
+                prefix="${BASH_REMATCH[1]}.${patch}."
+            else
+                return 1
+            fi
+            [[ ${loader} == "${prefix}"* ]] || return 1
+            url="https://maven.neoforged.net/releases/net/neoforged/neoforge/${loader}/neoforge-${loader}-installer.jar.sha1"
+            ;;
+        fabric|quilt)
+            if [[ ${software} == fabric ]]; then
+                url="https://meta.fabricmc.net/v2/versions/loader/${version}/${loader}/server/json"
+                coordinate="net.fabricmc:fabric-loader:${loader}"
+            else
+                url="https://meta.quiltmc.org/v3/versions/loader/${version}/${loader}/server/json"
+                coordinate="org.quiltmc:quilt-loader:${loader}"
+            fi
+            curl --connect-timeout 3 --max-time 12 -fsSL "${url}" | jq -e --arg version "${version}" --arg loader "${coordinate}" '
+                .inheritsFrom == $version and
+                (.mainClass | type == "string" and endswith(".KnotServer")) and
+                any(.libraries[]; .name == $loader)' >/dev/null
+            return
+            ;;
+        *) return 1 ;;
+    esac
+    digest="$(curl --connect-timeout 3 --max-time 12 -fsSL "${url}")" || return 1
+    [[ ${digest} =~ ^[a-fA-F0-9]{40}$ ]]
+}
+
+# Setup-time discovery only. Every selected pin is checked by the existing
+# exact upstream verifier before it can leave this resolver.
+resolve_setup_loader() {
+    local software="$1" game="$2" metadata prefix
+    case "${software}" in
+        paper|purpur|vanilla|spigot|pufferfish|leaf) return 0 ;;
+        fabric|quilt)
+            local api=https://meta.fabricmc.net/v2
+            [[ ${software} != quilt ]] || api=https://meta.quiltmc.org/v3
+            curl --connect-timeout 3 --max-time 8 -fsSL "${api}/versions/loader/${game}" |
+                jq -er --arg software "${software}" '[.[] | .loader | select(if $software == "fabric" then .stable == true else .stable != false end) | .version | select(test("^[0-9]+([.][0-9]+){1,3}$"))][0] // empty'
+            ;;
+        forge)
+            curl --connect-timeout 3 --max-time 8 -fsSL https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json |
+                jq -er --arg game "${game}" '.promos | .[$game + "-recommended"] // .[$game + "-latest"] | select(type == "string" and test("^[0-9]+([.][0-9]+){1,3}$"))'
+            ;;
+        neoforge)
+            if [[ ${game} =~ ^26\.([1-9][0-9]*)(\.([0-9]+))?$ ]]; then
+                prefix="26.${BASH_REMATCH[1]}.${BASH_REMATCH[3]:-0}."
+            elif [[ ${game} =~ ^1\.(20|21)(\.([0-9]+))?$ ]]; then
+                prefix="${BASH_REMATCH[1]}.${BASH_REMATCH[3]:-0}."
+            else return 1; fi
+            metadata="$(curl --connect-timeout 3 --max-time 8 -fsSL https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml)" || return 1
+            printf '%s\n' "${metadata}" | sed 's/<version>/\n<version>/g' | sed -n 's/.*<version>\([0-9][0-9.]*\)<\/version>.*/\1/p' |
+                jq -Rrs --arg prefix "${prefix}" 'split("\n") | map(select(startswith($prefix) and test("^[0-9]+([.][0-9]+){2,3}$"))) | sort_by(split(".") | map(tonumber)) | last // empty'
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+resolve_setup_java_runtime() {
+    local software="$1" policy="$2" specific="$3" game loader image releases branches branch discovered metadata reason
+    case "${policy}" in recommended|pinned) ;; *) return 1 ;; esac
+    if [[ ${policy} == pinned ]]; then
+        [[ ${specific} =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || return 1
+        releases="${specific}"
+    else
+        case "${software}" in
+            pufferfish)
+                # Ask Jenkins which jobs actually exist. Probing every Mojang
+                # release branch can exhaust the preview deadline on absent jobs.
+                branches="$(curl --connect-timeout 3 --max-time 12 -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" \
+                    'https://ci.pufferfish.host/api/json?tree=jobs%5Bname%5D' |
+                    jq -er '[.jobs[] | .name | select(type == "string") |
+                        select(test("^Pufferfish-[0-9]+[.][0-9]+$")) |
+                        ltrimstr("Pufferfish-")] | unique |
+                        sort_by(split(".") | map(tonumber)) | reverse | .[0:4][]')" || return 1
+                releases=''
+                while IFS= read -r branch; do
+                    discovered="$(pufferfish_build_version "${branch}")" || continue
+                    [[ $(cut -d. -f1,2 <<< "${discovered}") == "${branch}" ]] || continue
+                    java_server_version_available pufferfish "${discovered}" || continue
+                    releases="${discovered}"
+                    break
+                done <<< "${branches}"
+                ;;
+            leaf)
+                releases="$(curl --connect-timeout 3 --max-time 12 -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" https://api.leafmc.one/v2/projects/leaf |
+                    jq -er 'select(.project_id == "leaf") | .versions |
+                        map(select(type == "string" and test("^[0-9]+[.][0-9]+([.][0-9]+)?$"))) |
+                        unique | sort_by(split(".") | map(tonumber)) | reverse[]')" || return 1
+                ;;
+            fabric|neoforge)
+                releases="$(vanilla_metadata | jq -er '.versions[] | select(.type == "release") | .id')" || return 1
+                ;;
+            *) releases="$(vanilla_metadata | jq -er '[.versions[] | select(.type == "release") | .id][0:8][]')" || return 1 ;;
+        esac
+    fi
+    while IFS= read -r game; do
+        if [[ ${game} =~ ^1\.(20\.[56]|21(\.([0-9]|1[01]))?)$ ]]; then image=java21
+        elif [[ ${game} =~ ^26\.[1-9][0-9]*(\.(0|[1-9][0-9]*))?$ ]]; then image=java25
+        else continue; fi
+        [[ ${software} != spigot ]] || image+=-jdk
+        loader="$(resolve_setup_loader "${software}" "${game}")" || continue
+        validate_java_server_selection "${software}" pinned "${game}" "${loader}" "${image}" || continue
+        java_server_version_available "${software}" "${game}" "${loader}" || continue
+        reason=''
+        if [[ ${software} == leaf ]]; then
+            metadata="$(leaf_build_metadata "${game}")" || continue
+            if jq -e '(.channel // "" | ascii_downcase) == "experimental"' <<< "${metadata}" >/dev/null; then
+                reason='Leaf labels this build Experimental. It is available for setup.'
+            fi
+        fi
+        jq -cn --arg game "${game}" --arg loader "${loader}" --arg image "${image}" --arg reason "${reason}" '{game:$game,loader:$loader,image:$image,reason:$reason}'
+        return
+    done <<< "${releases}"
+    return 1
+}
+
+purpur_metadata() {
+    curl --connect-timeout 5 --max-time 20 -fsSL https://api.purpurmc.org/v2/purpur | jq -e '
+        select(.metadata.current | type == "string" and test("^[0-9]+([.][0-9]+){1,2}$"))
+        | select(.versions | type == "array" and length > 0 and all(.[]; type == "string" and test("^[0-9]+([.][0-9]+){1,2}$")))
+        | select(.metadata.current as $current | .versions | index($current) != null)'
+}
+vanilla_metadata() {
+    curl --connect-timeout 5 --max-time 20 -fsSL https://piston-meta.mojang.com/mc/game/version_manifest_v2.json | jq -e '
+        select(.latest.release | type == "string" and length > 0)
+        | select(.versions | type == "array" and length > 0)
+        | select(.latest.release as $release | any(.versions[]; .id == $release and .type == "release"))'
+}
+server_version_available() {
+    local version="$1"
+    [[ ${version} =~ ^[0-9A-Za-z._-]+$ ]] || return 1
+    case "${MINECRAFT_SERVER_TYPE-paper}" in
+        paper) paper_version_build_channel "${version}" >/dev/null ;;
+        purpur) purpur_metadata | jq -e --arg v "${version}" '.versions | index($v) != null' >/dev/null ;;
+        vanilla) vanilla_metadata | jq -e --arg v "${version}" 'any(.versions[]; .id == $v and .type == "release")' >/dev/null ;;
+        pufferfish|leaf|spigot|forge|neoforge|fabric|quilt) java_server_version_available "${MINECRAFT_SERVER_TYPE}" "${version}" "${MINECRAFT_LOADER_VERSION:-}" ;;
+        *) return 1 ;;
+    esac
+}
+server_version_recommended_available() {
+    if [[ ${MINECRAFT_SERVER_TYPE-paper} == paper ]]; then paper_version_has_stable_build "$1"; else server_version_available "$1"; fi
+}
+resolve_recommended_server_version() {
+    case "${MINECRAFT_SERVER_TYPE-paper}" in
+        paper) resolve_latest_stable_paper_version ;;
+        purpur) purpur_metadata | jq -er '.metadata.current' ;;
+        vanilla) vanilla_metadata | jq -er '.latest.release' ;;
+        pufferfish|leaf) resolve_setup_java_runtime "${MINECRAFT_SERVER_TYPE}" recommended '' | jq -er .game ;;
+        *) return 1 ;;
+    esac
+}
+resolve_latest_server_version() {
+    case "${MINECRAFT_SERVER_TYPE-paper}" in
+        paper) resolve_latest_available_paper_version ;;
+        purpur) purpur_metadata | jq -er '.versions | sort_by(split(".") | map(tonumber)) | last' ;;
+        vanilla|pufferfish|leaf) resolve_recommended_server_version ;;
+        *) return 1 ;;
+    esac
+}
+server_version_channel() {
+    if [[ ${MINECRAFT_SERVER_TYPE-paper} == paper ]]; then paper_version_build_channel "$1"; else server_version_available "$1" && printf RELEASE; fi
+}
+
+render_runtime_files() {
+    require_config
+    case "${MINECRAFT_SERVER_TYPE-paper}" in paper|purpur|vanilla) ;; *)
+        echo 'ERROR: this server software requires the per-instance runtime.' >&2
+        return 1 ;;
+    esac
+    if declare -F jv_trace_run >/dev/null; then jv_trace_run install -d -m0700 -o root -g root "${JV_CONFIG_DIR}"; else install -d -m0700 -o root -g root "${JV_CONFIG_DIR}"; fi
+    if declare -F jv_trace_run >/dev/null; then jv_trace_run install -d -m0755 -o root -g root /etc/containers/systemd; else install -d -m0755 -o root -g root /etc/containers/systemd; fi
+
+    local rcon_password env_tmp quadlet_tmp backup_tmp service_tmp timer_tmp image_ref runtime_version paper_channel build_channel
+    if [[ ${JUSTVOXEL_REGENERATE_RCON:-0} == 1 ]]; then
+        rcon_password="$(openssl rand -hex 24)"
+    elif [[ -r ${JV_MC_ENV} ]]; then
+        rcon_password="$(sed -n 's/^RCON_PASSWORD=//p' "${JV_MC_ENV}" | head -n1)"
+    else
+        rcon_password="$(openssl rand -hex 24)"
+    fi
+    [[ -n ${rcon_password} ]] || rcon_password="$(openssl rand -hex 24)"
+
+    runtime_version="${MINECRAFT_VERSION}"
+    paper_channel=default
+    if [[ ${MINECRAFT_SERVER_TYPE} != paper ]]; then
+        if [[ ${MINECRAFT_VERSION_MODE} == latest ]]; then runtime_version=LATEST; fi
+    elif [[ ${MINECRAFT_VERSION_MODE} == latest ]]; then
+        runtime_version=LATEST
+        paper_channel=experimental
+    elif [[ ${MINECRAFT_VERSION_MODE} == pinned ]] &&
+        { ! grep -Fqx "VERSION=${MINECRAFT_VERSION}" "${JV_MC_ENV}" 2>/dev/null || ! grep -Fqx TYPE=PAPER "${JV_MC_ENV}" 2>/dev/null; }; then
+        build_channel="$(paper_version_build_channel "${MINECRAFT_VERSION}")" || return 1
+        if [[ ${build_channel} != STABLE ]]; then
+            paper_channel=experimental
+        fi
+    elif [[ ${MINECRAFT_VERSION_MODE} == pinned ]] && grep -Fqx 'PAPER_CHANNEL=experimental' "${JV_MC_ENV}" 2>/dev/null; then
+        paper_channel=experimental
+    fi
+    env_tmp="$(mktemp "${JV_CONFIG_DIR}/.minecraft.env.XXXXXX")"
+    cp "${JV_TEMPLATE_ROOT}/config/minecraft.env.in" "${env_tmp}"
+    replace_token "${env_tmp}" MINECRAFT_SERVER_TYPE "${MINECRAFT_SERVER_TYPE^^}"
+    replace_token "${env_tmp}" EULA TRUE
+    replace_token "${env_tmp}" MINECRAFT_VERSION "${runtime_version}"
+    replace_token "${env_tmp}" PAPER_CHANNEL "${paper_channel}"
+    replace_token "${env_tmp}" MINECRAFT_UID "${MINECRAFT_UID}"
+    replace_token "${env_tmp}" MINECRAFT_GID "${MINECRAFT_GID}"
+    replace_token "${env_tmp}" JAVA_MEMORY "${JAVA_MEMORY^^}"
+    replace_token "${env_tmp}" GAME_MODE "${GAME_MODE}"
+    replace_token "${env_tmp}" DIFFICULTY "${DIFFICULTY}"
+    replace_token "${env_tmp}" WHITELIST_ENABLED "$([[ ${WHITELIST_ENABLED} == yes ]] && printf TRUE || printf FALSE)"
+    replace_token "${env_tmp}" ENFORCE_WHITELIST "$([[ ${ENFORCE_WHITELIST} == yes ]] && printf TRUE || printf FALSE)"
+    replace_token "${env_tmp}" MAX_PLAYERS "${MAX_PLAYERS}"
+    replace_token "${env_tmp}" RCON_PASSWORD "${rcon_password}"
+    replace_token "${env_tmp}" MOTD "$(systemd_env_escape "${MOTD}")"
+    # JustVoxel verifies these binaries; the container only owns ViaVersion.
+    replace_token "${env_tmp}" PLUGINS_LINE '# Cross-play binaries are managed by JustVoxel.'
+    if [[ ${MINECRAFT_SERVER_TYPE} != paper ]]; then sed -i '/^PAPER_CHANNEL=/d' "${env_tmp}"; fi
+    if ! server_supports_viaversion; then sed -i '/^MODRINTH_PROJECTS=/d' "${env_tmp}"; fi
+    if declare -F jv_trace_run >/dev/null; then jv_trace_run install -o root -g root -m0600 "${env_tmp}" "${JV_MC_ENV}"; else install -o root -g root -m0600 "${env_tmp}" "${JV_MC_ENV}"; fi
+    rm -f "${env_tmp}"
+
+    image_ref="$(minecraft_image_ref)"
+    quadlet_tmp="$(mktemp /etc/containers/systemd/.minecraft.container.XXXXXX)"
+    cp "${JV_TEMPLATE_ROOT}/quadlets/minecraft.container.in" "${quadlet_tmp}"
+    if server_supports_managed_crossplay; then
+        sed -i '/^ExecStartPre=.*validate-data-mount$/a ExecStartPre=/usr/libexec/justvoxel/mjust/managed-crossplay-start' "${quadlet_tmp}"
+    fi
+    replace_token "${quadlet_tmp}" MINECRAFT_IMAGE "${image_ref}"
+    replace_token "${quadlet_tmp}" DATA_PATH "${DATA_PATH}"
+    replace_token "${quadlet_tmp}" JAVA_PORT "${JAVA_PORT}"
+    replace_token "${quadlet_tmp}" CONTAINER_MEMORY "${CONTAINER_MEMORY^^}"
+    if [[ ${BEDROCK_ENABLED} == yes ]]; then
+        replace_token "${quadlet_tmp}" BEDROCK_PUBLISH_PORT "PublishPort=${BEDROCK_PORT}:19132/tcp"
+        sed -i "/^PublishPort=${BEDROCK_PORT}:19132\/tcp$/a PublishPort=${BEDROCK_PORT}:19132/udp" "${quadlet_tmp}"
+    else
+        replace_token "${quadlet_tmp}" BEDROCK_PUBLISH_PORT '# Bedrock port disabled.'
+    fi
+    if declare -F jv_trace_run >/dev/null; then jv_trace_run install -o root -g root -m0644 "${quadlet_tmp}" "${JV_QUADLET}"; else install -o root -g root -m0644 "${quadlet_tmp}" "${JV_QUADLET}"; fi
+    rm -f "${quadlet_tmp}"
+
+    backup_tmp="$(mktemp "${JV_CONFIG_DIR}/.minecraft-backup.env.XXXXXX")"
+    cp "${JV_TEMPLATE_ROOT}/config/minecraft-backup.env.in" "${backup_tmp}"
+    replace_token "${backup_tmp}" DATA_PATH "${DATA_PATH}"
+    replace_token "${backup_tmp}" BACKUP_PATH "${BACKUP_PATH}"
+    replace_token "${backup_tmp}" BACKUP_KEEP "${BACKUP_KEEP}"
+    replace_token "${backup_tmp}" BACKUP_MOUNT_POINT "${BACKUP_MOUNT_POINT}"
+    replace_token "${backup_tmp}" BACKUP_EXPECTED_UUID "${BACKUP_EXPECTED_UUID}"
+    replace_token "${backup_tmp}" BACKUP_EXPECTED_SOURCE "${BACKUP_EXPECTED_SOURCE}"
+    if declare -F jv_trace_run >/dev/null; then jv_trace_run install -o root -g root -m0600 "${backup_tmp}" "${JV_BACKUP_ENV}"; else install -o root -g root -m0600 "${backup_tmp}" "${JV_BACKUP_ENV}"; fi
+    rm -f "${backup_tmp}"
+
+    service_tmp="$(mktemp /etc/systemd/system/.minecraft-backup.service.XXXXXX)"
+    cp "${JV_TEMPLATE_ROOT}/systemd/minecraft-backup.service.in" "${service_tmp}"
+    replace_token "${service_tmp}" DATA_PATH "${DATA_PATH}"
+    if [[ -n ${BACKUP_MOUNT_POINT} ]]; then
+        replace_token "${service_tmp}" BACKUP_REQUIREMENT_PATH "${BACKUP_MOUNT_POINT}"
+    else
+        replace_token "${service_tmp}" BACKUP_REQUIREMENT_PATH "${BACKUP_PATH}"
+    fi
+    if declare -F jv_trace_run >/dev/null; then jv_trace_run install -o root -g root -m0644 "${service_tmp}" "${JV_BACKUP_SERVICE}"; else install -o root -g root -m0644 "${service_tmp}" "${JV_BACKUP_SERVICE}"; fi
+    rm -f "${service_tmp}"
+
+    timer_tmp="$(mktemp /etc/systemd/system/.minecraft-backup.timer.XXXXXX)"
+    cp "${JV_TEMPLATE_ROOT}/systemd/minecraft-backup.timer.in" "${timer_tmp}"
+    replace_token "${timer_tmp}" BACKUP_SCHEDULE "${BACKUP_SCHEDULE}"
+    if declare -F jv_trace_run >/dev/null; then jv_trace_run install -o root -g root -m0644 "${timer_tmp}" "${JV_BACKUP_TIMER}"; else install -o root -g root -m0644 "${timer_tmp}" "${JV_BACKUP_TIMER}"; fi
+    rm -f "${timer_tmp}"
+
+    if declare -F jv_trace_run >/dev/null; then jv_trace_run systemctl daemon-reload; else systemctl daemon-reload; fi
+}
+
+activate_backup_timer() {
+    if [[ ${BACKUP_TIMER_ENABLED} == yes ]]; then
+        if declare -F jv_trace_run >/dev/null; then jv_trace_run systemctl enable minecraft-backup.timer >/dev/null; else systemctl enable minecraft-backup.timer >/dev/null; fi
+        if declare -F jv_trace_run >/dev/null; then jv_trace_run systemctl restart minecraft-backup.timer; else systemctl restart minecraft-backup.timer; fi
+    else
+        if declare -F jv_trace_run >/dev/null; then jv_trace_run systemctl disable --now minecraft-backup.timer 2>/dev/null || true; else systemctl disable --now minecraft-backup.timer 2>/dev/null || true; fi
+    fi
+}
+
+render_runtime() {
+    render_runtime_files
+    activate_backup_timer
+}
+
+# Legacy fixed-runtime callers have no instance firewall journal. Record only
+# newly added Geyser TCP rules, including their zone, before changing firewalld.
+# Missing evidence from older deployments never authorizes TCP removal.
+geyser_tcp_firewall_add() {
+    local port="$1" zone marker status
+    validate_port "${port}" || return 1
+    zone="$(firewall-cmd --get-default-zone)" || return 1
+    [[ ${zone} =~ ^[A-Za-z0-9_-]+$ ]] || return 1
+    marker="${JV_CONFIG_DIR}/geyser-tcp-firewall/${port}/${zone}"
+    if firewall-cmd --zone="${zone}" --permanent --query-port="${port}/tcp" >/dev/null; then
+        return 0
+    else
+        status=$?
+        [[ ${status} == 1 ]] || return 1
+    fi
+    install -d -m0700 -o root -g root "$(dirname -- "${marker}")" || return 1
+    [[ ! -L ${marker} ]] || return 1
+    (umask 077; : > "${marker}") || return 1
+    firewall-cmd --zone="${zone}" --permanent --add-port="${port}/tcp" >/dev/null || return 1
+    firewall-cmd --zone="${zone}" --permanent --query-port="${port}/tcp" >/dev/null
+}
+
+geyser_tcp_firewall_remove() {
+    local port="$1" marker zone status
+    validate_port "${port}" || return 1
+    for marker in "${JV_CONFIG_DIR}/geyser-tcp-firewall/${port}/"*; do
+        [[ -e ${marker} ]] || continue
+        [[ -f ${marker} && ! -L ${marker} && $(stat -c '%u:%g:%a' "${marker}") == 0:0:600 ]] || return 1
+        zone="${marker##*/}"
+        [[ ${zone} =~ ^[A-Za-z0-9_-]+$ ]] || return 1
+        firewall-cmd --zone="${zone}" --permanent --remove-port="${port}/tcp" >/dev/null || return 1
+        if firewall-cmd --zone="${zone}" --permanent --query-port="${port}/tcp" >/dev/null; then
+            return 1
+        else
+            status=$?
+            [[ ${status} == 1 ]] || return 1
+        fi
+        rm -f -- "${marker}" || return 1
+    done
+}
+
+configure_firewall_initial() {
+    firewall-cmd --permanent --add-port="${JAVA_PORT}/tcp" >/dev/null
+    if [[ ${BEDROCK_ENABLED} == yes ]]; then
+        geyser_tcp_firewall_add "${BEDROCK_PORT}" || return 1
+        firewall-cmd --permanent --add-port="${BEDROCK_PORT}/udp" >/dev/null
+    fi
+    firewall-cmd --reload >/dev/null
+}
+
+update_firewall_ports() {
+    local old_java="$1" old_bedrock_enabled="$2" old_bedrock="$3"
+    if [[ ${old_java} != ${JAVA_PORT} ]]; then
+        firewall-cmd --permanent --remove-port="${old_java}/tcp" >/dev/null 2>&1 || true
+    fi
+    if [[ ${old_bedrock_enabled} == yes && ( ${BEDROCK_ENABLED} != yes || ${old_bedrock} != ${BEDROCK_PORT} ) ]]; then
+        geyser_tcp_firewall_remove "${old_bedrock}" || return 1
+        firewall-cmd --permanent --remove-port="${old_bedrock}/udp" >/dev/null 2>&1 || true
+    fi
+    firewall-cmd --permanent --add-port="${JAVA_PORT}/tcp" >/dev/null
+    if [[ ${BEDROCK_ENABLED} == yes ]]; then
+        geyser_tcp_firewall_add "${BEDROCK_PORT}" || return 1
+        firewall-cmd --permanent --add-port="${BEDROCK_PORT}/udp" >/dev/null
+    fi
+    firewall-cmd --reload >/dev/null
+}
+
+wait_for_rcon() {
+    local timeout="${1:-900}" elapsed=0
+    while (( elapsed < timeout )); do
+        # A stopping container can still answer RCON; check the unit after the probe.
+        if podman exec minecraft rcon-cli 'list' >/dev/null 2>&1 &&
+            systemctl is-active --quiet minecraft.service; then
+            return 0
+        fi
+        sleep 5
+        elapsed=$((elapsed + 5))
+    done
+    return 1
+}
+
+configure_geyser_floodgate() {
+    [[ ${BEDROCK_ENABLED} == yes ]] || return 0
+    local geyser_config="${DATA_PATH}/plugins/Geyser-Spigot/config.yml"
+    if [[ ! -f ${geyser_config} ]]; then
+        echo "ERROR: Geyser configuration was not generated: ${geyser_config}" >&2
+        return 1
+    fi
+    if grep -Eq '^[[:space:]]*auth-type:[[:space:]]*floodgate[[:space:]]*$' "${geyser_config}"; then
+        return 0
+    fi
+    echo 'Configuring Geyser to use Floodgate authentication.'
+    systemctl stop minecraft.service
+    sed -i -E 's/^([[:space:]]*auth-type:).*/\1 floodgate/' "${geyser_config}"
+    chown "${MINECRAFT_UID}:${MINECRAFT_GID}" "${geyser_config}"
+    restorecon -F "${geyser_config}" 2>/dev/null || true
+    grep -Eq '^[[:space:]]*auth-type:[[:space:]]*floodgate[[:space:]]*$' "${geyser_config}"
+    systemctl start minecraft.service
+    wait_for_rcon 900
+}
+
+# The official Linux release entry is the sole authority. Never use preview or LATEST.
+resolve_bedrock_release() {
+    curl --connect-timeout 3 --max-time 8 -fsSL https://net.web.minecraft-services.net/api/v1.0/download/links |
+      jq -er '[.result.links[] | select(.downloadType == "serverBedrockLinux") | .downloadUrl |
+        capture("^https://www[.]minecraft[.]net/bedrockdedicatedserver/bin-linux/bedrock-server-(?<version>[0-9]+[.][0-9]+[.][0-9]+([.][0-9]+)?)[.]zip$").version] |
+        unique | select(length == 1) | .[0]'
+}

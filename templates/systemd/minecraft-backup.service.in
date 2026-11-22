@@ -1,0 +1,14 @@
+[Unit]
+Description=Cold backup of the JustVoxel Minecraft server
+After=local-fs.target network-online.target minecraft.service
+Wants=network-online.target
+RequiresMountsFor=@@DATA_PATH@@ @@BACKUP_REQUIREMENT_PATH@@
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/justvoxel/minecraft-backup
+UMask=0077
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+TimeoutStartSec=6h

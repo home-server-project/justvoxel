@@ -1,0 +1,99 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+common=mjust/libexec/minecraft-reset-common.sh
+helper=mjust/libexec/admin-factory-reset-json
+agent=management/cmd/justvoxel-management-agent/admin_factory_reset.go
+operations=management/cmd/justvoxel-management-agent/operation_store.go
+auth=management/cmd/justvoxel-management-agent/auth_provider.go
+store=management/cmd/justvoxel-management-agent/webui_store.go
+
+for path in "${common}" "${helper}" "${agent}" "${operations}" "${auth}" "${store}"; do
+    [[ -f "${path}" ]] || {
+        echo "ERROR: missing Factory Reset source: ${path}" >&2
+        exit 1
+    }
+done
+
+grep -Fq 'network|external|unknown)' "${helper}"
+grep -Fq 'internal) backup_action=delete' "${helper}"
+grep -Fq 'backup_action=preserve' "${helper}"
+grep -Fq 'external_storage_action:"preserve"' "${helper}"
+grep -Fq 'network_storage_action:"preserve"' "${helper}"
+grep -Fq 'storage_layout_action:"preserve"' "${helper}"
+grep -Fq 'config_backups_action:"delete"' "${helper}"
+grep -Fq 'jv_reset_delete_tree_same_filesystem "${backup_path}"' "${helper}"
+grep -Fq 'jv_reset_delete_tree_same_filesystem "${config_backup_dir}"' "${helper}"
+# Fixed execution survives only in shared Setup helpers, never Factory Reset.
+if rg 'minecraft\.service|podman.*minecraft|web-status-json|jv_reset_remove_minecraft_container|jv_reset_remove_active_configuration|disable --now.*minecraft-backup\.timer' "${helper}"; then
+    echo 'ERROR: Factory Reset retained fixed-runtime execution.' >&2; exit 1
+fi
+grep -Fq 'factory-reset-runtime-empty' "${helper}"
+grep -Fq 'JUSTVOXEL_FACTORY_RESET_INSTANCES_RETIRED' "${helper}"
+python3 - "${agent}" <<'PY'
+import pathlib
+import sys
+source = pathlib.Path(sys.argv[1]).read_text()
+helper = source.split('var runAdminFactoryResetHelper = ', 1)[1].split('\nvar ', 1)[0]
+assert 'if len(args) > 0 && args[0] == "apply" {' in helper
+flag = helper.index('cmd.Env = append(os.Environ(), "JUSTVOXEL_FACTORY_RESET_INSTANCES_RETIRED=1")')
+assert flag < helper.index('attachOperationTrace(ctx, cmd)') < helper.index('cmd.Output()')
+PY
+grep -Fq 'Compatibility cleanup only' "${helper}"
+grep -Fq 'podman rm --force --ignore minecraft' "${common}"
+grep -Fq 'podman container exists minecraft' "${common}"
+grep -Fq 'data_cleanup_failed' "${helper}"
+grep -Fq 'backup_cleanup_failed' "${helper}"
+grep -Fq 'configuration_cleanup_failed' "${helper}"
+grep -Fq 'runtime_cleanup_incomplete' "${helper}"
+
+(
+    source "${common}"
+    findmnt() {
+        printf '%s\n' '/var/mnt/justvoxel-data' '/var/mnt/justvoxel-data/nested' '/var/mnt/other'
+    }
+    nested="$(jv_reset_nested_mounts /var/mnt/justvoxel-data)"
+    [[ "${nested}" == '/var/mnt/justvoxel-data/nested' ]] || {
+        echo "ERROR: reset root mountpoint was incorrectly treated as a nested mount: ${nested}" >&2
+        exit 1
+    }
+)
+
+if grep -Eq 'wipefs|parted|sgdisk|mkfs\.' "${helper}" "${common}"; then
+    echo 'ERROR: Full Factory Reset must not alter partitions or filesystems.' >&2
+    exit 1
+fi
+for required in 'DATA_MOUNT_POINT' 'BACKUP_MOUNT_POINT' '/var/mnt/justvoxel-data' '/var/mnt/justvoxel-backup' 'jv_exact_mount_identity UUID' 'jv_exact_mount_identity SOURCE' 'systemd-escape --path --suffix=mount' 'systemctl daemon-reload' 'systemctl reset-failed' 'factory_reset_managed_mounts'; do
+    grep -Fq "${required}" "${helper}" || { echo "ERROR: missing managed mount cleanup: ${required}" >&2; exit 1; }
+done
+if grep -Eq 'rm[[:space:]]+-rf.*(nfs|smb|cifs|network|external|usb)' "${helper}" "${common}"; then
+    echo 'ERROR: Full Factory Reset contains an external/network recursive delete path.' >&2
+    exit 1
+fi
+
+grep -Fq 'SystemPassword  string' "${agent}"
+grep -Fq 's.verifySessionPassword(actor, request.SystemPassword)' "${agent}"
+grep -Fq 'request.SystemPassword = ""' "${agent}"
+grep -Fq 'const factoryBootstrapPasswordHash = "$6$0LPXGhsb5MOJ160J$K97FKtUs0SgIXum7OpGk69m.asoBR0Os86DpbUnes5JO27aV5XzfEgtpVb/Ff8RMKl.izzSgbqwK8XPpYRFV20"' "${agent}"
+grep -Fq '"/usr/sbin/usermod", "--password", "!"+factoryBootstrapPasswordHash, systemAdminUsername' "${agent}"
+grep -Fq '"/usr/bin/chage", "-d", "0", systemAdminUsername' "${agent}"
+grep -Fq '"/usr/sbin/usermod", "--unlock", systemAdminUsername' "${agent}"
+grep -Fq 'plan.PasswordAction != "restore_default_and_expire"' "${agent}"
+grep -Fq 'password_action:"restore_default_and_expire"' "${helper}"
+grep -Fq 'resetFactoryAuthenticationState()' "${agent}"
+grep -Fq 's.store.resetFactoryState()' "${agent}"
+grep -Fq 's.invalidateSessions()' "${agent}"
+grep -Eq '^[[:space:]]*operationTypeFactoryReset[[:space:]]*=[[:space:]]*"factory_reset"[[:space:]]*$' "${operations}"
+grep -Fq 'POST /v1/admin/reset/factory/plan' "${agent}"
+grep -Fq 'POST /v1/admin/reset/factory/apply' "${agent}"
+grep -Fq 'POST /v1/admin/reset/factory/resolve' "${agent}"
+grep -Eq '^[[:space:]]*operationResolved[[:space:]]+operationState[[:space:]]*=[[:space:]]*"resolved"[[:space:]]*$' "${operations}"
+grep -Fq 'return state != operationSucceeded && state != operationRolledBack && state != operationResolved' "${operations}"
+
+grep -Fq 'setAuthMode(authModeSystem)' "${auth}"
+grep -Fq 'os.Remove(localAuthPath)' "${auth}"
+grep -Fq 'DELETE FROM web_users' "${store}"
+grep -Fq 'DELETE FROM audit_events' "${store}"
+grep -Fq 'DELETE FROM notifications' "${store}"
+
+echo 'Full Factory Reset source contract OK'

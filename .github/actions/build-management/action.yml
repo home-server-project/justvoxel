@@ -1,0 +1,21 @@
+name: Compile and validate the Management Agent from source
+description: Compile and validate the Management Agent from source
+runs:
+  using: composite
+  steps:
+    - name: Build management agent on Home Server Base 10
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p build_artifacts/management
+        sudo podman run --rm \
+          --pull=always \
+          --security-opt=label=disable \
+          -v "${PWD}:/repo:ro" \
+          -v "${PWD}/system_files/usr/libexec/justvoxel:/system_files/usr/libexec/justvoxel:ro" \
+          -v "${PWD}/system_files/etc/pam.d/justvoxel:/etc/pam.d/justvoxel:ro" \
+          -v "${PWD}/tests/run-pam-integration-alma.sh:/run-pam-integration-alma.sh:ro" \
+          -v "${PWD}/build_artifacts/management:/out" \
+          "${HOME_SERVER_BASE_IMAGE}" \
+          /bin/bash /repo/build_files/build-management-agent.sh
+        sudo chmod 0755 build_artifacts/management/management-agent

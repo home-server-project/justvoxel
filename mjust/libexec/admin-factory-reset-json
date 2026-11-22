@@ -1,0 +1,257 @@
+#!/usr/bin/bash
+
+source "$(dirname -- "${BASH_SOURCE[0]}")/operation-trace.sh"
+set -euo pipefail
+
+source /usr/libexec/justvoxel/mjust/admin-storage-actions-common.sh
+source /usr/libexec/justvoxel/mjust/minecraft-reset-common.sh
+source /usr/libexec/justvoxel/mjust/storage-mount-ownership.sh
+
+require_root
+
+action="${1:-}"
+jv_trace_stage "RESET Validation"
+case "${action}" in
+    plan|apply) ;;
+    *)
+        echo '{"ok":false,"error":"unsupported factory reset action"}'
+        exit 2
+        ;;
+esac
+
+configured=false
+data_path=''
+data_scope='none'
+data_action='none'
+backup_path=''
+backup_scope='none'
+backup_action='none'
+warnings=()
+
+if [[ -r ${JV_CONFIG} ]]; then
+    configured=true
+    # shellcheck disable=SC1090
+    source "${JV_CONFIG}"
+    # Server runtime comes exclusively from the instance registry.
+    # This historical config supplies shared appliance storage policy only.
+
+    data_path="${DATA_PATH}"
+    backup_path="${BACKUP_PATH}"
+
+    data_scope="$(jv_reset_path_scope "${data_path}")"
+    case "${data_scope}" in
+        internal) data_action=delete ;;
+        network|external|unknown)
+            data_action=preserve
+            warnings+=("Minecraft data is outside appliance-owned internal storage and will be preserved.")
+            ;;
+        unsafe)
+            jq -n '{ok:false,code:"unsafe_data_path",error:"Minecraft data path is unsafe to reset."}'
+            exit 4
+            ;;
+        *)
+            jq -n '{ok:false,code:"invalid_data_scope",error:"Minecraft data scope could not be classified safely."}'
+            exit 4
+            ;;
+    esac
+
+    backup_scope="$(jv_reset_path_scope "${backup_path}")"
+    case "${backup_scope}" in
+        internal) backup_action=delete ;;
+        network|external|unknown)
+            backup_action=preserve
+            warnings+=("Backup storage is external or not appliance-owned and will be preserved.")
+            ;;
+        unsafe)
+            jq -n '{ok:false,code:"unsafe_backup_path",error:"Backup path is unsafe to reset."}'
+            exit 4
+            ;;
+        *)
+            jq -n '{ok:false,code:"invalid_backup_scope",error:"Backup storage scope could not be classified safely."}'
+            exit 4
+            ;;
+    esac
+fi
+
+# Player safety is inspected for every authoritative instance by the Agent.
+players_json='{"online":0,"names":[]}'
+
+emit_plan() {
+    local warnings_json
+    warnings_json="$(printf '%s\n' "${warnings[@]-}" | jq -Rsc 'split("\n") | map(select(length>0))')"
+    jq -n \
+        --argjson configured "${configured}" \
+        --arg data_path "${data_path}" \
+        --arg data_scope "${data_scope}" \
+        --arg data_action "${data_action}" \
+        --arg backup_path "${backup_path}" \
+        --arg backup_scope "${backup_scope}" \
+        --arg backup_action "${backup_action}" \
+        --argjson players "${players_json}" \
+        --argjson warnings "${warnings_json}" \
+        '{
+          ok:true,
+          schema_version:"v1",
+          mode:"factory",
+          minecraft_configured:$configured,
+          data_path:$data_path,
+          data_scope:$data_scope,
+          data_action:$data_action,
+          backup_path:$backup_path,
+          backup_scope:$backup_scope,
+          backup_action:$backup_action,
+          config_backups_action:"delete",
+          storage_layout_action:"preserve",
+          external_storage_action:"preserve",
+          network_storage_action:"preserve",
+          authentication_action:"reset_to_system",
+          webui_users_action:"delete",
+          password_action:"restore_default_and_expire",
+          sessions_action:"invalidate",
+          players_online:($players.online // 0),
+          players:($players.names // []),
+          warnings:$warnings
+        }'
+}
+
+if [[ ${action} == plan ]]; then
+    emit_plan
+    exit 0
+fi
+
+confirm_players="${2:-}"
+
+factory_reset_fail() {
+    local code="$1" message="$2" rc="${3:-5}"
+    jq -n --arg code "${code}" --arg error "${message}" '{ok:false,code:$code,error:$error}'
+    exit "${rc}"
+}
+
+factory_reset_managed_mounts() {
+    local fstab=/etc/fstab point source live unit tmp changed=false
+    local -a points=(/var/mnt/justvoxel-data /var/mnt/justvoxel-backup)
+    [[ -n ${DATA_MOUNT_POINT:-} ]] && points+=("${DATA_MOUNT_POINT}")
+    [[ -n ${BACKUP_MOUNT_POINT:-} ]] && points+=("${BACKUP_MOUNT_POINT}")
+    mapfile -t points < <(printf '%s\n' "${points[@]}" | sort -u | awk '{print length($0), $0}' | sort -rn | cut -d' ' -f2-)
+    [[ -f ${fstab} && ! -L ${fstab} ]] || return 1
+    for point in "${points[@]}"; do
+        [[ ${point} == /* && ${point} != / && ${point} != *[[:space:]]* ]] || return 1
+        unit="$(systemd-escape --path --suffix=mount "${point}")" || return 1
+        source="$(awk -v mp="${point}" '$0 !~ /^[[:space:]]*#/ && NF >= 2 && $2 == mp {print $1}' "${fstab}")"
+        if [[ -n ${source} ]]; then
+            [[ ${source} != *$'\n'* ]] || return 1
+            if mountpoint -q -- "${point}"; then
+                if [[ ${source} == UUID=* ]]; then
+                    live="$(jv_exact_mount_identity UUID "${point}")" || return 1
+                    [[ ${live} == "${source#UUID=}" ]] || return 1
+                else
+                    live="$(jv_exact_mount_identity SOURCE "${point}")" || return 1
+                    [[ ${live} == "${source}" ]] || return 1
+                fi
+                jv_trace_run umount -- "${point}" || return 1
+            fi
+            tmp="$(mktemp /etc/.fstab.justvoxel-reset.XXXXXX)" || return 1
+            if ! awk -v mp="${point}" '$0 ~ /^[[:space:]]*#/ || NF < 2 || $2 != mp {print}' "${fstab}" > "${tmp}" ||
+               ! chmod --reference="${fstab}" "${tmp}" || ! chown --reference="${fstab}" "${tmp}" ||
+               ! cat -- "${tmp}" > "${fstab}"; then
+                jv_trace_run rm -f -- "${tmp}"
+                return 1
+            fi
+            jv_trace_run rm -f -- "${tmp}"
+            changed=true
+            jv_trace_run systemctl daemon-reload || return 1
+        fi
+        jv_trace_run systemctl reset-failed "${unit}" >/dev/null 2>&1 || true
+    done
+    [[ ${changed} == false ]] || jv_trace_run systemctl daemon-reload
+}
+
+if [[ ${confirm_players} != --confirm-players ]]; then
+    factory_reset_fail "confirmation_required" "Full factory reset Apply requires explicit player interruption confirmation." 4
+fi
+
+# The Agent persists, quiesces and retires the entire authoritative instance set
+# first. A direct legacy helper invocation must not bypass that contract.
+if [[ ${JUSTVOXEL_FACTORY_RESET_INSTANCES_RETIRED:-} != 1 ]] ||
+   ! jv_trace_run /usr/libexec/justvoxel/management-agent factory-reset-runtime-empty; then
+    factory_reset_fail "instance_cleanup_required" "Factory Reset requires verified appliance-wide Minecraft cleanup."
+fi
+
+jv_trace_stage "RESET Cleaning appliance state"
+# Compatibility cleanup of the historical data directory, never runtime authority.
+if [[ ${data_action} == delete ]]; then
+    if ! cleanup_error="$(jv_reset_delete_tree_same_filesystem "${data_path}" 'Minecraft data' 2>&1)"; then
+        factory_reset_fail "data_cleanup_failed" "Minecraft data cleanup failed: ${cleanup_error:-unknown cleanup error}"
+    fi
+fi
+if [[ ${backup_action} == delete ]]; then
+    if ! cleanup_error="$(jv_reset_delete_tree_same_filesystem "${backup_path}" 'local backup data' 2>&1)"; then
+        factory_reset_fail "backup_cleanup_failed" "Local backup cleanup failed: ${cleanup_error:-unknown cleanup error}"
+    fi
+fi
+
+jv_trace_stage "RESET Retiring managed mounts"
+if ! storage_mount_retire_all || ! factory_reset_managed_mounts; then
+    factory_reset_fail "mount_cleanup_failed" "JustVoxel-managed mount entries could not be cleaned safely. Review mount identity and /etc/fstab before retrying."
+fi
+
+config_backup_dir=/var/lib/justvoxel/config-backups
+if ! cleanup_error="$(jv_reset_delete_tree_same_filesystem "${config_backup_dir}" 'JustVoxel configuration backups' 2>&1)"; then
+    factory_reset_fail "config_backup_cleanup_failed" "JustVoxel configuration backup cleanup failed: ${cleanup_error:-unknown cleanup error}"
+fi
+
+# Compatibility cleanup only: historical fixed Quadlet/timer files are not live
+# lifecycle targets. The Agent already proved fixed runtime inactivity.
+# Remove the historical enablement link without starting/stopping a fixed job.
+# factory-reset-runtime-empty proved this optional legacy timer is inactive.
+if [[ -e ${JV_BACKUP_TIMER} || -L ${JV_BACKUP_TIMER} ]]; then
+    if ! jv_trace_run systemctl disable -- minecraft-backup.timer; then
+        factory_reset_fail "configuration_cleanup_failed" "Historical backup timer configuration could not be retired."
+    fi
+fi
+# Preserve the historical contract for Minecraft firewall openings recorded in
+# the old appliance configuration. These ports never select an active runtime.
+if [[ ${configured} == true && -n ${JAVA_PORT:-} ]]; then
+    jv_trace_run firewall-cmd --permanent --remove-port="${JAVA_PORT}/tcp" >/dev/null 2>&1 || true
+    if [[ ${BEDROCK_ENABLED:-no} == yes && -n ${BEDROCK_PORT:-} ]]; then
+        geyser_tcp_firewall_remove "${BEDROCK_PORT}" || factory_reset_fail "firewall_cleanup_failed" "Managed cross-play TCP firewall cleanup failed."
+        jv_trace_run firewall-cmd --permanent --remove-port="${BEDROCK_PORT}/udp" >/dev/null 2>&1 || true
+    fi
+    jv_trace_run firewall-cmd --reload >/dev/null 2>&1 || true
+fi
+jv_trace_run rm -f -- "${JV_QUADLET}" "${JV_BACKUP_SERVICE}" "${JV_BACKUP_TIMER}" "${JV_PREVIOUS_IMAGE_STATE}"
+jv_trace_run rm -rf -- "${JV_CONFIG_DIR}"
+if ! jv_trace_run systemctl daemon-reload; then
+    factory_reset_fail "configuration_cleanup_failed" "systemd could not reload after JustVoxel configuration cleanup."
+fi
+jv_trace_stage "VERIFY Runtime cleanup"
+if [[ -e ${JV_CONFIG} || -e ${JV_QUADLET} || -e ${JV_BACKUP_SERVICE} || -e ${JV_BACKUP_TIMER} ]] ||
+   ! jv_trace_run /usr/libexec/justvoxel/management-agent factory-reset-runtime-empty; then
+    factory_reset_fail "runtime_cleanup_incomplete" "Factory Reset could not verify complete Minecraft cleanup."
+fi
+
+jq -n \
+    --argjson configured "${configured}" \
+    --arg data_path "${data_path}" \
+    --arg data_scope "${data_scope}" \
+    --arg data_action "${data_action}" \
+    --arg backup_path "${backup_path}" \
+    --arg backup_scope "${backup_scope}" \
+    --arg backup_action "${backup_action}" \
+    '{
+      ok:true,
+      schema_version:"v1",
+      mode:"factory",
+      minecraft_was_configured:$configured,
+      data_path:$data_path,
+      data_scope:$data_scope,
+      data_action:$data_action,
+      backup_path:$backup_path,
+      backup_scope:$backup_scope,
+      backup_action:$backup_action,
+      config_backups_action:"delete",
+      storage_layout_action:"preserve",
+      external_storage_action:"preserve",
+      network_storage_action:"preserve",
+      message:"Local JustVoxel runtime state was cleared."
+    }'

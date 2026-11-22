@@ -1,0 +1,58 @@
+/* Installer-only Cockpit branding, scoped to Anaconda. */
+.anaconda {
+    --brand-default-light: #68bd8e;
+    --brand-default: #2f6c4a;
+    --brand-default-dark: #184c31;
+}
+
+/* Keep the logo on dark green, fading into the normal header green. */
+.anaconda .pf-v6-c-page__main-group > .pf-v6-c-page__main-section:first-child {
+    background: radial-gradient(circle at 2.5rem, #103522 180px, var(--brand-default) 100%);
+}
+
+:not(.pf-v6-theme-dark) .anaconda {
+    --pf-t--global--color--brand--default: var(--brand-default);
+    --pf-t--global--color--brand--hover: var(--brand-default-dark);
+}
+
+.pf-v6-theme-dark .anaconda {
+    --pf-t--global--color--brand--default: var(--brand-default-light);
+    --pf-t--global--color--brand--hover: var(--brand-default);
+}
+
+/* Color wizard surfaces only, preserving normal control backgrounds. */
+.anaconda #installation-wizard {
+    --pf-v6-c-wizard__main--BackgroundColor: #f3f5f2;
+    --pf-v6-c-wizard__nav--BackgroundColor: #ecefe9;
+}
+
+.anaconda .pf-v6-c-page__main-section.pf-m-wizard,
+.anaconda #installation-wizard .pf-v6-c-wizard__main,
+.anaconda #installation-wizard .pf-v6-c-wizard__main-body,
+.anaconda #installation-wizard .pf-v6-c-wizard__footer {
+    background-color: #f3f5f2;
+}
+
+.anaconda #installation-wizard .pf-v6-c-wizard__nav {
+    background-color: #ecefe9;
+}
+
+.anaconda .logo {
+    background-image: url("logo.png");
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: left center;
+    inline-size: 162px;
+    block-size: 60px;
+    filter: none !important;
+}
+
+#badge {
+    background-image: url("logo.png");
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: left center;
+    inline-size: 162px;
+    block-size: 60px;
+    filter: none;
+}

@@ -1,0 +1,6 @@
+label: "JustVoxel-Installer"
+grub2:
+  entries:
+    - name: "Install JustVoxel"
+      linux: "/images/pxeboot/vmlinuz inst.stage2=hd:LABEL=JustVoxel-Installer console=tty0 inst.webui inst.graphical selinux=0 rhgb quiet"
+      initrd: "/images/pxeboot/initrd.img"

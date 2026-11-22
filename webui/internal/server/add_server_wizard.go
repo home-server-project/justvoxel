@@ -1,0 +1,360 @@
+package server
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/url"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"unicode"
+	"unicode/utf8"
+
+	"github.com/home-server-project/justvoxel-webui/internal/api"
+)
+
+const minecraftServersPath = "/minecraft/servers"
+const addServerBasePath = minecraftServersPath + "/add"
+
+// Serialize wizard requests, including double submissions, until create returns.
+// Only the Add Server context is affected; legacy setup never takes this lock.
+var addServerWizardMu sync.Mutex
+var addServerIDPattern = regexp.MustCompile(`^jv-[a-z0-9]{6,12}$`)
+var addServerBackupTimePattern = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
+
+type addServerAPI interface {
+	MinecraftInstances(context.Context, string) ([]api.RegisteredMinecraftInstance, error)
+	MinecraftInstanceRuntimes(context.Context, string) ([]string, error)
+	MinecraftInstanceConfiguration(context.Context, string, string) (api.InstanceRuntimeSettings, error)
+	MinecraftInstanceBackupSettings(context.Context, string, string) (api.InstanceBackupSettings, error)
+	CreateMinecraftInstance(context.Context, string, api.CreateMinecraftInstanceRequest) (api.CreateMinecraftInstanceResponse, error)
+	SetMinecraftInstanceBackupSettings(context.Context, string, string, api.InstanceBackupSettings) error
+}
+
+func isAddServerRequest(r *http.Request) bool {
+	return r.URL.Path == addServerBasePath || strings.HasPrefix(r.URL.Path, addServerBasePath+"/")
+}
+func setupBasePath(r *http.Request) string {
+	if isAddServerRequest(r) {
+		return addServerBasePath
+	}
+	return "/setup"
+}
+func (a *App) registerAddServerWizardRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET "+minecraftServersPath, a.minecraftServersPage)
+	mux.HandleFunc("GET /workspace/minecraft-servers", a.minecraftServersWorkspace)
+	mux.HandleFunc("GET "+minecraftServersPath+"/view/{id}", a.minecraftSelectedServer)
+	mux.HandleFunc("POST "+minecraftServersPath+"/view/{id}/{action}", a.minecraftSelectedServerAction)
+	routes := map[string]http.HandlerFunc{
+		"GET ":                 a.setupWizardPage,
+		"POST /start":          a.setupWizardStart,
+		"POST /recommended":    a.setupWizardSimple,
+		"POST /simple":         a.setupWizardSimple,
+		"POST /server":         a.setupWizardSaveServer,
+		"POST /connections":    a.setupWizardSaveConnections,
+		"POST /resources":      a.setupWizardSaveResources,
+		"GET /version-preview": a.setupWizardVersionPreview,
+		"POST /storage":        a.setupWizardSaveStorage,
+		"POST /backups":        a.setupWizardSaveBackups,
+		"POST /navigate":       a.setupWizardNavigate,
+		"POST /cancel":         a.setupWizardCancel,
+		"GET /review":          a.setupWizardReviewPage,
+		"POST /review/back":    a.setupWizardReviewBack,
+		"POST /review/cancel":  a.setupWizardCancel,
+		"POST /review/apply":   a.setupWizardReviewApply,
+	}
+	for route, handler := range routes {
+		method, suffix, _ := strings.Cut(route, " ")
+		mux.HandleFunc(method+" "+addServerBasePath+suffix, func(w http.ResponseWriter, r *http.Request) {
+			addServerWizardMu.Lock()
+			defer addServerWizardMu.Unlock()
+			// After an uncertain/partial result the draft must never become another
+			// creation request through Back, a stale tab, or a repeated Start POST.
+			if session, ok := sessionFromRequest(r); ok {
+				draft, exists := setupDrafts.get(a, session)
+				backupEdit := draft.CoreCreated && (suffix == "/review/back" || suffix == "/backups")
+				if exists && draft.AddServer && draft.CreationAttempted && r.Method == http.MethodPost && !backupEdit && suffix != "/review/apply" && suffix != "/cancel" && suffix != "/review/cancel" {
+					http.Error(w, uiText("ui.90da7ede56fa"), http.StatusConflict)
+					return
+				}
+			}
+			handler(w, r)
+		})
+	}
+}
+
+type minecraftServersPageData struct {
+	Title         string
+	Version       string
+	ManagementAPI string
+	CSRF          string
+	Identity      api.SessionInfo
+	Message       string
+	Error         string
+	Configured    bool
+	Servers       []minecraftServerSummary
+	Selected      *minecraftServerSummary
+}
+
+func (a *App) minecraftServersPage(w http.ResponseWriter, r *http.Request) {
+	if mustChange(r) {
+		http.Redirect(w, r, "/password", http.StatusSeeOther)
+		return
+	}
+	if _, _, _, ok := a.adminDiscoveryRequest(w, r); !ok {
+		return
+	}
+	query := url.Values{"workspace": {"minecraft-servers"}}
+	for _, key := range []string{"created", "deleted"} {
+		if r.URL.Query().Get(key) == "yes" {
+			query.Set(key, "yes")
+		}
+	}
+	http.Redirect(w, r, "/?"+query.Encode(), http.StatusSeeOther)
+}
+
+func (a *App) minecraftServersWorkspace(w http.ResponseWriter, r *http.Request) {
+	if mustChange(r) {
+		http.Redirect(w, r, "/password", http.StatusSeeOther)
+		return
+	}
+	session, client, identity, ok := a.adminDiscoveryRequest(w, r)
+	if !ok {
+		return
+	}
+	configuration, err := client.AdminConfiguration(r.Context(), session)
+	if err != nil {
+		a.handleAdminDiscoveryError(w, r, err)
+		return
+	}
+	message := ""
+	if r.URL.Query().Get("deleted") == "yes" {
+		message = ui(w, "ui.a2e4780da483")
+	}
+	if r.URL.Query().Get("created") == "yes" {
+		message = ui(w, "ui.df6478b86f23")
+	}
+	data := minecraftServersPageData{Title: ui(w, "ui.d9d8bd931a78"), Version: a.config.Version, ManagementAPI: a.config.ManagementAPI, CSRF: csrfFromRequest(r), Identity: identity, Message: message, Configured: configuration.Configured}
+	data.Servers, data.Error = a.minecraftServerInventory(r.Context(), session)
+	a.renderAdminDiscovery(w, "minecraft_servers.html", data)
+}
+
+// Same Phase 1 friendly-name rules, with a required non-empty name for this UI.
+// The registry remains authoritative for uniqueness at creation time.
+func (a *App) validateAddServerName(ctx context.Context, session, name string, excludeID ...string) error {
+	if !utf8.ValidString(name) {
+		return errors.New(uiText("ui.8e08c518a2e3"))
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
+			return errors.New(uiText("ui.25e1e9702fc8"))
+		}
+	}
+	name = strings.TrimSpace(name)
+	if name == "" || name == "." || name == ".." || utf8.RuneCountInString(name) > 64 {
+		return errors.New(uiText("ui.5c5a0d3278e0"))
+	}
+	for _, r := range name {
+		if !(unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.IsMark(r) || r == ' ' || strings.ContainsRune("._-'()", r)) {
+			return errors.New(uiText("ui.25e1e9702fc8"))
+		}
+	}
+	client, ok := a.api.(interface {
+		MinecraftInstances(context.Context, string) ([]api.RegisteredMinecraftInstance, error)
+	})
+	if !ok {
+		return errors.New(uiText("ui.fca3d11e7828"))
+	}
+	instances, err := client.MinecraftInstances(ctx, session)
+	if err != nil {
+		return errors.New(uiText("ui.ca2ab788585b"))
+	}
+	for _, instance := range instances {
+		if len(excludeID) > 0 && instance.ID == excludeID[0] {
+			continue
+		}
+		if strings.EqualFold(instance.DisplayName, name) {
+			return errors.New(uiText("ui.2ec5db4d828a"))
+		}
+	}
+	return nil
+}
+
+func availableInstancePort(start int, used map[int]bool) (int, error) {
+	for port := start; port <= 65535; port++ {
+		if !used[port] {
+			return port, nil
+		}
+	}
+	return 0, errors.New(uiText("ui.3e2318920e2c"))
+}
+func separatedBackupTimes(a, b string) bool {
+	minute := func(s string) int { h, _ := strconv.Atoi(s[:2]); m, _ := strconv.Atoi(s[3:]); return h*60 + m }
+	d := minute(a) - minute(b)
+	if d < 0 {
+		d = -d
+	}
+	return d >= 30 && d <= 1410
+}
+
+func (a *App) newAddServerDraft(ctx context.Context, session string, client adminDiscoveryAPI) (setupDraft, error) {
+	defaults, err := client.AdminSetupDefaults(ctx, session)
+	if err != nil {
+		return setupDraft{}, err
+	}
+	configuration, err := client.AdminConfiguration(ctx, session)
+	if err != nil {
+		return setupDraft{}, err
+	}
+	instances, ok := a.api.(addServerAPI)
+	if !ok {
+		return setupDraft{}, errors.New(uiText("ui.fca3d11e7828"))
+	}
+	ids, err := instances.MinecraftInstanceRuntimes(ctx, session)
+	if err != nil {
+		return setupDraft{}, err
+	}
+	defaults = normalizedSetupDefaults(defaults)
+	defaults.ImageTag, defaults.VersionMode = "stable", "recommended"
+	inventory, err := client.AdminStorage(ctx, session)
+	if err != nil {
+		return setupDraft{}, err
+	}
+	draft := draftFromSetupDefaults(defaults, inventory)
+	draft.AddServer, draft.StartOnBoot = true, true
+	draft.BackupAvailable = true
+	javaUsed := map[int]bool{configuration.Minecraft.JavaPort: true}
+	bedrockUsed := map[int]bool{}
+	if configuration.Minecraft.BedrockEnabled {
+		bedrockUsed[configuration.Minecraft.BedrockPort] = true
+	}
+	if len(ids) == 0 && configuration.Configured {
+		draft.OtherMemoryMiB, _ = setupMemoryMiB(configuration.Minecraft.ContainerMemory)
+		// Legacy runtime evidence is not sufficient to promise a simultaneous start.
+		draft.StartAfterUnavailable, draft.StartBootUnavailable = true, true
+	}
+	schedules := []string{}
+	if configuration.Backup.TimerEnabled {
+		// Discovery stores the ordinary daily OnCalendar expression.
+		schedule := strings.TrimPrefix(configuration.Backup.Schedule, "*-*-* ")
+		schedule = strings.TrimSuffix(schedule, ":00")
+		if addServerBackupTimePattern.MatchString(schedule) {
+			schedules = append(schedules, schedule)
+		} else {
+			draft.Backups.Automatic = false
+		}
+	}
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if seen[id] {
+			return setupDraft{}, errors.New(uiText("ui.43b98d28d53c"))
+		}
+		seen[id] = true
+		runtime, err := instances.MinecraftInstanceConfiguration(ctx, session, id)
+		if err != nil {
+			return setupDraft{}, errors.New(uiText("ui.8193ab557d46"))
+		}
+		if runtime.Software == "bedrock" {
+			javaUsed[runtime.BedrockTCPPort], bedrockUsed[runtime.BedrockTCPPort] = true, true
+			for port := runtime.BedrockUDPStart; port <= runtime.BedrockUDPEnd; port++ {
+				javaUsed[port], bedrockUsed[port] = true, true
+			}
+		}
+		javaUsed[runtime.JavaPort] = true
+		if runtime.BedrockEnabled {
+			bedrockUsed[runtime.BedrockPort] = true
+		}
+		memory, valid := setupMemoryMiB(runtime.ContainerMemory)
+		if !valid {
+			return setupDraft{}, errors.New(uiText("ui.83cddf6b5d84"))
+		}
+		draft.OtherMemoryMiB += memory
+		if runtime.StartOnBoot {
+			draft.BootMemoryMiB += memory
+		}
+		statusClient, ok := a.api.(interface {
+			MinecraftInstanceStatus(context.Context, string, string) (api.MinecraftInstanceStatus, error)
+		})
+		if !ok {
+			draft.StartAfterUnavailable = true
+		} else {
+			status, err := statusClient.MinecraftInstanceStatus(ctx, session, id)
+			if err != nil || status.ID != id {
+				draft.StartAfterUnavailable = true
+			} else {
+				switch status.State {
+				case "running", "starting":
+					draft.RunningMemoryMiB += memory
+				case "stopped", "configured", "failed":
+				default:
+					draft.StartAfterUnavailable = true
+				}
+			}
+		}
+		backup, err := instances.MinecraftInstanceBackupSettings(ctx, session, id)
+		if err != nil {
+			return setupDraft{}, err
+		}
+		if backup.Enabled {
+			if !addServerBackupTimePattern.MatchString(backup.Time) {
+				return setupDraft{}, errors.New(uiText("ui.76df17cc94a9"))
+			}
+			schedules = append(schedules, backup.Time)
+		}
+	}
+	draft.StartCapacityUnknown, draft.BootCapacityUnknown = draft.StartAfterUnavailable, draft.StartBootUnavailable
+	candidate, valid := setupMemoryMiB(draft.Minecraft.ContainerMemory)
+	draft.StartAfterUnavailable = draft.StartAfterUnavailable || !valid || defaults.SystemMemoryMiB <= 0 || draft.RunningMemoryMiB+candidate+1024 > defaults.SystemMemoryMiB
+	draft.StartBootUnavailable = draft.StartBootUnavailable || !valid || defaults.SystemMemoryMiB <= 0 || draft.BootMemoryMiB+candidate+1024 > defaults.SystemMemoryMiB
+	draft.StartAfterSetup, draft.StartOnBoot = !draft.StartAfterUnavailable, !draft.StartBootUnavailable
+
+	// Geyser reserves TCP as well as UDP; defaults must respect both.
+	for port := range bedrockUsed {
+		javaUsed[port] = true
+	}
+	for port := range javaUsed {
+		bedrockUsed[port] = true
+	}
+	javaPort, err := availableInstancePort(defaults.JavaPort, javaUsed)
+	if err != nil {
+		return setupDraft{}, err
+	}
+	bedrockUsed[javaPort] = true
+	bedrockPort, err := availableInstancePort(defaults.BedrockPort, bedrockUsed)
+	if err != nil {
+		return setupDraft{}, err
+	}
+	draft.Minecraft.JavaPort, draft.Minecraft.BedrockPort = strconv.Itoa(javaPort), strconv.Itoa(bedrockPort)
+	if draft.Backups.Automatic {
+		found := false
+		startMinute := 270
+		if addServerBackupTimePattern.MatchString(defaults.BackupDailyTime) {
+			h, _ := strconv.Atoi(defaults.BackupDailyTime[:2])
+			m, _ := strconv.Atoi(defaults.BackupDailyTime[3:])
+			startMinute = h*60 + m
+		}
+		for offset := 0; offset < 1440; offset++ {
+			minute := (startMinute + offset) % 1440
+			time := fmt.Sprintf("%02d:%02d", minute/60, minute%60)
+			safe := true
+			for _, other := range schedules {
+				if !separatedBackupTimes(time, other) {
+					safe = false
+					break
+				}
+			}
+			if safe {
+				draft.Backups.DailyTime = time
+				found = true
+				break
+			}
+		}
+		if !found {
+			draft.Backups.Automatic = false
+		}
+	}
+	return draft, nil
+}

@@ -1,0 +1,69 @@
+name: Build and validate the Development image
+description: Build and validate the Development image
+runs:
+  using: composite
+  steps:
+    - name: Build local WebUI artifact
+      id: webui
+      shell: bash
+      run: |
+        set -euo pipefail
+        ./build_files/build-webui.sh "${GITHUB_SHA}" "${GITHUB_WORKSPACE}/build_artifacts/webui"
+        version="$(jq -r '.version' build_artifacts/webui/webui-release.json)"
+        source_commit="$(jq -r '.source_commit' build_artifacts/webui/webui-release.json)"
+        management_api="$(jq -r '.management_api' build_artifacts/webui/webui-release.json)"
+        [[ -n "${version}" && "${version}" != "null" ]]
+        [[ "${source_commit}" == "${GITHUB_SHA}" ]]
+        [[ "${management_api}" == "v1" ]]
+        echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+    - name: Build JustVoxel development image
+      shell: bash
+      env:
+        WEBUI_VERSION: ${{ steps.webui.outputs.version }}
+      run: |
+        set -euo pipefail
+        sudo podman build \
+          --pull=always \
+          --security-opt=label=disable \
+          --cap-add=all \
+          --device /dev/fuse \
+          --build-arg "HOME_SERVER_BASE_IMAGE=${HOME_SERVER_BASE_IMAGE}" \
+          --build-arg "JUSTVOXEL_DEV_REPOSITORY=${IMAGE_REPOSITORY}" \
+          --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+          --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          --label "io.home-server-project.justvoxel.webui.version=${WEBUI_VERSION}" \
+          --label "io.home-server-project.justvoxel.management-api=v1" \
+          --target justvoxel-dev \
+          --tag justvoxel-dev:unrechunked \
+          --file Containerfile.dev \
+          .
+
+    - name: Rechunk JustVoxel development image
+      id: rechunk
+      shell: bash
+      run: |
+        set -euo pipefail
+        rechunk_tmp="${RUNNER_TEMP}/justvoxel-dev-rechunk"
+        sudo mkdir -p "${rechunk_tmp}"
+        sudo chmod 1777 "${rechunk_tmp}"
+        sudo podman run --rm --privileged \
+          -v /var/lib/containers:/var/lib/containers \
+          -v "${rechunk_tmp}:/var/tmp" \
+          --entrypoint /usr/libexec/bootc-base-imagectl \
+          localhost/justvoxel-dev:unrechunked \
+          rechunk \
+          --max-layers "${RECHUNK_MAX_LAYERS}" \
+          localhost/justvoxel-dev:unrechunked \
+          localhost/justvoxel-dev:build
+        layer_count="$(sudo skopeo inspect --raw containers-storage:localhost/justvoxel-dev:build | jq -r '.layers | length')"
+        [[ "${layer_count}" =~ ^[0-9]+$ ]]
+        (( layer_count <= OCI_LAYER_LIMIT ))
+        echo "layers=${layer_count}" >> "${GITHUB_OUTPUT}"
+
+    - name: Validate completed development image
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo podman run --rm -i --entrypoint /bin/bash justvoxel-dev:build \
+          < build_files/validate/completed-image.sh

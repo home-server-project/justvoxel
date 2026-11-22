@@ -1,0 +1,324 @@
+package api
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"regexp"
+	"strings"
+	"time"
+)
+
+const (
+	adminMinecraftResetPlanPath  = "/v1/admin/reset/minecraft/plan"
+	adminMinecraftResetApplyPath = "/v1/admin/reset/minecraft/apply"
+	adminFactoryResetPlanPath    = "/v1/admin/reset/factory/plan"
+	adminFactoryResetApplyPath   = "/v1/admin/reset/factory/apply"
+	adminFactoryResetResolvePath = "/v1/admin/reset/factory/resolve"
+)
+
+var (
+	adminResetPlanTimeout        = 30 * time.Second
+	adminResetApplyTimeout       = 45 * time.Second
+	adminResetFingerprintPattern = regexp.MustCompile("^sha256:[0-9a-f]{64}$")
+)
+
+type ResetParticipant struct {
+	ID            string   `json:"id"`
+	DisplayName   string   `json:"display_name"`
+	State         string   `json:"state"`
+	PlayersOnline int      `json:"players_online"`
+	Players       []string `json:"players"`
+	DataScope     string   `json:"data_scope"`
+	DataAction    string   `json:"data_action"`
+}
+
+type AdminResetPlanResponse struct {
+	Participants              []ResetParticipant `json:"participants,omitempty"`
+	TotalPlayersOnline        int                `json:"total_players_online,omitempty"`
+	InstanceID                string             `json:"instance_id,omitempty"`
+	OK                        bool               `json:"ok"`
+	SchemaVersion             string             `json:"schema_version,omitempty"`
+	Mode                      string             `json:"mode,omitempty"`
+	PlanFingerprint           string             `json:"plan_fingerprint,omitempty"`
+	Code                      string             `json:"code,omitempty"`
+	Error                     string             `json:"error,omitempty"`
+	MinecraftConfigured       bool               `json:"minecraft_configured,omitempty"`
+	DataPath                  string             `json:"data_path,omitempty"`
+	DataScope                 string             `json:"data_scope,omitempty"`
+	DataAction                string             `json:"data_action,omitempty"`
+	PluginsAction             string             `json:"plugins_action,omitempty"`
+	BackupPath                string             `json:"backup_path,omitempty"`
+	BackupScope               string             `json:"backup_scope,omitempty"`
+	BackupAction              string             `json:"backup_action,omitempty"`
+	ConfigBackupsAction       string             `json:"config_backups_action,omitempty"`
+	StorageLayoutAction       string             `json:"storage_layout_action,omitempty"`
+	ExternalStorageAction     string             `json:"external_storage_action,omitempty"`
+	NetworkStorageAction      string             `json:"network_storage_action,omitempty"`
+	AuthenticationAction      string             `json:"authentication_action,omitempty"`
+	WebUIUsersAction          string             `json:"webui_users_action,omitempty"`
+	PasswordAction            string             `json:"password_action,omitempty"`
+	SessionsAction            string             `json:"sessions_action,omitempty"`
+	ExternalConnectionsAction string             `json:"external_connections_action,omitempty"`
+	GatewayAction             string             `json:"gateway_action,omitempty"`
+	PlayersOnline             int                `json:"players_online,omitempty"`
+	Players                   []string           `json:"players"`
+	Warnings                  []string           `json:"warnings"`
+}
+
+type AdminMinecraftResetApplyRequest struct {
+	PlanFingerprint string `json:"plan_fingerprint"`
+	ConfirmPlayers  bool   `json:"confirm_players"`
+}
+
+type AdminFactoryResetApplyRequest struct {
+	PlanFingerprint string `json:"plan_fingerprint"`
+	ConfirmPlayers  bool   `json:"confirm_players"`
+	SystemPassword  string `json:"system_password"`
+}
+
+type AdminResetApplyResponse struct {
+	OK        bool                 `json:"ok"`
+	Code      string               `json:"code,omitempty"`
+	Error     string               `json:"error,omitempty"`
+	Created   bool                 `json:"created"`
+	Players   []string             `json:"players,omitempty"`
+	Operation *PersistentOperation `json:"operation,omitempty"`
+}
+
+func (c *Client) AdminMinecraftResetPlan(ctx context.Context, session string) (AdminResetPlanResponse, error) {
+	return c.adminResetPlan(ctx, session, adminMinecraftResetPlanPath, "minecraft")
+}
+
+func (c *Client) AdminFactoryResetPlan(ctx context.Context, session string) (AdminResetPlanResponse, error) {
+	return c.adminResetPlan(ctx, session, adminFactoryResetPlanPath, "factory")
+}
+
+func (c *Client) AdminMinecraftResetApply(ctx context.Context, session string, request AdminMinecraftResetApplyRequest) (AdminResetApplyResponse, error) {
+	if !adminResetFingerprintPattern.MatchString(request.PlanFingerprint) {
+		return AdminResetApplyResponse{}, errors.New("invalid Minecraft reset fingerprint")
+	}
+	return c.adminResetApply(ctx, session, adminMinecraftResetApplyPath, request, "minecraft_reset")
+}
+
+func (c *Client) AdminFactoryResetApply(ctx context.Context, session string, request AdminFactoryResetApplyRequest) (AdminResetApplyResponse, error) {
+	if !adminResetFingerprintPattern.MatchString(request.PlanFingerprint) {
+		return AdminResetApplyResponse{}, errors.New("invalid factory reset request")
+	}
+	return c.adminResetApply(ctx, session, adminFactoryResetApplyPath, request, "factory_reset")
+}
+
+func (c *Client) AdminFactoryResetResolve(ctx context.Context, session, operationID string) (PersistentOperationResponse, error) {
+	var out PersistentOperationResponse
+	if !persistentOperationIDPattern.MatchString(operationID) {
+		return out, errors.New("invalid factory reset operation id")
+	}
+	data, err := json.Marshal(map[string]any{"operation_id": operationID, "keep_current_state": true})
+	if err != nil {
+		return out, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://unix"+adminFactoryResetResolvePath, bytes.NewReader(data))
+	if err != nil {
+		return out, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+session)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return out, fmt.Errorf("management API unavailable: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized {
+		return out, ErrUnauthorized
+	}
+	if resp.StatusCode == http.StatusForbidden {
+		return out, ErrPasswordChangeRequired
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return out, readResponseError(resp)
+	}
+	if err := decodePersistentOperationResponse(resp.Body, &out); err != nil {
+		return out, fmt.Errorf("management API returned invalid factory reset resolution response: %w", err)
+	}
+	if out.Operation == nil || out.Operation.OperationType != "factory_reset" || out.Operation.State != "resolved" {
+		return out, errors.New("management API returned unsupported factory reset resolution")
+	}
+	return out, nil
+}
+
+func (c *Client) adminResetPlan(ctx context.Context, session, path, mode string) (AdminResetPlanResponse, error) {
+	var out AdminResetPlanResponse
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://unix"+path, nil)
+	if err != nil {
+		return out, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+session)
+
+	client := *c.http
+	client.Timeout = adminResetPlanTimeout
+	resp, err := client.Do(req)
+	if err != nil {
+		return out, fmt.Errorf("management API unavailable: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized {
+		return out, ErrUnauthorized
+	}
+	if resp.StatusCode == http.StatusForbidden {
+		return out, ErrPasswordChangeRequired
+	}
+	if err := decodeAdminResetPlan(resp.Body, &out); err != nil {
+		return out, fmt.Errorf("management API returned invalid reset plan response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return out, &ResponseError{StatusCode: resp.StatusCode, Message: resetResponseMessage(out.Error, "reset planning was rejected")}
+	}
+	if mode == "minecraft" && path == adminMinecraftResetPlanPath && out.InstanceID != "" {
+		return out, errors.New("Minecraft reset plan instance mismatch")
+	}
+	if !out.OK || out.Mode != mode || !adminResetFingerprintPattern.MatchString(out.PlanFingerprint) {
+		return out, errors.New("management API returned unsupported reset plan")
+	}
+	return out, nil
+}
+
+func (c *Client) adminResetApply(ctx context.Context, session, path string, body any, operationType string) (AdminResetApplyResponse, error) {
+	var out AdminResetApplyResponse
+	data, err := json.Marshal(body)
+	if err != nil {
+		return out, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://unix"+path, bytes.NewReader(data))
+	if err != nil {
+		return out, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+session)
+
+	client := *c.http
+	client.Timeout = adminResetApplyTimeout
+	resp, err := client.Do(req)
+	if err != nil {
+		return out, fmt.Errorf("management API unavailable: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized {
+		// A rejected confirmation password leaves the signed-in session valid.
+		if path == adminFactoryResetApplyPath && decodeAdminResetApply(resp.Body, &out) == nil && out.Code == "system_password_incorrect" {
+			return out, &ResponseError{StatusCode: resp.StatusCode, Message: out.Error}
+		}
+		return out, ErrUnauthorized
+	}
+	if err := decodeAdminResetApply(resp.Body, &out); err != nil {
+		return out, fmt.Errorf("management API returned invalid reset apply response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return out, &ResponseError{StatusCode: resp.StatusCode, Message: resetResponseMessage(out.Error, "reset could not start")}
+	}
+	if operationType == "minecraft_reset" && path == adminMinecraftResetApplyPath && (out.Operation == nil || out.Operation.InstanceID != "") {
+		return out, errors.New("Minecraft reset operation instance mismatch")
+	}
+	if !out.OK || out.Operation == nil || out.Operation.OperationType != operationType {
+		return out, errors.New("management API returned unsupported reset operation")
+	}
+	return out, nil
+}
+
+func decodeAdminResetPlan(reader io.Reader, target *AdminResetPlanResponse) error {
+	decoder := json.NewDecoder(io.LimitReader(reader, 2<<20))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return errors.New("unexpected trailing JSON value")
+		}
+		return err
+	}
+	if target.Players == nil {
+		target.Players = []string{}
+	}
+	if target.Warnings == nil {
+		target.Warnings = []string{}
+	}
+	return nil
+}
+
+func decodeAdminResetApply(reader io.Reader, target *AdminResetApplyResponse) error {
+	decoder := json.NewDecoder(io.LimitReader(reader, 32*1024))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return errors.New("unexpected trailing JSON value")
+		}
+		return err
+	}
+	if target.Operation != nil {
+		if !persistentOperationIDPattern.MatchString(target.Operation.OperationID) {
+			return errors.New("invalid operation id in reset response")
+		}
+		if target.Operation.PlanFingerprint != "" && !adminResetFingerprintPattern.MatchString(target.Operation.PlanFingerprint) {
+			return errors.New("invalid reset fingerprint in operation response")
+		}
+	}
+	return nil
+}
+
+func resetResponseMessage(message, fallback string) string {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return fallback
+	}
+	return message
+}
+
+// Historical reset recovery resolves its target only from the active operation,
+// never from a selector or caller-supplied server ID.
+func (c *Client) historicalMinecraftResetInstance(ctx context.Context, session string) (string, error) {
+	current, err := c.AdminCurrentMinecraftResetOperation(ctx, session)
+	if err != nil {
+		return "", err
+	}
+	if current.Operation == nil || !minecraftMaintenanceIDPattern.MatchString(current.Operation.InstanceID) {
+		return "", errors.New("historical Minecraft reset is unavailable")
+	}
+	return current.Operation.InstanceID, nil
+}
+func (c *Client) HistoricalMinecraftResetPlan(ctx context.Context, session string) (AdminResetPlanResponse, error) {
+	id, err := c.historicalMinecraftResetInstance(ctx, session)
+	if err != nil {
+		return AdminResetPlanResponse{}, err
+	}
+	plan, err := c.adminResetPlan(ctx, session, "/v1/minecraft/instances/"+id+"/reset/plan", "minecraft")
+	if err == nil && plan.InstanceID != id {
+		return AdminResetPlanResponse{}, errors.New("Minecraft reset plan instance mismatch")
+	}
+	return plan, err
+}
+func (c *Client) HistoricalMinecraftResetApply(ctx context.Context, session string, request AdminMinecraftResetApplyRequest) (AdminResetApplyResponse, error) {
+	if !adminResetFingerprintPattern.MatchString(request.PlanFingerprint) {
+		return AdminResetApplyResponse{}, errors.New("invalid Minecraft reset fingerprint")
+	}
+	id, err := c.historicalMinecraftResetInstance(ctx, session)
+	if err != nil {
+		return AdminResetApplyResponse{}, err
+	}
+	result, err := c.adminResetApply(ctx, session, "/v1/minecraft/instances/"+id+"/reset/apply", request, "minecraft_reset")
+	if err == nil && (result.Operation == nil || result.Operation.InstanceID != id) {
+		return AdminResetApplyResponse{}, errors.New("Minecraft reset operation instance mismatch")
+	}
+	return result, err
+}

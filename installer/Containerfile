@@ -1,0 +1,134 @@
+ARG INSTALLER_BASE_IMAGE=quay.io/fedora/fedora-bootc:44
+FROM registry.fedoraproject.org/fedora:44 AS webui-builder
+
+# Build tools and fetched sources exist only in this stage.
+RUN dnf install -y git nodejs npm tar diffutils \
+    && dnf clean all
+WORKDIR /work/anaconda-webui
+RUN git init . \
+    && git fetch --no-tags --depth=1 https://github.com/rhinstaller/anaconda-webui.git a8745f07a18f303375351f3ba577d73108f5163d \
+    && git checkout --detach FETCH_HEAD \
+    && git fetch --no-tags --depth=1 https://github.com/cockpit-project/cockpit.git 92e0108df1034207bcf7852c7747707d7da044ac \
+    && git archive 92e0108df1034207bcf7852c7747707d7da044ac pkg/lib | tar -x
+
+# v68 stores its upstream lockfile in the pinned node-cache gitlink.
+# Extract only metadata, then npm ci installs the locked build dependencies.
+RUN git init /work/node-cache \
+    && git -C /work/node-cache fetch --no-tags --depth=1 https://github.com/rhinstaller/node-cache.git 1a725c2d19e1bd6ed77702953fd7c97160a9a037 \
+    && git -C /work/node-cache show FETCH_HEAD:.package.json > /work/node-cache-package.json \
+    && cmp package.json /work/node-cache-package.json \
+    && git -C /work/node-cache show FETCH_HEAD:.package-lock.json > package-lock.json \
+    && printf '%s\n' 68 > VERSION.txt \
+    && npm ci
+COPY installer/webui-overrides/justvoxel.patch /work/justvoxel.patch
+COPY installer/webui-overrides/src/ /work/anaconda-webui/src/
+RUN git apply /work/justvoxel.patch \
+    && NODE_ENV=production ./build.js
+
+FROM ${INSTALLER_BASE_IMAGE}
+
+# Explicit components avoid the metapackage's legacy GTK frontend.
+RUN dnf install -y \
+    anaconda-core \
+    anaconda-install-img-deps \
+    anaconda-dracut \
+    anaconda-webui \
+    cockpit-networkmanager \
+    firefox \
+    dbus-glib \
+    dracut-config-generic \
+    dracut-network \
+    NetworkManager-wifi \
+    atheros-firmware \
+    brcmfmac-firmware \
+    iwlegacy-firmware \
+    iwlwifi-dvm-firmware \
+    iwlwifi-mvm-firmware \
+    mt7xxx-firmware \
+    nxpwireless-firmware \
+    realtek-firmware \
+    tiwilink-firmware \
+    curl \
+    net-tools \
+    grub2-common \
+    grub2-pc-modules \
+    grub2-efi-x64 \
+    grub2-efi-x64-cdboot \
+    shim-x64 \
+    plymouth \
+    plymouth-plugin-script \
+    default-fonts-core-sans \
+    default-fonts-other-sans \
+    google-noto-sans-cjk-fonts \
+    xorriso \
+    squashfs-tools \
+    jq \
+    && dnf clean all
+
+# Keep the RPM's runtime integration; replace only its compiled WebUI assets.
+RUN rm -rf /usr/share/cockpit/anaconda-webui
+COPY --from=webui-builder /work/anaconda-webui/dist/ /usr/share/cockpit/anaconda-webui/
+
+# Presentation names belong only to this temporary Fedora installer image.
+# Preserve ID, VERSION_ID, and all other Fedora platform/profile fields.
+RUN sed -i \
+    -e 's/^NAME=.*/NAME="JustVoxel"/' \
+    -e 's/^PRETTY_NAME=.*/PRETTY_NAME="JustVoxel 10"/' \
+    /usr/lib/os-release
+
+# image-builder expects EFI binaries here rather than in bootc's payload store.
+RUN mkdir -p /boot/efi \
+    && cp -ra /usr/lib/efi/*/*/EFI /boot/efi
+
+# COPY paths use the repository root as the build context.
+RUN mkdir -p /etc/anaconda/conf.d
+COPY installer/90-justvoxel.conf /etc/anaconda/conf.d/90-justvoxel.conf
+# Replace platform defaults only in this disposable installer environment.
+COPY installer/anaconda-overrides/set-platform-defaults.py /tmp/set-platform-defaults.py
+RUN python3 /tmp/set-platform-defaults.py && rm /tmp/set-platform-defaults.py
+COPY installer/firefox-userChrome.css /usr/share/anaconda/firefox-theme/default/chrome/userChrome.css
+RUN mkdir -p /usr/share/cockpit/branding/fedora
+COPY installer/branding.css /usr/share/cockpit/branding/fedora/branding.css
+COPY installer/jv-inst-logo.png /usr/share/cockpit/branding/fedora/logo.png
+COPY installer/.buildstamp /.buildstamp
+COPY installer/iso.yaml /usr/lib/image-builder/bootc/iso.yaml
+COPY installer/interactive-defaults.ks /usr/share/anaconda/interactive-defaults.ks
+
+# Source references require a transport prefix, but the installed bootc
+# tracking reference must be a normal registry image reference.
+RUN source_ref="$(awk '$1 == "bootc" {for (i=1; i<=NF; i++) if ($i == "--source-imgref") print $(i+1)}' /usr/share/anaconda/interactive-defaults.ks)" \
+    && target_ref="$(awk '$1 == "bootc" {for (i=1; i<=NF; i++) if ($i == "--target-imgref") print $(i+1)}' /usr/share/anaconda/interactive-defaults.ks)" \
+    && test -n "${source_ref}" \
+    && test -n "${target_ref}" \
+    && case "${source_ref}" in registry:*) ;; *) echo "ERROR: bootc source image is missing registry transport" >&2; exit 1 ;; esac \
+    && case "${target_ref}" in registry:*|*://*) echo "ERROR: bootc target image must not include a transport prefix: ${target_ref}" >&2; exit 1 ;; *) ;; esac
+
+COPY installer/plymouth/ /usr/share/plymouth/themes/justvoxel/
+RUN plymouth-set-default-theme justvoxel
+
+# Reproduce Lorax's temporary boot.iso environment, never target OS accounts.
+# Reference: https://osbuild.org/docs/developer-guide/projects/image-builder/advanced/bootc/isos/
+RUN printf '%s\n' 'install:x:0:0:root:/root:/usr/libexec/anaconda/run-anaconda' >> /etc/passwd \
+    && printf '%s\n' 'install::14438:0:99999:7:::' >> /etc/shadow \
+    && passwd -d root \
+    && mv /usr/share/anaconda/list-harddrives-stub /usr/bin/list-harddrives \
+    && mv /etc/yum.repos.d /etc/anaconda.repos.d \
+    && ln -sfn /usr/lib/systemd/system/anaconda.target /etc/systemd/system/default.target \
+    && rm /usr/lib/systemd/system-generators/systemd-gpt-auto-generator
+
+# Reserve the alternate VT for Anaconda's troubleshooting shell.
+RUN ln -sfn /usr/lib/systemd/system/anaconda-shell@.service /usr/lib/systemd/system/autovt@.service \
+    && mkdir -p /usr/lib/systemd/logind.conf.d \
+    && printf '%s\n' '[Login]' 'ReserveVT=2' > /usr/lib/systemd/logind.conf.d/anaconda-shell.conf
+
+# Installer hardware varies; include Anaconda stage2 discovery in the initramfs.
+RUN mkdir -p "$(realpath /root)" \
+    && kernel=$(kernel-install list --json pretty | jq -er '.[] | select(.has_kernel == true) | .version') \
+    && DRACUT_NO_XATTR=1 dracut --force --zstd --reproducible --no-hostonly \
+        --add "anaconda plymouth" --include /.buildstamp /.buildstamp \
+        "/usr/lib/modules/${kernel}/initramfs.img" "${kernel}"
+
+# The temporary graphical installer runs as root and needs PipeWire available.
+RUN mkdir -p /etc/systemd/user/pipewire.service.d /etc/systemd/user/pipewire.socket.d \
+    && printf '%s\n' '[Unit]' 'ConditionUser=' > /etc/systemd/user/pipewire.service.d/allowroot.conf \
+    && printf '%s\n' '[Unit]' 'ConditionUser=' > /etc/systemd/user/pipewire.socket.d/allowroot.conf

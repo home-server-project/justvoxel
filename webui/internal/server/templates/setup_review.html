@@ -1,0 +1,116 @@
+{{define "setup_review.html"}}{{$wizard := .}}<!doctype html>
+<html lang="{{locale}}">
+<head><script src="/i18n.js"></script><script src="/static/i18n.js"></script>
+  <link rel="icon" type="image/png" href="/static/justvoxel-favicon.png">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{t "ui.dc6c0e3dcaf7"}}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/setup.css">
+  <link rel="stylesheet" href="/static/setup-review.css">
+  <script src="/static/app.js" defer></script>
+  <script src="/static/setup-operation.js" defer></script>
+  {{if .AddServer}}<link rel="stylesheet" href="/static/add-server-cancelled.css"><script src="/static/add-server-cancel.js" defer></script>{{end}}
+</head>
+<body class="role-administrator setup-body{{if .AddServer}} setup-add-server-review{{end}}{{if ne .SetupMode "recommended"}} setup-advanced{{end}}">
+<header class="setup-header topbar setup-topbar">
+  <a class="brand-link brand-mark" href="{{$wizard.BasePath}}/review" aria-current="page" aria-label="{{if .AddServer}}Create Server review{{else}}JustVoxel first setup review{{end}}"><img class="brand-logo" src="/static/justvoxel-logo.png" alt="JustVoxel"></a>
+  <div class="topbar-clock" data-topbar-clock aria-label="{{t "ui.2397ec601845"}}">--:--</div>
+  <form class="nav-logout setup-topbar-logout" method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">{{t "ui.49616145514e"}}</button></form>
+</header>
+<main class="setup-shell">
+  <div class="setup-stage-header">
+  {{if ne .SetupMode "recommended"}}
+  <ol class="setup-progress" aria-label="{{t "ui.e9b4495ace72"}}">
+    <li class="complete"><form method="post" action="{{$wizard.BasePath}}/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="1"><button type="submit"><span class="setup-number">1</span><span>{{t "ui.aef7de28d529"}}</span></button></form></li>
+    <li class="complete"><form method="post" action="{{$wizard.BasePath}}/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="2"><button type="submit"><span class="setup-number">2</span><span>{{t "ui.3ea657a3bed3"}}</span></button></form></li>
+    <li class="complete"><form method="post" action="{{$wizard.BasePath}}/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="3"><button type="submit"><span class="setup-number">3</span><span>{{t "ui.c3963aedaac6"}}</span></button></form></li>
+    <li class="complete"><form method="post" action="{{$wizard.BasePath}}/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="4"><button type="submit"><span class="setup-number">4</span><span>{{t "ui.a69c4dece144"}}</span></button></form></li>
+    <li class="complete"><form method="post" action="{{$wizard.BasePath}}/navigate"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="direction" value="jump"><input type="hidden" name="step" value="5"><button type="submit"><span class="setup-number">5</span><span>{{t "ui.3334fee2c77f"}}</span></button></form></li>
+    <li class="active" aria-current="step"><span class="setup-number">6</span><span>{{t "ui.aff0766a5290"}}</span></li>
+  </ol>
+  {{end}}
+  </div>
+
+  <section class="panel setup-step-panel setup-review-panel{{if ne .SetupMode "recommended"}} setup-advanced-frame{{end}}">
+    <div class="setup-review-content">
+    <div class="setup-review-header"><h2>{{t "ui.aff0766a5290"}}</h2>{{if and .Plan.OK (not .AddServer)}}<a class="button-link secondary" href="{{$wizard.BasePath}}/review/configuration">{{t "ui.418b21d66922"}}</a>{{end}}</div>
+    {{if .Error}}<div class="notice error" role="alert"><strong>{{t "ui.39d845bcc1d7"}}</strong><br>{{ts .Error}}</div>{{end}}
+
+    {{if .Plan.OK}}
+    <div class="setup-review-summary{{if .AddServer}} setup-review-summary-add-server{{end}}" aria-label="{{t "ui.6d5d303360f8"}}">
+      <section class="setup-review-server"><h3>{{t "ui.aef7de28d529"}}</h3><dl>
+        {{if .DisplayName}}<div><dt>{{t "ui.21babfed6c38"}}</dt><dd>{{.DisplayName}}</dd></div>{{end}}
+        <div><dt>{{t "ui.8b8ee2755acb"}}</dt><dd>{{ts .ServerTypeLabel}}</dd></div>
+        <div><dt>{{t "ui.797389fc28b4"}}</dt><dd>{{.Plan.Normalized.Server.MOTD}}</dd></div>
+        <div><dt>{{t "ui.ede76ceab6f1"}}</dt><dd>{{ts .GameModeLabel}}</dd></div>
+        <div><dt>{{t "ui.e1f268f4f175"}}</dt><dd>{{.Plan.Normalized.Server.MaxPlayers}}</dd></div>
+      </dl></section>
+      {{if eq .Plan.Normalized.Minecraft.ServerType "bedrock"}}
+      <section class="setup-review-cross-play"><h3>{{t "ui.71c715c11367"}}</h3><dl><div><dt>{{t "ui.77eee6c5c149"}}</dt><dd>{{.Plan.Normalized.Minecraft.BedrockTCPPort}}</dd></div><div><dt>{{t "ui.dc25a9962feb"}}</dt><dd>{{.Plan.Normalized.Minecraft.BedrockUDPStart}}–{{.Plan.Normalized.Minecraft.BedrockUDPEnd}}</dd></div></dl></section>
+      {{else}}
+      <section class="setup-review-cross-play"><h3>{{t "ui.3ea657a3bed3"}}</h3><dl>
+        <div><dt>Java</dt><dd>{{t "ui.b0f5d266e884"}} {{.Plan.Normalized.Minecraft.JavaPort}}</dd></div>
+        <div><dt>{{t "ui.202f8e51b72c"}}</dt><dd>{{if .Plan.Normalized.Server.BedrockEnabled}}{{t "ui.b0f5d266e884"}} {{.Plan.Normalized.Minecraft.BedrockPort}}{{else}}{{t "ui.75081b593d15"}}{{end}}</dd></div>
+      </dl></section>
+      {{end}}
+      {{if .AddServer}}<section class="setup-review-startup"><h3>{{t "ui.65d48235a91e"}}</h3><dl>
+        <div><dt>{{t "ui.2c8e0f48aedd"}}</dt><dd>{{if .StartAfterSetup}}{{t "ui.92c1cdfdf4cb"}}{{else}}{{t "ui.75081b593d15"}}{{end}}</dd></div>
+        <div><dt>{{t "ui.7f369a5b5b05"}}</dt><dd>{{if .StartOnBoot}}{{t "ui.92c1cdfdf4cb"}}{{else}}{{t "ui.75081b593d15"}}{{end}}</dd></div>
+      </dl></section>{{end}}
+      <section class="setup-review-minecraft"><h3>Minecraft</h3><dl>
+        <div><dt>{{t "ui.96bede3bff29"}}</dt><dd>{{.Plan.Normalized.Minecraft.Version}}</dd></div>
+        <div><dt>{{t "ui.3e9ec30db683"}}</dt><dd>{{ts .VersionPolicyLabel}}</dd></div>
+        {{if ne .Plan.Normalized.Minecraft.ServerType "bedrock"}}<div><dt>{{t "ui.038f7b4cf610"}}</dt><dd>{{.Plan.Normalized.Minecraft.JavaMemory}}</dd></div>{{end}}
+        <div><dt>{{t "ui.dfd505296613"}}</dt><dd>{{.Plan.Normalized.Minecraft.ContainerMemory}}</dd></div>
+        {{if ne .Plan.Normalized.Minecraft.ServerType "bedrock"}}<div><dt>{{t "ui.e0e5ffeb622e"}}</dt><dd>{{ts .ImageChannelLabel}}</dd></div>{{end}}
+      </dl></section>
+      <section class="setup-review-storage"><h3>{{t "ui.93f427e2181c"}}</h3><dl>
+        <div><dt>{{t "ui.c6f1a54d31ab"}}</dt><dd>{{ts .StorageLabel}}</dd></div>
+        <div><dt>{{t "ui.1f0d370ee29c"}}</dt><dd>{{ts .BackupLabel}}</dd></div>
+        <div><dt>{{t "ui.cb8603c8ce91"}}</dt><dd>{{if .Plan.Normalized.Backups.Automatic}}{{t "ui.92c1cdfdf4cb"}}{{else}}{{t "ui.75081b593d15"}}{{end}}</dd></div>
+        {{if .Plan.Normalized.Backups.Automatic}}<div><dt>{{t "ui.f4830a1dae29"}}</dt><dd>{{t "ui.7dee76af685d"}} {{.Plan.Normalized.Backups.DailyTime}}</dd></div>{{end}}
+        <div><dt>{{t "ui.3b1f58d94eac"}}</dt><dd>{{t "ui.183f00f483d3"}} {{.Plan.Normalized.Backups.Keep}} {{t "ui.9d488c8887ad"}}</dd></div>
+      </dl></section>
+    </div>
+
+    {{if .Plan.Warnings}}
+    <section class="setup-review-warnings" aria-label="{{t "ui.b6f45f0372dc"}}">
+      {{range .Plan.Warnings}}<div class="setup-backup-resilience setup-disk-warning" role="note"><strong>{{if eq .Code "same_physical_disk"}}{{t "ui.4e8f7fbea51a"}}{{else if eq .Code "bedrock_version_unsupported"}}{{t "ui.ab326bab7bce"}}{{else if eq .Code "bedrock_compatibility_unavailable"}}{{t "ui.4be381b70ddd"}}{{else}}{{t "ui.39d845bcc1d7"}}{{end}}</strong><span>{{if eq .Code "same_physical_disk"}}{{t "ui.55782943c1ce"}}{{else}}{{ts .Message}}{{end}}</span></div>{{end}}
+    </section>
+    {{end}}
+
+
+
+    <form id="setup-apply-form" method="post" action="{{$wizard.BasePath}}/review/apply" data-setup-apply{{if .AddServer}} data-add-server="true"{{else}} data-instance-preflight{{end}} data-eula-accepted="{{.EULAAccepted}}" data-smb-required="{{.Plan.Requirements.SMBPasswordRequired}}">
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <input type="hidden" name="plan_fingerprint" value="{{.Plan.PlanFingerprint}}">
+    </form>
+    {{if .Plan.Requirements.SMBPasswordRequired}}<dialog class="setup-eula-dialog" data-setup-password-dialog aria-labelledby="setup-password-title">
+      <h2 id="setup-password-title">{{t "ui.ae34ce1c7e57"}}</h2>
+      <p>{{t "ui.28bc4b47b4c8"}}</p>
+      <label class="setup-secret-input">{{t "ui.ae34ce1c7e57"}}<input type="password" name="smb_password" form="setup-apply-form" required maxlength="4096" autocomplete="off" data-setup-password></label>
+      <div class="setup-eula-actions"><button type="button" class="secondary" data-setup-password-cancel>{{t "ui.19766ed6ccb2"}}</button><button type="button" data-setup-password-continue>{{t "ui.31fbef162594"}}</button></div>
+    </dialog>{{end}}
+    <dialog class="setup-eula-dialog" data-setup-eula-dialog aria-labelledby="setup-eula-title">
+      <h2 id="setup-eula-title">{{t "ui.45fed2d11dd9"}}</h2>
+      <p>{{t "ui.ff7a97b6cc37"}} <a href="{{.EULAURL}}" target="_blank" rel="noopener noreferrer">{{t "ui.888ba0573fe5"}}</a>.</p>
+      <p>{{t "ui.468c89f44103"}}</p>
+      <div class="setup-eula-actions">
+        <button type="button" class="secondary" data-setup-eula-cancel>{{t "ui.19766ed6ccb2"}}</button>
+        <button type="button" class="secondary" data-setup-eula-decline>{{t "ui.a2d285b35287"}}</button>
+        <button type="submit" form="setup-apply-form" name="eula_accepted" value="on" data-setup-eula-accept>{{t "ui.ea9ac3e0bdc3"}}</button>
+      </div>
+    </dialog>
+    {{end}}
+    </div>
+
+    <div class="setup-step-actions setup-actions-split">
+      <form method="post" action="{{$wizard.BasePath}}/review/cancel"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">{{if .AddServer}}{{t "ui.c66f5d96ad92"}}{{else}}{{t "ui.c17bac18b5a6"}}{{end}}</button></form>
+      <div class="setup-step-navigation">{{if not .CreationBlocked}}<form method="post" action="{{$wizard.BasePath}}/review/back"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">{{t "ui.76900f1bfd16"}}</button></form>{{end}}{{if and .Plan.OK (not .CreationBlocked)}}<button type="submit" form="setup-apply-form" data-setup-configure>{{if .AddServer}}{{t "ui.7ac52b00d920"}}{{else}}{{t "ui.fef1e933ec92"}}{{end}}</button>{{else}}<span class="setup-configure-disabled" role="group" aria-disabled="true" tabindex="0" aria-describedby="setup-configure-help"><button type="button" disabled aria-describedby="setup-configure-help">{{if .AddServer}}{{t "ui.7ac52b00d920"}}{{else}}{{t "ui.fef1e933ec92"}}{{end}}</button><span class="setup-configure-tooltip" id="setup-configure-help" role="tooltip">{{t "ui.32e97bf38fe0"}}</span></span>{{end}}</div>
+    </div>
+  </section>
+</main>
+{{template "project-footer" .}}
+{{template "language-dialog" .}}</body>
+</html>{{end}}

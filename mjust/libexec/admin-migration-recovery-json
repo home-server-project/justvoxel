@@ -1,0 +1,96 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/migration-common.sh
+require_root
+source /usr/libexec/justvoxel/mjust/migration-instance.sh
+[[ ${1:-} == --instance && ${2:-} =~ ^jv-[a-z0-9]{6,12}$ ]] || { echo 'ERROR: --instance jv-... is required.' >&2; exit 2; }
+jv_migration_load_instance "$2" migration-recovery || exit 1
+shift 2
+
+configured=yes
+data_parent="$(dirname -- "${DATA_PATH}")"
+collect_transactions() { find "${data_parent}" -maxdepth 1 -type d \( -name '.justvoxel-import-*' -o -name '.justvoxel-export-*' \) -print 2>/dev/null | sort -u; }
+summary_json() {
+    local transaction="$1" phase source_type updated_at mode=selected-instance finalizable=false
+    [[ $(dirname -- "${transaction}") == "${data_parent}" && -d ${transaction} && ! -L ${transaction} && -r ${transaction}/state ]] || return 1
+    phase="$(sed -n 's/^phase=//p' "${transaction}/state" | head -n1)"
+    source_type="$(sed -n 's/^source_type=//p' "${transaction}/state" | head -n1)"
+    updated_at="$(sed -n 's/^updated_at=//p' "${transaction}/state" | head -n1)"
+    if jv_migration_validate_evidence "${transaction}"; then
+        case "${phase}" in staging|prepared|ready-to-switch|switching|imported-active|validating|rollback|rolled-back|critical-rollback|validated|exporting) finalizable=true ;; esac
+    else
+        mode=needs_attention
+    fi
+    jq -cn --arg transaction "${transaction}" --arg phase "${phase}" --arg source_type "${source_type}" --arg updated_at "${updated_at}" --arg mode "${mode}" --argjson finalizable "${finalizable}" '{transaction:$transaction,phase:$phase,source_type:$source_type,updated_at:$updated_at,mode:$mode,finalizable:$finalizable}'
+}
+
+discover() {
+    local items='[]' transaction item
+    while IFS= read -r transaction; do
+        [[ -n ${transaction} ]] || continue
+        item="$(summary_json "${transaction}" 2>/dev/null || true)"
+        [[ -n ${item} ]] && items="$(jq -cn --argjson current "${items}" --argjson item "${item}" '$current + [$item]')"
+    done < <(collect_transactions)
+    jq -cn --argjson configured "$([[ ${configured} == yes ]] && echo true || echo false)" --argjson transactions "${items}" '{ok:true,schema_version:"v1",configured:$configured,transactions:$transactions}'
+}
+
+resolve_check() {
+    local retained=''
+    exec 9>"${JV_MAINTENANCE_LOCK}"
+    if ! flock -n 9; then
+        jq -cn '{ok:false,schema_version:"v1",safe_to_resolve:false,code:"maintenance_busy",error:"Another Minecraft maintenance operation is active."}'
+        return 0
+    fi
+
+    if [[ ${configured} != yes ]]; then
+        jq -cn '{ok:false,schema_version:"v1",safe_to_resolve:false,code:"runtime_not_configured",error:"The current configured Minecraft runtime is unavailable, so the failed Import cannot be dismissed safely."}'
+        return 0
+    fi
+
+    retained="$(find "${data_parent}" -maxdepth 1 \( -name '.justvoxel-import-*' -o -name '.justvoxel-export-*' \) -print -quit 2>/dev/null || true)"
+    if [[ -n ${retained} ]]; then
+        jq -cn '{ok:false,schema_version:"v1",safe_to_resolve:false,code:"retained_transaction",error:"Retained Import transaction state still exists and must be reviewed through Migration Recovery."}'
+        return 0
+    fi
+
+    if ! jv_migration_validate_current >/dev/null 2>&1; then
+        jq -cn '{ok:false,schema_version:"v1",safe_to_resolve:false,code:"runtime_validation_failed",error:"The selected destination instance did not pass validation."}'
+        return 0
+    fi
+
+    jq -cn '{ok:true,schema_version:"v1",safe_to_resolve:true}'
+}
+
+plan() {
+    local request transaction allowed=no summary phase state_identity runtime=false unconfigured=false
+    request="$(cat)"
+    if ! jq -e 'type=="object" and ((keys-["transaction"])|length==0) and (.transaction|type=="string")' >/dev/null 2>&1 <<< "${request}"; then
+        jq -cn '{ok:false,schema_version:"v1",code:"invalid_request",error:"invalid migration recovery request",warnings:[]}'
+        return 0
+    fi
+    transaction="$(jq -r '.transaction' <<< "${request}")"
+    if [[ ${transaction} != /* || $(realpath -m -- "${transaction}") != "${transaction}" || $(basename -- "${transaction}") != .justvoxel-import-* && $(basename -- "${transaction}") != .justvoxel-export-* ]]; then
+        jq -cn '{ok:false,schema_version:"v1",code:"invalid_transaction",error:"migration recovery transaction path is invalid",warnings:[]}'
+        return 0
+    fi
+    [[ $(dirname -- "${transaction}") == "${data_parent}" ]] && allowed=yes
+    if [[ ${allowed} != yes ]]; then
+        jq -cn '{ok:false,schema_version:"v1",code:"untrusted_transaction",error:"Recovery does not belong to the selected destination instance.",warnings:[]}'
+        return 0
+    fi
+    summary="$(summary_json "${transaction}" 2>/dev/null || true)"
+    if [[ -z ${summary} ]]; then jq -cn '{ok:false,schema_version:"v1",code:"missing_transaction",error:"migration recovery transaction is unavailable",warnings:[]}'; return 0; fi
+    if [[ $(jq -r '.finalizable' <<< "${summary}") != true ]]; then jq -cn --argjson normalized "${summary}" '{ok:false,schema_version:"v1",code:"not_finalizable",error:"migration recovery state is not safely finalizable in the current appliance state",normalized:$normalized,warnings:[]}'; return 0; fi
+    phase="$(jq -r '.phase' <<< "${summary}")"
+    runtime=true
+    state_identity="$(cat "${transaction}/state" "${transaction}/evidence.json" | sha256sum | awk '{print $1}')"
+    jq -cn --argjson normalized "${summary}" --arg state_identity "${state_identity}" --argjson runtime "${runtime}" --argjson unconfigured "${unconfigured}" '{ok:true,schema_version:"v1",normalized:$normalized,warnings:[],requirements:{finalize_confirmation_required:true,runtime_validation_required:$runtime,unconfigured_validation_required:$unconfigured},context:{state_identity:$state_identity}}'
+}
+
+case "${1:-}" in
+    discover) discover ;;
+    resolve-check) resolve_check ;;
+    plan) plan ;;
+    *) echo 'Usage: admin-migration-recovery-json {discover|resolve-check|plan}' >&2; exit 2 ;;
+esac

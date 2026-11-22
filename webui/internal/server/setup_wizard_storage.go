@@ -1,0 +1,730 @@
+package server
+
+import (
+	"errors"
+	"fmt"
+	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
+
+	"github.com/home-server-project/justvoxel-webui/internal/api"
+)
+
+var setupStoragePathPattern = regexp.MustCompile(`^/[A-Za-z0-9._/-]+$`)
+var setupBackupTimePattern = regexp.MustCompile(`^([01]?[0-9]|2[0-3]):([0-5][0-9])$`)
+
+type setupStorageDraft struct {
+	Type       string
+	Path       string
+	Device     string
+	MountPoint string
+	Complete   bool
+}
+
+type setupBackupDraft struct {
+	Automatic  bool
+	DailyTime  string
+	Keep       string
+	Type       string
+	Path       string
+	Device     string
+	MountPoint string
+	Source     string
+	Username   string
+	Domain     string
+	Complete   bool
+}
+
+type setupFilesystemView struct {
+	Path       string
+	Name       string
+	Size       string
+	Filesystem string
+	Label      string
+	UUID       string
+	Mountpoint string
+	Model      string
+	Transport  string
+	SystemDisk bool
+	Available  string
+	UsageKnown bool
+}
+
+type setupStoragePartitionView struct {
+	UUID       string
+	Protected  bool
+	Path       string
+	Size       string
+	Filesystem string
+	Label      string
+	Mountpoint string
+	Formatted  bool
+	SystemDisk bool
+}
+
+type setupStorageFreeSpaceView struct {
+	Device    string
+	Start     string
+	End       string
+	Size      string
+	SizeBytes uint64
+}
+
+type setupStorageDiskView struct {
+	Name       string
+	Path       string
+	Size       string
+	Model      string
+	Transport  string
+	SystemDisk bool
+	External   bool
+	Partitions []setupStoragePartitionView
+	FreeSpaces []setupStorageFreeSpaceView
+}
+
+func (a *App) registerSetupWizardStorageRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("POST /setup/storage", a.setupWizardSaveStorage)
+	mux.HandleFunc("POST /setup/backups", a.setupWizardSaveBackups)
+}
+
+func (a *App) setupWizardSaveStorage(w http.ResponseWriter, r *http.Request) {
+	session, client, identity, ok := a.setupWizardRequest(w, r, true)
+	if !ok {
+		return
+	}
+	draft, exists := setupDrafts.get(a, session)
+	if !exists || !draft.Started {
+		http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
+		return
+	}
+	storage, err := client.AdminStorage(r.Context(), session)
+	if err != nil {
+		a.handleAdminDiscoveryError(w, r, err)
+		return
+	}
+	draft.Inventory = storage
+	draft.Storage = parseSetupStorageForm(r, draft.Defaults)
+
+	if r.FormValue("direction") == "back" {
+		draft.Storage.Complete = false
+		draft.CurrentStep = setupMemoryStep
+		setupDrafts.save(a, session, draft)
+		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "storage settings changed; user returned to Memory", draft)
+		http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
+		return
+	}
+	if err := validateSetupStorage(draft.Storage, draft.Inventory, draft.Defaults); err != nil {
+		draft.Storage.Complete = false
+		setupDrafts.save(a, session, draft)
+		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "storage settings rejected", draft)
+		w.WriteHeader(http.StatusBadRequest)
+		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), err.Error())
+		return
+	}
+	draft.Storage.Complete = true
+	draft.CurrentStep = setupBackupsStep
+	setupDrafts.save(a, session, draft)
+	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "storage settings saved", draft)
+	http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
+}
+
+func (a *App) setupWizardSaveBackups(w http.ResponseWriter, r *http.Request) {
+	session, client, identity, ok := a.setupWizardRequest(w, r, true)
+	if !ok {
+		return
+	}
+	draft, exists := setupDrafts.get(a, session)
+	if !exists || !draft.Started {
+		http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
+		return
+	}
+	storage, err := client.AdminStorage(r.Context(), session)
+	if err != nil {
+		a.handleAdminDiscoveryError(w, r, err)
+		return
+	}
+	draft.Inventory = storage
+	draft.Backups = parseSetupBackupForm(r, draft.Defaults)
+	if draft.Storage.Type == "partition" && draft.Backups.Type == "partition" && draft.Storage.Device == draft.Backups.Device {
+		// One filesystem has one persistent mount; keep the two directories separate.
+		draft.Backups.MountPoint = draft.Storage.MountPoint
+		draft.Backups.Path = strings.TrimRight(draft.Storage.MountPoint, "/") + "/backups"
+	}
+
+	if r.FormValue("direction") == "back" {
+		draft.Backups.Complete = false
+		draft.CurrentStep = setupStorageStep
+		setupDrafts.save(a, session, draft)
+		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "backup settings changed; user returned to Storage", draft)
+		http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
+		return
+	}
+	if err := validateSetupBackups(draft.Backups, draft.Storage, draft.Inventory, draft.Defaults); err != nil {
+		draft.Backups.Complete = false
+		setupDrafts.save(a, session, draft)
+		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "backup settings rejected", draft)
+		w.WriteHeader(http.StatusBadRequest)
+		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), err.Error())
+		return
+	}
+	draft.Backups.Complete = true
+	draft.CurrentStep = setupReviewStep
+	setupDrafts.save(a, session, draft)
+	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "backup settings saved; configuration ready for Review", draft)
+	http.Redirect(w, r, setupBasePath(r)+"/review", http.StatusSeeOther)
+}
+
+func initialSetupStorageDraft(defaults api.AdminSetupDefaults) setupStorageDraft {
+	return setupStorageDraft{Type: "system", Path: defaults.DataPath}
+}
+
+func initialSetupBackupDraft(defaults api.AdminSetupDefaults) setupBackupDraft {
+	return setupBackupDraft{
+		Automatic: true,
+		DailyTime: defaults.BackupDailyTime,
+		Keep:      strconv.Itoa(defaults.BackupKeep),
+		Type:      "system",
+		Path:      defaults.BackupPath,
+	}
+}
+
+func parseSetupStorageForm(r *http.Request, defaults api.AdminSetupDefaults) setupStorageDraft {
+	out := setupStorageDraft{
+		Type:       strings.TrimSpace(r.FormValue("storage_type")),
+		Path:       strings.TrimSpace(r.FormValue("storage_path")),
+		Device:     strings.TrimSpace(r.FormValue("storage_device")),
+		MountPoint: strings.TrimSpace(r.FormValue("storage_mount_point")),
+	}
+	if out.Type == "system" {
+		out.Path = defaults.DataPath
+		out.Device = ""
+		out.MountPoint = ""
+	}
+	return out
+}
+
+func parseSetupBackupForm(r *http.Request, defaults api.AdminSetupDefaults) setupBackupDraft {
+	out := setupBackupDraft{
+		Automatic:  r.FormValue("backup_automatic") == "on",
+		DailyTime:  strings.TrimSpace(r.FormValue("backup_daily_time")),
+		Keep:       strings.TrimSpace(r.FormValue("backup_keep")),
+		Type:       strings.TrimSpace(r.FormValue("backup_type")),
+		Path:       strings.TrimSpace(r.FormValue("backup_path")),
+		Device:     strings.TrimSpace(r.FormValue("backup_device")),
+		MountPoint: strings.TrimSpace(r.FormValue("backup_mount_point")),
+		Source:     strings.TrimSpace(r.FormValue("backup_source")),
+		Username:   strings.TrimSpace(r.FormValue("backup_username")),
+		Domain:     strings.TrimSpace(r.FormValue("backup_domain")),
+	}
+	if out.Type == "system" {
+		out.Path = defaults.BackupPath
+		out.Device = ""
+		out.MountPoint = ""
+		out.Source = ""
+		out.Username = ""
+		out.Domain = ""
+	}
+	return out
+}
+
+func validateSetupStorage(storage setupStorageDraft, inventory api.AdminStorageDiscovery, defaults api.AdminSetupDefaults) error {
+	switch storage.Type {
+	case "system":
+		if storage.Path != defaults.DataPath {
+			return errors.New(uiText("ui.00a94b8f5e18"))
+		}
+	case "partition":
+		if storage.Device == "" {
+			return errors.New(uiText("ui.bfb7f5b7307b"))
+		}
+		device, ok := safeSetupMinecraftDevice(inventory, storage.Device)
+		if !ok {
+			return errors.New(uiText("ui.4a45d12f5924"))
+		}
+		mount, err := validateSetupLocalMount(storage.MountPoint, device)
+		if err != nil {
+			return err
+		}
+		if !validSetupPath(storage.Path) || !setupPathWithin(storage.Path, mount) {
+			return errors.New(uiText("ui.f09d7d0e38ee"))
+		}
+	default:
+		return errors.New(uiText("ui.c62c2fb91ce1"))
+	}
+	return nil
+}
+
+func validateSetupBackups(backups setupBackupDraft, data setupStorageDraft, inventory api.AdminStorageDiscovery, defaults api.AdminSetupDefaults) error {
+	if _, err := parsePositiveFormInt(backups.Keep, uiText("ui.2bb27baba5e4")); err != nil {
+		return err
+	}
+	if backups.Automatic {
+		if _, err := normalizeSetupBackupTime(backups.DailyTime); err != nil {
+			return err
+		}
+	}
+
+	switch backups.Type {
+	case "system":
+		if backups.Path != defaults.BackupPath {
+			return errors.New(uiText("ui.989b094fc5bd"))
+		}
+	case "partition":
+		if backups.Device == "" {
+			return errors.New(uiText("ui.bfb7f5b7307b"))
+		}
+		device, ok := safeSetupDevice(inventory, backups.Device)
+		if !ok {
+			return errors.New(uiText("ui.dcb261c9751c"))
+		}
+		mount, err := validateSetupLocalMount(backups.MountPoint, device)
+		if err != nil {
+			return err
+		}
+		if !validSetupPath(backups.Path) || !setupPathWithin(backups.Path, mount) {
+			return errors.New(uiText("ui.b6d2ac5bb83e"))
+		}
+	case "nfs":
+		if !validSetupNFS(backups.Source) {
+			return errors.New("NFS source must look like server:/export and cannot contain spaces.")
+		}
+		if !validSetupMountPoint(backups.MountPoint) {
+			return errors.New(uiText("ui.a954e416f92a"))
+		}
+		if !validSetupPath(backups.Path) || !setupPathWithin(backups.Path, backups.MountPoint) {
+			return errors.New(uiText("ui.07197023e868"))
+		}
+	case "smb":
+		if !validSetupSMB(backups.Source) {
+			return errors.New("SMB source must look like //server/share and cannot contain spaces.")
+		}
+		if !validSetupMountPoint(backups.MountPoint) {
+			return errors.New(uiText("ui.73c8be65a474"))
+		}
+		if !validSetupPath(backups.Path) || !setupPathWithin(backups.Path, backups.MountPoint) {
+			return errors.New(uiText("ui.4fd5f59807a3"))
+		}
+		if backups.Username == "" {
+			return errors.New("SMB username is required. The password is requested only when setup is finally applied.")
+		}
+		if strings.ContainsAny(backups.Username, "\r\n") || strings.ContainsAny(backups.Domain, "\r\n") {
+			return errors.New("SMB username or domain is invalid.")
+		}
+	default:
+		return errors.New(uiText("ui.f7a60541e010"))
+	}
+
+	if data.Path != "" && backups.Path != "" && setupPathsOverlap(data.Path, backups.Path) {
+		return errors.New(uiText("ui.917dacf062bc"))
+	}
+	return nil
+}
+
+func setupFilesystemViews(storage api.AdminStorageDiscovery) []setupFilesystemView {
+	out := make([]setupFilesystemView, 0)
+	for _, device := range storage.Devices {
+		if !safeSetupDeviceValue(device) || device.System || storageBrowserLooksSystem(device) {
+			continue
+		}
+		mountpoint := ""
+		if len(device.Mountpoints) > 0 {
+			mountpoint = device.Mountpoints[0]
+		}
+		model := strings.TrimSpace(device.Model)
+		if model == "" {
+			for _, parent := range storage.Devices {
+				if parent.Name == device.Parent {
+					model = strings.TrimSpace(parent.Model)
+					if model == "" {
+						model = parent.Name
+					}
+					break
+				}
+			}
+		}
+		if model == "" {
+			model = device.Name
+		}
+		out = append(out, setupFilesystemView{
+			Path: device.Path, Name: device.Name, Size: humanBytes(device.SizeBytes), Filesystem: device.Filesystem,
+			Label: device.Label, UUID: device.UUID, Mountpoint: mountpoint, Model: model,
+			Transport: device.Transport, SystemDisk: device.System,
+			Available: humanBytes(device.FilesystemFreeBytes), UsageKnown: device.FilesystemUsageKnown,
+		})
+	}
+	return out
+}
+
+func setupStorageDiskViews(storage api.AdminStorageDiscovery) ([]setupStorageDiskView, int) {
+	systemDisks := make(map[string]struct{}, len(storage.SystemDisks))
+	for _, path := range storage.SystemDisks {
+		systemDisks[path] = struct{}{}
+	}
+
+	disks := make([]setupStorageDiskView, 0)
+	diskByName := make(map[string]int)
+	diskByPath := make(map[string]int)
+	externalCount := 0
+
+	for _, device := range storage.Devices {
+		if device.Type != "disk" || strings.HasPrefix(strings.ToLower(device.Name), "zram") {
+			continue
+		}
+		if setupDeviceIsExternal(storage, device) {
+			externalCount++
+			continue
+		}
+		_, listedSystem := systemDisks[device.Path]
+		index := len(disks)
+		disks = append(disks, setupStorageDiskView{
+			Name: device.Name, Path: device.Path, Size: humanBytes(device.SizeBytes),
+			Model: strings.TrimSpace(device.Model), Transport: strings.TrimSpace(device.Transport),
+			SystemDisk: device.System || listedSystem || storageBrowserLooksSystem(device),
+		})
+		diskByName[device.Name] = index
+		diskByPath[device.Path] = index
+	}
+
+	for _, device := range storage.Devices {
+		if device.Type != "part" || setupDeviceIsExternal(storage, device) {
+			continue
+		}
+		index, exists := diskByName[device.Parent]
+		if !exists {
+			continue
+		}
+		formatted := safeSetupDeviceValue(device)
+		mountpoint := ""
+		if len(device.Mountpoints) > 0 {
+			mountpoint = device.Mountpoints[0]
+		}
+		disks[index].Partitions = append(disks[index].Partitions, setupStoragePartitionView{
+			Path: device.Path, Size: humanBytes(device.SizeBytes), Filesystem: device.Filesystem,
+			Label: device.Label, Mountpoint: mountpoint, Formatted: formatted,
+			UUID: device.UUID, Protected: device.System || device.ReadOnly || storageBrowserLooksSystem(device),
+			SystemDisk: disks[index].SystemDisk,
+		})
+	}
+
+	for _, free := range storage.FreeSpaces {
+		index, exists := diskByPath[free.Device]
+		if !exists || free.SizeBytes < 1024*1024*1024 {
+			continue
+		}
+		disks[index].FreeSpaces = append(disks[index].FreeSpaces, setupStorageFreeSpaceView{
+			Device: free.Device, Start: free.Start, End: free.End,
+			Size: humanBytes(free.SizeBytes), SizeBytes: free.SizeBytes,
+		})
+	}
+
+	return actionableSetupDisks(disks), externalCount
+}
+
+func actionableSetupDisks(disks []setupStorageDiskView) []setupStorageDiskView {
+	out := disks[:0]
+	for _, disk := range disks {
+		if len(disk.Partitions) > 0 || len(disk.FreeSpaces) > 0 {
+			out = append(out, disk)
+		}
+	}
+	return out
+}
+
+func setupBackupDiskViews(storage api.AdminStorageDiscovery) []setupStorageDiskView {
+	systemDisks := make(map[string]struct{}, len(storage.SystemDisks))
+	for _, path := range storage.SystemDisks {
+		systemDisks[path] = struct{}{}
+	}
+
+	disks := make([]setupStorageDiskView, 0)
+	diskByName := make(map[string]int)
+	diskByPath := make(map[string]int)
+	for _, device := range storage.Devices {
+		if device.Type != "disk" || strings.HasPrefix(strings.ToLower(device.Name), "zram") {
+			continue
+		}
+		_, listedSystem := systemDisks[device.Path]
+		index := len(disks)
+		disks = append(disks, setupStorageDiskView{
+			Name: device.Name, Path: device.Path, Size: humanBytes(device.SizeBytes),
+			Model: strings.TrimSpace(device.Model), Transport: strings.TrimSpace(device.Transport),
+			SystemDisk: device.System || listedSystem || storageBrowserLooksSystem(device),
+			External:   setupDeviceIsExternal(storage, device),
+		})
+		diskByName[device.Name] = index
+		diskByPath[device.Path] = index
+	}
+
+	for _, device := range storage.Devices {
+		if device.Type != "part" {
+			continue
+		}
+		index, exists := diskByName[device.Parent]
+		if !exists {
+			continue
+		}
+		formatted := safeSetupDeviceValue(device)
+		mountpoint := ""
+		if len(device.Mountpoints) > 0 {
+			mountpoint = device.Mountpoints[0]
+		}
+		disks[index].Partitions = append(disks[index].Partitions, setupStoragePartitionView{
+			Path: device.Path, Size: humanBytes(device.SizeBytes), Filesystem: device.Filesystem,
+			Label: device.Label, Mountpoint: mountpoint, Formatted: formatted,
+			UUID: device.UUID, Protected: device.System || device.ReadOnly || storageBrowserLooksSystem(device),
+			SystemDisk: disks[index].SystemDisk,
+		})
+	}
+
+	for _, free := range storage.FreeSpaces {
+		index, exists := diskByPath[free.Device]
+		if !exists || free.SizeBytes < 1024*1024*1024 {
+			continue
+		}
+		disks[index].FreeSpaces = append(disks[index].FreeSpaces, setupStorageFreeSpaceView{
+			Device: free.Device, Start: free.Start, End: free.End,
+			Size: humanBytes(free.SizeBytes), SizeBytes: free.SizeBytes,
+		})
+	}
+	return actionableSetupDisks(disks)
+}
+
+func safeSetupBlankBackupDeviceValue(device api.AdminStorageDevice) bool {
+	if device.Type != "part" || device.ReadOnly || device.Filesystem != "" {
+		return false
+	}
+	for _, mountpoint := range device.Mountpoints {
+		if strings.TrimSpace(mountpoint) != "" {
+			return false
+		}
+	}
+	return true
+}
+
+func setupDeviceIsExternal(storage api.AdminStorageDiscovery, device api.AdminStorageDevice) bool {
+	transport := strings.ToLower(strings.TrimSpace(device.Transport))
+	if transport == "usb" {
+		return true
+	}
+	if transport != "" || device.Parent == "" {
+		return false
+	}
+	for _, candidate := range storage.Devices {
+		if candidate.Type != "disk" {
+			continue
+		}
+		if candidate.Name == device.Parent || candidate.Path == device.Parent || candidate.Path == "/dev/"+device.Parent {
+			return strings.EqualFold(strings.TrimSpace(candidate.Transport), "usb")
+		}
+	}
+	return false
+}
+
+func safeSetupMinecraftDevice(storage api.AdminStorageDiscovery, path string) (api.AdminStorageDevice, bool) {
+	for _, device := range storage.Devices {
+		if device.Path == path && safeSetupMinecraftDeviceValue(storage, device) {
+			return device, true
+		}
+	}
+	return api.AdminStorageDevice{}, false
+}
+
+func safeSetupMinecraftDeviceValue(storage api.AdminStorageDiscovery, device api.AdminStorageDevice) bool {
+	return !setupDeviceIsExternal(storage, device) && safeSetupDeviceValue(device)
+}
+
+func safeSetupBlankMinecraftDeviceValue(storage api.AdminStorageDiscovery, device api.AdminStorageDevice) bool {
+	if setupDeviceIsExternal(storage, device) || device.Type != "part" || device.ReadOnly || device.Filesystem != "" {
+		return false
+	}
+	for _, mountpoint := range device.Mountpoints {
+		if strings.TrimSpace(mountpoint) != "" {
+			return false
+		}
+	}
+	return true
+}
+
+func safeSetupDevice(storage api.AdminStorageDiscovery, path string) (api.AdminStorageDevice, bool) {
+	for _, device := range storage.Devices {
+		if device.Path == path && safeSetupDeviceValue(device) {
+			return device, true
+		}
+	}
+	return api.AdminStorageDevice{}, false
+}
+
+func safeSetupDeviceValue(device api.AdminStorageDevice) bool {
+	if device.Type != "part" || device.ReadOnly {
+		return false
+	}
+	switch device.Filesystem {
+	case "xfs", "ext4", "btrfs":
+	default:
+		return false
+	}
+	for _, mountpoint := range device.Mountpoints {
+		switch mountpoint {
+		case "/", "/boot", "/boot/efi", "/var":
+			return false
+		}
+	}
+	return device.UUID != ""
+}
+
+func validateSetupLocalMount(requested string, device api.AdminStorageDevice) (string, error) {
+	if len(device.Mountpoints) > 0 && device.Mountpoints[0] != "" {
+		mounted := strings.TrimSuffix(device.Mountpoints[0], "/")
+		if mounted == "" {
+			mounted = "/"
+		}
+		if requested != mounted {
+			return "", fmt.Errorf(uiText("ui.8caf3b387e93"), device.Path, mounted)
+		}
+		return mounted, nil
+	}
+	if !validSetupMountPoint(requested) {
+		return "", errors.New(uiText("ui.e18885f7d287"))
+	}
+	return requested, nil
+}
+
+func validSetupPath(value string) bool {
+	return value != "/" && setupStoragePathPattern.MatchString(value) && !strings.Contains(value, "//")
+}
+
+func validSetupMountPoint(value string) bool {
+	if !validSetupPath(value) {
+		return false
+	}
+	switch value {
+	case "/boot", "/boot/efi", "/var":
+		return false
+	}
+	return true
+}
+
+func setupPathWithin(path, mount string) bool {
+	mount = strings.TrimSuffix(mount, "/")
+	return path == mount || strings.HasPrefix(path, mount+"/")
+}
+
+func setupPathsOverlap(a, b string) bool {
+	a = strings.TrimSuffix(a, "/")
+	b = strings.TrimSuffix(b, "/")
+	return a == b || strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
+}
+
+func validSetupNFS(source string) bool {
+	return source != "" && strings.Contains(source, ":") && !strings.ContainsAny(source, " \t\r\n")
+}
+
+func validSetupSMB(source string) bool {
+	if !strings.HasPrefix(source, "//") || strings.ContainsAny(source, " \t\r\n") {
+		return false
+	}
+	rest := strings.TrimPrefix(source, "//")
+	parts := strings.SplitN(rest, "/", 2)
+	return len(parts) == 2 && parts[0] != "" && parts[1] != ""
+}
+
+func normalizeSetupBackupTime(value string) (string, error) {
+	match := setupBackupTimePattern.FindStringSubmatch(strings.TrimSpace(value))
+	if len(match) != 3 {
+		return "", errors.New(uiText("ui.371a0756d651"))
+	}
+	hour, _ := strconv.Atoi(match[1])
+	minute, _ := strconv.Atoi(match[2])
+	return fmt.Sprintf("%02d:%02d", hour, minute), nil
+}
+
+func setupSameDiskWarning(draft setupDraft) string {
+	if draft.Storage.Type == "" || draft.Backups.Type == "" {
+		return ""
+	}
+	if draft.Backups.Type == "nfs" || draft.Backups.Type == "smb" {
+		return ""
+	}
+	if draft.Storage.Type == "system" && draft.Backups.Type == "system" {
+		return uiText("ui.e5ed6f33cc43")
+	}
+	if draft.Storage.Type == "system" && draft.Backups.Type == "partition" {
+		if device, ok := safeSetupDevice(draft.Inventory, draft.Backups.Device); ok && device.System {
+			return uiText("ui.d797aa9e8281")
+		}
+		return ""
+	}
+	if draft.Storage.Type == "partition" && draft.Backups.Type == "system" {
+		if device, ok := safeSetupDevice(draft.Inventory, draft.Storage.Device); ok && device.System {
+			return uiText("ui.df8621558d69")
+		}
+		return ""
+	}
+	if draft.Storage.Type == "partition" && draft.Backups.Type == "partition" {
+		dataDevice, dataOK := safeSetupDevice(draft.Inventory, draft.Storage.Device)
+		backupDevice, backupOK := safeSetupDevice(draft.Inventory, draft.Backups.Device)
+		if dataOK && backupOK && setupPhysicalDiskKey(dataDevice) != "" && setupPhysicalDiskKey(dataDevice) == setupPhysicalDiskKey(backupDevice) {
+			return uiText("ui.014163f9300e")
+		}
+	}
+	return ""
+}
+
+func setupPhysicalDiskKey(device api.AdminStorageDevice) string {
+	if device.Parent != "" {
+		if strings.HasPrefix(device.Parent, "/dev/") {
+			return device.Parent
+		}
+		return "/dev/" + device.Parent
+	}
+	return device.Path
+}
+
+// Setup uses the Control Center Storage presentation and operations, with purpose-specific selection.
+func setupStorageBrowserData(draft setupDraft, csrf string, backups bool) storageBrowserPageData {
+	data := storageBrowserPresentation(draft.Inventory, api.AdminConfigurationDiscovery{}, api.SessionInfo{}, csrf, nil, nil)
+	disks := make([]storageBrowserDiskView, 0, len(data.Disks))
+	data.InternalDisks, data.ExternalDisks = nil, nil
+	selectedDevice := draft.Storage.Device
+	if backups {
+		selectedDevice = draft.Backups.Device
+	}
+	data.SelectedDisk = ""
+	data.SetupPurpose = "minecraft"
+	if backups {
+		data.SetupPurpose = "backups"
+	}
+	for _, disk := range data.Disks {
+		if !backups && setupDeviceIsExternal(draft.Inventory, api.AdminStorageDevice{Path: disk.Path, Transport: disk.Transport}) {
+			continue
+		}
+		// Setup prepares partitions through the shared Review, without assigning a live server.
+		disk.MinecraftWholeDisk, disk.BackupWholeDisk, disk.CanInitialize = false, false, false
+		for i := range disk.Partitions {
+			partition := &disk.Partitions[i]
+			device, safe := safeSetupMinecraftDevice(draft.Inventory, partition.Path)
+			if backups {
+				device, safe = safeSetupDevice(draft.Inventory, partition.Path)
+			}
+			partition.SetupSelectable = safe && !partition.System
+			if partition.SetupSelectable && len(device.Mountpoints) == 1 {
+				partition.SetupMountPoint = device.Mountpoints[0]
+			}
+			if partition.Path == selectedDevice {
+				data.SelectedDisk = disk.Name
+			}
+		}
+		disks = append(disks, disk)
+		if setupDeviceIsExternal(draft.Inventory, api.AdminStorageDevice{Path: disk.Path, Transport: disk.Transport}) {
+			data.ExternalDisks = append(data.ExternalDisks, disk)
+		} else {
+			data.InternalDisks = append(data.InternalDisks, disk)
+		}
+	}
+	data.Disks = disks
+	if data.SelectedDisk == "" && len(disks) > 0 {
+		data.SelectedDisk = disks[0].Name
+	}
+	return data
+}

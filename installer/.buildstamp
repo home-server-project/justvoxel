@@ -1,0 +1,7 @@
+[Main]
+Product=JustVoxel
+Version=10
+IsFinal=True
+UUID=justvoxel-10.x86_64
+Variant=Installer
+BugURL=https://github.com/home-server-project/justvoxel

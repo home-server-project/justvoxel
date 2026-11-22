@@ -1,0 +1,434 @@
+#!/usr/bin/bash
+set -Eeuo pipefail
+source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/update-policy.sh
+require_root
+[[ ! -e ${JV_SETUP_IN_PROGRESS} && ! -L ${JV_SETUP_IN_PROGRESS} ]] || { echo 'ERROR: first-run Setup or its recovery is active.' >&2; exit 1; }
+exec 9>"${JV_MAINTENANCE_LOCK}"
+if ! flock -n 9; then
+    echo 'ERROR: another JustVoxel maintenance operation is already running.' >&2
+    exit 1
+fi
+[[ ${1:-} == --instance && $# -ge 2 ]] || { echo 'ERROR: --instance jv-... is required.' >&2; exit 2; }
+source /usr/libexec/justvoxel/mjust/instance-context.sh
+jv_load_instance "$2" || exit 1
+instance_args=(--instance "$2")
+shift 2
+switch_exact=${JUSTVOXEL_SWITCH_EXACT:-no}
+switch_preserve_content=${switch_exact}
+write_main_config() {
+    JUSTVOXEL_SWITCH_PRESERVE_CONTENT="${switch_preserve_content}" /usr/libexec/justvoxel/management-agent instance-version-publish "${JV_INSTANCE_ID}" "${MINECRAFT_SERVER_TYPE}" "${MINECRAFT_IMAGE_TAG}" "${MINECRAFT_VERSION}" "${MINECRAFT_VERSION_MODE}" "${JV_UPDATE_IMAGE_DIGEST:-${JV_INSTANCE_IMAGE_DIGEST}}"
+}
+render_runtime() { :; } # publication above uses the authoritative Go renderer
+
+old_image="${JV_INSTANCE_IMAGE_REF}"
+old_image_tag="${MINECRAFT_IMAGE_TAG}"
+target_image_tag="${old_image_tag}"
+source /usr/libexec/justvoxel/mjust/managed-crossplay.sh
+old_server_type="${MINECRAFT_SERVER_TYPE-paper}"
+case "${old_server_type}" in paper|purpur|pufferfish|leaf|vanilla|spigot) ;; *)
+    echo 'ERROR: server updates for this software require separate compatibility support.' >&2
+    exit 1 ;;
+esac
+target_server_type="${old_server_type}"
+target_policy="${MINECRAFT_VERSION_MODE}"
+target_version="${MINECRAFT_VERSION}"
+while [[ ${1:-} == --server-type || ${1:-} == --image-tag || ${1:-} == --policy || ${1:-} == --version ]]; do
+    (( $# >= 2 )) || exit 1
+    case "$1" in
+        --server-type) target_server_type="$2" ;;
+        --image-tag) target_image_tag="$2" ;;
+        --policy) target_policy="$2" ;;
+        --version) target_version="$2" ;;
+    esac
+    shift 2
+done
+[[ ${target_image_tag} =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || exit 1
+# Build only the fixed repository reference; configuration remains untouched.
+image="${JV_MINECRAFT_IMAGE_REPO}:${target_image_tag}"
+server_allows_in_place_switch "${old_server_type}" "${target_server_type}" || { echo 'ERROR: changing to/from Vanilla requires Minecraft reset and setup again.' >&2; exit 1; }
+status_args=("${instance_args[@]}")
+if [[ ${target_server_type} != "${old_server_type}" ]]; then status_args+=(--server-type "${target_server_type}"); fi
+if [[ ${target_image_tag} != "${old_image_tag}" ]]; then status_args+=(--image-tag "${target_image_tag}"); fi
+reviewed=no
+expected_fingerprint=''
+players_override=no
+if (( $# > 0 )); then
+    [[ $1 == --reviewed-stack && $# -ge 2 && $2 =~ ^sha256:[a-f0-9]{64}$ ]] || exit 1
+    reviewed=yes
+    expected_fingerprint="$2"
+    shift 2
+    if (( $# > 0 )); then
+        [[ $# == 1 && $1 == --confirm-players ]] || exit 1
+        players_override=yes
+    fi
+fi
+stack_plan="$(/usr/libexec/justvoxel/mjust/admin-version-status-json "${status_args[@]}" "${target_policy}" "${target_version}")"
+stack_state="$(jq -r '.stack_state' <<< "${stack_plan}")"
+if [[ ${reviewed} == yes ]]; then
+    [[ ${stack_state} == updates_available &&
+       $(jq -r '.plan_fingerprint' <<< "${stack_plan}") == "${expected_fingerprint}" &&
+       $(jq -r '.update_available' <<< "${stack_plan}") == true ]] || {
+        echo 'ERROR: the reviewed server update changed; review again.' >&2; exit 1;
+    }
+fi
+case "${stack_state}" in
+    up_to_date) echo 'Up to date; no maintenance needed.'; exit 0 ;;
+    waiting_for_compatibility)
+        echo 'Newer Minecraft is available, but released cross-play support is not ready yet. No action is needed.'; exit 0 ;;
+    updates_available)
+        [[ $(jq -r '.update_available' <<< "${stack_plan}") == true ]] || {
+            echo 'ERROR: server update information is unavailable; Minecraft was left untouched.' >&2; exit 1;
+        } ;;
+    *) echo 'ERROR: compatible server update information is unavailable; Minecraft was left untouched.' >&2; exit 1 ;;
+esac
+latest_mc="$(jq -r '.selected_candidate' <<< "${stack_plan}")"
+if [[ ${switch_exact} == yes ]]; then
+    [[ ${target_policy} == pinned && ${target_version} == "${latest_mc}" && ${latest_mc} == "$(jq -r '.installed' <<< "${stack_plan}")" ]] || { echo 'ERROR: Switch must preserve the exact installed Minecraft version; review again.' >&2; exit 1; }
+fi
+latest_image_release=''
+repin_game=no
+old_game_mode="${MINECRAFT_VERSION_MODE}"
+old_game_version="${MINECRAFT_VERSION}"
+old_managed_plugins="${BEDROCK_MANAGED_PLUGINS:-yes}"
+# Specific version remains explicit; Recommended follows verified compatibility.
+if [[ ${MINECRAFT_VERSION} != "${latest_mc}" ]]; then
+    repin_game=yes
+fi
+printf 'Minecraft: %s -> %s\n' "$(jq -r '.installed' <<< "${stack_plan}")" "${latest_mc}"
+printf 'Geyser: %s\nFloodgate: %s\n' \
+    "$(jq -r '.geyser_state' <<< "${stack_plan}")" "$(jq -r '.floodgate_state' <<< "${stack_plan}")"
+server_supports_viaversion && echo 'ViaVersion: Managed automatically'
+
+echo
+if [[ ${MINECRAFT_IMAGE_TAG} != stable && ${MINECRAFT_IMAGE_TAG} != latest ]]; then
+    latest_image_release="$(resolve_latest_itzg_release || true)"
+    echo "Container image tag is pinned/custom: ${MINECRAFT_IMAGE_TAG}"
+    [[ -n ${latest_image_release} ]] && echo "Latest upstream itzg image release: ${latest_image_release}"
+    echo 'mjust will check this exact tag for a rebuilt digest; use mjust configure to change tags.'
+    echo
+fi
+
+remote_digest="$(jv_remote_platform_digest "${image}" || true)"
+if [[ ! ${remote_digest} =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    echo "ERROR: could not resolve the remote platform digest for ${image}" >&2
+    exit 1
+fi
+
+[[ ${remote_digest} == "$(jq -r '.managed_image_digest' <<< "${stack_plan}")" ]] || {
+    echo 'ERROR: the reviewed image changed; review again.' >&2; exit 1;
+}
+
+target_registry_image="${image}"
+image="${JV_MINECRAFT_IMAGE_REPO}@${remote_digest}"
+JV_UPDATE_IMAGE_DIGEST="${remote_digest}"
+
+local_digest="$(podman image inspect "${old_image}" --format '{{.Digest}}' 2>/dev/null || true)"
+local_id="$(podman image inspect "${old_image}" --format '{{.Id}}' 2>/dev/null || true)"
+
+was_active=no
+running_id=''
+if systemctl is-active --quiet "${JV_INSTANCE_UNIT}"; then
+    was_active=yes
+    running_id="$(podman inspect "${JV_INSTANCE_CONTAINER}" --format '{{.Image}}' 2>/dev/null || true)"
+    [[ -n ${running_id} ]] || { echo 'ERROR: Minecraft service is active but running image identity is unknown.' >&2; exit 1; }
+fi
+
+target_local_digest="$(podman image inspect "${image}" --format '{{.Digest}}' 2>/dev/null || true)"
+target_local_id="$(podman image inspect "${image}" --format '{{.Id}}' 2>/dev/null || true)"
+
+if [[ -z ${target_local_id} ]]; then
+    state=image_missing
+    echo 'Minecraft container: configured image is not local and must be pulled'
+elif [[ ! ${target_local_digest} =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    echo 'ERROR: local Minecraft image exists but its platform digest is unknown.' >&2
+    exit 1
+elif [[ ${remote_digest} != ${target_local_digest} ]]; then
+    state=update_available
+    echo 'Minecraft container: UPDATE AVAILABLE for the configured tag'
+elif [[ ${was_active} == yes && ${running_id} != ${target_local_id} ]]; then
+    state=restart_needed
+    echo 'Minecraft container: selected local image differs from the running image; restart is needed'
+else
+    state=current
+    echo 'Minecraft container: CURRENT for the configured tag'
+fi
+
+echo "Remote platform digest: ${remote_digest}"
+[[ -n ${local_digest} ]] && echo "Local platform digest:  ${local_digest}"
+[[ -n ${running_id} ]] && echo "Running image ID:       ${running_id}"
+
+query_players() {
+    podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli 'list' 2>/dev/null || true
+}
+
+approve_online_players() {
+    local players="$1"
+    echo "${players}"
+    if grep -q 'There are 0 of' <<< "${players}"; then
+        return 0
+    fi
+    echo 'Players appear to be online.'
+    echo 'If you continue, Minecraft will use the player-aware 60-second in-game shutdown countdown.'
+    if [[ ${players_override} == yes ]] || { [[ ${reviewed} != yes ]] && confirm 'Continue with maintenance anyway?'; }; then
+        players_override=yes
+        return 0
+    fi
+    echo 'Update cancelled; Minecraft was left untouched.'
+    [[ ${reviewed} != yes ]] || exit 1
+    exit 0
+}
+
+old_local_id="${local_id}"
+old_running_id="${running_id}"
+maintenance_started=no
+config_only=no
+game_config_changed=no
+component_staging="$(mktemp -d)"
+
+cleanup() {
+    local result=$? recovery_ok=yes
+    trap - EXIT
+    if (( result != 0 )) && [[ ${maintenance_started} == yes ]]; then
+        # Never replace JARs underneath a running failed runtime.
+        if [[ ${config_only} == yes ]]; then
+            MINECRAFT_VERSION_MODE="${old_game_mode}"
+            MINECRAFT_VERSION="${old_game_version}"
+            MINECRAFT_SERVER_TYPE="${old_server_type}"
+            MINECRAFT_IMAGE_TAG="${old_image_tag}"
+            JV_UPDATE_IMAGE_DIGEST="${JV_INSTANCE_IMAGE_DIGEST}"
+            if ! write_main_config || ! render_runtime; then recovery_ok=no; fi
+            if [[ ${was_active} == yes && $(podman inspect "${JV_INSTANCE_CONTAINER}" --format '{{.Image}}' 2>/dev/null || true) != "${old_running_id}" ]]; then recovery_ok=no; fi
+            if [[ ${was_active} != yes ]] && systemctl is-active --quiet "${JV_INSTANCE_UNIT}"; then recovery_ok=no; fi
+            if [[ ${was_active} == yes ]] && ! JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack "${instance_args[@]}" "${old_game_version}"; then recovery_ok=no; fi
+        elif ! systemctl stop "${JV_INSTANCE_UNIT}"; then
+            echo 'ERROR: Minecraft could not be stopped for rollback; operation requires attention.' >&2
+            recovery_ok=no
+        else
+            if ! jv_crossplay_rollback "${component_staging}"; then
+                echo 'ERROR: managed Geyser/Floodgate rollback failed; previous runtime was not restored; operation requires attention.' >&2
+                recovery_ok=no
+            fi
+            BEDROCK_MANAGED_PLUGINS="${old_managed_plugins}"
+            MINECRAFT_SERVER_TYPE="${old_server_type}"
+            MINECRAFT_IMAGE_TAG="${old_image_tag}"
+            JV_UPDATE_IMAGE_DIGEST="${JV_INSTANCE_IMAGE_DIGEST}"
+            MINECRAFT_VERSION_MODE="${old_game_mode}"
+            MINECRAFT_VERSION="${old_game_version}"
+            # A failed Switch must restart the original at the same game version
+            # and preserve content even if failure preceded target publication.
+            if [[ ${switch_exact} == yes ]]; then MINECRAFT_VERSION="${latest_mc}"; fi
+            if [[ ${game_config_changed} == yes || ${switch_exact} == yes ]]; then
+                if write_main_config; then game_config_changed=yes; else recovery_ok=no; fi
+            fi
+            if ! render_runtime; then recovery_ok=no; fi
+            if [[ -n ${old_running_id:-${old_local_id}} && $(podman image inspect "${old_image}" --format '{{.Id}}' 2>/dev/null || true) != "${old_running_id:-${old_local_id}}" ]]; then recovery_ok=no; fi
+            if [[ ${was_active} != yes ]] && systemctl is-active --quiet "${JV_INSTANCE_UNIT}"; then recovery_ok=no; fi
+            # The start helper would recreate absent managed JARs. Keep the exact
+            # restored state and require attention when that restart is unsafe.
+            if [[ ${was_active} == yes && ${BEDROCK_ENABLED} == yes &&
+                  -f ${component_staging}/replacement-started &&
+                  ( -f ${component_staging}/previous/geyser.absent || -f ${component_staging}/previous/floodgate.absent ) ]]; then
+                echo 'ERROR: the previous managed pair was incomplete; Minecraft cannot safely restart without changing the restored JAR state.' >&2
+                recovery_ok=no
+            fi
+            if [[ ${recovery_ok} == yes && ${was_active} == yes ]]; then
+                if ! systemctl start "${JV_INSTANCE_UNIT}" || ! wait_for_rcon 900 || [[ $(podman inspect "${JV_INSTANCE_CONTAINER}" --format '{{.Image}}' 2>/dev/null || true) != "${old_running_id:-${old_local_id}}" ]] || ! JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack "${instance_args[@]}" "${old_game_version}"; then recovery_ok=no; fi
+            fi
+        fi
+        if [[ ${recovery_ok} != yes ]]; then
+            echo "ERROR: previous runtime recovery is incomplete; operation requires attention. Recovery files: ${component_staging}" >&2
+        fi
+    fi
+    if [[ ${switch_exact} == yes && ${game_config_changed} == yes && ${recovery_ok} == yes ]]; then
+        switch_preserve_content=no
+        if ! write_main_config; then recovery_ok=no; result=1; fi
+    fi
+    if [[ ${recovery_ok} == yes ]]; then rm -rf -- "${component_staging}"; fi
+    exit "${result}"
+}
+trap cleanup EXIT
+
+# A tag-only alias of the verified runtime needs a definition change, not downtime.
+if [[ ${target_server_type} == "${old_server_type}" &&
+      $(jq -r '.runtime_update_required' <<< "${stack_plan}") == false ]]; then
+    current_plan="$(/usr/libexec/justvoxel/mjust/admin-version-status-json "${status_args[@]}" "${target_policy}" "${target_version}")"
+    [[ $(jq -r '.plan_fingerprint' <<< "${current_plan}") == "$(jq -r '.plan_fingerprint' <<< "${stack_plan}")" ]] || {
+        echo 'ERROR: server update plan changed; review again.' >&2; exit 1;
+    }
+    verified_id="${old_running_id:-${old_local_id}}"
+    [[ -n ${verified_id} && $(podman image inspect "${verified_id}" --format '{{.Digest}}' 2>/dev/null || true) == "${remote_digest}" ]] || {
+        echo 'ERROR: current Minecraft image cannot be verified; review again.' >&2; exit 1;
+    }
+    if [[ ${was_active} == yes ]]; then
+        JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack "${instance_args[@]}" "${latest_mc}"
+    fi
+    if [[ ${reviewed} != yes ]] && ! confirm 'Save the verified container channel?'; then
+        echo 'Update cancelled.'
+        exit 0
+    fi
+    config_only=yes
+    maintenance_started=yes
+    game_config_changed=yes
+    MINECRAFT_IMAGE_TAG="${target_image_tag}"
+    MINECRAFT_VERSION_MODE="${target_policy}"
+    MINECRAFT_VERSION="${latest_mc}"
+    write_main_config
+    render_runtime
+    [[ $(podman image inspect "${image}" --format '{{.Id}}' 2>/dev/null || true) == "${verified_id}" ]] || exit 1
+    if [[ ${was_active} == yes ]]; then
+        [[ $(podman inspect "${JV_INSTANCE_CONTAINER}" --format '{{.Image}}' 2>/dev/null || true) == "${old_running_id}" ]] || exit 1
+        JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack "${instance_args[@]}" "${latest_mc}"
+    else
+        ! systemctl is-active --quiet "${JV_INSTANCE_UNIT}" || exit 1
+    fi
+    echo 'Container channel saved; verified runtime is unchanged.'
+    exit 0
+fi
+
+if [[ ${was_active} == yes ]]; then
+    echo 'Checking players through RCON.'
+    players="$(query_players)"
+    if [[ -z ${players} ]]; then
+        echo 'ERROR: could not confirm player status. Leaving Minecraft untouched.' >&2
+        exit 1
+    fi
+    approve_online_players "${players}"
+fi
+
+if [[ ${reviewed} != yes ]] && ! confirm 'Create a cold backup and apply the selected Minecraft maintenance?'; then
+    echo 'Update cancelled.'
+    exit 0
+fi
+
+# Resolve and verify downloads while the good runtime is still untouched.
+if [[ ${BEDROCK_ENABLED} == yes && ${switch_exact} != yes ]]; then
+    jv_crossplay_prepare "${component_staging}"
+    for project in geyser floodgate; do
+        [[ $(jq -cS ".managed_artifacts.${project}" <<< "${stack_plan}") == "$(jq -cS . "${component_staging}/${project}.json")" ]] || {
+            echo 'ERROR: cross-play releases changed during preparation; review again.' >&2; exit 1;
+        }
+    done
+fi
+current_plan="$(/usr/libexec/justvoxel/mjust/admin-version-status-json "${status_args[@]}" "${target_policy}" "${target_version}")"
+[[ $(jq -r '.plan_fingerprint' <<< "${current_plan}") == "$(jq -r '.plan_fingerprint' <<< "${stack_plan}")" &&
+   $(jq -r '.stack_state' <<< "${current_plan}") == updates_available &&
+   $(jq -r '.update_available' <<< "${current_plan}") == true ]] || {
+    echo 'ERROR: server update plan changed before shutdown; review again.' >&2; exit 1;
+}
+
+if systemctl is-active --quiet "${JV_INSTANCE_UNIT}"; then
+    echo 'Final player check immediately before the graceful stop.'
+    players="$(query_players)"
+    if [[ -z ${players} ]]; then
+        echo 'ERROR: player state became unknown. Update cancelled.' >&2
+        exit 1
+    fi
+    echo "${players}"
+    if ! grep -q 'There are 0 of' <<< "${players}" && [[ ${players_override} != yes ]]; then
+        echo 'A player joined after the first check.'
+        echo 'Continuing will use the player-aware 60-second in-game shutdown countdown.'
+        if [[ ${reviewed} != yes ]] && confirm 'Continue anyway?'; then
+            players_override=yes
+        else
+            echo 'Update cancelled; Minecraft was left untouched.'
+            [[ ${reviewed} != yes ]] || exit 1
+            exit 0
+        fi
+    fi
+fi
+
+maintenance_started=yes
+echo 'Creating pre-update cold backup.'
+if [[ ${switch_exact} == yes ]]; then
+    JUSTVOXEL_SWITCH_BACKUP_VERSION="${latest_mc}" /usr/libexec/justvoxel/management-agent instance-version-backup "${JV_INSTANCE_ID}"
+else
+    /usr/libexec/justvoxel/management-agent instance-version-backup "${JV_INSTANCE_ID}"
+fi
+if [[ ${switch_exact} == yes ]]; then
+    /usr/libexec/justvoxel/management-agent instance-switch-content-verify "${JV_INSTANCE_ID}" "${target_server_type}" "${latest_mc}" "${JUSTVOXEL_SWITCH_CONTENT:-}"
+fi
+
+if [[ ${state} == update_available || ${state} == image_missing ]]; then
+    echo "Pulling ${image}"
+    podman pull "${image}"
+fi
+
+new_local_id="$(podman image inspect "${image}" --format '{{.Id}}' 2>/dev/null || true)"
+new_local_digest="$(podman image inspect "${image}" --format '{{.Digest}}' 2>/dev/null || true)"
+[[ -n ${new_local_id} ]] || { echo 'ERROR: selected Minecraft image is still not available locally.' >&2; exit 1; }
+[[ ${new_local_digest} =~ ^sha256:[0-9a-f]{64}$ ]] || { echo 'ERROR: selected local Minecraft platform digest is unknown.' >&2; exit 1; }
+
+# Refresh the remote digest after pulling so a tag that moved during maintenance
+# is compared against its current platform manifest rather than a stale index.
+remote_digest_after="$(jv_remote_platform_digest "${target_registry_image}" || true)"
+[[ ${remote_digest_after} =~ ^sha256:[0-9a-f]{64}$ ]] || { echo 'ERROR: could not re-check the remote Minecraft platform digest.' >&2; exit 1; }
+if [[ ${new_local_digest} != "${remote_digest_after}" || ${new_local_digest} != "$(jq -r '.managed_image_digest' <<< "${stack_plan}")" ]]; then
+    echo 'ERROR: pulled Minecraft image does not match the current remote platform digest.' >&2
+    echo "Remote platform digest: ${remote_digest_after}" >&2
+    echo "Local platform digest:  ${new_local_digest}" >&2
+    exit 1
+fi
+remote_digest="${remote_digest_after}"
+
+MINECRAFT_SERVER_TYPE="${target_server_type}"
+MINECRAFT_IMAGE_TAG="${target_image_tag}"
+MINECRAFT_VERSION_MODE="${target_policy}"
+if [[ ${repin_game} == yes ]]; then
+    MINECRAFT_VERSION="${latest_mc}"
+fi
+# Commit software and channel in the existing atomic configuration write.
+if [[ ${BEDROCK_ENABLED} == yes ]]; then BEDROCK_MANAGED_PLUGINS=yes; fi
+game_config_changed=yes
+write_main_config
+if [[ ${BEDROCK_ENABLED} == yes && ${switch_exact} != yes ]]; then
+    jv_crossplay_install "${component_staging}"
+    jv_crossplay_verify "${component_staging}"
+fi
+render_runtime
+
+# A startup pass refreshes ViaVersion through the existing Modrinth integration.
+# Stopped servers start temporarily for verification, then return to stopped.
+systemctl start "${JV_INSTANCE_UNIT}"
+if ! wait_for_rcon 900; then
+    echo 'ERROR: Minecraft did not become ready after the update.' >&2
+    echo "Previous image ID retained for rollback: ${old_running_id:-${old_local_id:-unknown}}" >&2
+    exit 1
+fi
+
+new_running_id="$(podman inspect "${JV_INSTANCE_CONTAINER}" --format '{{.Image}}' 2>/dev/null || true)"
+if [[ ${new_running_id} != ${new_local_id} ]]; then
+    echo 'ERROR: Minecraft is not running the newly selected local image.' >&2
+    exit 1
+fi
+
+JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack "${instance_args[@]}" "${latest_mc}"
+if [[ ${BEDROCK_ENABLED} == yes ]]; then
+    jv_crossplay_verify "${component_staging}"
+fi
+
+if [[ ${was_active} != yes ]]; then
+    systemctl stop "${JV_INSTANCE_UNIT}"
+fi
+
+candidate_previous_id=''
+if [[ -n ${old_running_id} && ${old_running_id} != ${new_local_id} ]]; then
+    candidate_previous_id="${old_running_id}"
+elif [[ -n ${old_local_id} && ${old_local_id} != ${new_local_id} ]]; then
+    candidate_previous_id="${old_local_id}"
+fi
+
+if [[ -n ${candidate_previous_id} ]]; then
+    install -d -m0700 -o root -g root "${JV_STATE_DIR}"
+    # Images are shared cache objects. Retiring one instance's previous image
+    # must not remove an image still referenced by a stopped sibling's runtime.
+    tmp_state="$(mktemp "${JV_STATE_DIR}/.minecraft-previous-image.XXXXXX")"
+    printf '%s\n' "${candidate_previous_id}" > "${tmp_state}"
+    chmod 0600 "${tmp_state}"
+    mv -f "${tmp_state}" "${JV_STATE_DIR}/minecraft-${JV_INSTANCE_ID}-previous-image-id"
+    echo "Previous Minecraft image retained for rollback: ${candidate_previous_id}"
+fi
+
+rm -rf -- "${component_staging}"
+trap - EXIT
+echo "Minecraft maintenance completed and runtime verified. Platform digest: ${new_local_digest}"

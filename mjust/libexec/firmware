@@ -1,0 +1,73 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/system-actions-api.sh
+
+if (( EUID != 0 )); then
+    echo 'ERROR: this operation must run as root.' >&2
+    exit 1
+fi
+
+status="$(jv_system_actions_get)" || exit 1
+if ! jq -e '.ok == true and (.firmware | type == "object")' <<<"${status}" >/dev/null 2>&1; then
+    echo 'ERROR: JustVoxel Management API returned invalid firmware status.' >&2
+    exit 1
+fi
+
+if [[ $(jq -r '.firmware.available' <<<"${status}") != true ]]; then
+    reason="$(jq -r '.firmware.reason // "unavailable"' <<<"${status}")"
+    case "${reason}" in
+        not_hws)
+            echo 'Firmware setup is available on JustVoxel HWS only.'
+            echo 'For a JustVoxel VM, manage firmware/UEFI through the hypervisor.'
+            ;;
+        not_efi)
+            echo 'ERROR: this machine is not currently booted through EFI; firmware-setup reboot is unavailable.' >&2
+            ;;
+        *)
+            echo 'ERROR: system firmware setup reboot is unavailable on this machine.' >&2
+            ;;
+    esac
+    exit 1
+fi
+
+case "$(jq -r '.firmware.display_state // "unknown"' <<<"${status}")" in
+    connected)
+        echo 'Display: connected'
+        echo 'Firmware setup reboot is supported.'
+        ;;
+    disconnected)
+        echo 'WARNING: no connected display was detected.'
+        echo 'Firmware setup may leave this machine waiting at a local firmware screen'
+        echo 'that cannot be used over SSH.'
+        ;;
+    *)
+        echo 'WARNING: display state is unknown.'
+        echo 'JustVoxel cannot reliably confirm that a local display is available.'
+        echo 'Continue only if you can access the machine locally.'
+        ;;
+esac
+
+echo
+read -r -p 'Reboot into firmware / UEFI setup? [y/N]: ' answer
+if [[ ${answer,,} != y && ${answer,,} != yes ]]; then
+    echo 'Firmware reboot cancelled.'
+    exit 0
+fi
+
+response="$(jv_system_actions_apply firmware-reboot false)" || exit 1
+set +e
+response="$(jv_system_actions_handle_players firmware-reboot "${response}" 'Reboot into firmware setup')"
+rc=$?
+set -e
+if (( rc == 20 )); then
+    exit 0
+elif (( rc != 0 )); then
+    exit "${rc}"
+fi
+
+if [[ $(jq -r '.ok // false' <<<"${response}") != true || $(jq -r '.accepted // false' <<<"${response}") != true ]]; then
+    jv_system_actions_api_error "${response}" 'Firmware reboot was not accepted.'
+    exit 1
+fi
+message="$(jq -r '.message // empty' <<<"${response}")"
+[[ -n ${message} ]] && echo "${message}"

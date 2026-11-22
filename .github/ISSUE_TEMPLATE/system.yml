@@ -1,0 +1,109 @@
+name: System problem
+description: Problem with JustVoxel itself, system services, hardware, storage, networking, or other system functionality.
+title: "[System]: "
+body:
+  - type: checkboxes
+    id: existing-issues
+    attributes:
+      label: Existing issues
+      options:
+        - label: I searched the existing issues in this repository for this problem.
+          required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - System Settings
+        - System Monitor
+        - System Update
+        - System Network
+        - Storage
+        - File Browser
+        - Terminal
+        - AI & API Connections
+        - WebUI / Control Center
+        - UPS
+        - Private access / VPN
+        - Other system issue
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Please clearly describe the problem you ran into.
+    validations:
+      required: true
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: steps-to-reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Tell us what you clicked or did before the problem happened.
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: |
+        ### Support Report
+
+        In JustVoxel open:
+
+        Control Center -> System Settings -> Logs -> Support -> Generate support report
+
+        JustVoxel generates the report locally. Download the generated report and manually attach it to this issue below.
+        If you cannot generate it, choose the matching status. You can still submit this issue without a report.
+  - type: dropdown
+    id: support-report-status
+    attributes:
+      label: Support report status
+      description: If you choose another reason, explain it in Anything else below.
+      options:
+        - I attached the Support Report below
+        - I cannot generate it because the WebUI is unavailable
+        - I cannot generate it because the system will not boot
+        - I cannot generate it for another reason explained below
+    validations:
+      required: true
+  - type: upload
+    id: support-report
+    attributes:
+      label: Support Report
+    validations:
+      required: false
+      accept: ".log,.txt"
+  - type: markdown
+    attributes:
+      value: |
+        ### Additional diagnostics
+
+        When available, also attach the matching JustVoxel diagnostic:
+
+        - System Network or Private access / VPN -> generate and attach the Network Report
+        - System Update -> latest Update log
+        - Storage -> relevant Migration log if the failure happened during a storage/data migration
+
+        For other system problems, the Support Report is normally enough unless a maintainer asks for more.
+  - type: upload
+    id: additional-diagnostic
+    attributes:
+      label: Additional diagnostic or screenshot
+    validations:
+      required: false
+      accept: ".log,.txt,.png,.jpg,.jpeg,.gif,.webp"
+  - type: textarea
+    id: anything-else
+    attributes:
+      label: Anything else?
+    validations:
+      required: false

@@ -1,0 +1,306 @@
+const memoryPanel = document.querySelector("[data-memory-settings]");
+if (memoryPanel) {
+  const containerOnly = memoryPanel.dataset.memoryMode === "container";
+  const gameMemory = document.getElementById("java-memory");
+  const maxMemory = document.getElementById("container-memory");
+  const maxPlayers = document.getElementById("max-players");
+  const status = document.getElementById("memory-status");
+  const buttons = Array.from(memoryPanel.querySelectorAll("[data-memory-preset]"));
+  const totalMiB = Number(memoryPanel.dataset.systemMemoryMib || 0);
+  const minimumReserveMiB = Number(memoryPanel.dataset.minReserveMib || 1024);
+  const recommendedReserveMiB = Number(memoryPanel.dataset.recommendedReserveMib || 1536);
+
+  const parseMemoryMiB = (value) => {
+    const match = String(value || "").trim().match(/^([1-9][0-9]*)([mMgG])$/);
+    if (!match) return 0;
+    const amount = Number(match[1]);
+    return match[2].toUpperCase() === "G" ? amount * 1024 : amount;
+  };
+
+  const memoryValue = (mib) => {
+    if (mib % 1024 === 0) return `${mib / 1024}G`;
+    return `${mib}M`;
+  };
+
+  const formatRemaining = (mib) => {
+    if (mib >= 1024) return `${(mib / 1024).toFixed(mib % 1024 === 0 ? 0 : 1)} GB`;
+    return `${Math.max(0, Math.round(mib))} MB`;
+  };
+
+  const markPreset = (name) => {
+    buttons.forEach((button) => button.classList.toggle("is-selected", button.dataset.memoryPreset === name));
+  };
+
+  const updateStatus = () => {
+    if (!status || !maxMemory) return;
+    const maximumMiB = parseMemoryMiB(maxMemory.value);
+    status.classList.remove("warning", "danger");
+    if (!totalMiB) {
+      status.textContent = jvT("ui.1ff4a1e67aae");
+      status.classList.add("warning");
+      return;
+    }
+    if (!maximumMiB) {
+      status.textContent = jvT("ui.e9efdcb72877");
+      status.classList.add("warning");
+      return;
+    }
+    const otherMemoryMiB = Number(memoryPanel.dataset.otherMemoryMib || 0);
+    const remaining = totalMiB - maximumMiB;
+    if (remaining < minimumReserveMiB) {
+      status.textContent = jvT("ui.f48134d2c849", {v0: (formatRemaining(remaining))});
+      status.classList.add("danger");
+    } else if (otherMemoryMiB > 0 && remaining - otherMemoryMiB < minimumReserveMiB) {
+      status.textContent = jvT("ui.93dab088e9c4", {v0: (formatRemaining(otherMemoryMiB))});
+      status.classList.add("warning");
+    } else if (remaining < recommendedReserveMiB) {
+      status.textContent = jvT("ui.40d2cf5cc58b", {v0: (formatRemaining(remaining))});
+      status.classList.add("warning");
+    } else {
+      status.textContent = jvT("ui.07b31ffcb6cd", {v0: (formatRemaining(remaining))});
+    }
+  };
+
+  const presetValues = (name) => {
+    // Match suggest_memory_values: round the sizing class, not the reserve.
+    const totalGiB = totalMiB > 0 ? Math.round(totalMiB / 1024) : 8;
+
+    let baseRecommended, baseMaximum;
+    if (totalGiB >= 16) { baseRecommended = 6; baseMaximum = 8; }
+    else if (totalGiB >= 8) { baseRecommended = 4; baseMaximum = 6; }
+    else if (totalGiB >= 6) { baseRecommended = 3; baseMaximum = 4; }
+    else if (totalGiB >= 4) { baseRecommended = 2; baseMaximum = 3; }
+    else { baseRecommended = 1; baseMaximum = 2; }
+
+    let heapGiB = baseRecommended;
+    if (name === "light") heapGiB = Math.max(2, baseRecommended - 2);
+    if (name === "high") heapGiB = Math.min(14, baseRecommended + 2);
+    let heapMiB = heapGiB * 1024;
+    let maximumMiB = (name === "recommended" ? baseMaximum : heapGiB + (heapGiB >= 4 ? 2 : 1)) * 1024;
+
+    if (totalMiB > 0) {
+      const allowedMaximumMiB = Math.floor(totalMiB - Math.max(1024, minimumReserveMiB));
+      if (allowedMaximumMiB < 1024) return null;
+      // High retains whole-GiB sizing; Recommended and Light can use MiB
+      // precision to preserve their heap despite firmware/kernel reservations.
+      const limitMiB = name === "high" && allowedMaximumMiB >= 2048
+        ? Math.floor(allowedMaximumMiB / 1024) * 1024 : allowedMaximumMiB;
+      maximumMiB = Math.min(maximumMiB, limitMiB);
+      if (heapMiB > maximumMiB - 512) {
+        heapMiB = maximumMiB >= 2048 ? maximumMiB - 1024 : Math.floor(maximumMiB / 2);
+      }
+    }
+
+    return { heapMiB, maximumMiB };
+  };
+
+  const detectPreset = () => {
+    const matching = ["recommended", "light", "high"].find((name) => {
+      const values = presetValues(name);
+      return values && (containerOnly || parseMemoryMiB(gameMemory?.value) === values.heapMiB) &&
+        parseMemoryMiB(maxMemory?.value) === values.maximumMiB;
+    });
+    markPreset(matching || "custom");
+  };
+
+  const applyPreset = (name) => {
+    if (name === "custom") {
+      markPreset("custom");
+      if (containerOnly) maxMemory?.focus();
+      else if (gameMemory) gameMemory.focus();
+      updateStatus();
+      return;
+    }
+    if ((!containerOnly && !gameMemory) || !maxMemory) return;
+    const values = presetValues(name);
+    if (!values) return;
+    if (!containerOnly) gameMemory.value = memoryValue(values.heapMiB);
+    maxMemory.value = memoryValue(values.maximumMiB);
+    markPreset(name);
+    updateStatus();
+  };
+
+  buttons.forEach((button) => {
+    button.addEventListener("click", () => applyPreset(button.dataset.memoryPreset));
+  });
+
+  [gameMemory, maxMemory].forEach((input) => {
+    if (!input) return;
+    const memoryChanged = () => {
+      detectPreset();
+      updateStatus();
+    };
+    input.addEventListener("input", memoryChanged);
+    input.addEventListener("change", memoryChanged);
+  });
+
+  if (maxPlayers) {
+    maxPlayers.addEventListener("change", () => {
+      detectPreset();
+      updateStatus();
+    });
+  }
+
+  detectPreset();
+  updateStatus();
+}
+
+const versionPolicy = document.getElementById("version-policy");
+const versionInput = document.getElementById("minecraft-version");
+const specificVersionField = document.getElementById("specific-version-field");
+if (versionPolicy && versionInput && specificVersionField) {
+  const form = versionPolicy.closest("form");
+  const preview = document.getElementById("setup-version-preview");
+  const next = form?.querySelector('button[name="direction"][value="next"]');
+  let sequence = 0;
+  let timer;
+  const channelLabel = (channel) => ({ STABLE: jvT("ui.90ee305714d7"), BETA: jvT("ui.703390318bd5"), ALPHA: jvT("ui.b1a96dd646bc"), RELEASE: jvT("ui.e020e3c67bd0") })[channel] || channel || jvT("ui.ca1844969742");
+  const show = (status, policy) => {
+    const make = (tag, className, value) => {
+      const node = document.createElement(tag);
+      node.className = className;
+      node.textContent = value;
+      return node;
+    };
+    const toggle = form.querySelector("[data-bedrock-toggle]");
+    const software = form.dataset?.serverType;
+    const javaOnly = ["vanilla", "forge", "quilt"].includes(software);
+    const incompatible = !!status.selected_candidate && status.managed_crossplay_available === true && status.crossplay_compatible === false;
+    const crossplayEnabled = status.crossplay_enabled && !javaOnly && !incompatible;
+    if (toggle) {
+      toggle.disabled = javaOnly || incompatible;
+      if (toggle.disabled) toggle.checked = false;
+    }
+    const summary = make("div", "notice " + (status.selected_candidate ? "success" : "warning") + " setup-version-panel", "");
+    summary.append(make("span", "setup-version-kicker", policy === "recommended" ? "Recommended" : policy === "latest" ? jvT("ui.8730d3c2022a") : jvT("ui.0b85c4d8a4ba")));
+    if (status.selected_candidate) {
+      summary.append(make("strong", "setup-version-candidate", status.selected_candidate));
+      summary.append(make("span", "setup-version-note", jvT("ui.f8105739960e", {v0: (channelLabel(status.candidate_channel))})));
+    } else {
+      summary.append(make("p", "setup-version-explanation", status.reason || jvT("ui.6cd62188f456")));
+    }
+    preview.replaceChildren(summary);
+    if (status.selected_candidate && status.reason && (!crossplayEnabled || status.crossplay_compatible)) {
+      preview.append(make("div", "notice warning setup-version-panel setup-version-explanation", status.reason));
+    }
+    const compatibility = make("div", "notice " + (!crossplayEnabled || status.crossplay_compatible ? "success" : "warning") + " setup-version-compatibility", "");
+    const supported = status.geyser_supported_version;
+    const selected = status.selected_candidate;
+    let message;
+    if (javaOnly) {
+      message = jvT("ui.869dd17f477a");
+    } else if (crossplayEnabled && status.crossplay_compatible) {
+      message = jvT("ui.a4582db875ce", {v0: (selected)});
+    } else if (!supported) {
+      message = jvT("ui.a8522a0e572f");
+    } else {
+      message = jvT("ui.463ab0c37dc9", {v0: (supported)});
+      if (selected && selected !== supported) {
+        message += jvT("ui.371159f2be05", {v0: (selected)});
+      } else if (!crossplayEnabled) {
+        const runtime = software === "fabric" ? "Fabric" : software === "neoforge" ? "NeoForge" : "";
+        message += runtime ? jvT("ui.d50bb83fdfbd", {v0: (runtime)}) : jvT("ui.8e590792a1f3");
+      } else {
+        message += " " + (status.reason || jvT("ui.3a1f60bff938"));
+      }
+    }
+    compatibility.append(make("p", "", message));
+    if (crossplayEnabled && !status.crossplay_compatible) compatibility.append(make("p", "", jvT("ui.c144eefdf05c")));
+    preview.append(compatibility);
+    next.disabled = !status.selected_candidate || (crossplayEnabled && !status.crossplay_compatible);
+  };
+  const showNotice = (message, severity = "") => {
+    const panel = document.createElement("div");
+    panel.className = "notice " + severity + " setup-version-panel";
+    const title = document.createElement("span");
+    title.className = "setup-version-kicker";
+    title.textContent = versionPolicy.value === "recommended" ? jvT("ui.d70604e84304") : versionPolicy.value === "latest" ? jvT("ui.8730d3c2022a") : jvT("ui.0b85c4d8a4ba");
+    const explanation = document.createElement("p");
+    explanation.className = "setup-version-explanation";
+    explanation.textContent = message;
+    panel.append(title, explanation);
+    preview.replaceChildren(panel);
+  };
+  const refresh = async () => {
+    const ticket = ++sequence;
+    next.disabled = true;
+    showNotice(jvT("ui.c193a42f50aa"));
+    const policy = versionPolicy.value;
+    const version = policy === "pinned" ? versionInput.value.trim() : "";
+    if (policy === "pinned" && !version) { showNotice(jvT("ui.77012c65b90d"), "warning"); return; }
+    try {
+      const response = await fetch((form?.dataset.versionPreviewUrl || "/setup/version-preview") + "?" + new URLSearchParams({ policy, version, bedrock_enabled: form?.querySelector("[data-bedrock-toggle]")?.checked ? "on" : "off" }), { credentials: "same-origin", cache: "no-store" });
+      if (!response.ok) throw new Error();
+      const status = await response.json();
+      if (ticket === sequence) show(status, policy);
+    } catch (_) { if (ticket === sequence) showNotice(jvT("ui.6b1be7716cd4"), "error"); }
+  };
+  const updateVersionHelp = () => {
+    const specific = versionPolicy.value === "pinned";
+    specificVersionField.hidden = !specific;
+    versionInput.required = specific;
+    versionInput.readOnly = !specific;
+    if (!specific) versionInput.value = "";
+    refresh();
+  };
+  form?.querySelector("[data-bedrock-toggle]")?.addEventListener("change", refresh);
+  versionPolicy.addEventListener("change", updateVersionHelp);
+  versionInput.addEventListener("input", () => { clearTimeout(timer); ++sequence; next.disabled = true; showNotice(jvT("ui.c193a42f50aa")); timer = setTimeout(refresh, 300); });
+  form?.addEventListener("submit", (event) => { if (event.submitter?.value === "next" && next.disabled) event.preventDefault(); });
+  updateVersionHelp();
+}
+
+if (window.location.hash === "#review") {
+  const review = document.getElementById("review");
+  if (review) review.scrollIntoView({ block: "start" });
+}
+
+
+const imageChannel = document.getElementById("image-channel");
+const imageTag = document.getElementById("image-tag");
+const customImageTagField = document.getElementById("custom-image-tag-field");
+const customImageTag = document.getElementById("custom-image-tag");
+if (imageChannel && imageTag && customImageTagField && customImageTag) {
+  const syncImageChannel = () => {
+    const custom = imageChannel.value === "custom";
+    customImageTagField.hidden = !custom;
+    if (custom) {
+      imageTag.value = customImageTag.value.trim();
+      customImageTag.required = true;
+    } else {
+      imageTag.value = imageChannel.value;
+      customImageTag.required = false;
+    }
+  };
+  imageChannel.addEventListener("change", () => {
+    syncImageChannel();
+    if (imageChannel.value === "custom") customImageTag.focus();
+  });
+  customImageTag.addEventListener("input", syncImageChannel);
+  syncImageChannel();
+}
+
+
+
+const setupConnections = document.querySelector("[data-setup-connections]");
+if (setupConnections) {
+  const bedrockToggle = setupConnections.querySelector("[data-bedrock-toggle]");
+  const bedrockPortField = setupConnections.querySelector("[data-bedrock-port-field]");
+  const syncBedrockPort = () => {
+    if (bedrockPortField) {
+      const enabled = !!bedrockToggle?.checked;
+      bedrockPortField.classList.toggle("is-disabled", !enabled);
+      // Preserve submission of the existing port while cross-play is off.
+      const port = bedrockPortField.querySelector("input");
+      if (port) { port.readOnly = !enabled; port.setAttribute("aria-disabled", String(!enabled)); }
+    }
+  };
+  bedrockToggle?.addEventListener("change", syncBedrockPort);
+  syncBedrockPort();
+}
+
+// These buttons reflect form selection only; the server owns every state transition.
+for (const form of document.querySelectorAll("[data-simple-setup]")) {
+  const next = form.querySelector("[data-simple-next]");
+  if (next) form.addEventListener("change", () => { next.disabled = !form.querySelector('input[type="radio"]:checked:not(:disabled)'); });
+}

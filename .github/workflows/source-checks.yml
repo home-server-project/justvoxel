@@ -1,0 +1,111 @@
+name: Appliance source checks
+on: workflow_call
+permissions:
+  contents: read
+jobs:
+  source-tests:
+    name: Source tests
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Go for WebUI source tests
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: ".go-version"
+          cache: false
+
+      - name: Install source-test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ripgrep podman
+
+      - name: Run shell and mjust regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          syntax_failures=()
+          test_failures=()
+          test_count=0
+          check_syntax() {
+            local script="$1" shebang
+            shebang="$(head -n 1 "${script}")" || return 1
+            if [[ "${shebang}" =~ ^'#!'[[:space:]]*([^[:space:]]*/)?(env[[:space:]]+)?python3([.][0-9]+)?([[:space:]]|$) ]]; then
+              python3 -B -c 'import ast, pathlib, sys; ast.parse(pathlib.Path(sys.argv[1]).read_bytes(), filename=sys.argv[1])' "${script}"
+            elif [[ "${shebang}" =~ ^'#!'[[:space:]]*([^[:space:]]*/)?(env[[:space:]]+)?(bash|sh|dash)([[:space:]]|$) ]] || [[ "${shebang}" != '#!'* ]]; then
+              # Files without a shebang include sourced shell helpers.
+              bash -n "${script}"
+            else
+              printf 'Unsupported interpreter: %s (%s)\n' "${script}" "${shebang}" >&2
+              return 1
+            fi
+          }
+          for script in \
+            build_files/*.sh \
+            build_files/validate/*.sh \
+            mjust/bin/mjust \
+            mjust/libexec/* \
+            runtime/* \
+            tests/*.sh; do
+            [[ -f "${script}" ]] || continue
+            printf 'Checking syntax: %s\n' "${script}"
+            if check_syntax "${script}"; then
+              printf 'PASS syntax: %s\n' "${script}"
+            else
+              printf 'FAIL syntax: %s\n' "${script}" >&2
+              syntax_failures+=("${script}")
+            fi
+          done
+          for test_script in tests/test-*.sh; do
+            [[ -f "${test_script}" ]] || continue
+            test_count=$((test_count + 1))
+            printf 'Running test: %s\n' "${test_script}"
+            # Real ownership checks need root inside a rootless user namespace.
+            test_command=(bash "${test_script}")
+            case "${test_script}" in
+              tests/test-instance-delete.sh|tests/test-instance-backups.sh|tests/test-instance-restore.sh|tests/test-legacy-backup-restore-exclusion.sh)
+                test_command=(podman unshare bash "${test_script}")
+                ;;
+            esac
+            if "${test_command[@]}"; then
+              printf 'PASS: %s\n' "${test_script}"
+            else
+              test_status=$?
+              printf 'FAIL: %s (exit %s)\n' "${test_script}" "${test_status}" >&2
+              test_failures+=("${test_script}")
+            fi
+          done
+          if (( test_count == 0 )); then
+            echo 'ERROR: no shell regression scripts found.' >&2
+            exit 1
+          fi
+          if (( ${#syntax_failures[@]} > 0 )); then
+            printf 'Syntax checks failed:\n' >&2
+            printf '  %s\n' "${syntax_failures[@]}" >&2
+          fi
+          if (( ${#test_failures[@]} > 0 )); then
+            printf 'Regression tests failed:\n' >&2
+            printf '  %s\n' "${test_failures[@]}" >&2
+          fi
+          if (( ${#syntax_failures[@]} > 0 || ${#test_failures[@]} > 0 )); then
+            exit 1
+          fi
+
+      - name: Check WebUI JavaScript syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          for script in webui/internal/server/static/*.js; do
+            [[ -f "${script}" ]] || continue
+            node --check "${script}"
+          done
+
+      - name: Validate HWS package composition
+        run: python3 build_files/validate/test-hws-packages.py
