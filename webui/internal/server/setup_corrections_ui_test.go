@@ -88,16 +88,22 @@ for (const software of ["paper", "purpur", "spigot", "pufferfish", "leaf", "fabr
   form.dataset.serverType = software;
   const modded = ["fabric", "neoforge"].includes(software);
   for (const policy of ["recommended", "latest", "pinned"]) {
-    const status = { ...fixture, selected_candidate: "1.21.11", geyser_supported_version: "26.3", crossplay_enabled: false, crossplay_compatible: false, managed_crossplay_available: !modded };
-    const before = JSON.stringify(status);
-    show(status, policy);
-    assert.equal(JSON.stringify(status), before);
-    assert.equal(next.disabled, false);
-    assert.equal(toggle.disabled, false);
-    assert(text().includes("Managed cross-play currently supports Minecraft 26.3. Selected Minecraft 1.21.11 is available as Java-only."));
-    assert.equal(preview.children.length, 2);
+    for (const enabled of [false, true]) {
+      const status = { ...fixture, selected_candidate: "1.21.11", geyser_supported_version: "26.3", crossplay_enabled: enabled, crossplay_compatible: false, managed_crossplay_available: !modded };
+      toggle.checked = enabled;
+      const before = JSON.stringify(status);
+      show(status, policy);
+      assert.equal(JSON.stringify(status), before);
+      assert.equal(next.disabled, enabled && modded);
+      assert.equal(toggle.disabled, !modded);
+      assert.equal(toggle.checked, enabled && modded);
+      assert(text().includes("Managed cross-play currently supports Minecraft " + status.geyser_supported_version + ". Selected Minecraft " + status.selected_candidate + " is available as Java-only."));
+      assert.equal(preview.children.length, 2);
+    }
   }
-  show({ ...fixture, crossplay_enabled: false }, "pinned");
+  show({ ...fixture, managed_crossplay_available: !modded, crossplay_enabled: false }, "pinned");
+  assert.equal(toggle.disabled, false);
+  assert.equal(next.disabled, false);
   assert(text().includes(modded ? ("verify this exact " + (software === "fabric" ? "Fabric" : "NeoForge") + " runtime") : "Enable Bedrock cross-play if wanted."));
   for (const enabled of [false, true]) {
     show({ ...fixture, geyser_supported_version: "", crossplay_enabled: enabled, crossplay_compatible: false }, "pinned");
@@ -119,6 +125,7 @@ for (const software of ["paper", "purpur", "spigot", "pufferfish", "leaf", "fabr
     show({ ...failed, crossplay_enabled: false, reason: "" }, "pinned");
     assert.equal(next.disabled, false);
     show({ ...fixture, managed_crossplay_available: true }, "pinned");
+    assert.equal(toggle.disabled, false);
     assert.equal(next.disabled, false);
   }
 }

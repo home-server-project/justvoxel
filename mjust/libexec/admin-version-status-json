@@ -95,7 +95,12 @@ if (( $# == 3 )) && [[ ${target_type} == bedrock ]]; then
 fi
 # New Java types have setup-time exact resolution, never a moving update policy.
 if (( $# == 3 )) && [[ ${target_type} != paper && ${target_type} != purpur && ${target_type} != vanilla ]]; then
-    resolved="$(resolve_setup_java_runtime "${target_type}" "$1" "$2" || true)"
+    runtime_policy="$1"
+    # Latest uses the same verified upstream selection as Recommended for these forks.
+    case "${target_type}:${runtime_policy}" in
+        pufferfish:latest|leaf:latest) runtime_policy=recommended ;;
+    esac
+    resolved="$(resolve_setup_java_runtime "${target_type}" "${runtime_policy}" "$2" || true)"
     [[ -n ${resolved} ]] || resolved='{}'
     candidate="$(jq -r '.game // empty' <<< "${resolved}")"
     loader="$(jq -r '.loader // empty' <<< "${resolved}")"

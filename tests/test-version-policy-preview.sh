@@ -104,7 +104,7 @@ grep -Fq '"GET /setup/version-preview", a.setupWizardVersionPreview' "${repo_roo
 grep -Eq '"GET /version-preview":[[:space:]]+a.setupWizardVersionPreview' "${repo_root}/webui/internal/server/add_server_wizard.go"
 grep -Fq 'bedrock, draft.Minecraft.ServerType)' "${repo_root}/webui/internal/server/setup_wizard.go"
 grep -Fq 'status.selected_candidate' "${repo_root}/webui/internal/server/static/settings.js"
-grep -Fq 'next.disabled = !status.selected_candidate || (status.crossplay_enabled && !status.crossplay_compatible)' "${repo_root}/webui/internal/server/static/settings.js"
+grep -Fq 'next.disabled = !status.selected_candidate || (crossplayEnabled && !status.crossplay_compatible)' "${repo_root}/webui/internal/server/static/settings.js"
 catalog_text_used "${repo_root}/webui/internal/server/templates/setup_review.html" 'Minecraft version' '<dt>{{t "' '"}}</dt><dd>{{.Plan.Normalized.Minecraft.Version}}</dd>'
 catalog_text_used "${repo_root}/webui/internal/server/templates/setup_review.html" 'Version policy' '<dt>{{t "' '"}}</dt><dd>{{ts .VersionPolicyLabel}}</dd>'
 if grep -Fq 'Version: LATEST' "${repo_root}/webui/internal/server/templates/setup_review.html"; then exit 1; fi
@@ -225,15 +225,14 @@ done
 # and test-paper-fork-versions.sh; this fixture isolates the preview boundary.
 cat >> "${fixture_dir}/common.sh" <<'STUB'
 resolve_setup_java_runtime() {
-    [[ $2 == recommended || $2 == latest || ( $2 == pinned && ( $3 == 26.3 || $3 == 26.4 ) ) ]] || return 1
-    local game=26.3
-    [[ $2 != latest ]] || game=26.4
+    [[ $2 == recommended || ( $2 == pinned && ( $3 == 26.3 || $3 == 26.4 ) ) ]] || return 1
+    local game="${FIXTURE_GAME:-26.3}"
     [[ $2 != pinned ]] || game=$3
     case "$1" in
         fabric) jq -cn --arg game "${game}" '{game:$game,loader:"0.19.5",image:"java25"}' ;;
         neoforge) jq -cn --arg game "${game}" --arg loader "${game}.0.99" '{game:$game,loader:$loader,image:"java25"}' ;;
-        spigot|pufferfish) printf '%s' '{"game":"26.3","loader":"","image":"java25"}' ;;
-        leaf) printf '%s' '{"game":"26.3","loader":"","image":"java25","reason":"Leaf labels this build Experimental. It is available for setup."}' ;;
+        spigot|pufferfish) jq -cn --arg game "${game}" '{game:$game,loader:"",image:"java25"}' ;;
+        leaf) jq -cn --arg game "${game}" '{game:$game,loader:"",image:"java25",reason:"Leaf labels this build Experimental. It is available for setup."}' ;;
         *) return 1 ;;
     esac
 }
@@ -264,22 +263,30 @@ for software in fabric neoforge; do
     [[ $(cat "${DATA_PATH}.crossplay-checks") == "${software} 26.3 ${loader}"$'\n'"${software} 26.3 ${loader}" ]]
     rm "${DATA_PATH}.crossplay-checks"
 done
-# Specific and Latest retain a newer Java-valid release, with no artifact
+# Specific retains a newer Java-valid release, with no artifact
 # proof attempted against artifacts for the publisher's older supported game.
 for software in fabric neoforge; do
-    for policy in pinned latest; do
-        for enabled in yes no; do
-            preview="$(GEYSER_VERSION=26.3 CROSSPLAY_VERIFIED=yes bash "${fixture_dir}/status" --server-type "${software}" "${policy}" 26.4 "${enabled}")"
-            jq -e '.selected_candidate == "26.4" and .server_supported and .geyser_supported_version == "26.3" and (.crossplay_compatible | not) and (.managed_crossplay_available | not)' <<< "${preview}" >/dev/null
-            if [[ ${enabled} == yes ]]; then
-                jq -e '.reason | contains("Managed cross-play currently supports Minecraft 26.3.") and contains("Selected Minecraft 26.4 is available as Java-only.")' <<< "${preview}" >/dev/null
-            fi
-            [[ ! -e ${DATA_PATH}.crossplay-checks ]]
-        done
+    preview="$(bash "${fixture_dir}/status" --server-type "${software}" latest '' no)"
+    jq -e '.selected_candidate == "" and (.server_supported | not)' <<< "${preview}" >/dev/null
+    for enabled in yes no; do
+        preview="$(GEYSER_VERSION=26.3 CROSSPLAY_VERIFIED=yes bash "${fixture_dir}/status" --server-type "${software}" pinned 26.4 "${enabled}")"
+        jq -e '.selected_candidate == "26.4" and .server_supported and .geyser_supported_version == "26.3" and (.crossplay_compatible | not) and (.managed_crossplay_available | not)' <<< "${preview}" >/dev/null
+        if [[ ${enabled} == yes ]]; then
+            jq -e '.reason | contains("Managed cross-play currently supports Minecraft 26.3.") and contains("Selected Minecraft 26.4 is available as Java-only.")' <<< "${preview}" >/dev/null
+        fi
+        [[ ! -e ${DATA_PATH}.crossplay-checks ]]
     done
 done
 preview="$(bash "${fixture_dir}/status" --server-type leaf recommended '' no)"
 jq -e '.selected_candidate == "26.3" and .candidate_channel == "RELEASE" and .server_supported and (.reason | contains("Experimental"))' <<< "${preview}" >/dev/null
+
+for software in pufferfish leaf; do
+    for game in "${STABLE_VERSION}" "${NEWEST_VERSION}"; do
+        preview="$(FIXTURE_GAME="${game}" bash "${fixture_dir}/status" --server-type "${software}" latest '' no)"
+        jq -e --arg game "${game}" '.selected_candidate == $game and .server_supported and .candidate_channel == "RELEASE" and .image_tag == "java25" and .loader_version == ""' <<< "${preview}" >/dev/null
+        if [[ ${software} == leaf ]]; then jq -e '.reason | contains("Experimental")' <<< "${preview}" >/dev/null; fi
+    done
+done
 
 # Discovery never rewrites a selected runtime or invokes artifact proof for a
 # mismatch or missing Geyser metadata, even with cross-play explicitly requested.

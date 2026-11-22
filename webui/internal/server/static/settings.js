@@ -165,8 +165,12 @@ if (versionPolicy && versionInput && specificVersionField) {
     const toggle = form.querySelector("[data-bedrock-toggle]");
     const software = form.dataset?.serverType;
     const javaOnly = ["vanilla", "forge", "quilt"].includes(software);
-    if (javaOnly && toggle) { toggle.disabled = true; toggle.checked = false; status.crossplay_enabled = false; }
-    if (toggle && !javaOnly) toggle.disabled = false;
+    const incompatible = !!status.selected_candidate && status.managed_crossplay_available === true && status.crossplay_compatible === false;
+    const crossplayEnabled = status.crossplay_enabled && !javaOnly && !incompatible;
+    if (toggle) {
+      toggle.disabled = javaOnly || incompatible;
+      if (toggle.disabled) toggle.checked = false;
+    }
     const summary = make("div", "notice " + (status.selected_candidate ? "success" : "warning") + " setup-version-panel", "");
     summary.append(make("span", "setup-version-kicker", policy === "recommended" ? "Recommended" : policy === "latest" ? jvT("ui.8730d3c2022a") : jvT("ui.0b85c4d8a4ba")));
     if (status.selected_candidate) {
@@ -176,16 +180,16 @@ if (versionPolicy && versionInput && specificVersionField) {
       summary.append(make("p", "setup-version-explanation", status.reason || jvT("ui.6cd62188f456")));
     }
     preview.replaceChildren(summary);
-    if (status.selected_candidate && status.reason && (!status.crossplay_enabled || status.crossplay_compatible)) {
+    if (status.selected_candidate && status.reason && (!crossplayEnabled || status.crossplay_compatible)) {
       preview.append(make("div", "notice warning setup-version-panel setup-version-explanation", status.reason));
     }
-    const compatibility = make("div", "notice " + (!status.crossplay_enabled || status.crossplay_compatible ? "success" : "warning") + " setup-version-compatibility", "");
+    const compatibility = make("div", "notice " + (!crossplayEnabled || status.crossplay_compatible ? "success" : "warning") + " setup-version-compatibility", "");
     const supported = status.geyser_supported_version;
     const selected = status.selected_candidate;
     let message;
     if (javaOnly) {
       message = jvT("ui.869dd17f477a");
-    } else if (status.crossplay_enabled && status.crossplay_compatible) {
+    } else if (crossplayEnabled && status.crossplay_compatible) {
       message = jvT("ui.a4582db875ce", {v0: (selected)});
     } else if (!supported) {
       message = jvT("ui.a8522a0e572f");
@@ -193,7 +197,7 @@ if (versionPolicy && versionInput && specificVersionField) {
       message = jvT("ui.463ab0c37dc9", {v0: (supported)});
       if (selected && selected !== supported) {
         message += jvT("ui.371159f2be05", {v0: (selected)});
-      } else if (!status.crossplay_enabled) {
+      } else if (!crossplayEnabled) {
         const runtime = software === "fabric" ? "Fabric" : software === "neoforge" ? "NeoForge" : "";
         message += runtime ? jvT("ui.d50bb83fdfbd", {v0: (runtime)}) : jvT("ui.8e590792a1f3");
       } else {
@@ -201,9 +205,9 @@ if (versionPolicy && versionInput && specificVersionField) {
       }
     }
     compatibility.append(make("p", "", message));
-    if (status.crossplay_enabled && !status.crossplay_compatible) compatibility.append(make("p", "", jvT("ui.c144eefdf05c")));
+    if (crossplayEnabled && !status.crossplay_compatible) compatibility.append(make("p", "", jvT("ui.c144eefdf05c")));
     preview.append(compatibility);
-    next.disabled = !status.selected_candidate || (status.crossplay_enabled && !status.crossplay_compatible);
+    next.disabled = !status.selected_candidate || (crossplayEnabled && !status.crossplay_compatible);
   };
   const showNotice = (message, severity = "") => {
     const panel = document.createElement("div");

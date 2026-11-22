@@ -759,7 +759,7 @@ func TestSetupVersionPreviewPresentationContract(t *testing.T) {
 		`preview.replaceChildren(summary);`,
 		`Bedrock cross-play is supported for Minecraft`, `Selected Minecraft ${selected} is available as Java-only.`,
 		`Managed cross-play currently supports Minecraft ${supported}`,
-		`next.disabled = !status.selected_candidate || (status.crossplay_enabled && !status.crossplay_compatible);`,
+		`next.disabled = !status.selected_candidate || (crossplayEnabled && !status.crossplay_compatible);`,
 		`if (policy === "pinned" && !version)`,
 	} {
 		if !strings.Contains(source, want) {
