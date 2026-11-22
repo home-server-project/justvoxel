@@ -3,9 +3,18 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -56,11 +65,11 @@ func TestRouterOSHTTPSBoundary(t *testing.T) {
 		case 1:
 			http.Redirect(w, r, redirect.URL, http.StatusTemporaryRedirect)
 		case 2:
-			fmt.Fprint(w, "["+strings.Repeat(" ", routerOSResponseLimit)+"]")
+			fmt.Fprint(w, "{"+strings.Repeat(" ", routerOSResponseLimit)+"}")
 		case 3:
-			fmt.Fprint(w, `[{"name":"lab","number":1}]`)
+			fmt.Fprint(w, `{"name":"lab","number":1}`)
 		default:
-			fmt.Fprint(w, `[{"name":"lab","number":"1","flag":"true"}]`)
+			fmt.Fprint(w, `{"name":"lab","number":"1","flag":"true"}`)
 		}
 	}))
 	defer router.Close()
@@ -69,27 +78,27 @@ func TestRouterOSHTTPSBoundary(t *testing.T) {
 	if production.transport.Proxy != nil || production.transport.TLSClientConfig.InsecureSkipVerify {
 		t.Fatal("RouterOS transport uses proxy or bypasses certificates")
 	}
-	if _, err := production.read(ctx, c, routerOSIdentity); err != errRouterOSUnavailable {
+	if _, err := production.readSingleton(ctx, c, routerOSIdentity); err != errRouterOSTLS {
 		t.Fatal("accepted an untrusted certificate")
 	}
 	client := trustTestRouter(t, router)
 	for _, endpoint := range []string{"http://router.example", "https://name:secret@router.example", "https://router.example?", "https://router.example#", "https://router.example/rest/system/identity"} {
 		invalid := c
 		invalid.Endpoint = endpoint
-		if _, err := client.read(ctx, invalid, routerOSIdentity); err != errRouterOSUnavailable {
+		if _, err := client.readSingleton(ctx, invalid, routerOSIdentity); err != errRouterOSUnavailable {
 			t.Errorf("accepted invalid endpoint %q", endpoint)
 		}
 	}
-	if _, err := client.read(ctx, c, routerOSResource(100)); err != errRouterOSUnavailable {
+	if _, err := client.readList(ctx, c, routerOSResource(100)); err != errRouterOSUnavailable {
 		t.Fatal("accepted an unlisted REST resource")
 	}
-	rows, err := client.read(ctx, c, routerOSIdentity)
-	if err != nil || len(rows) != 1 || rows[0]["name"] != "lab" || rows[0]["number"] != "1" || !routerOSTrue(rows[0]["flag"]) {
+	row, err := client.readSingleton(ctx, c, routerOSIdentity)
+	if err != nil || row["name"] != "lab" || row["number"] != "1" || !routerOSTrue(row["flag"]) {
 		t.Fatal("failed to read RouterOS string values")
 	}
-	for _, failure := range []int32{1, 2, 3} {
-		mode.Store(failure)
-		if _, err := client.read(ctx, c, routerOSIdentity); err != errRouterOSUnavailable {
+	for index, want := range []routerOSError{errRouterOSUnavailable, errRouterOSResponse, errRouterOSResponse} {
+		mode.Store(int32(index + 1))
+		if _, err := client.readSingleton(ctx, c, routerOSIdentity); err != want {
 			t.Error("accepted a redirect, oversized body or invalid response")
 		}
 	}
@@ -98,9 +107,154 @@ func TestRouterOSHTTPSBoundary(t *testing.T) {
 	}
 }
 
+func TestRouterOSResourceShapes(t *testing.T) {
+	records := [...]string{
+		`{"name":"router"}`,
+		`{"version":"7.23.8","board-name":"test-board"}`,
+		`{"name":"ether1"}`,
+		`{"name":"uplinks"}`,
+		`{"list":"uplinks","interface":"ether1"}`,
+		`{"chain":"dstnat","action":"dst-nat"}`,
+	}
+	for resource, path := range routerOSPaths {
+		t.Run(path, func(t *testing.T) {
+			var array atomic.Bool
+			router := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != path {
+					t.Errorf("unexpected resource %q", r.URL.Path)
+				}
+				if array.Load() {
+					fmt.Fprint(w, "["+records[resource]+"]")
+				} else {
+					fmt.Fprint(w, records[resource])
+				}
+			}))
+			defer router.Close()
+			client := trustTestRouter(t, router)
+			credentials := testRouterConfiguration(router.URL).routerOSCredentials
+			for _, isArray := range []bool{false, true} {
+				array.Store(isArray)
+				var err error
+				singleton := resource <= int(routerOSSystem)
+				if singleton {
+					_, err = client.readSingleton(context.Background(), credentials, routerOSResource(resource))
+				} else {
+					_, err = client.readList(context.Background(), credentials, routerOSResource(resource))
+				}
+				var want error
+				if singleton == isArray {
+					want = errRouterOSResponse
+				}
+				if err != want {
+					t.Errorf("array=%v: got %v, want %v", isArray, err, want)
+				}
+			}
+		})
+	}
+}
+
+func testRouterCertificates(t *testing.T, name string, usage x509.KeyUsage) (string, tls.Certificate, string) {
+	t.Helper()
+	key := func() *ecdsa.PrivateKey {
+		t.Helper()
+		key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return key
+	}
+	pair := func(template, parent *x509.Certificate, subject, signer *ecdsa.PrivateKey) []byte {
+		t.Helper()
+		data, err := x509.CreateCertificate(rand.Reader, template, parent, &subject.PublicKey, signer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return data
+	}
+	now := time.Now()
+	ca := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: name},
+		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(24 * time.Hour),
+		BasicConstraintsValid: true, IsCA: true, KeyUsage: usage,
+	}
+	caKey := key()
+	caDER := pair(ca, ca, caKey, caKey)
+	leaf := &x509.Certificate{
+		SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "router"},
+		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(12 * time.Hour),
+		BasicConstraintsValid: true, KeyUsage: x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		IPAddresses: []net.IP{net.IPv4(127, 0, 0, 1), net.IPv6loopback},
+	}
+	leafKey := key()
+	leafDER := pair(leaf, ca, leafKey, caKey)
+	caPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}))
+	privateDER, err := x509.MarshalECPrivateKey(caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	privatePEM := string(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: privateDER}))
+	return caPEM, tls.Certificate{Certificate: [][]byte{leafDER}, PrivateKey: leafKey}, privatePEM
+}
+
+func TestRouterOSCAKeepsEndpointVerification(t *testing.T) {
+	caPEM, leaf, _ := testRouterCertificates(t, "router-ca", x509.KeyUsageCertSign)
+	router := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("sent an HTTP request despite a mismatched certificate SAN")
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	router.TLS = &tls.Config{Certificates: []tls.Certificate{leaf}}
+	router.StartTLS()
+	defer router.Close()
+
+	ca, err := parseRouterOSCA(caPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := newRouterOSClient()
+	base.transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return (&net.Dialer{Timeout: 2 * time.Second}).DialContext(ctx, network, router.Listener.Addr().String())
+	}
+	client, closeIdle, err := base.withCA(ca)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeIdle()
+	credentials := testRouterConfiguration("https://router.example").routerOSCredentials
+	if _, err := client.readSingleton(context.Background(), credentials, routerOSIdentity); err != errRouterOSTLS {
+		t.Fatal("expected TLS diagnostic for an endpoint missing from the certificate SAN", err)
+	}
+}
+
+func TestRouterOSCAValidation(t *testing.T) {
+	ca, leaf, key := testRouterCertificates(t, "private-ca", x509.KeyUsageCertSign|x509.KeyUsageCRLSign)
+	wrongUsage, _, _ := testRouterCertificates(t, "wrong-usage", x509.KeyUsageCRLSign)
+	if _, err := parseRouterOSCA(strings.ReplaceAll(ca, "\n", "\r\n")); err != nil {
+		t.Fatal("rejected a public CA exported as PEM", err)
+	}
+	leafPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leaf.Certificate[0]}))
+	for name, input := range map[string]string{
+		"malformed": "-----BEGIN CERTIFICATE-----\nwhat?\n-----END CERTIFICATE-----",
+		"key":       key, "key then cert": key + ca, "key after cert": ca + key,
+		"non-CA": leafPEM, "key usage": wrongUsage, "multiple blocks": ca + ca,
+		"over limit": ca + strings.Repeat(" ", routerOSCALimit),
+		"garbage":    ca + "trailing data",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseRouterOSCA(input); err != errRouterOSInvalidCA {
+				t.Fatal("accepted invalid CA input")
+			}
+		})
+	}
+}
+
 func TestRouterOSMigrationPersistenceAndRevocation(t *testing.T) {
 	store, path := openTestWebUIStore(t)
-	if _, err := store.db.Exec(`DROP TABLE routeros_state; DELETE FROM schema_migrations WHERE version=12`); err != nil {
+	if _, err := store.db.Exec(`ALTER TABLE routeros_state DROP COLUMN ca_pem; DELETE FROM schema_migrations WHERE version=13`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO routeros_state VALUES
+		(1, 1, 'https://router.example', 'justvoxel', ?, '192.0.2.9', 'list', 'uplinks')`, testRouterPassword); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.createWebUser("previous-user", webUserRoleOperator, "previous-password"); err != nil {
@@ -114,6 +268,10 @@ func TestRouterOSMigrationPersistenceAndRevocation(t *testing.T) {
 	}
 	ctx := context.Background()
 	c := testRouterConfiguration("https://router.example")
+	if got, err := store.readRouterOS(ctx); err != nil || got == nil || *got != c {
+		t.Fatal("migration changed existing connector data", err)
+	}
+	c.CAPEM, _, _ = testRouterCertificates(t, "stored-ca", x509.KeyUsageCertSign)
 	actor := administratorSession(time.Now())
 	if err := store.writeRouterOS(ctx, &c, actor, "routeros_save"); err != nil {
 		t.Fatal(err)
@@ -153,8 +311,8 @@ func TestRouterOSMigrationPersistenceAndRevocation(t *testing.T) {
 		if err != nil && !os.IsNotExist(err) {
 			t.Fatal(err)
 		}
-		if bytes.Contains(data, []byte(testRouterPassword)) {
-			t.Fatal("revoked credential remains in SQLite data")
+		if bytes.Contains(data, []byte(testRouterPassword)) || bytes.Contains(data, []byte("-----BEGIN CERTIFICATE-----")) {
+			t.Fatal("revoked credential or CA remains in SQLite data")
 		}
 	}
 }
@@ -169,6 +327,7 @@ func TestRouterOSFactoryResetRevokesBeforeCleanup(t *testing.T) {
 			attachTestOperationStore(t, s, operations)
 			ctx := context.Background()
 			c := testRouterConfiguration("https://router.example")
+			c.CAPEM, _, _ = testRouterCertificates(t, "reset-ca", x509.KeyUsageCertSign)
 			if err := s.store.writeRouterOS(ctx, &c, administratorSession(time.Now()), "routeros_save"); err != nil {
 				t.Fatal(err)
 			}
@@ -213,19 +372,35 @@ func TestRouterOSLocalRoutes(t *testing.T) {
 	useEmptyFactoryResetRuntime(t)
 	useTestMinecraftInstances(t)
 	var requests atomic.Int32
-	router := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var statusOverride atomic.Int32
+	var wrongShape atomic.Bool
+	authToken := base64.StdEncoding.EncodeToString([]byte("justvoxel:" + testRouterPassword))
+	ca, leaf, _ := testRouterCertificates(t, "router-ca-original", x509.KeyUsageCertSign)
+	replacementCA, replacementLeaf, _ := testRouterCertificates(t, "router-ca-replacement", x509.KeyUsageCertSign)
+	var activeLeaf atomic.Pointer[tls.Certificate]
+	activeLeaf.Store(&leaf)
+	router := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
 		username, password, ok := r.BasicAuth()
 		if r.Method != http.MethodGet || r.URL.RawQuery != "" || !ok || username != "justvoxel" || password != testRouterPassword {
 			t.Error("unexpected RouterOS request")
 		}
+		if status := statusOverride.Load(); status != 0 {
+			w.WriteHeader(int(status))
+			fmt.Fprint(w, "sensitive-remote-error "+testRouterPassword)
+			return
+		}
 		switch r.URL.Path {
 		case "/rest/system/identity":
-			fmt.Fprint(w, `[{"name":"router-lab","ignored":"`+testRouterPassword+`"}]`)
+			if wrongShape.Load() {
+				fmt.Fprint(w, `[{"name":"sensitive-remote-error"}]`)
+				return
+			}
+			fmt.Fprint(w, `{"name":"router-lab","ignored":"`+testRouterPassword+`"}`)
 		case "/rest/system/resource":
-			fmt.Fprint(w, `[{"version":"7.18.0","board-name":"test-board"}]`)
+			fmt.Fprint(w, `{"version":"7.23.8","board-name":"test-board"}`)
 		case "/rest/interface":
-			fmt.Fprint(w, `[{"name":"ethernet"},{"name":"vlan"},{"name":"`+testRouterPassword+`"}]`)
+			fmt.Fprint(w, `[{"name":"ethernet"},{"name":"vlan"},{"name":"`+testRouterPassword+`"},{"name":"Basic `+authToken+`"}]`)
 		case "/rest/interface/list":
 			fmt.Fprint(w, `[{"name":"uplinks","include":"none"}]`)
 		case "/rest/interface/list/member":
@@ -237,10 +412,14 @@ func TestRouterOSLocalRoutes(t *testing.T) {
 			w.WriteHeader(404)
 		}
 	}))
+	router.TLS = &tls.Config{GetConfigForClient: func(*tls.ClientHelloInfo) (*tls.Config, error) {
+		return &tls.Config{Certificates: []tls.Certificate{*activeLeaf.Load()}}, nil
+	}}
+	router.StartTLS()
 	defer router.Close()
 	oldClient, oldNetwork := liveRouterOS, openNetworkClient
 	t.Cleanup(func() { liveRouterOS, openNetworkClient = oldClient, oldNetwork })
-	liveRouterOS = trustTestRouter(t, router)
+	liveRouterOS = newRouterOSClient()
 	openNetworkClient = func(context.Context) (networkClient, error) {
 		return &fakeNetworkClient{snapshot: networking.Snapshot{Devices: []networking.Device{
 			{IPv4: networking.IPConfig{Addresses: []networking.IPAddress{{Address: "192.0.2.9"}, {Address: "127.0.0.1"}, {Address: "2001:db8::1"}}}},
@@ -263,7 +442,10 @@ func TestRouterOSLocalRoutes(t *testing.T) {
 		req.Header.Set("Authorization", "Bearer "+actor)
 		rr := httptest.NewRecorder()
 		mux.ServeHTTP(rr, req)
-		if rr.Code != want || strings.Contains(rr.Body.String(), testRouterPassword) || strings.Contains(rr.Body.String(), "private-router-rule") {
+		if rr.Code != want || strings.Contains(rr.Body.String(), testRouterPassword) || strings.Contains(rr.Body.String(), "private-router-rule") ||
+			strings.Contains(rr.Body.String(), "sensitive-remote-error") || strings.Contains(rr.Body.String(), authToken) ||
+			strings.Contains(rr.Body.String(), "BEGIN CERTIFICATE") || strings.Contains(rr.Body.String(), `"ca_pem"`) ||
+			strings.Contains(rr.Body.String(), `"password"`) {
 			t.Fatalf("%s %s by %s: unexpected status or private response (%d)", method, suffix, actor, rr.Code)
 		}
 		return rr
@@ -277,18 +459,34 @@ func TestRouterOSLocalRoutes(t *testing.T) {
 		}
 		call(method, suffix, "secondary", nil, 403)
 	}
+	call(http.MethodPut, "/ca", "secondary", nil, 403)
+	call(http.MethodDelete, "/ca", "secondary", nil, 403)
 	call(http.MethodGet, "?port=22", "secondary", nil, 400)
 	call(http.MethodGet, "/instances/invalid", "secondary", nil, 400)
 	call(http.MethodGet, "", "secondary", nil, 200)
+	expectCode := func(rr *httptest.ResponseRecorder, code routerOSError) {
+		t.Helper()
+		if strings.TrimSpace(rr.Body.String()) != fmt.Sprintf(`{"error":%q}`, code) {
+			t.Fatalf("expected safe error %q, got %s", code, rr.Body.String())
+		}
+	}
+	expectCode(call(http.MethodPost, "/test", "primary", c.routerOSCredentials, 502), errRouterOSTLS)
+	c.CAPEM = "invalid"
+	expectCode(call(http.MethodPost, "/test", "primary", c.routerOSCredentials, 400), errRouterOSInvalidCA)
+	c.CAPEM = ca
 	status := call(http.MethodPost, "/test", "primary", c.routerOSCredentials, 200)
-	for _, want := range []string{"router-lab", "7.18.0", "test-board", "uplinks", "ethernet", "vlan", "192.0.2.9"} {
+	for _, want := range []string{"router-lab", "7.23.8", "test-board", "uplinks", "ethernet", "vlan", "192.0.2.9",
+		"trusted_ca", "router-ca-original", "fingerprint", "expires_at"} {
 		if !strings.Contains(status.Body.String(), want) {
 			t.Errorf("test response omitted %s", want)
 		}
 	}
 	if stored, err := s.store.readRouterOS(context.Background()); stored != nil || err != nil {
-		t.Fatal("testing saved a candidate password")
+		t.Fatal("testing persisted candidate credentials or a CA")
 	}
+	withoutCA := c.routerOSCredentials
+	withoutCA.CAPEM = ""
+	expectCode(call(http.MethodPost, "/test", "primary", withoutCA, 502), errRouterOSTLS)
 	before := requests.Load()
 	unassigned := c
 	unassigned.Target = "192.0.2.10"
@@ -304,10 +502,58 @@ func TestRouterOSLocalRoutes(t *testing.T) {
 	if !strings.Contains(status.Body.String(), `"status":"connected"`) || strings.Contains(status.Body.String(), `"can_configure":true`) {
 		t.Fatal("read-only administrator status is incorrect")
 	}
+	for _, remoteStatus := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		statusOverride.Store(int32(remoteStatus))
+		expectCode(call(http.MethodPost, "/test", "primary", c.routerOSCredentials, 502), errRouterOSAuth)
+	}
+	statusOverride.Store(http.StatusServiceUnavailable)
+	expectCode(call(http.MethodPost, "/test", "primary", c.routerOSCredentials, 502), errRouterOSUnavailable)
+	statusOverride.Store(0)
+	wrongShape.Store(true)
+	expectCode(call(http.MethodPost, "/test", "primary", c.routerOSCredentials, 502), errRouterOSResponse)
+	wrongShape.Store(false)
+
+	assertStoredCA := func(want string) {
+		t.Helper()
+		stored, err := s.store.readRouterOS(context.Background())
+		expected := c
+		expected.CAPEM = want
+		if err != nil || stored == nil || *stored != expected {
+			t.Fatal("CA change did not preserve the expected connector record", err)
+		}
+	}
+	replacement := map[string]string{"ca_pem": replacementCA}
+	expectCode(call(http.MethodPut, "/ca", "primary", replacement, 502), errRouterOSTLS)
+	assertStoredCA(ca)
+	expectCode(call(http.MethodDelete, "/ca", "primary", nil, 502), errRouterOSTLS)
+	assertStoredCA(ca)
+
+	activeLeaf.Store(&replacementLeaf)
+	call(http.MethodPut, "/ca", "primary", replacement, 200)
+	assertStoredCA(replacementCA)
+	status = call(http.MethodGet, "", "primary", nil, 200)
+	if !strings.Contains(status.Body.String(), "router-ca-replacement") || strings.Contains(status.Body.String(), "router-ca-original") {
+		t.Fatal("status did not expose only replacement CA metadata")
+	}
+	cert, err := parseRouterOSCA(replacementCA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Use an explicit test root pool in place of the appliance system roots.
+	liveRouterOS.transport.TLSClientConfig.RootCAs = x509.NewCertPool()
+	liveRouterOS.transport.TLSClientConfig.RootCAs.AddCert(cert)
+	call(http.MethodDelete, "/ca", "primary", nil, 200)
+	assertStoredCA("")
+	if status := call(http.MethodGet, "", "primary", nil, 200); strings.Contains(status.Body.String(), "trusted_ca") {
+		t.Fatal("removed CA remains in status")
+	}
+	call(http.MethodPut, "/ca", "primary", replacement, 200)
+	assertStoredCA(replacementCA)
 	router.Close()
+	expectCode(call(http.MethodPost, "/test", "primary", c.routerOSCredentials, 502), errRouterOSNetwork)
 	out := routerOSStatus{Endpoints: []routerMinecraftEndpoint{{Port: 25570, LastPort: 25570, Protocols: []string{"tcp"}, State: routerForwardUnknown}}}
 	out.inspect(context.Background(), c, true)
-	if out.Status != "unavailable" || out.Endpoints[0].State != routerForwardUnknown {
+	if out.Status != "unavailable" || out.Diagnostic != string(errRouterOSNetwork) || out.Endpoints[0].State != routerForwardUnknown {
 		t.Fatal("unreachable router did not produce Unknown")
 	}
 	before = requests.Load()

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"time"
 )
 
 const routerOSPath = "/v1/admin/network/router/mikrotik"
@@ -16,6 +17,7 @@ type RouterOSCredentials struct {
 	Endpoint string `json:"endpoint"`
 	Username string `json:"username"`
 	Password string `json:"password"`
+	CAPEM    string `json:"ca_pem,omitempty"`
 }
 
 type RouterOSConfiguration struct {
@@ -35,10 +37,18 @@ type RouterMinecraftEndpoint struct {
 	State     string   `json:"state"`
 }
 
+type RouterOSCAMetadata struct {
+	CommonName  string    `json:"common_name,omitempty"`
+	Fingerprint string    `json:"fingerprint"`
+	ExpiresAt   time.Time `json:"expires_at"`
+}
+
 type RouterOSStatus struct {
 	Configured     bool                      `json:"configured"`
 	CanConfigure   bool                      `json:"can_configure,omitempty"`
 	Status         string                    `json:"status"`
+	Diagnostic     string                    `json:"diagnostic,omitempty"`
+	TrustedCA      *RouterOSCAMetadata       `json:"trusted_ca,omitempty"`
 	Identity       string                    `json:"identity,omitempty"`
 	Version        string                    `json:"version,omitempty"`
 	Board          string                    `json:"board,omitempty"`
@@ -79,4 +89,14 @@ func (c *Client) RouterOSSave(ctx context.Context, session string, input RouterO
 
 func (c *Client) RouterOSForget(ctx context.Context, session string) error {
 	return c.do(ctx, http.MethodDelete, routerOSPath, session, nil, nil)
+}
+
+func (c *Client) RouterOSReplaceCA(ctx context.Context, session, caPEM string) error {
+	return c.do(ctx, http.MethodPut, routerOSPath+"/ca", session, struct {
+		CAPEM string `json:"ca_pem"`
+	}{CAPEM: caPEM}, nil)
+}
+
+func (c *Client) RouterOSRemoveCA(ctx context.Context, session string) error {
+	return c.do(ctx, http.MethodDelete, routerOSPath+"/ca", session, nil, nil)
 }

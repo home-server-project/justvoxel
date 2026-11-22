@@ -1,9 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/x509"
 	"database/sql"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/netip"
 	"os"
@@ -15,6 +20,46 @@ import (
 const routerOSRoute = "/v1/admin/network/router/mikrotik"
 
 var errRouterOSState = errors.New("MikroTik connector state unavailable")
+
+func decodeRouterOSRequest(body io.Reader, out any) error {
+	data, err := io.ReadAll(io.LimitReader(body, routerOSRequestLimit+1))
+	if err != nil {
+		return err
+	}
+	if len(data) > routerOSRequestLimit {
+		return errors.New("RouterOS request too large")
+	}
+	d := json.NewDecoder(bytes.NewReader(data))
+	token, err := d.Token()
+	if err != nil || token != json.Delim('{') {
+		return errors.New("invalid RouterOS request")
+	}
+	seen := map[string]bool{}
+	for d.More() {
+		key, err := d.Token()
+		if err != nil {
+			return err
+		}
+		name, ok := key.(string)
+		if !ok || seen[strings.ToLower(name)] {
+			return errors.New("ambiguous RouterOS request")
+		}
+		seen[strings.ToLower(name)] = true
+		var value json.RawMessage
+		if err = d.Decode(&value); err != nil {
+			return err
+		}
+	}
+	if _, err = d.Token(); err != nil {
+		return err
+	}
+	if d.Decode(new(any)) != io.EOF {
+		return errors.New("invalid RouterOS request")
+	}
+	d = json.NewDecoder(bytes.NewReader(data))
+	d.DisallowUnknownFields()
+	return d.Decode(out)
+}
 
 type routerOSConfiguration struct {
 	routerOSCredentials
@@ -37,8 +82,8 @@ func (s *webUIStore) readRouterOS(ctx context.Context) (*routerOSConfiguration, 
 	}
 	var c routerOSConfiguration
 	var version int
-	err := s.db.QueryRowContext(ctx, `SELECT schema_version, endpoint, username, password, target, ingress_type, ingress_name
-		FROM routeros_state WHERE id=1`).Scan(&version, &c.Endpoint, &c.Username, &c.Password, &c.Target, &c.Ingress.Type, &c.Ingress.Name)
+	err := s.db.QueryRowContext(ctx, `SELECT schema_version, endpoint, username, password, target, ingress_type, ingress_name, ca_pem
+		FROM routeros_state WHERE id=1`).Scan(&version, &c.Endpoint, &c.Username, &c.Password, &c.Target, &c.Ingress.Type, &c.Ingress.Name, &c.CAPEM)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -47,6 +92,18 @@ func (s *webUIStore) readRouterOS(ctx context.Context) (*routerOSConfiguration, 
 		return nil, errRouterOSState
 	}
 	return &c, nil
+}
+
+func (s *webUIStore) readRouterOSCA(ctx context.Context) (string, bool, error) {
+	if s == nil || s.db == nil {
+		return "", false, errRouterOSState
+	}
+	var pem string
+	err := s.db.QueryRowContext(ctx, `SELECT ca_pem FROM routeros_state WHERE id=1`).Scan(&pem)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	return pem, err == nil, err
 }
 
 func (s *webUIStore) writeRouterOS(ctx context.Context, c *routerOSConfiguration, actor session, action string) error {
@@ -71,11 +128,11 @@ func (s *webUIStore) writeRouterOS(ctx context.Context, c *routerOSConfiguration
 		_, err = tx.ExecContext(ctx, `DELETE FROM routeros_state WHERE id=1`)
 	} else {
 		_, err = tx.ExecContext(ctx, `INSERT INTO routeros_state
-			(id, schema_version, endpoint, username, password, target, ingress_type, ingress_name)
-			VALUES (1, 1, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET schema_version=1,
+			(id, schema_version, endpoint, username, password, target, ingress_type, ingress_name, ca_pem)
+			VALUES (1, 1, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET schema_version=1,
 			endpoint=excluded.endpoint, username=excluded.username, password=excluded.password,
-			target=excluded.target, ingress_type=excluded.ingress_type, ingress_name=excluded.ingress_name`,
-			c.Endpoint, c.Username, c.Password, c.Target, c.Ingress.Type, c.Ingress.Name)
+			target=excluded.target, ingress_type=excluded.ingress_type, ingress_name=excluded.ingress_name, ca_pem=excluded.ca_pem`,
+			c.Endpoint, c.Username, c.Password, c.Target, c.Ingress.Type, c.Ingress.Name, c.CAPEM)
 	}
 	if err != nil || insertAuditEventTx(tx, s.now().UTC(), actor, action, "mikrotik", true, "") != nil || tx.Commit() != nil {
 		return errRouterOSState
@@ -113,6 +170,8 @@ type routerOSStatus struct {
 	Configured     bool                      `json:"configured"`
 	CanConfigure   bool                      `json:"can_configure"`
 	Status         string                    `json:"status"`
+	Diagnostic     string                    `json:"diagnostic,omitempty"`
+	TrustedCA      *routerOSCAMetadata       `json:"trusted_ca,omitempty"`
 	Identity       string                    `json:"identity,omitempty"`
 	Version        string                    `json:"version,omitempty"`
 	Board          string                    `json:"board,omitempty"`
@@ -128,18 +187,21 @@ type routerOSStatus struct {
 	NetworkMember  bool                      `json:"network_member,omitempty"`
 }
 
-func routerOSPublicText(value, password string) string {
-	// A remote service can reflect credentials in any response field.
-	if len(value) > 300 || strings.Contains(value, password) {
-		return ""
+func (c routerOSCredentials) publicTextFilter() func(string) string {
+	// A remote service can reflect credentials or the Basic Auth token in any field.
+	token := base64.RawStdEncoding.EncodeToString([]byte(c.Username + ":" + c.Password))
+	return func(value string) string {
+		if len(value) > 300 || strings.Contains(value, c.Password) || strings.Contains(value, token) {
+			return ""
+		}
+		return value
 	}
-	return value
 }
 
-func (out *routerOSStatus) discovery(d routerOSDiscovery, password string) {
-	out.Identity = routerOSPublicText(d.name, password)
-	out.Version = routerOSPublicText(d.version, password)
-	out.Board = routerOSPublicText(d.board, password)
+func (out *routerOSStatus) discovery(d routerOSDiscovery, publicText func(string) string) {
+	out.Identity = publicText(d.name)
+	out.Version = publicText(d.version)
+	out.Board = publicText(d.board)
 }
 
 func routerTargetAddresses(ctx context.Context) ([]string, error) {
@@ -263,6 +325,8 @@ func registerRouterOSRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("POST "+routerOSRoute+"/test", s.routerOSTest)
 	mux.HandleFunc("PUT "+routerOSRoute, s.routerOSSave)
 	mux.HandleFunc("DELETE "+routerOSRoute, s.routerOSForget)
+	mux.HandleFunc("PUT "+routerOSRoute+"/ca", s.routerOSChangeCA)
+	mux.HandleFunc("DELETE "+routerOSRoute+"/ca", s.routerOSChangeCA)
 }
 
 func (s *server) routerOSStatus(w http.ResponseWriter, r *http.Request) {
@@ -297,20 +361,35 @@ func (s *server) routerOSStatus(w http.ResponseWriter, r *http.Request) {
 
 func (out *routerOSStatus) inspect(ctx context.Context, c routerOSConfiguration, details bool) {
 	out.Configured, out.Status = true, "unavailable"
+	publicText := c.publicTextFilter()
 	if details {
-		out.Endpoint = routerOSPublicText(c.Endpoint, c.Password)
-		out.Username = routerOSPublicText(c.Username, c.Password)
-		out.Target = routerOSPublicText(c.Target, c.Password)
-		if routerOSPublicText(c.Ingress.Name, c.Password) != "" {
+		out.Endpoint = publicText(c.Endpoint)
+		out.Username = publicText(c.Username)
+		out.Target = publicText(c.Target)
+		if publicText(c.Ingress.Name) != "" {
 			out.Ingress = &c.Ingress
 		}
 	}
 
-	d, err := liveRouterOS.discover(ctx, c.routerOSCredentials)
+	client, cert, closeIdle, err := routerOSConnection(c.CAPEM)
 	if details {
-		out.discovery(d, c.Password)
+		out.TrustedCA = routerOSCAInfo(cert, publicText)
 	}
 	if err != nil {
+		if details {
+			out.Diagnostic = string(routerOSErrorCode(err))
+		}
+		return
+	}
+	defer closeIdle()
+	d, err := client.discover(ctx, c.routerOSCredentials)
+	if details {
+		out.discovery(d, publicText)
+	}
+	if err != nil {
+		if details {
+			out.Diagnostic = string(routerOSErrorCode(err))
+		}
 		return
 	}
 	addresses, err := routerTargetAddresses(ctx)
@@ -321,8 +400,11 @@ func (out *routerOSStatus) inspect(ctx context.Context, c routerOSConfiguration,
 		out.Status = "configuration_error"
 		return
 	}
-	rows, err := liveRouterOS.read(ctx, c.routerOSCredentials, routerOSNAT)
+	rows, err := client.readList(ctx, c.routerOSCredentials, routerOSNAT)
 	if err != nil {
+		if details {
+			out.Diagnostic = string(routerOSErrorCode(err))
+		}
 		return
 	}
 	out.Status = "connected"
@@ -343,15 +425,29 @@ func (s *server) routerOSTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var c routerOSCredentials
-	if r.URL.ForceQuery || r.URL.RawQuery != "" || decodeContainerJSON(r.Body, &c) != nil || !c.normalize() {
+	if r.URL.ForceQuery || r.URL.RawQuery != "" || decodeRouterOSRequest(r.Body, &c) != nil || !c.normalize() {
 		writeError(w, 400, "invalid_credentials")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
-	d, err := liveRouterOS.discover(ctx, c)
+	if c.CAPEM == "" {
+		storedCA, _, err := s.store.readRouterOSCA(ctx)
+		if err != nil {
+			writeError(w, 503, "configuration_error")
+			return
+		}
+		c.CAPEM = storedCA
+	}
+	client, cert, closeIdle, err := routerOSConnection(c.CAPEM)
 	if err != nil {
-		writeError(w, 502, "unavailable")
+		writeRouterOSConnectionError(w, err)
+		return
+	}
+	defer closeIdle()
+	d, err := client.discover(ctx, c)
+	if err != nil {
+		writeRouterOSConnectionError(w, err)
 		return
 	}
 	addresses, err := routerTargetAddresses(ctx)
@@ -359,15 +455,16 @@ func (s *server) routerOSTest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 503, "target_unavailable")
 		return
 	}
-	out := routerOSStatus{Status: "connected"}
-	out.discovery(d, c.Password)
+	publicText := c.publicTextFilter()
+	out := routerOSStatus{Status: "connected", TrustedCA: routerOSCAInfo(cert, publicText)}
+	out.discovery(d, publicText)
 	for name := range d.lists {
-		if routerOSPublicText(name, c.Password) != "" {
+		if publicText(name) != "" {
 			out.IngressChoices = append(out.IngressChoices, routerOSSelector{Type: "list", Name: name})
 		}
 	}
 	for name := range d.interfaces {
-		if routerOSPublicText(name, c.Password) != "" {
+		if publicText(name) != "" {
 			out.IngressChoices = append(out.IngressChoices, routerOSSelector{Type: "interface", Name: name})
 		}
 	}
@@ -379,7 +476,7 @@ func (s *server) routerOSTest(w http.ResponseWriter, r *http.Request) {
 		return a.Name < b.Name
 	})
 	for _, address := range addresses {
-		if routerOSPublicText(address, c.Password) != "" {
+		if publicText(address) != "" {
 			out.TargetChoices = append(out.TargetChoices, address)
 		}
 	}
@@ -393,7 +490,7 @@ func (s *server) routerOSSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var c routerOSConfiguration
-	if r.URL.ForceQuery || r.URL.RawQuery != "" || decodeContainerJSON(r.Body, &c) != nil || !c.valid() {
+	if r.URL.ForceQuery || r.URL.RawQuery != "" || decodeRouterOSRequest(r.Body, &c) != nil || !c.valid() {
 		writeError(w, 400, "invalid_configuration")
 		return
 	}
@@ -406,17 +503,35 @@ func (s *server) routerOSSave(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "target_unavailable")
 		return
 	}
-	d, err := liveRouterOS.discover(ctx, c.routerOSCredentials)
+	storedCA, configured, err := s.store.readRouterOSCA(ctx)
 	if err != nil {
-		writeError(w, 502, "unavailable")
+		writeError(w, 503, "configuration_error")
+		return
+	}
+	if configured {
+		if c.CAPEM != "" {
+			writeError(w, 409, "ca_change_required")
+			return
+		}
+		c.CAPEM = storedCA
+	}
+	client, _, closeIdle, err := routerOSConnection(c.CAPEM)
+	if err != nil {
+		writeRouterOSConnectionError(w, err)
+		return
+	}
+	defer closeIdle()
+	d, err := client.discover(ctx, c.routerOSCredentials)
+	if err != nil {
+		writeRouterOSConnectionError(w, err)
 		return
 	}
 	if !d.has(c.Ingress) {
 		writeError(w, 400, "ingress_unavailable")
 		return
 	}
-	if _, err := liveRouterOS.read(ctx, c.routerOSCredentials, routerOSNAT); err != nil {
-		writeError(w, 502, "unavailable")
+	if _, err := client.readList(ctx, c.routerOSCredentials, routerOSNAT); err != nil {
+		writeRouterOSConnectionError(w, err)
 		return
 	}
 	addresses, err = routerTargetAddresses(ctx)
@@ -424,12 +539,8 @@ func (s *server) routerOSSave(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "target_unavailable")
 		return
 	}
-	if s.operations != nil {
-		current, err := s.operations.currentFactoryReset()
-		if err != nil || (current != nil && operationIsCurrent(current.State)) {
-			writeError(w, 409, "factory_reset_pending")
-			return
-		}
+	if !s.allowRouterOSSave(w) {
+		return
 	}
 	if err := s.store.writeRouterOS(ctx, &c, actor, "routeros_save"); err != nil {
 		writeError(w, 503, "configuration_error")
@@ -453,6 +564,113 @@ func (s *server) routerOSForget(w http.ResponseWriter, r *http.Request) {
 	s.routerOSMu.Lock()
 	defer s.routerOSMu.Unlock()
 	if s.store.writeRouterOS(ctx, nil, actor, "routeros_forget") != nil {
+		writeError(w, 503, "configuration_error")
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+func routerOSConnection(caPEM string) (routerOSClient, *x509.Certificate, func(), error) {
+	var cert *x509.Certificate
+	if caPEM != "" {
+		var err error
+		cert, err = parseRouterOSCA(caPEM)
+		if err != nil {
+			return routerOSClient{}, nil, nil, err
+		}
+	}
+	client, closeIdle, err := liveRouterOS.withCA(cert)
+	return client, cert, closeIdle, err
+}
+
+func routerOSErrorCode(err error) routerOSError {
+	var category routerOSError
+	if errors.As(err, &category) {
+		return category
+	}
+	return errRouterOSUnavailable
+}
+
+func writeRouterOSConnectionError(w http.ResponseWriter, err error) {
+	code := routerOSErrorCode(err)
+	status := http.StatusBadGateway
+	if code == errRouterOSInvalidCA {
+		status = http.StatusBadRequest
+	}
+	writeError(w, status, string(code))
+}
+
+func (s *server) allowRouterOSSave(w http.ResponseWriter) bool {
+	if s.operations != nil {
+		current, err := s.operations.currentFactoryReset()
+		if err != nil || (current != nil && operationIsCurrent(current.State)) {
+			writeError(w, 409, "factory_reset_pending")
+			return false
+		}
+	}
+	return true
+}
+
+func (s *server) routerOSChangeCA(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	actor, ok := s.requirePrimaryAdministrator(w, r)
+	if !ok {
+		return
+	}
+	if r.URL.ForceQuery || r.URL.RawQuery != "" {
+		writeError(w, 400, "invalid_request")
+		return
+	}
+	var input struct {
+		CAPEM string `json:"ca_pem"`
+	}
+	action := "routeros_ca_remove"
+	if r.Method == http.MethodPut {
+		if decodeRouterOSRequest(r.Body, &input) != nil || input.CAPEM == "" {
+			writeRouterOSConnectionError(w, errRouterOSInvalidCA)
+			return
+		}
+		action = "routeros_ca_replace"
+	} else if r.ContentLength != 0 {
+		writeError(w, 400, "invalid_request")
+		return
+	}
+
+	s.routerOSMu.Lock()
+	defer s.routerOSMu.Unlock()
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	c, err := s.store.readRouterOS(ctx)
+	if err != nil {
+		writeError(w, 503, "configuration_error")
+		return
+	}
+	if c == nil {
+		writeError(w, 409, "ca_change_required")
+		return
+	}
+	if !s.allowRouterOSSave(w) {
+		return
+	}
+	c.CAPEM = input.CAPEM
+	client, _, closeIdle, err := routerOSConnection(c.CAPEM)
+	if err != nil {
+		writeRouterOSConnectionError(w, err)
+		return
+	}
+	defer closeIdle()
+	if _, err := client.discover(ctx, c.routerOSCredentials); err != nil {
+		writeRouterOSConnectionError(w, err)
+		return
+	}
+	if _, err := client.readList(ctx, c.routerOSCredentials, routerOSNAT); err != nil {
+		writeRouterOSConnectionError(w, err)
+		return
+	}
+	if !s.allowRouterOSSave(w) {
+		return
+	}
+	if err := s.store.writeRouterOS(ctx, c, actor, action); err != nil {
 		writeError(w, 503, "configuration_error")
 		return
 	}

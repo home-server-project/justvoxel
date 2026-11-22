@@ -17,6 +17,8 @@ type routerOSAPI interface {
 	RouterOSTest(context.Context, string, api.RouterOSCredentials) (api.RouterOSStatus, error)
 	RouterOSSave(context.Context, string, api.RouterOSConfiguration) error
 	RouterOSForget(context.Context, string) error
+	RouterOSReplaceCA(context.Context, string, string) error
+	RouterOSRemoveCA(context.Context, string) error
 }
 
 func (a *App) registerRouterOSRoutes(mux *http.ServeMux) {
@@ -25,6 +27,8 @@ func (a *App) registerRouterOSRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST "+routerOSWebPath+"/test", a.routerOS)
 	mux.HandleFunc("PUT "+routerOSWebPath, a.routerOS)
 	mux.HandleFunc("DELETE "+routerOSWebPath, a.routerOS)
+	mux.HandleFunc("PUT "+routerOSWebPath+"/ca", a.routerOS)
+	mux.HandleFunc("DELETE "+routerOSWebPath+"/ca", a.routerOS)
 }
 
 func (a *App) routerOS(w http.ResponseWriter, r *http.Request) {
@@ -55,7 +59,7 @@ func (a *App) routerOS(w http.ResponseWriter, r *http.Request) {
 			writeNetworkWebError(w, 403, ui(w, "ui.74bccc44f472"))
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, 8192)
+		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 		if r.Method == http.MethodDelete {
 			if r.ContentLength != 0 {
 				writeNetworkWebError(w, 400, ui(w, "network.router.invalid_request"))
@@ -68,10 +72,29 @@ func (a *App) routerOS(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		if r.URL.Path == routerOSWebPath+"/ca" {
+			switch r.Method {
+			case http.MethodPut:
+				pem := r.PostForm["ca_pem"]
+				if len(r.PostForm) != 1 || len(pem) != 1 {
+					writeNetworkWebError(w, 400, ui(w, "network.router.invalid_ca"))
+					return
+				}
+				err = client.RouterOSReplaceCA(r.Context(), session, pem[0])
+			case http.MethodDelete:
+				err = client.RouterOSRemoveCA(r.Context(), session)
+			}
+			if err != nil {
+				a.writeRouterOSError(w, err, r.Method == http.MethodDelete)
+			} else {
+				writeNetworkWebJSON(w, 200, map[string]bool{"ok": true})
+			}
+			return
+		}
 		for key, values := range r.PostForm {
 			allowed := false
 			if r.Method != http.MethodDelete {
-				allowed = key == "endpoint" || key == "username" || key == "password"
+				allowed = key == "endpoint" || key == "username" || key == "password" || key == "ca_pem"
 			}
 			if r.Method == http.MethodPut {
 				allowed = allowed || key == "target" || key == "ingress_type" || key == "ingress_name"
@@ -83,6 +106,7 @@ func (a *App) routerOS(w http.ResponseWriter, r *http.Request) {
 		}
 		credentials := api.RouterOSCredentials{
 			Endpoint: r.PostForm.Get("endpoint"), Username: r.PostForm.Get("username"), Password: r.PostForm.Get("password"),
+			CAPEM: r.PostForm.Get("ca_pem"),
 		}
 		switch r.Method {
 		case http.MethodPost:
@@ -97,7 +121,7 @@ func (a *App) routerOS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err != nil {
-		a.writeRouterOSError(w, err)
+		a.writeRouterOSError(w, err, false)
 		return
 	}
 	if r.Method == http.MethodPut || r.Method == http.MethodDelete {
@@ -107,7 +131,7 @@ func (a *App) routerOS(w http.ResponseWriter, r *http.Request) {
 	writeNetworkWebJSON(w, 200, out)
 }
 
-func (a *App) writeRouterOSError(w http.ResponseWriter, err error) {
+func (a *App) writeRouterOSError(w http.ResponseWriter, err error, removingCA bool) {
 	if errors.Is(err, api.ErrUnauthorized) || errors.Is(err, api.ErrPasswordChangeRequired) {
 		a.handleNetworkAPIError(w, err)
 		return
@@ -128,6 +152,15 @@ func (a *App) writeRouterOSError(w http.ResponseWriter, err error) {
 			status, key = response.StatusCode, "network.router.inventory_error"
 		case "configuration_error":
 			status, key = 503, "network.router.configuration_error"
+		case "invalid_ca":
+			status, key = 400, "network.router.invalid_ca"
+		case "ca_change_required":
+			status, key = 409, "network.router.ca_change_required"
+		case "tls_error", "auth_error", "network_error", "response_error":
+			key = "network.router." + response.Message
+			if removingCA && response.Message == "tls_error" {
+				key = "network.router.ca_remove_tls_error"
+			}
 		case "factory_reset_pending":
 			status, key = 409, "network.router.factory_reset_pending"
 		}

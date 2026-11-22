@@ -1492,6 +1492,26 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     return grid;
   };
 
+  const routerDiagnostic = (code) => {
+    switch (code) {
+      case "tls_error": return jvT("network.router.tls_error");
+      case "auth_error": return jvT("network.router.auth_error");
+      case "network_error": return jvT("network.router.network_error");
+      case "response_error": return jvT("network.router.response_error");
+      case "invalid_ca": return jvT("network.router.invalid_ca");
+      case "unavailable":
+        return jvT("network.router.unavailable");
+      default:
+        return "";
+    }
+  };
+
+  const routerCARows = (ca) => ca ? [
+    ca.common_name && row(jvT("network.router.ca_name"), ca.common_name),
+    row(jvT("network.router.ca_fingerprint"), ca.fingerprint),
+    row(jvT("network.router.ca_expires"), ca.expires_at.slice(0, 10)),
+  ].filter(Boolean) : [];
+
   const renderRouterConfiguration = (stored) => {
     const form = document.createElement("form");
     form.className = "network-ethernet-form";
@@ -1536,8 +1556,30 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     feedback.className = "network-connect-hint";
     feedback.setAttribute("role", "status");
 
+    const trust = document.createElement("section");
+    trust.className = "network-router-trust";
+    const trustHeading = document.createElement("h3");
+    trustHeading.textContent = jvT("network.router.trusted_ca");
+    const trustHelp = document.createElement("p");
+    trustHelp.className = "muted";
+    trustHelp.textContent = jvT("network.router.ca_help");
+    const caFile = document.createElement("input");
+    caFile.type = "file";
+    caFile.accept = ".crt,.pem";
+    caFile.hidden = true;
+    const uploadCA = actionButton(stored.trusted_ca ? jvT("network.router.ca_replace") : jvT("network.router.ca_upload"), "routerUploadCA", "");
+    const removeCA = actionButton(jvT("network.router.ca_remove"), "routerRemoveCA", "");
+    const clearCA = actionButton(jvT("network.router.ca_clear"), "routerClearCA", "");
+    const caActions = document.createElement("div");
+    caActions.className = "network-inline-actions";
+    caActions.append(uploadCA, caFile);
+    if (stored.trusted_ca) caActions.appendChild(removeCA);
+    if (!stored.configured) caActions.appendChild(clearCA);
+    const caDetails = document.createElement("div");
+    trust.append(trustHeading, trustHelp, caActions, caDetails);
+
     const forget = actionButton(jvT("network.router.forget"), "routerForget", "danger");
-    form.append(credentialsRow, endpointRow, targetLabel, ingressLabel, feedback);
+    form.append(credentialsRow, endpointRow, targetLabel, ingressLabel, trust, feedback);
     if (stored.configured) {
       const forgetActions = document.createElement("div");
       forgetActions.className = "network-form-actions";
@@ -1548,21 +1590,31 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     let choices = [];
     let verified = false;
     let busy = false;
+    let pendingCA = "";
+    let testedCA = null;
     const update = () => {
       targetLabel.hidden = ingressLabel.hidden = !verified;
       save.disabled = busy || !verified || !target.value || !ingress.value;
-      test.disabled = forget.disabled = busy;
+      test.disabled = forget.disabled = uploadCA.disabled = removeCA.disabled = clearCA.disabled = busy;
+      clearCA.hidden = !pendingCA;
+      if (pendingCA && !testedCA) {
+        caDetails.replaceChildren(document.createTextNode(jvT("network.router.ca_pending")));
+      } else {
+        caDetails.replaceChildren(...routerCARows(testedCA || stored.trusted_ca));
+      }
       endpoint.readOnly = username.readOnly = password.readOnly = busy;
       target.disabled = ingress.disabled = busy || !verified;
       target.required = ingress.required = verified;
     };
     const invalidate = () => {
       verified = false;
+      testedCA = null;
       feedback.replaceChildren();
       update();
     };
     endpoint.addEventListener("input", invalidate);
     username.addEventListener("input", invalidate);
+    password.addEventListener("input", invalidate);
     target.addEventListener("change", update);
     ingress.addEventListener("change", update);
     update();
@@ -1592,6 +1644,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         body.set("endpoint", endpoint.value);
         body.set("username", username.value);
         body.set("password", password.value);
+        if (pendingCA) body.set("ca_pem", pendingCA);
       }
       if (method === "PUT") {
         const choice = choices[Number(ingress.value)];
@@ -1599,7 +1652,8 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         body.set("ingress_type", choice.type);
         body.set("ingress_name", choice.name);
       }
-      if (method === "POST") verified = false;
+      verified = false;
+      testedCA = null;
       busy = true;
       update();
       feedback.textContent = jvT("ui.ec963ffc911b");
@@ -1608,12 +1662,11 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
           method,
           headers: { "Content-Type": "application/x-www-form-urlencoded", "X-CSRF-Token": csrf },
           body: method === "DELETE" ? undefined : body,
-        }).finally(() => {
-          password.value = "";
-          body.delete("password");
         });
         if (!data) return;
         if (method !== "POST") {
+          password.value = "";
+          pendingCA = "";
           await refreshRouter();
           return;
         }
@@ -1624,7 +1677,48 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         const hint = document.createElement("p");
         hint.textContent = data.target_choices?.length && choices.length ? jvT("network.router.reenter") : jvT("network.router.no_choices");
         feedback.replaceChildren(...routerIdentityRows(data), hint);
+        testedCA = data.trusted_ca || null;
         verified = true;
+      } catch (error) {
+        feedback.textContent = error?.message || jvT("network.router.unavailable");
+      } finally {
+        body.delete("password");
+        body.delete("ca_pem");
+        if (!verified) password.value = "";
+        busy = false;
+        update();
+      }
+    };
+
+    const changeCA = async (file) => {
+      if (busy) return;
+      if (!stored.configured) pendingCA = "";
+      invalidate();
+      busy = true;
+      update();
+      try {
+        let pem = "";
+        if (file) {
+          if (!file.size || file.size > 8192) {
+            feedback.textContent = jvT("network.router.invalid_ca");
+            return;
+          }
+          pem = await file.text();
+        }
+        if (!stored.configured) {
+          pendingCA = pem;
+          return;
+        }
+        feedback.textContent = jvT("ui.ec963ffc911b");
+        const data = await requestJSON(routerPath + "/ca", {
+          method: file ? "PUT" : "DELETE",
+          headers: { "Content-Type": "application/x-www-form-urlencoded", "X-CSRF-Token": csrf },
+          body: file ? new URLSearchParams({ ca_pem: pem }) : undefined,
+        });
+        if (data) {
+          password.value = "";
+          await refreshRouter();
+        }
       } catch (error) {
         feedback.textContent = error?.message || jvT("network.router.unavailable");
       } finally {
@@ -1632,6 +1726,17 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         update();
       }
     };
+    uploadCA.addEventListener("click", () => caFile.click());
+    caFile.addEventListener("change", () => {
+      const file = caFile.files?.[0];
+      caFile.value = "";
+      if (file) return changeCA(file);
+    });
+    removeCA.addEventListener("click", () => changeCA(null));
+    clearCA.addEventListener("click", () => {
+      pendingCA = "";
+      invalidate();
+    });
     test.addEventListener("click", () => run("POST"));
     save.addEventListener("click", () => run("PUT"));
     forget.addEventListener("click", () => run("DELETE"));
@@ -1656,7 +1761,19 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     ]) {
       if (value) section.appendChild(row(label, value));
     }
-    if (data.can_configure) section.appendChild(renderRouterConfiguration(data));
+    const diagnostic = routerDiagnostic(data.diagnostic);
+    if (diagnostic) {
+      const message = document.createElement("p");
+      message.textContent = diagnostic;
+      section.appendChild(message);
+    }
+    if (data.can_configure) {
+      section.appendChild(renderRouterConfiguration(data));
+    } else if (data.trusted_ca) {
+      const trustHeading = document.createElement("h3");
+      trustHeading.textContent = jvT("network.router.trusted_ca");
+      section.append(trustHeading, ...routerCARows(data.trusted_ca));
+    }
     const heading = document.createElement("h3");
     heading.textContent = jvT("network.router.endpoints");
     section.appendChild(heading);
@@ -1697,7 +1814,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     guide.append(title, intro);
 
     const appendGuideText = (parent, text, tokenTag = "code") => {
-      const tokens = /(<JUSTVOXEL_IP>(?:\/32)?|<ROUTER_IP>:443\/TCP|<WAN_INTERFACE_LIST>|\b(?:www-ssl|rest-secure|rest-plain|rest-api|read|write|api|jv|justvoxel|dstnat)\b)/g;
+      const tokens = /(\/certificate sign <SERVER_CERTIFICATE_NAME> ca=<CA_CERTIFICATE_NAME>|<JUSTVOXEL_IP>(?:\/32)?|<ROUTER_IP>:443\/TCP|<WAN_INTERFACE_LIST>|\b(?:justvoxel-ca|www-ssl|rest-secure|rest-plain|rest-api|key-cert-sign|crl-sign|digital-signature|key-encipherment|tls-server|read|write|api|jv|justvoxel|dstnat)\b)/g;
       text.split(tokens).forEach((part, index) => {
         if (index % 2 === 0) {
           parent.appendChild(document.createTextNode(part));
@@ -1721,10 +1838,13 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     ].join("\n"), "span");
     forwardExample.appendChild(code);
     const sections = [
-      [jvT("network.router.https"), [jvT("network.router.https_help")]],
       [jvT("network.router.group"), [jvT("network.router.group_help")]],
       [jvT("network.router.user"), [jvT("network.router.user_help")]],
+      [jvT("network.router.guide_ca"), [jvT("network.router.guide_ca_help")]],
+      [jvT("network.router.guide_leaf"), [jvT("network.router.guide_leaf_help"), jvT("network.router.guide_leaf_sign_fallback")]],
+      [jvT("network.router.https"), [jvT("network.router.https_help")]],
       [jvT("network.router.input"), [jvT("network.router.input_help")]],
+      [jvT("network.router.guide_upload"), [jvT("network.router.guide_upload_help"), jvT("network.router.guide_renew_help")]],
       [jvT("network.router.forward"), [jvT("network.router.forward_help")], forwardExample],
       [jvT("network.router.boundary"), [jvT("network.router.boundary_help"), jvT("network.router.exclusions")]],
       [jvT("network.router.endpoints"), [jvT("network.router.endpoints_help")]],

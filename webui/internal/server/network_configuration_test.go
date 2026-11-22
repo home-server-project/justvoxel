@@ -1459,8 +1459,8 @@ func TestNetworkPresentationLayoutContract(t *testing.T) {
 		}
 		return script[a:b]
 	}
-	if strings.Contains(slice("  const renderMikroTikGuide =", "  const renderNetwork ="), "innerHTML") {
-		t.Error("Router guide must build tokens with DOM nodes")
+	if strings.Contains(slice("  const routerDiagnostic =", "  const renderNetwork ="), "innerHTML") {
+		t.Error("Router guide and certificate details must use safe DOM APIs")
 	}
 	if !strings.Contains(script, `refreshButton?.addEventListener("click", loadNetwork)`) ||
 		!strings.Contains(slice("  const loadNetwork =", "  const requestScan ="), `if (selectedTab === "Router") refreshRouter();`) {
@@ -1508,9 +1508,11 @@ const routerPath = "/api/network/router/mikrotik";
 const csrf = "test-csrf";
 let testResult, testFailure;
 const routerRequests = [];
+const routerRequestCAs = [];
 const requestJSON = async (path, options) => {
   if (!options) return routerStatus;
   routerRequests.push([path, options.method]);
+  routerRequestCAs.push(options.body?.get("ca_pem") ?? null);
   if (options.method === "POST" && testFailure) throw new Error("Connection failed");
   return options.method === "POST" ? testResult : routerStatus;
 };
@@ -1666,6 +1668,11 @@ for (const required of [
   "router identity and version", "status and conflicts",
   "interfaces, VLANs, routes, DNS, DHCP", "RouterOS users and groups, certificates, /ip service",
   "packages and updates, router reboots and arbitrary RouterOS commands",
+  "justvoxel-ca", "3650 days", "825 days", "RSA 2048", "key-cert-sign", "crl-sign", "self-signed root CA",
+  "Subject Alt Name (SAN)", "select IP as the type and enter only the address, without IP: or ::",
+  "digital-signature", "key-encipherment", "tls-server", "rest-secure=yes", "rest-plain=no",
+  "export only its public certificate as PEM", "leaving the export passphrase blank", "Download the .crt file",
+  "Use Replace CA when the signing CA changes",
   "Minecraft instance or Minecraft Network (Velocity) configuration", "no way to accept arbitrary ports"
 ]) assert(guideText.includes(required), required);
 assert.doesNotMatch(guideText, /\b(?:\d{1,3}\.){3}\d{1,3}\b|RB3011|bridge-minecraft|pppoe-wan/i);
@@ -1692,8 +1699,8 @@ assert(find(tabPanel(), (node) => node.textContent === "Providers"));
 assert(!find(tabPanel(), (node) => node.dataset.routerProvider || hasClass("network-router-guide")(node)));
 
 (async () => {
-  routerStatus = { status: "connected", can_configure: true, configured: true,
-    endpoint: "https://router.example", username: "operator" };
+  const metadata = { common_name: "<router-ca>", fingerprint: "a".repeat(64), expires_at: "2030-02-03T00:00:00Z" };
+  routerStatus = { status: "not_configured", can_configure: true, configured: false };
   const connection = renderRouterConnection();
   assert(!find(connection, (node) => node.tag === "button" && node.textContent === "Refresh"));
   const form = find(connection, (node) => node.tag === "form");
@@ -1705,6 +1712,15 @@ assert(!find(tabPanel(), (node) => node.dataset.routerProvider || hasClass("netw
   assert(!password.value);
   assert(hasClass("network-router-endpoint-row")(endpointRow));
   assert.equal(endpointRow.children[0].textContent, "HTTPS endpoint");
+  const endpoint = endpointRow.children[0].children[0];
+  endpoint.value = "https://router.example";
+  credentialsRow.children[0].children[0].value = "operator";
+  const file = find(form, (node) => node.type === "file");
+  const upload = find(form, (node) => node.textContent === "Upload trusted CA");
+  assert(file && upload);
+  file.files = [{ size: 12, text: async () => "test-public-ca" }];
+  await file.onchange();
+  assert(find(form, (node) => node.textContent === "CA selected. Test the connection to verify it."));
   const [test, save] = endpointRow.children[1].children;
   assert.deepEqual([test.textContent, save.textContent], ["Test connection", "Save"]);
   assert(!save.hidden && save.disabled);
@@ -1719,23 +1735,48 @@ assert(!find(tabPanel(), (node) => node.dataset.routerProvider || hasClass("netw
   await test.onclick();
   assert(save.disabled && !password.value);
   testFailure = false;
-  testResult = { target_choices: ["192.0.2.10"], ingress_choices: [{ type: "list", name: "WAN" }] };
+  testResult = { target_choices: ["192.0.2.10"], ingress_choices: [{ type: "list", name: "WAN" }], trusted_ca: metadata };
   password.value = "test-password";
   await test.onclick();
-  assert(!password.value && save.disabled);
+  assert.equal(password.value, "test-password");
+  assert(save.disabled);
   assert(!targetLabel.hidden && !ingressLabel.hidden);
+  for (const value of [metadata.common_name, metadata.fingerprint, "2030-02-03"]) {
+    assert(find(form, (node) => node.tag === "strong" && node.textContent === value), value);
+  }
+  password.value = "changed-password";
+  password.oninput();
+  assert(save.disabled && targetLabel.hidden && ingressLabel.hidden);
+  assert(!find(form, (node) => node.textContent === metadata.fingerprint));
+  await test.onclick();
   target.value = "192.0.2.10";
   target.onchange();
   assert(save.disabled);
   ingress.value = "0";
   ingress.onchange();
   assert(!save.disabled);
-  password.value = "test-password";
   await save.onclick();
   assert(!password.value);
   endpointRow.children[0].children[0].oninput();
   assert(save.disabled);
-  assert.deepEqual(routerRequests, [[routerPath + "/test", "POST"], [routerPath + "/test", "POST"], [routerPath, "PUT"]]);
+  assert.deepEqual(routerRequests, [
+    [routerPath + "/test", "POST"], [routerPath + "/test", "POST"], [routerPath + "/test", "POST"], [routerPath, "PUT"],
+  ]);
+  assert.deepEqual(routerRequestCAs, Array(4).fill("test-public-ca"));
+
+  routerStatus = { status: "unavailable", diagnostic: "tls_error", configured: true, can_configure: true, trusted_ca: metadata };
+  const configured = renderRouterConnection();
+  assert(find(configured, (node) => node.textContent === "Router certificate could not be verified. Check the trusted CA and HTTPS endpoint."));
+  const replace = find(configured, (node) => node.textContent === "Replace CA");
+  const remove = find(configured, (node) => node.textContent === "Remove CA");
+  assert(replace && remove);
+  assert(!find(configured, (node) => node.type === "password").value);
+  const replacement = find(configured, (node) => node.type === "file");
+  replacement.files = [{ size: 11, text: async () => "replacement" }];
+  await replacement.onchange();
+  await remove.onclick();
+  assert.deepEqual(routerRequests.slice(-2), [[routerPath + "/ca", "PUT"], [routerPath + "/ca", "DELETE"]]);
+  assert.deepEqual(routerRequestCAs.slice(-2), ["replacement", null]);
 })().catch(error => { console.error(error); process.exitCode = 1; });
 `
 	cmd := nodeTestCommand()

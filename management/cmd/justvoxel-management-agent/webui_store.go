@@ -239,6 +239,13 @@ var webUIStoreMigrations = []webUIStoreMigration{
 				target TEXT NOT NULL, ingress_type TEXT NOT NULL, ingress_name TEXT NOT NULL)`,
 		},
 	},
+	{
+		version: 13,
+		name:    "routeros_trusted_ca",
+		statements: []string{
+			`ALTER TABLE routeros_state ADD COLUMN ca_pem TEXT NOT NULL DEFAULT ''`,
+		},
+	},
 }
 
 func openWebUIStore(path string) (*webUIStore, error) {

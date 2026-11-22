@@ -52,6 +52,23 @@
   align-items: end;
 }
 
+.network-router-trust {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: var(--jv-space-xs);
+}
+
+.network-router-trust > h3,
+.network-router-trust > p {
+  margin: 0;
+}
+
+.network-router-trust button {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .network-router-guide {
   display: grid;
   justify-items: start;
