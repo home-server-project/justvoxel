@@ -47,7 +47,7 @@ Dispatch **Testing** from `testing` to build both products from the checked-out 
 
 ## Stable releases
 
-After product validation, open a pull request from this repository’s `testing` branch to `main`. The promotion check verifies both the source branch and repository. Direct-push prevention requires GitHub repository rules protecting `main` and requiring the promotion check.
+After product validation, open a pull request from this repository’s `testing` branch to `main`. The **Protect main** ruleset is active on `refs/heads/main`. It requires a pull request with zero approving reviews required for the solo-maintainer workflow. The required `promotion` status check passes only when the promotion workflow verifies that the source is this repository’s `testing` branch. The ruleset blocks force pushes and branch deletion and has no bypass actors.
 
 A push to `main`, a manual dispatch on `main`, or the Saturday 08:00 UTC schedule builds from the validated main revision. Stable uses its own internal verified `ghcr.io/home-server-project/justvoxel-management-agent:stable` package, rebuilding it when inputs change. Development has no stable tag. The stable appliance repositories are
 

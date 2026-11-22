@@ -24,6 +24,16 @@ Make CI truthful, minimal, deterministic, and easy to diagnose.
 - When stable CI is implemented or changed, prefer promotion of reviewed testing source plus a scheduled rebuild of the current stable source rather than fake commits.
 - Do not use release/promotion workflows as a place to patch product code.
 
+## Promotion Protection
+
+- Use `testing -> pull request -> main` as the production/stable promotion path.
+- Require the pull request to originate from this repository's `testing` branch.
+- Require the `promotion` status check to pass before `main` can update.
+- Preserve the repository ruleset `Protect main`.
+- Never bypass, disable, weaken, or rewrite that protection while troubleshooting CI.
+- Require explicit human approval for any repository-protection settings change.
+- Repair CI failures on `testing` or another explicitly approved development branch, never by directly patching `main`.
+
 ## Avoid Duplicate Validation
 
 Do not repeatedly verify packages or facts guaranteed by Home Server Base unless JustVoxel has a specific integration dependency that needs its own check.

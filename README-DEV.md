@@ -139,7 +139,7 @@ Start with the document that matches what you are trying to do:
 
 Pull requests into `testing` validate source and build Development locally in CI. Dispatch **Development** to publish the full WebUI showcase or **Testing** to build VM and HWS from the current checkout and Home Server Base stable. Both workflows share the verified testing-channel Management Agent.
 
-Promote validated source from `testing` to `main` by pull request. Stable builds compile both products from the promoted revision. The [build guide](docs/BUILD.md) covers tags, local development, and release triggers.
+The protected `main` branch is reserved for stable promotion. Development takes place on `testing`. After validation, promote only by pull request from this repository’s `testing` branch to `main`. The required `promotion` check rejects other branches and forks. The **Protect main** ruleset blocks force pushes and deletion and has no bypass actors. Stable builds compile both products from the promoted revision. The [build guide](docs/BUILD.md) covers tags, local development, and release triggers.
 
 ## License
 

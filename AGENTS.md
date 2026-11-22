@@ -142,8 +142,11 @@ Before editing, inspect:
 
 Normal Codex scope is `testing` or an explicitly selected development branch.
 
-`main` is outside normal Codex modification scope unless the human explicitly
-approves a branch-specific task.
+`main` is a protected promotion branch. Normal Codex and source work never modifies it directly.
+The only normal source promotion is `testing` -> PR -> `main` within this repository.
+The **Protect main** ruleset requires a pull request and a passing `promotion` check.
+Direct pushes, force pushes, branch deletion, and promotion PRs from other branches or forks are invalid.
+Weakening or bypassing these protections requires explicit human approval.
 
 Promotion is human-controlled. The intended release flow is development branch ->
 PR to `testing` -> testing image -> human runtime/VM acceptance -> PR from
