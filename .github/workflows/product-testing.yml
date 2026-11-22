@@ -1,0 +1,122 @@
+name: Product testing
+on: workflow_dispatch
+concurrency:
+  group: product-testing
+  cancel-in-progress: false
+
+env:
+  VM_IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/justvoxel-vm
+  HWS_IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/justvoxel-hws
+  CURRENT_TAG: testing
+  PARENT_CHANNEL: testing
+  PRODUCT_STATUS: development
+  TESTING_PARENT: ghcr.io/home-server-project/justvoxel-dev:testing
+  RECHUNK_MAX_LAYERS: '127'
+  OCI_LAYER_LIMIT: '128'
+
+jobs:
+  source-tests:
+    if: github.ref == 'refs/heads/testing'
+    name: Product source checks
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Validate product build scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          for script in build_files/*.sh build_files/validate/*.sh; do
+            [[ -f "${script}" ]] || continue
+            bash -n "${script}"
+          done
+
+  build:
+    needs: source-tests
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y podman skopeo jq
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: 'v3.1.3'
+
+      - name: Verify and pull the testing parent for both products
+        shell: bash
+        run: |
+          set -euo pipefail
+          digest="$(skopeo inspect --format '{{.Digest}}' "docker://${TESTING_PARENT}")"
+          [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          parent="${TESTING_PARENT%:*}@${digest}"
+          cosign verify --new-bundle-format=false --key cosign.pub "${parent}" >/dev/null
+          sudo podman pull "${parent}"
+          sudo podman tag "${parent}" localhost/justvoxel-dev:build
+          echo 'JUSTVOXEL_DEV_IMAGE=localhost/justvoxel-dev:build' >> "${GITHUB_ENV}"
+
+      - name: Build both product images
+        uses: ./.github/actions/build-products
+
+      - name: Login to GHCR
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${HOME}/.docker"
+          printf '%s' "${GHCR_TOKEN}" | podman login \
+            --authfile "${HOME}/.docker/config.json" \
+            ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
+          chmod 600 "${HOME}/.docker/config.json"
+
+      - name: Publish both products
+        uses: ./.github/actions/publish-products
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
+
+  cleanup:
+    name: cleanup
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write
+    steps:
+      - name: Remove expired VM testing images
+        uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          packages: justvoxel-vm
+          delete-tags: 'testing-*'
+          exclude-tags: 'testing,stable,stable-*'
+          older-than: 45 days
+          keep-n-tagged: 7
+          validate: true
+
+      - name: Remove expired HWS testing images
+        uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          packages: justvoxel-hws
+          delete-tags: 'testing-*'
+          exclude-tags: 'testing,stable,stable-*'
+          older-than: 45 days
+          keep-n-tagged: 7
+          validate: true
