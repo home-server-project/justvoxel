@@ -1,5 +1,5 @@
 {{define "app-header"}}
-<header class="app-header topbar">
+<header class="app-header topbar"{{if developmentProfile}} data-development-profile{{end}}>
   <a class="brand-link brand-mark" href="/" aria-label="{{t "ui.6e76c1a4edf1"}}">
     <img class="brand-logo" src="/static/justvoxel-logo.png" alt="JustVoxel">
   </a>

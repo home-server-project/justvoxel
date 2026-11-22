@@ -29,32 +29,32 @@ JustVoxel consumes [Home Server Base 10](https://github.com/home-server-project/
 ghcr.io/home-server-project/home-server-base-10:stable
 ```
 
-The workflow verifies the current `:stable` signature with Cosign and builds from that tag directly. The parent image is not maintained as a manually pinned digest in this repository.
+Publishing workflows resolve the moving stable tag and verify its exact digest with Cosign. The same digest supplies Management Agent validation and appliance assembly.
 
 The supported host-management model is bootc. No host-side rpm-ostree layering workflow is supported.
 
 ## Image composition
 
-`Containerfile.dev` assembles the shared runtime, WebUI, Management Agent, and VM guest tools. Its runtime variant marker is `justvoxel-vm`. The final `Containerfile` builds JustVoxel VM from that baseline and adds the packages in `build_files/packages-hws.env` for JustVoxel HWS. HWS has its own variant marker, hardware checks, and trust policy.
+`Containerfile.dev` builds Development (`justvoxel-dev`), the full WebUI and integration showcase. VM and HWS build independently of Development. Their `Containerfile` runs the shared appliance build once in an internal Home Server Base stage with the current checkout’s WebUI binary, release metadata and verified Management Agent. HWS adds the hardware packages and configuration before finalization.
 
 ## Testing
 
 PRs targeting `testing` run source checks and compile the Management Agent from source for a development image build. PR validation uses read-only repository access.
 
-Dispatch **Development testing** from `testing` to publish `ghcr.io/home-server-project/justvoxel-dev:testing`. It reuses the signed `ghcr.io/home-server-project/justvoxel-management-agent:testing` package when the inputs match. Otherwise it rebuilds, signs, and verifies that package.
+Dispatch **Development** from `testing` to publish `ghcr.io/home-server-project/justvoxel-dev:testing`. It reuses the signed `ghcr.io/home-server-project/justvoxel-management-agent:testing` package when the inputs match. Otherwise it rebuilds, signs, and verifies that package.
 
-Dispatch **Product testing** from `testing` to verify the development image and build both products from the same verified digest. It publishes `ghcr.io/home-server-project/justvoxel-vm:testing` and `ghcr.io/home-server-project/justvoxel-hws:testing`. Testing builds also publish immutable tags with the build date, short commit, run ID, and attempt.
+Dispatch **Testing** from `testing` to build both products from the checked-out source. Both testing-channel workflows reuse the same internal Management Agent package after verifying the input identity, base digest, API version and exact package digest signature. It publishes `ghcr.io/home-server-project/justvoxel-vm:testing` and `ghcr.io/home-server-project/justvoxel-hws:testing`. Testing builds also publish immutable tags with the build date, short commit, run ID, and attempt.
 
 ## Stable releases
 
 After product validation, open a pull request from this repository’s `testing` branch to `main`. The promotion check verifies both the source branch and repository. Direct-push prevention requires GitHub repository rules protecting `main` and requiring the promotion check.
 
-A push to `main`, a manual dispatch on `main`, or the Saturday 08:00 UTC schedule builds from the validated main revision. The workflow compiles the Management Agent directly from source and assembles the common image locally as `localhost/justvoxel-dev:build`. Both final builds consume that local image. Stable publication and signing are limited to:
+A push to `main`, a manual dispatch on `main`, or the Saturday 08:00 UTC schedule builds from the validated main revision. Stable uses its own internal verified `ghcr.io/home-server-project/justvoxel-management-agent:stable` package, rebuilding it when inputs change. Development has no stable tag. The stable appliance repositories are
 
 - `ghcr.io/home-server-project/justvoxel-vm:stable`
 - `ghcr.io/home-server-project/justvoxel-hws:stable`
 
-CI rechunks the common image and the final HWS image with a target of 127 layers and enforces a 128-layer limit. Published image digests are signed and verified with Cosign.
+CI rechunks Development and both products with a target of 127 layers and enforces a 128-layer limit. Published image digests are signed and verified with Cosign.
 
 ## Local development
 

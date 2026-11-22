@@ -301,7 +301,7 @@ class Element {
   prepend(node) { this.children.unshift(node); }
   setAttribute(name, value) { this[name] = value; }
 }
-const document = { createElement: (tag) => new Element(tag) };
+const document = { querySelector: () => null, createElement: (tag) => new Element(tag) };
 const row = (name, value) => { const e = new Element("row"); e.textContent = name + ": " + value; return e; };
 const sectionHeading = () => new Element("heading");
 const actionButton = (text, key, value, kind = "secondary") => { const e = new Element("button"); e.textContent = text; e.dataset[key] = value; e.className = kind + " nav-admin-only network-action-button"; return e; };
@@ -718,10 +718,15 @@ func TestNetworkVisibleTabsAndConnectivityPresentation(t *testing.T) {
 	}
 	program := `
 const assert = require("node:assert/strict");
+let development = false;
 ` + script[start:end] + `
 const all = ["Overview", "Ethernet", "Wi-Fi", "Troubleshoot", "Remote Access", "Router"];
 let currentSnapshot = { workspace_tabs: all, devices: [{ kind: "ethernet" }], wireless_enabled: true };
 assert.deepEqual(effectiveTabs(currentSnapshot), ["Overview", "Ethernet", "Troubleshoot", "Remote Access", "Router"]);
+development = true;
+assert.deepEqual(effectiveTabs(currentSnapshot), all);
+assert.deepEqual(effectiveTabs({ workspace_tabs: ["Overview"] }), ["Overview"]);
+development = false;
 for (const state of ["disconnected", "unavailable"]) {
   assert.deepEqual(effectiveTabs({ workspace_tabs: all, devices: [{ kind: "wifi", state }], wireless_enabled: false }), all);
 }
@@ -1518,6 +1523,7 @@ const requestJSON = async (path, options) => {
   return options.method === "POST" ? testResult : routerStatus;
 };
 const refreshRemoteAccess = async () => {}, pollRemoteAccess = () => {};
+const development = false;
 const wifi = { kind: "wifi", interface: "wlp1s0", state: "activated", managed: true,
   wireless: { ssid: "Robinson Crusoe", signal: 79 },
   ipv4: { addresses: [{ address: "192.168.0.27", prefix: 24 }] },

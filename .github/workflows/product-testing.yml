@@ -1,4 +1,4 @@
-name: Product testing
+name: Testing
 on: workflow_dispatch
 concurrency:
   group: product-testing
@@ -8,9 +8,9 @@ env:
   VM_IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/justvoxel-vm
   HWS_IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/justvoxel-hws
   CURRENT_TAG: testing
-  PARENT_CHANNEL: testing
+  MANAGEMENT_PACKAGE: ghcr.io/home-server-project/justvoxel-management-agent:testing
+  HOME_SERVER_BASE_IMAGE: ghcr.io/home-server-project/home-server-base-10:stable
   PRODUCT_STATUS: development
-  TESTING_PARENT: ghcr.io/home-server-project/justvoxel-dev:testing
   RECHUNK_MAX_LAYERS: '127'
   OCI_LAYER_LIMIT: '128'
 
@@ -37,6 +37,7 @@ jobs:
           done
 
   build:
+    concurrency: management-package-testing
     needs: source-tests
     runs-on: ubuntu-24.04
     permissions:
@@ -47,6 +48,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+
+      - name: Set up Go for local WebUI build
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: ".go-version"
+          cache: false
 
       - name: Install build dependencies
         shell: bash
@@ -60,21 +67,6 @@ jobs:
         with:
           cosign-release: 'v3.1.3'
 
-      - name: Verify and pull the testing parent for both products
-        shell: bash
-        run: |
-          set -euo pipefail
-          digest="$(skopeo inspect --format '{{.Digest}}' "docker://${TESTING_PARENT}")"
-          [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
-          parent="${TESTING_PARENT%:*}@${digest}"
-          cosign verify --new-bundle-format=false --key cosign.pub "${parent}" >/dev/null
-          sudo podman pull "${parent}"
-          sudo podman tag "${parent}" localhost/justvoxel-dev:build
-          echo 'JUSTVOXEL_DEV_IMAGE=localhost/justvoxel-dev:build' >> "${GITHUB_ENV}"
-
-      - name: Build both product images
-        uses: ./.github/actions/build-products
-
       - name: Login to GHCR
         shell: bash
         env:
@@ -86,6 +78,14 @@ jobs:
             --authfile "${HOME}/.docker/config.json" \
             ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
           chmod 600 "${HOME}/.docker/config.json"
+
+      - name: Prepare verified Management Agent
+        uses: ./.github/actions/prepare-management
+        with:
+          signing-key: ${{ secrets.SIGNING_SECRET }}
+
+      - name: Build both product images
+        uses: ./.github/actions/build-products
 
       - name: Publish both products
         uses: ./.github/actions/publish-products

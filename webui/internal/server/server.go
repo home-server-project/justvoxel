@@ -125,7 +125,13 @@ func New(client API, cfg Config) (*App, error) {
 	if cfg.ExternalScheme == "" {
 		cfg.ExternalScheme = "http"
 	}
-	t, err := template.New("pages").Funcs(localeTemplateFuncs("en", "/login")).Funcs(template.FuncMap{"systemTimezone": systemTimezone, "systemNow": func() int64 { return time.Now().UnixMilli() }}).ParseFS(assets, "templates/*.html")
+	variant, _ := os.ReadFile("/usr/lib/justvoxel/variant")
+	development := strings.TrimSpace(string(variant)) == "justvoxel-dev"
+	funcs := localeTemplateFuncs("en", "/login")
+	funcs["developmentProfile"] = func() bool { return development }
+	funcs["systemTimezone"] = systemTimezone
+	funcs["systemNow"] = func() int64 { return time.Now().UnixMilli() }
+	t, err := template.New("pages").Funcs(funcs).ParseFS(assets, "templates/*.html")
 	if err != nil {
 		return nil, err
 	}

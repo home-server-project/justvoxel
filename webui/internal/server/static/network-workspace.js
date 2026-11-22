@@ -160,8 +160,9 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       deactivateDisabled: blocked || (provider.id === "nordvpn" ? !provider.service_active : (!(provider.id === "playit" && setupRunning()) && !provider.service_active && !provider.service_enabled && provider.service_state === "inactive"))
     };
   };
+  const development = Boolean(document.querySelector("[data-development-profile]"));
   const effectiveTabs = (snapshot) => (snapshot?.workspace_tabs || ["Overview"])
-    .filter((tab) => tab !== "Wi-Fi" || (snapshot?.devices || []).some((device) => device.kind === "wifi"));
+    .filter((tab) => tab !== "Wi-Fi" || development || (snapshot?.devices || []).some((device) => device.kind === "wifi"));
   const connectivitySummary = (value) => ({
     full: jvT("ui.efc751eb6e64"), limited: jvT("ui.4ead7680959f"), portal: jvT("ui.8c36e202e707"),
     none: jvT("ui.c4184bd7daac")

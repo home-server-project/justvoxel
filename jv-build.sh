@@ -252,7 +252,6 @@ assert_base_unchanged
 sudo podman build --pull=always --security-opt=label=disable --cap-add=all --device /dev/fuse \
     --build-arg "HOME_SERVER_BASE_IMAGE=${base_image}" \
     --build-arg JUSTVOXEL_DEV_REPOSITORY=ghcr.io/home-server-project/justvoxel-dev \
-    --build-arg JUSTVOXEL_VM_REPOSITORY=ghcr.io/home-server-project/justvoxel-vm \
     --label "org.opencontainers.image.revision=${source_commit}" \
     --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --label "io.home-server-project.justvoxel.webui.version=${webui_version}" \

@@ -30,7 +30,7 @@ JustVoxel consumes Home Server Base 10 as its direct operating-system parent. Ho
 
 The project needs a conservative server-oriented base with systemd, NetworkManager, firewalld, SELinux, Podman, and the normal Linux administration model expected on a long-lived home server. Home Server Base 10 centralizes that generic EL10 foundation so JustVoxel can focus on the Minecraft-appliance layer instead of maintaining its own duplicate rootfs composition.
 
-The common development image adds the complete shared appliance layer and remains VM-ready. Appliance behavior, management logic, WebUI/API functionality, and capability gating are owned here.
+Development, VM and HWS use the same appliance source and common build logic. VM and HWS start from Home Server Base stable and build independently of the published Development image.
 
 For exact image composition and build details, see [BUILD.md](BUILD.md).
 
@@ -178,7 +178,7 @@ Keeping these paths separate reduces unnecessary coupling between the appliance 
 
 JustVoxel maintains one common appliance implementation.
 
-The common image is VM-ready, but the same management layer may also contain hardware-aware functionality. Hardware-dependent controls are exposed only when the running system provides the required capability and platform support.
+Development exposes the full WebUI for integration and visual verification. VM and HWS show hardware controls according to detected capabilities. The Management Agent checks actual capabilities and privileges on all three variants.
 
 This avoids separate WebUI, Management API, or mjust implementations for different deployment types. The browser interface, privileged Management Agent, command workflows, validation model, and documentation remain common; only capability availability changes at runtime.
 

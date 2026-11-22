@@ -13,6 +13,7 @@
   const message = dialog.querySelector("[data-display-status]");
   const apply = dialog.querySelector("[data-display-apply]");
   const cancel = dialog.querySelector("[data-display-cancel]");
+  const development = Boolean(document.querySelector("[data-development-profile]"));
   let snapshot = null;
   let busy = false;
   let opening = false;
@@ -57,7 +58,7 @@
     try {
       hardware = await get("/api/system-hardware");
       snapshot = hardware;
-      open.hidden = !(hardware.hws === true && hardware.display_available);
+      open.hidden = !development && !(hardware.hws === true && hardware.display_available);
     } catch (_) {
       snapshot = null;
       return;
@@ -124,7 +125,7 @@
     message.textContent = "";
     try {
       snapshot = await get("/api/system-hardware");
-      if (!snapshot.hws || !snapshot.display_available) { open.hidden = true; return; }
+      if (!development && (!snapshot.hws || !snapshot.display_available)) { open.hidden = true; return; }
     } catch (error) {
       snapshot = null;
       message.textContent = error.message;
@@ -135,7 +136,7 @@
     timer.checked = false;
     display.checked = displaySelection;
     displayDirty = false;
-    lidOption.hidden = !(snapshot?.hws === true && snapshot.lid_available);
+    lidOption.hidden = !development && !(snapshot?.hws === true && snapshot.lid_available);
     lid.checked = !!snapshot?.lid_ignored;
     setInputs();
     dialog.showModal();

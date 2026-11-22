@@ -5,7 +5,7 @@ JustVoxel includes the common operating-system and appliance packages used by ev
 This document groups those packages by purpose so the package set is understandable
 without reading the build scripts. `build_files/packages.env` declares inherited
 requirements and the common DNF package list. The complete image composition also
-includes package-stage RPMs and vendor repositories declared by `Containerfile.dev`
+includes package-stage RPMs and vendor repositories declared by `Containerfile.dev`, `Containerfile`
 and `build_files/build-common.sh`; no single package file is the entire inventory.
 
 ## Core networking and remote access
@@ -113,7 +113,7 @@ Examples include `curl`, `jq`, `lsof`, `file`, `less`, `nano`, `util-linux`, and
 
 ## VM guest integration
 
-The Base is VM-ready and includes guest integration for the major supported hypervisor families:
+The common source includes guest integration for the major supported hypervisor families:
 
 - QEMU/KVM guest agent
 - VMware guest tools

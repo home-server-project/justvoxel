@@ -147,7 +147,7 @@ approves a branch-specific task.
 
 Promotion is human-controlled. The intended release flow is development branch ->
 PR to `testing` -> testing image -> human runtime/VM acceptance -> PR from
-`testing` to `main` -> stable image from the validated `main` revision. The stable workflow builds both products on main pushes, manual main dispatch, and Saturdays at 08:00 UTC. It builds the common layer locally and compiles the Management Agent from source.
+`testing` to `main` -> stable image from the validated `main` revision. The stable workflow builds both products on main pushes, manual main dispatch, and Saturdays at 08:00 UTC. It builds the common layer locally and prepares the verified stable Management Agent package.
 
 Codex must not merge, promote, tag, publish a release, or modify a stable branch unless the human explicitly authorizes that exact action.
 
@@ -206,7 +206,7 @@ Typical routing examples:
 - Workflow/build failure: `justvoxel-ci`.
 - Independent review: `justvoxel-review` + the relevant domain skill.
 
-For the image skill, apply common composition guidance to `Containerfile.dev` and final product guidance to the VM/HWS targets in `Containerfile`. For the CI skill, use the channel and promotion contracts in [the unified build guide](docs/BUILD.md). Only the development testing dispatch may publish the internal Management Agent testing package.
+For the image skill, apply common composition guidance to `Containerfile.dev` and final product guidance to the VM/HWS targets in `Containerfile`. For the CI skill, use the channel and promotion contracts in [the unified build guide](docs/BUILD.md). Development and Testing share the internal testing Management Agent package. Stable uses the separate stable package. PR validation compiles from source.
 
 A skill supplements this file. It never overrides the global scope, Git/GitHub, or approval rules here.
 

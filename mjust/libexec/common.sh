@@ -47,6 +47,7 @@ jv_variant_kind() {
     local raw="${1:-}"
     [[ -n ${raw} ]] || raw="$(jv_variant_raw)"
     case "${raw}" in
+        dev|justvoxel-dev) printf 'dev\n' ;;
         vm|justvoxel-vm) printf 'vm\n' ;;
         hws|justvoxel-hws) printf 'hws\n' ;;
         *) printf 'unknown\n' ;;
@@ -55,6 +56,7 @@ jv_variant_kind() {
 
 jv_variant_name() {
     case "$(jv_variant_kind "${1:-}")" in
+        dev) printf 'Development\n' ;;
         vm) printf 'VM\n' ;;
         hws) printf 'HWS\n' ;;
         *) printf 'Unknown\n' ;;

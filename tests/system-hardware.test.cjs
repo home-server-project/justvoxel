@@ -25,7 +25,7 @@ class Element {
 }
 async function settle() { for (let i = 0; i < 80; i++) await Promise.resolve(); }
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return {promise, resolve, reject}; };
-function page(hardware, ups, {systemActions = false, intercept} = {}) {
+function page(hardware, ups, {systemActions = false, development = false, intercept} = {}) {
   let currentHardware = {...hardware};
   const nodes = new Map();
   const node = selector => { if (!nodes.has(selector)) nodes.set(selector, new Element()); return nodes.get(selector); };
@@ -45,7 +45,7 @@ function page(hardware, ups, {systemActions = false, intercept} = {}) {
   const context = vm.createContext({
     URLSearchParams, controlCenter: node('[data-control-center]'),
     window: {location: {assign() {}}},
-    document: {querySelector: node, createElement: () => new Element(), addEventListener() {}},
+    document: {querySelector: selector => selector === "[data-development-profile]" && !development ? null : node(selector), createElement: () => new Element(), addEventListener() {}},
     fetch: async (url, options = {}) => {
       requests.push({url, options});
       const overridden = intercept?.(url, options);
@@ -83,6 +83,18 @@ test('VM hides display, lid and indicators and never requests UPS', async () => 
   await p.open(); await p.popup();
   for (const selector of ['[data-display-open]', '[data-lid-option]', '[data-power-indicators]']) assert.equal(p.node(selector).hidden, true);
   assert.deepEqual(p.requests.map(r => r.url), ['/api/system-hardware']);
+});
+test('Development shows hardware controls while unavailable actions remain disabled', async () => {
+  const p = page({hws: false, display_available: false, lid_available: false, batteries: []},
+    null, {systemActions: true, development: true});
+  await p.open(); await p.popup();
+  assert.equal(p.node('[data-display-open]').hidden, false);
+  assert.equal(p.node('[data-lid-option]').hidden, false);
+  for (const selector of ['[data-system-action="firmware-reboot"]', '[data-display-apply]', '[data-lid-ignore]']) {
+    assert.equal(p.node(selector).disabled, true);
+  }
+  await p.apply();
+  assert.deepEqual(p.posts(), []);
 });
 test('HWS requires backend console and actual lid capabilities', async () => {
   const p = page({...hws, display_available: false}, null); await p.open();

@@ -44,7 +44,7 @@ Experienced administrators are not locked out. JustVoxel remains a normal immuta
 
 ## Image composition
 
-`Containerfile.dev` builds the common appliance on signed Home Server Base 10. `Containerfile` finalizes the two products. JustVoxel VM inherits the guest tools and VM identity from the common layer. JustVoxel HWS adds the physical-hardware packages and applies its own OS identity and image trust configuration.
+`Containerfile.dev` builds the Development showcase. `Containerfile` builds VM and HWS from a private common stage based on signed Home Server Base 10. Both products receive the current checkout’s WebUI and shared Management Agent. HWS adds physical-hardware support before each product receives its own identity and image trust configuration.
 
 See [package composition](docs/PACKAGES.md) for the common dependencies and [the HWS package list](build_files/packages-hws.env) for the hardware delta.
 
@@ -137,7 +137,7 @@ Start with the document that matches what you are trying to do:
 
 ## Branches and builds
 
-Pull requests into `testing` validate source and build the development image locally in CI. Dispatch **Development testing** on `testing` to publish the signed development image. Dispatch **Product testing** on that branch to build both products from the verified development image.
+Pull requests into `testing` validate source and build Development locally in CI. Dispatch **Development** to publish the full WebUI showcase or **Testing** to build VM and HWS from the current checkout and Home Server Base stable. Both workflows share the verified testing-channel Management Agent.
 
 Promote validated source from `testing` to `main` by pull request. Stable builds compile both products from the promoted revision. The [build guide](docs/BUILD.md) covers tags, local development, and release triggers.
 

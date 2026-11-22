@@ -6,7 +6,6 @@ source /ctx/build_files/packages-hws.env
 
 read -r -a hws_packages <<< "${JUSTVOXEL_HWS_PACKAGES}"
 
-# justvoxel-dev intentionally ships external repositories disabled.
 # Enable EPEL only for composition; finalize-hws.sh disables it again.
 dnf --enablerepo=epel install -y "${hws_packages[@]}"
 

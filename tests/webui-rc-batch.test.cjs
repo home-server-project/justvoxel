@@ -710,7 +710,7 @@ test('System accepts bounded dynamic Logs navigation and preserves exact Plugins
   const end = app.indexOf('\n  systemWorkspaceOpen.addEventListener', start);
   let opened = 0;
   const context = vm.createContext({
-    window: {}, settingsPanels: new Map(), administratorTabs: new Set(['logs']), upsAvailable: false,
+    window: {}, settingsPanels: new Map(), administratorTabs: new Set(['logs']), showUPSTab: () => false,
     loadIdentity: async () => ({role: 'administrator'}), initialized: false, currentTab: 'health',
     requestedMigrationLog: null, syncSystemTabs() {}, controlCenter: {open: true},
     workspaceWindow: {open() { opened++; }},

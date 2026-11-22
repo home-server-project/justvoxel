@@ -1,4 +1,4 @@
-name: Stable products
+name: Stable
 on:
   push:
     branches: [main]
@@ -14,11 +14,9 @@ env:
   VM_IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/justvoxel-vm
   HWS_IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/justvoxel-hws
   CURRENT_TAG: stable
-  PARENT_CHANNEL: local
-  PRODUCT_STATUS: stable
-  JUSTVOXEL_DEV_IMAGE: localhost/justvoxel-dev:build
-  IMAGE_REPOSITORY: ghcr.io/home-server-project/justvoxel-dev
+  MANAGEMENT_PACKAGE: ghcr.io/home-server-project/justvoxel-management-agent:stable
   HOME_SERVER_BASE_IMAGE: ghcr.io/home-server-project/home-server-base-10:stable
+  PRODUCT_STATUS: stable
   RECHUNK_MAX_LAYERS: '127'
   OCI_LAYER_LIMIT: '128'
 
@@ -59,24 +57,6 @@ jobs:
         with:
           cosign-release: 'v3.1.3'
 
-      - name: Verify Home Server Base stable signature
-        shell: bash
-        run: |
-          set -euo pipefail
-          cosign verify \
-            --new-bundle-format=false \
-            --key cosign.pub \
-            "${HOME_SERVER_BASE_IMAGE}" >/dev/null
-
-      - name: Build Management Agent from source
-        uses: ./.github/actions/build-management
-
-      - name: Build and validate common image
-        uses: ./.github/actions/build-dev
-
-      - name: Build both product images
-        uses: ./.github/actions/build-products
-
       - name: Login to GHCR
         shell: bash
         env:
@@ -88,6 +68,14 @@ jobs:
             --authfile "${HOME}/.docker/config.json" \
             ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
           chmod 600 "${HOME}/.docker/config.json"
+
+      - name: Prepare verified Management Agent
+        uses: ./.github/actions/prepare-management
+        with:
+          signing-key: ${{ secrets.SIGNING_SECRET }}
+
+      - name: Build both product images
+        uses: ./.github/actions/build-products
 
       - name: Publish both products
         uses: ./.github/actions/publish-products

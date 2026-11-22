@@ -1057,7 +1057,7 @@ if (systemPower && systemDialog) {
         latestStatus.firmware &&
         latestStatus.firmware.available === true;
       if (firmwareButton) {
-        firmwareButton.hidden = !firmwareAvailable;
+        firmwareButton.hidden = !firmwareAvailable && !document.querySelector("[data-development-profile]");
         firmwareButton.disabled = !firmwareAvailable;
       }
       return true;
@@ -4875,6 +4875,8 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   const systemWorkspaceCSRF = document.querySelector("[data-system-workspace-csrf]")?.value || "";
   let identity = null;
   let upsAvailable = false;
+  const development = Boolean(document.querySelector("[data-development-profile]"));
+  const showUPSTab = () => upsAvailable || development;
   let currentTab = "health";
   let initialized = false;
   let loadSequence = 0;
@@ -6672,7 +6674,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     const root = document.createElement("div");
     root.className = "system-about-view";
     const variant = String(payload.variant || "").trim().toLowerCase();
-    const variantName = ({ vm: "VM", hws: "HWS", "justvoxel-vm": "VM", "justvoxel-hws": "HWS" })[variant];
+    const variantName = ({ "justvoxel-dev": "Development", dev: "Development", vm: "VM", hws: "HWS", "justvoxel-vm": "VM", "justvoxel-hws": "HWS" })[variant];
     const built = systemPanel(jvT("ui.bc75ba011e41"), variantName ? jvT("ui.446778e3c2f4", {v0: (variantName)}) : "JustVoxel");
     const list = document.createElement("dl");
     [
@@ -6935,7 +6937,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
         if (!response.ok) throw new Error(result.error || fallback);
         close();
         upsAvailable = Boolean(result.available);
-        if (upsTabButton) upsTabButton.hidden = !upsAvailable;
+        if (upsTabButton) upsTabButton.hidden = !showUPSTab();
         renderUPSMarkup(result, await loadIdentity());
         if (state) state.textContent = "";
       } catch (failure) {
@@ -6977,7 +6979,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
         if (!response.ok) throw new Error(result.error || jvT("ui.58c4983a2560"));
         close();
         upsAvailable = Boolean(result.available);
-        if (upsTabButton) upsTabButton.hidden = !upsAvailable;
+        if (upsTabButton) upsTabButton.hidden = !showUPSTab();
         renderUPSMarkup(result, await loadIdentity());
         if (state) state.textContent = "";
       } catch (failure) {
@@ -7005,12 +7007,12 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       ? (snapshot.source.host + ":" + snapshot.source.port)
       : jvT("ui.1b8548de762c");
     sourceBar.append(sourceLabel, sourceValue);
-    root.appendChild(sourceBar);
+    if (snapshot.available) root.appendChild(sourceBar);
 
-    if (snapshot.message) {
+    if (snapshot.message || !snapshot.available) {
       const notice = document.createElement("div");
       notice.className = "notice system-ups-notice";
-      notice.textContent = snapshot.message;
+      notice.textContent = snapshot.message || jvT("ui.f30c7422f23e");
       root.appendChild(notice);
     }
 
@@ -7053,7 +7055,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       root.appendChild(grid);
     }
 
-    if (snapshot.available && isAdministratorLevel(user?.role)) {
+    if ((snapshot.available || development) && isAdministratorLevel(user?.role)) {
       const panel = document.createElement("section");
       panel.className = "system-ups-source-panel";
       const heading = document.createElement("h3");
@@ -7165,6 +7167,9 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       syncRemoteFields();
 
       form.append(csrf, modeLabel, hostLabel, portLabel, driverLabel, deviceLabel, finalRow);
+      if (!snapshot.available) {
+        for (const control of form.elements) control.disabled = true;
+      }
       panel.append(heading, help, form);
       root.appendChild(panel);
     }
@@ -7188,8 +7193,8 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     const snapshot = await fetchUPSStatus();
     if (!snapshot) return null;
     upsAvailable = Boolean(snapshot.available);
-    if (upsTabButton) upsTabButton.hidden = !upsAvailable;
-    if (!upsAvailable && currentTab === "ups") {
+    if (upsTabButton) upsTabButton.hidden = !showUPSTab();
+    if (!showUPSTab() && currentTab === "ups") {
       currentTab = isAdministratorLevel(identity?.role) ? "health" : "history";
       syncSystemTabs();
     }
@@ -7200,8 +7205,8 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     const snapshot = await fetchUPSStatus();
     if (!snapshot || sequence !== loadSequence) return;
     upsAvailable = Boolean(snapshot.available);
-    if (upsTabButton) upsTabButton.hidden = !upsAvailable;
-    if (!upsAvailable) throw new Error(jvT("ui.f30c7422f23e"));
+    if (upsTabButton) upsTabButton.hidden = !showUPSTab();
+    if (!showUPSTab()) throw new Error(jvT("ui.f30c7422f23e"));
     renderUPSMarkup(snapshot, await loadIdentity());
   };
 
@@ -7224,7 +7229,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.error || jvT("ui.8d6f6ead6906"));
       upsAvailable = Boolean(result.available);
-      if (upsTabButton) upsTabButton.hidden = !upsAvailable;
+      if (upsTabButton) upsTabButton.hidden = !showUPSTab();
       renderUPSMarkup(result, await loadIdentity());
       if (state) state.textContent = "";
     } catch (error) {
@@ -7293,7 +7298,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     const user = await loadIdentity();
     if (!user) return;
     if (administratorTabs.has(tab) && !isAdministratorLevel(user.role)) return;
-    if (tab === "ups" && !upsAvailable) return;
+    if (tab === "ups" && !showUPSTab()) return;
     if (currentTab === "reset" && tab !== "reset") clearResetPoll();
     failedUnitsSelected = false;
     currentTab = tab;
@@ -7322,7 +7327,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
           const target = new URLSearchParams(window.location.search);
           const requested = target.get("workspace") === "system" ? target.get("tab") : "";
           currentTab = isAdministratorLevel(user.role) ? "health" : "history";
-          if (allowedSystemTabs.has(requested) && (requested !== "ups" || upsAvailable) &&
+          if (allowedSystemTabs.has(requested) && (requested !== "ups" || showUPSTab()) &&
               (!administratorTabs.has(requested) || isAdministratorLevel(user.role))) currentTab = requested;
           syncSystemTabs();
         }
@@ -7340,7 +7345,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       await window.JustVoxelSystem.openTab("logs");
     },
     openTab: async (tab) => {
-      if (!allowedSystemTabs.has(tab) || (tab === "ups" && !upsAvailable)) return;
+      if (!allowedSystemTabs.has(tab) || (tab === "ups" && !showUPSTab())) return;
       if (window.JustVoxelWallpaper?.canLeave() === false) return;
       const user = await loadIdentity();
       if (!user || administratorTabs.has(tab) && !isAdministratorLevel(user.role)) return;
