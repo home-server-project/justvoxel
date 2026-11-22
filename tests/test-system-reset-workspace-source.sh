@@ -61,7 +61,7 @@ grep -Fq '/api/system/workspace/reset/operations/' "${script}"
 grep -Fq 'slider.type = "range"' "${script}"
 grep -Fq 'slider.max = "100"' "${script}"
 grep -Fq 'finalConfirm.disabled = true' "${script}"
-catalog_text_used "${script}" 'Current voxel system password'
+catalog_text_used "${script}" 'Current password'
 catalog_text_used "${script}" 'Choose how much JustVoxel should reset. External, USB, NFS, and SMB storage are never erased by Full Factory Reset.'
 grep -Fq 'backup_action === "preserve"' "${script}"
 grep -Fq 'plan_fingerprint: plan.plan_fingerprint' "${script}"

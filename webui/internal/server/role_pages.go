@@ -82,3 +82,11 @@ func (a *App) handleRolePageError(w http.ResponseWriter, r *http.Request, err er
 	}
 	http.Error(w, ui(w, "ui.0b8e73a792bb"), http.StatusBadGateway)
 }
+
+func isAdministratorLevel(role string) bool {
+	return role == "administrator" || role == "webui-admin"
+}
+
+func rolePermitted(actual, required string) bool {
+	return actual == required || (required == "administrator" && isAdministratorLevel(actual))
+}

@@ -279,7 +279,7 @@ test('delayed native close event cannot stop a rapid reopened Terminal', async (
   assert.deepEqual(b.calls.map(call=>call.url.split('/').at(-1)),['terminal','stop','terminal']);
 });
 test('restore waits for identity and only the primary voxel administrator can restore or open', async () => {
-  for (const [username,role] of [['voxel','administrator'],['secondary','administrator'],['voxel','operator'],['voxel','viewer'],['secondary','operator'],['secondary','viewer']]) {
+  for (const [username,role] of [['voxel','administrator'],['secondary','administrator'],['secondary','webui-admin'],['voxel','operator'],['voxel','viewer'],['secondary','operator'],['secondary','viewer']]) {
     for (const pending of [false,true]) {
       const b=workspaceBrowser({username,role,pending,savedOpen:true});
       if (pending) {

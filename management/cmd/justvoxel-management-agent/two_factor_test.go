@@ -346,3 +346,36 @@ func TestTwoFactorThrottlingSurvivesPasswordSuccess(t *testing.T) {
 	challenge := f.login(t, user.Username, "operator-password").Challenge
 	f.request(t, "/v1/auth/login/two-factor", challenge, twoFactorRequest{Code: freshTOTP(t, begin.SetupKey)}, http.StatusTooManyRequests)
 }
+
+func TestWebUIAdminTwoFactorOwnershipAndRecovery(t *testing.T) {
+	withAuthTestDependencies(t)
+	readAuthMode = func() (authMode, error) { t.Fatal("WebUI account consulted voxel authentication"); return "", nil }
+	f := newTwoFactorFixture(t)
+	manager, err := f.server.store.createWebUser("Manager", webUserRoleAdmin, "own-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := f.login(t, manager.Username, "own-password").Session
+	status := f.request(t, "/v1/session", token, nil, 200)
+	if !strings.Contains(status.Body.String(), `"role":"webui-admin"`) || !strings.Contains(status.Body.String(), `"auth_source":"webui"`) {
+		t.Fatal("session lost WebUI Admin identity")
+	}
+	for _, role := range []webUserRole{webUserRoleAdmin, webUserRoleOperator, webUserRoleViewer} {
+		target, err := f.server.store.createWebUser(string(role), role, "target-password")
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.enroll(t, token, &target.ID, target.ID)
+		record, err := f.server.readTwoFactor(target.ID)
+		if err != nil || record == nil || record.Source != twoFactorAdministrator {
+			t.Fatal("administrator enrollment source was lost")
+		}
+		f.request(t, "/v1/auth/two-factor/disable", token, twoFactorRequest{UserID: &target.ID, Password: "target-password"}, 401)
+		f.request(t, "/v1/auth/two-factor/disable", token, twoFactorRequest{UserID: &target.ID, Password: "own-password"}, 200)
+	}
+	f.enroll(t, token, nil, manager.ID)
+	record, err := f.server.readTwoFactor(manager.ID)
+	if err != nil || record == nil || record.Source != twoFactorSelf {
+		t.Fatal("own WebUI Admin enrollment was not self-managed")
+	}
+}

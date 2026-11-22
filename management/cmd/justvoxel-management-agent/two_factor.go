@@ -141,7 +141,7 @@ func (s *server) twoFactorTarget(w http.ResponseWriter, actor session, requested
 		}
 		requested = &actor.WebUserID
 	}
-	if *requested <= 0 || (actor.Role != roleAdministrator && *requested != actor.WebUserID) {
+	if *requested <= 0 || (!actor.Role.isAdministratorLevel() && *requested != actor.WebUserID) {
 		writeError(w, http.StatusForbidden, "operation not permitted for this account")
 		return webUser{}, false
 	}
@@ -292,8 +292,7 @@ func (s *server) disableTwoFactor(w http.ResponseWriter, r *http.Request) {
 	if rateLimited(w, s.secondFactorAttempts.delay()) {
 		return
 	}
-	identity, err := s.authenticateIdentity(actor.Username, request.Password)
-	if err != nil || identity.WebUserID != actor.WebUserID {
+	if !s.verifySessionPassword(actor, request.Password) {
 		s.secondFactorAttempts.recordFailure()
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return

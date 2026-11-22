@@ -71,7 +71,7 @@ func (a *App) howToConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch identity.Role {
-	case "administrator", "operator", "viewer":
+	case "administrator", "webui-admin", "operator", "viewer":
 	default:
 		http.Error(w, ui(w, "ui.cc11d415d932"), http.StatusForbidden)
 		return

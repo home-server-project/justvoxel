@@ -360,6 +360,19 @@ func TestWizardModalStorageBehaviorAndStateRefresh(t *testing.T) {
 	}
 }
 
+func appRoleHelper(t *testing.T, source, name string) string {
+	t.Helper()
+	start := strings.Index(source, "const "+name+" =")
+	if start < 0 {
+		t.Fatalf("missing app.js role helper %s", name)
+	}
+	declaration, _, ok := strings.Cut(source[start:], "\n\n")
+	if !ok {
+		t.Fatalf("missing boundary after app.js role helper %s", name)
+	}
+	return declaration + "\n"
+}
+
 func TestAboutUsesInstalledVariantAndSuppliedVersions(t *testing.T) {
 	source := correctionSource(t, "static/app.js")
 	start := strings.Index(source, "  const renderAbout =")
@@ -379,7 +392,7 @@ let loadSequence = 1, payload, heading;
 const systemFetchJSON = async () => payload;
 const systemPanel = (label, title) => { heading = title; return { panel: node(), heading: node() }; };
 const flatten = n => [n.textContent || "", ...(n.children || []).flatMap(flatten)].join(" ");
-` + source[start:start+end] + `
+` + appRoleHelper(t, source, "displayedRole") + source[start:start+end] + `
 (async () => {
   for (const [variant, expected] of [["justvoxel-vm", "JustVoxel VM"], ["justvoxel-hws", "JustVoxel HWS"], ["vm", "JustVoxel VM"], ["hws", "JustVoxel HWS"], ["unknown", "JustVoxel"]]) {
     payload = { variant, justvoxel: "image-from-metadata", webui: "webui-from-metadata", management_api: "api-from-metadata", commit: "actual-source-revision", username: "signed-in-user", role: "administrator" };

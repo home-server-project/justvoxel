@@ -1,8 +1,12 @@
+const isAdministratorLevel = (role) => role === "administrator" || role === "webui-admin";
+
 // Normalize retired dashboard tab URLs before reading explicit workspace links.
 const selectionDashboard = typeof document !== "undefined" && typeof document.querySelector === "function"
   ? document.querySelector("#dashboard[data-dashboard-status]") : null;
 const dashboardURL = selectionDashboard?.dataset?.dashboardUrl;
 if (dashboardURL) window.history.replaceState(window.history.state, "", dashboardURL + window.location.hash);
+
+const displayedRole = (role) => role === "webui-admin" ? jvT("role.webui_admin") : role;
 
 const workspaceUsername = selectionDashboard?.dataset.workspaceUsername || "";
 const workspaceWindowStateKey = (id) => workspaceUsername
@@ -458,11 +462,11 @@ if (dashboard) {
       const identity = await response.json();
       const role = String(identity.role || "").toLowerCase();
       const username = String(identity.username || "");
-      if (!["administrator", "operator", "viewer"].includes(role)) return;
+      if (!["administrator", "webui-admin", "operator", "viewer"].includes(role)) return;
       document.body.classList.remove("role-pending");
       document.body.classList.toggle("primary-administrator", username === "voxel" && role === "administrator");
-      document.body.classList.add(`role-${role}`);
-      text("session-role", role);
+      document.body.classList.add(isAdministratorLevel(role) ? "role-administrator" : `role-${role}`);
+      text("session-role", displayedRole(role));
     } catch (_) {
       // Fail closed: role-gated controls remain hidden until identity is known.
     }
@@ -673,7 +677,7 @@ if (quickLook && quickLookToggle) {
       quickLookPanel.inert = !open;
       quickLookPanel.setAttribute("aria-hidden", open ? "false" : "true");
     }
-    if (identity?.role === "administrator" && persist) {
+    if (isAdministratorLevel(identity?.role) && persist) {
       try {
         window.localStorage.setItem(stateKey(identity.username), open ? "open" : "closed");
       } catch (_) {
@@ -841,12 +845,12 @@ if (quickLook && quickLookToggle) {
       const result = await response.json();
       const role = String(result.role || "").toLowerCase();
       const username = String(result.username || "");
-      if (!username || !["administrator", "operator", "viewer"].includes(role)) return;
+      if (!username || !["administrator", "webui-admin", "operator", "viewer"].includes(role)) return;
 
       identity = { username, role };
       document.body.classList.remove("role-pending");
       document.body.classList.toggle("primary-administrator", username === "voxel" && role === "administrator");
-      document.body.classList.add(`role-${role}`);
+      document.body.classList.add(isAdministratorLevel(role) ? "role-administrator" : `role-${role}`);
 
       if (role === "viewer" || role === "operator") {
         setOpen(true, false);
@@ -4963,13 +4967,13 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     const result = await response.json();
     const role = String(result.role || "").toLowerCase();
     const username = String(result.username || "");
-    if (!username || !["administrator", "operator", "viewer"].includes(role)) {
+    if (!username || !["administrator", "webui-admin", "operator", "viewer"].includes(role)) {
       throw new Error(jvT("ui.cfbc63955e94"));
     }
     identity = { username, role };
     document.body.classList.remove("role-pending");
     document.body.classList.toggle("primary-administrator", username === "voxel" && role === "administrator");
-    document.body.classList.add(`role-${role}`);
+    document.body.classList.add(isAdministratorLevel(role) ? "role-administrator" : `role-${role}`);
     return identity;
   };
 
@@ -5106,7 +5110,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     root.className = "system-history-view";
     if (message) root.appendChild(systemNotice(message));
 
-    if (payload.role === "administrator") {
+    if (isAdministratorLevel(payload.role)) {
       const notificationsPanel = systemPanel(jvT("ui.adf69e75cc7d"), jvT("ui.4e2fa50f7e95")).panel;
       const notifications = Array.isArray(payload.notifications) ? payload.notifications : [];
       if (!notifications.length) {
@@ -5168,7 +5172,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
           const action = document.createElement("strong");
           action.textContent = event.action || jvT("ui.64cff1319d2f");
           const meta = document.createElement("span");
-          meta.textContent = [event.occurred_at, event.actor_username, event.actor_role].filter(Boolean).join(" · ");
+          meta.textContent = [event.occurred_at, event.actor_username, displayedRole(event.actor_role)].filter(Boolean).join(" · ");
           info.append(action, meta);
           if (event.target) {
             const target = document.createElement("span");
@@ -5454,6 +5458,15 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     renderFiles();
   };
 
+  const webUserRoleLabels = () => ({
+    "webui-admin": jvT("role.webui_admin"),
+    operator: "Operator",
+    viewer: jvT("ui.678bfa6af48b"),
+  });
+  const webUserRoleOptions = (labels, selected) => Object.entries(labels).map(([role, label]) =>
+    new Option(label, role, role === selected).outerHTML
+  ).join("");
+
   const renderUsers = async (sequence, message = "") => {
     if (!document.querySelector('link[href="/static/storage-browser.css"]')) {
       const stylesheet = document.createElement("link");
@@ -5467,12 +5480,13 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     root.className = "system-users-view";
     if (message) root.appendChild(systemNotice(message));
 
+    const roleLabels = webUserRoleLabels();
     const create = systemPanel(jvT("ui.ca0b591569ff"), jvT("ui.f06da128c342")).panel;
     const createForm = document.createElement("form");
     createForm.className = "admin-form-grid";
     createForm.innerHTML =
       `<label>${jvH("ui.e3b89e9d33f8")}<input name="username" required maxlength="64" autocomplete="off"></label>` +
-      `<label>Role<select name="role" required><option value="operator">Operator</option><option value="viewer">${jvH("ui.678bfa6af48b")}</option></select></label>` +
+      `<label>Role<select name="role" required>${webUserRoleOptions(roleLabels, "operator")}</select></label>` +
       `<label>${jvH("ui.e7cf3ef4f17c")}<input type="password" name="password" required autocomplete="new-password"></label>` +
       `<label>${jvH("ui.5ac265f396a2")}<input type="password" name="confirm_password" required autocomplete="new-password"></label>` +
       `<div class="form-actions"><button type="submit">${jvH("ui.f06da128c342")}</button></div>`;
@@ -5509,11 +5523,12 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     list.appendChild(table);
     users.forEach((user, index) => {
       const isPrimary = user === primary;
-      const role = isPrimary ? jvT("ui.e7d3e769f3f5") : user.role === "operator" ? "Operator" : jvT("ui.678bfa6af48b");
+      const role = isPrimary ? jvT("ui.e7d3e769f3f5") : roleLabels[user.role];
+      const unlimited = isPrimary || isAdministratorLevel(user.role);
       const row = document.createElement("tr");
       for (const value of [user.username || jvT("ui.b512d97e7cbf"), role, user.enabled ? jvT("ui.92c1cdfdf4cb") : jvT("ui.75081b593d15"),
-        isPrimary ? "-" : `${user.restart_used ?? 0} / ${user.restart_limit ?? 0}`,
-        isPrimary ? "-" : `${user.backup_used ?? 0} / ${user.backup_limit ?? 0}`]) {
+        unlimited ? "-" : `${user.restart_used ?? 0} / ${user.restart_limit ?? 0}`,
+        unlimited ? "-" : `${user.backup_used ?? 0} / ${user.backup_limit ?? 0}`]) {
         const cell = document.createElement("td");
         cell.textContent = value;
         row.appendChild(cell);
@@ -5633,26 +5648,28 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
         const button = document.createElement("button");
         button.type = "button";
         button.textContent = title;
-        button.disabled = disabled || (isPrimary && action !== "password");
+        button.disabled = disabled || (isPrimary && (action !== "password" || payload.username !== primary.username));
         if (dangerous) button.className = "storage-action-danger";
         if (!button.disabled) button.addEventListener("click", () => openAction(title, fields, action, submitText, dangerous));
         choices.appendChild(button);
       };
       const twoFactor = document.createElement("button");
       twoFactor.type = "button";
+      const ownAccount = user.username === payload.username;
+      twoFactor.disabled = (isPrimary && !ownAccount) || (ownAccount && user.two_factor_source === "administrator");
       twoFactor.textContent = jvT(user.two_factor_enabled ? "two_factor.disable" : "two_factor.enable");
       if (user.two_factor_enabled) twoFactor.className = "storage-action-danger";
       twoFactor.addEventListener("click", () => {
         menu.open = false;
         if (choices.matches(":popover-open")) choices.hidePopover();
-        openTwoFactorDialog(user, trigger, !isPrimary, () => {
+        openTwoFactorDialog(user, trigger, !ownAccount, () => {
           if (currentTab === "users") return renderUsers(++loadSequence);
         });
       });
       choices.appendChild(twoFactor);
-      addAction(jvT("ui.a43a8d8cfd29"), '<label>Role<select name="role"><option value="operator"' + (user.role === "operator" ? ' selected' : '') + '>Operator</option><option value="viewer"' + (user.role !== "operator" ? ' selected' : '') + '>Viewer</option></select></label>', "role", jvT("ui.c7523b152e8b"));
-      addAction(jvT("ui.a683c212b7ef"), `<p>${jvH("ui.6bf4d1978e20")}</p>`, "restart-allowance/reset", jvT("ui.37769ec42cac"), false, Number(user.restart_used || 0) === 0);
-      addAction(jvT("ui.3ad28e785fb3"), `<p>${jvH("ui.2abbefb55ee4")}</p>`, "backup-allowance/reset", jvT("ui.37769ec42cac"), false, Number(user.backup_used || 0) === 0);
+      addAction(jvT("ui.a43a8d8cfd29"), `<label>Role<select name="role">${webUserRoleOptions(roleLabels, user.role)}</select></label>`, "role", jvT("ui.c7523b152e8b"));
+      addAction(jvT("ui.a683c212b7ef"), `<p>${jvH("ui.6bf4d1978e20")}</p>`, "restart-allowance/reset", jvT("ui.37769ec42cac"), false, unlimited || Number(user.restart_used || 0) === 0);
+      addAction(jvT("ui.3ad28e785fb3"), `<p>${jvH("ui.2abbefb55ee4")}</p>`, "backup-allowance/reset", jvT("ui.37769ec42cac"), false, unlimited || Number(user.backup_used || 0) === 0);
       addAction(user.enabled ? jvT("ui.9f024ada2282") : jvT("ui.1965185f3488"), '<input type="hidden" name="enabled" value="' + String(!user.enabled) + '"><p>' + (user.enabled ? jvT("ui.29ee543445e6") : jvT("ui.67022675441b")) + '</p>', "enabled", user.enabled ? jvT("ui.9f024ada2282") : jvT("ui.1965185f3488"), Boolean(user.enabled));
       addAction(jvT("ui.3f9c991f63a9"), `<label>${jvH("ui.3dd9df4441fb")}<input type="password" name="password" required autocomplete="new-password"></label><label>${jvH("ui.5ac265f396a2")}<input type="password" name="confirm_password" required autocomplete="new-password"></label>`, "password", jvT("ui.3f9c991f63a9"));
       addAction(jvT("ui.a2e20a335700"), `<p>${jvH("ui.0eb640efdff4")}</p>`, "delete", jvT("ui.a2e20a335700"), true);
@@ -6389,7 +6406,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     return { remove, keep };
   };
 
-  const renderResetPlan = (mode, plan, requireSystemPassword = false) => {
+  const renderResetPlan = (mode, plan, requireCurrentPassword = false) => {
     clearResetPoll();
     if (!content) return;
     const root = document.createElement("div");
@@ -6447,10 +6464,10 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     }
 
     let password = null;
-    if (mode === "factory" && requireSystemPassword) {
+    if (mode === "factory" && requireCurrentPassword) {
       const passwordLabel = document.createElement("label");
       passwordLabel.className = "system-reset-password";
-      passwordLabel.textContent = jvT("ui.b46bd6419d35");
+      passwordLabel.textContent = jvT("ui.72ed2bd767ce");
       password = document.createElement("input");
       password.type = "password";
       password.autocomplete = "current-password";
@@ -6458,7 +6475,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       passwordLabel.appendChild(password);
       const help = document.createElement("small");
       help.className = "muted";
-      help.textContent = jvT("ui.1c3074505e65");
+      help.textContent = jvT("reset.confirm_sign_in_password");
       passwordLabel.appendChild(help);
       built.panel.appendChild(passwordLabel);
     }
@@ -6582,13 +6599,13 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
         : "/api/system/workspace/reset/minecraft/plan";
       const plan = await systemPostForm(endpoint);
       if (!plan) return;
-      let requireSystemPassword = false;
-      if (mode === "factory") {
+      let requireCurrentPassword = identity?.role === "webui-admin";
+      if (mode === "factory" && !requireCurrentPassword) {
         const security = await systemFetchJSON("/api/system/workspace/security");
         if (!security) return;
-        requireSystemPassword = security.mode === "separate";
+        requireCurrentPassword = security.mode === "separate";
       }
-      renderResetPlan(mode, plan, requireSystemPassword);
+      renderResetPlan(mode, plan, requireCurrentPassword);
       if (state) state.textContent = "";
     } catch (error) {
       if (state) state.textContent = error?.message || jvT("ui.fc7fc36b9b26");
@@ -6663,7 +6680,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       ["WebUI", payload.webui || "—"],
       [jvT("ui.60e425d8c33f"), payload.management_api || "—"],
       [jvT("ui.0e570ca6fabe"), payload.commit || "—"],
-      [jvT("ui.abc50e334be4"), (payload.username || "—") + " (" + (payload.role || "—") + ")"],
+      [jvT("ui.abc50e334be4"), (payload.username || "—") + " (" + (displayedRole(payload.role) || "—") + ")"],
     ].forEach(([label, value]) => {
       const row = document.createElement("div");
       const dt = document.createElement("dt");
@@ -7036,7 +7053,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       root.appendChild(grid);
     }
 
-    if (snapshot.available && user?.role === "administrator") {
+    if (snapshot.available && isAdministratorLevel(user?.role)) {
       const panel = document.createElement("section");
       panel.className = "system-ups-source-panel";
       const heading = document.createElement("h3");
@@ -7173,7 +7190,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     upsAvailable = Boolean(snapshot.available);
     if (upsTabButton) upsTabButton.hidden = !upsAvailable;
     if (!upsAvailable && currentTab === "ups") {
-      currentTab = identity?.role === "administrator" ? "health" : "history";
+      currentTab = isAdministratorLevel(identity?.role) ? "health" : "history";
       syncSystemTabs();
     }
     return snapshot;
@@ -7239,14 +7256,14 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       const user = await loadIdentity();
       if (!user) return;
       if (sequence !== loadSequence) return;
-      if (administratorTabs.has(currentTab) && user.role !== "administrator") {
+      if (administratorTabs.has(currentTab) && !isAdministratorLevel(user.role)) {
         currentTab = "history";
         syncSystemTabs();
       }
       if (currentTab === "health") await renderHealth(sequence);
       else if (currentTab === "history") await renderHistory(sequence);
       else if (currentTab === "users") {
-        if (user.role === "administrator") await renderUsers(sequence);
+        if (isAdministratorLevel(user.role)) await renderUsers(sequence);
         else await renderOwnAccount(sequence);
       }
       else if (currentTab === "logs") await renderLogs(sequence);
@@ -7275,7 +7292,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
     if (window.JustVoxelWallpaper?.canLeave() === false) return;
     const user = await loadIdentity();
     if (!user) return;
-    if (administratorTabs.has(tab) && user.role !== "administrator") return;
+    if (administratorTabs.has(tab) && !isAdministratorLevel(user.role)) return;
     if (tab === "ups" && !upsAvailable) return;
     if (currentTab === "reset" && tab !== "reset") clearResetPoll();
     failedUnitsSelected = false;
@@ -7304,9 +7321,9 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
           initialized = true;
           const target = new URLSearchParams(window.location.search);
           const requested = target.get("workspace") === "system" ? target.get("tab") : "";
-          currentTab = user.role === "administrator" ? "health" : "history";
+          currentTab = isAdministratorLevel(user.role) ? "health" : "history";
           if (allowedSystemTabs.has(requested) && (requested !== "ups" || upsAvailable) &&
-              (!administratorTabs.has(requested) || user.role === "administrator")) currentTab = requested;
+              (!administratorTabs.has(requested) || isAdministratorLevel(user.role))) currentTab = requested;
           syncSystemTabs();
         }
         loadCurrentSystemTab();
@@ -7326,7 +7343,7 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
       if (!allowedSystemTabs.has(tab) || (tab === "ups" && !upsAvailable)) return;
       if (window.JustVoxelWallpaper?.canLeave() === false) return;
       const user = await loadIdentity();
-      if (!user || administratorTabs.has(tab) && user.role !== "administrator") return;
+      if (!user || administratorTabs.has(tab) && !isAdministratorLevel(user.role)) return;
       initialized = true;
       currentTab = tab;
       syncSystemTabs();

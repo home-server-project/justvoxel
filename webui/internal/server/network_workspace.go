@@ -73,7 +73,7 @@ func (a *App) networkStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status.WorkspaceTabs = networkWorkspaceTabs(identity.Role)
-	if identity.Role != "administrator" {
+	if !isAdministratorLevel(identity.Role) {
 		status.PendingCheckpoints = nil
 	}
 	writeNetworkWebJSON(w, http.StatusOK, status)
@@ -352,7 +352,7 @@ func (a *App) networkAdministratorSession(w http.ResponseWriter, r *http.Request
 	if !a.handleNetworkAPIError(w, err) {
 		return "", false
 	}
-	if identity.Role != "administrator" {
+	if !isAdministratorLevel(identity.Role) {
 		writeNetworkWebError(w, http.StatusForbidden, ui(w, "ui.031cc7a3ec82"))
 		return "", false
 	}
@@ -503,7 +503,7 @@ func (a *App) networkConfigurationChange(w http.ResponseWriter, r *http.Request)
 }
 
 func networkWorkspaceTabs(role string) []string {
-	if role == "administrator" {
+	if isAdministratorLevel(role) {
 		return []string{uiText("ui.d4b1ea5708dd"), "Ethernet", "Wi-Fi", "Troubleshoot", uiText("ui.7946a3c57900"), uiText("network.router.tab")}
 	}
 	return []string{uiText("ui.d4b1ea5708dd")}

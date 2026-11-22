@@ -1,4 +1,7 @@
 {
+  "reset.confirm_sign_in_password": "Confirm with the password you use to sign in to the WebUI.",
+  "role.invalid_web_user": "Choose WebUI Admin, Operator, or Viewer.",
+  "role.webui_admin": "WebUI Admin",
   "network.router.factory_reset_stage": "MikroTik connection removal failed",
   "network.router.factory_reset_failed": "The MikroTik connection could not be forgotten. No destructive cleanup was started. Retry Factory Reset.",
   "network.router.identity": "Router name",

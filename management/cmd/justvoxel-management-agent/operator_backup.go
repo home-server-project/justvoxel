@@ -191,7 +191,7 @@ func (g *operatorBackupGuard) acceptTarget(actor session, target string) (int, e
 }
 
 func (s *webUIStore) resetOperatorBackupAllowance(userID int64, actor session) error {
-	if actor.Role != roleAdministrator {
+	if !actor.Role.isAdministratorLevel() {
 		return errors.New("administrator role is required")
 	}
 	tx, err := s.db.BeginTx(context.Background(), nil)

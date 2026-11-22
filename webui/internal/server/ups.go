@@ -36,7 +36,7 @@ func (a *App) upsAdminClient(w http.ResponseWriter, r *http.Request) (upsAPI, st
 	if !ok {
 		return nil, "", false
 	}
-	if identity.Role != "administrator" {
+	if !isAdministratorLevel(identity.Role) {
 		writeUPSWebError(w, http.StatusForbidden, ui(w, "ui.031cc7a3ec82"))
 		return nil, "", false
 	}
@@ -185,7 +185,7 @@ func (a *App) upsIdentity(w http.ResponseWriter, r *http.Request) (string, api.S
 		return "", api.SessionInfo{}, false
 	}
 	switch identity.Role {
-	case "administrator", "operator", "viewer":
+	case "administrator", "webui-admin", "operator", "viewer":
 		return session, identity, true
 	default:
 		writeUPSWebError(w, http.StatusForbidden, ui(w, "ui.3f205a4cb47b"))

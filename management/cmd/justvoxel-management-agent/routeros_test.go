@@ -249,10 +249,7 @@ func TestRouterOSCAValidation(t *testing.T) {
 }
 
 func TestRouterOSMigrationPersistenceAndRevocation(t *testing.T) {
-	store, path := openTestWebUIStore(t)
-	if _, err := store.db.Exec(`ALTER TABLE routeros_state DROP COLUMN ca_pem; DELETE FROM schema_migrations WHERE version=13`); err != nil {
-		t.Fatal(err)
-	}
+	store, path := openTestWebUIStoreAtVersion(t, 12)
 	if _, err := store.db.Exec(`INSERT INTO routeros_state VALUES
 		(1, 1, 'https://router.example', 'justvoxel', ?, '192.0.2.9', 'list', 'uplinks')`, testRouterPassword); err != nil {
 		t.Fatal(err)

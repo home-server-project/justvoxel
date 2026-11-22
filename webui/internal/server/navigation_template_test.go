@@ -236,7 +236,7 @@ func TestSystemWorkspaceMigrationContract(t *testing.T) {
 		`sharingToggle.input.setAttribute("role", "switch")`,
 		`sharingToggle.input.disabled = true`,
 		`const sharingAvailable = selectedMode === "local"`,
-		`if (snapshot.available && user?.role === "administrator")`,
+		`if (snapshot.available && isAdministratorLevel(user?.role))`,
 		`if (!snapshot.available) return`,
 		`name.name = "ups_name"`,
 		`driver.name = "driver"`,
@@ -1506,5 +1506,33 @@ func TestApprovedControlCenterLayout(t *testing.T) {
 	}
 	if !strings.Contains(string(script), `element.style.top = workspaceTopInset() + "px";`) {
 		t.Fatal("new desktop windows must start at the Control Center top offset")
+	}
+}
+
+func TestWebUIAdminUsersRoleControls(t *testing.T) {
+	source, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, options, ok := strings.Cut(string(source), "const webUserRoleLabels =")
+	options, _, ended := strings.Cut(options, "const renderUsers =")
+	if !ok || !ended || strings.Contains(options, `"administrator"`) {
+		t.Fatal("invalid WebUI role selector")
+	}
+	for _, role := range []string{"webui-admin", "operator", "viewer"} {
+		if !strings.Contains(options, role) {
+			t.Fatalf("missing role %s", role)
+		}
+	}
+	for _, want := range []string{`webUserRoleOptions(roleLabels, "operator")`, `webUserRoleOptions(roleLabels, user.role)`,
+		`"webui-admin": jvT("role.webui_admin")`, ` : roleLabels[user.role]`, `const unlimited = isPrimary || isAdministratorLevel(user.role);`,
+		"unlimited ? \"-\" : `${user.restart_used",
+		"unlimited ? \"-\" : `${user.backup_used",
+		`(action !== "password" || payload.username !== primary.username)`,
+		`openAccountSecurity(trigger)`, `"password", jvT("ui.3f9c991f63a9")`,
+	} {
+		if !strings.Contains(string(source), want) {
+			t.Fatalf("missing Users control %q", want)
+		}
 	}
 }

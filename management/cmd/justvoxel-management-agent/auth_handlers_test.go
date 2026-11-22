@@ -218,7 +218,7 @@ func TestSeparateModeIgnoresSystemCredentialForWebLogin(t *testing.T) {
 	}
 }
 
-func TestOperatorCannotChangeAdministratorAuthentication(t *testing.T) {
+func TestWebAccountsCannotChangePrimaryAuthentication(t *testing.T) {
 	now := time.Now()
 	s := &server{sessions: map[string]session{
 		"operator": {
@@ -239,12 +239,17 @@ func TestOperatorCannotChangeAdministratorAuthentication(t *testing.T) {
 		{path: "/v1/auth/password", call: s.providerChangePassword},
 		{path: "/v1/auth/mode", call: s.changeAuthMode},
 	} {
-		req := httptest.NewRequest(http.MethodPost, test.path, bytes.NewBufferString(`{}`))
-		req.Header.Set("Authorization", "Bearer operator")
-		rr := httptest.NewRecorder()
-		test.call(rr, req)
-		if rr.Code != http.StatusForbidden {
-			t.Fatalf("operator received %d for %s: %s", rr.Code, test.path, rr.Body.String())
+		for _, role := range []principalRole{roleOperator, roleViewer, roleWebUIAdmin} {
+			actor := s.sessions["operator"]
+			actor.Role = role
+			s.sessions["operator"] = actor
+			req := httptest.NewRequest(http.MethodPost, test.path, bytes.NewBufferString(`{}`))
+			req.Header.Set("Authorization", "Bearer operator")
+			rr := httptest.NewRecorder()
+			test.call(rr, req)
+			if rr.Code != http.StatusForbidden {
+				t.Fatalf("%s received %d for %s: %s", role, rr.Code, test.path, rr.Body.String())
+			}
 		}
 	}
 }

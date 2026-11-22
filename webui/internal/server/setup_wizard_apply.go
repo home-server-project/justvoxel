@@ -286,7 +286,7 @@ func (a *App) setupWizardProgressStatus(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, ui(w, "ui.0b8e73a792bb"), http.StatusBadGateway)
 		return
 	}
-	if identity.Role != "administrator" {
+	if !isAdministratorLevel(identity.Role) {
 		http.Error(w, ui(w, "ui.031cc7a3ec82"), http.StatusForbidden)
 		return
 	}

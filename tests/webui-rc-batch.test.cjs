@@ -715,7 +715,8 @@ test('System accepts bounded dynamic Logs navigation and preserves exact Plugins
     requestedMigrationLog: null, syncSystemTabs() {}, controlCenter: {open: true},
     workspaceWindow: {open() { opened++; }},
   });
-  vm.runInContext(allowed + '\n' + app.slice(start, end), context);
+  const roleHelper = app.match(/^const isAdministratorLevel = .*;$/m)[0];
+  vm.runInContext(roleHelper + '\n' + allowed + '\n' + app.slice(start, end), context);
   const id = '12345678-1234-4234-8234-123456789abc';
   await context.window.JustVoxelSystem.openPluginLogs(id);
   assert.equal(context.currentTab, 'logs');

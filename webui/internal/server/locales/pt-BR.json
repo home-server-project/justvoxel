@@ -1,4 +1,7 @@
 {
+  "reset.confirm_sign_in_password": "Confirme com a senha que você usa para entrar na interface web.",
+  "role.invalid_web_user": "Escolha Administrador da interface web, Operador ou Observador.",
+  "role.webui_admin": "Administrador da interface web",
   "network.router.factory_reset_stage": "Falha ao remover a conexão MikroTik",
   "network.router.factory_reset_failed": "Não foi possível esquecer a conexão MikroTik. Nenhuma limpeza destrutiva foi iniciada. Tente restaurar as configurações de fábrica novamente.",
   "network.router.identity": "Nome do roteador",

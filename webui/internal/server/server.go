@@ -654,11 +654,11 @@ func (a *App) dashboardData(ctx context.Context, session, csrf string, selected 
 		identity, identityErr := identityClient.Session(ctx, session)
 		if identityErr == nil {
 			data.Username = identity.Username
-			data.Administrator = identity.Role == "administrator"
-			if operations, ok := a.api.(dashboardOperationAPI); ok && identity.Role == "administrator" {
+			data.Administrator = isAdministratorLevel(identity.Role)
+			if operations, ok := a.api.(dashboardOperationAPI); ok && isAdministratorLevel(identity.Role) {
 				data.Attention = dashboardCurrentAttention(ctx, operations, session)
 			}
-			if identity.Role == "administrator" && selected.ID != "" {
+			if isAdministratorLevel(identity.Role) && selected.ID != "" {
 				if client, ok := a.api.(selectedBackupsAPI); ok {
 					progress, restoreErr := readSelectedRestore(ctx, client, session, selected.ID)
 					if data.Attention == nil && restoreErr == nil && progress.RecoveryRequired {

@@ -40,7 +40,7 @@ func (a *App) routerOS(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if identity.Role != "administrator" || (r.Method != http.MethodGet && identity.Username != "voxel") {
+	if !isAdministratorLevel(identity.Role) || (r.Method != http.MethodGet && identity.Username != "voxel") {
 		writeNetworkWebError(w, 403, ui(w, "ui.031cc7a3ec82"))
 		return
 	}

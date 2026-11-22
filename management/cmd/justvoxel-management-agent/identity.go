@@ -10,10 +10,15 @@ import (
 
 type principalRole string
 
+func (role principalRole) isAdministratorLevel() bool {
+	return role == roleAdministrator || role == roleWebUIAdmin
+}
+
 type authSource string
 
 const (
 	roleAdministrator principalRole = "administrator"
+	roleWebUIAdmin    principalRole = "webui-admin"
 	roleOperator      principalRole = "operator"
 	roleViewer        principalRole = "viewer"
 
@@ -69,7 +74,7 @@ func (s *server) authenticateIdentity(username, password string) (identityAuthRe
 	}
 
 	role := principalRole(user.Role)
-	if role != roleOperator && role != roleViewer {
+	if !validWebUserRole(user.Role) {
 		return identityAuthResult{}, systemauth.ErrInvalidCredentials
 	}
 	return identityAuthResult{
@@ -80,6 +85,16 @@ func (s *server) authenticateIdentity(username, password string) (identityAuthRe
 		AccountCreated:  user.CreatedAt,
 		PasswordChanged: user.PasswordChangedAt,
 	}, nil
+}
+
+func (s *server) verifySessionPassword(actor session, password string) bool {
+	// Local root uses the existing system-password proof for appliance operations.
+	if actor.AuthSource == authSourceLocalRoot {
+		_, err := systemAuthenticate(systemAdminUsername, password)
+		return err == nil
+	}
+	identity, err := s.authenticateIdentity(actor.Username, password)
+	return err == nil && identity.WebUserID == actor.WebUserID && identity.Role == actor.Role
 }
 
 func (s *server) sessionStatus(w http.ResponseWriter, r *http.Request) {

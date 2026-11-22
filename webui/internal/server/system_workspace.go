@@ -153,7 +153,7 @@ func (a *App) systemWorkspaceIdentity(w http.ResponseWriter, r *http.Request, al
 		return "", api.SessionInfo{}, false
 	}
 	for _, role := range allowed {
-		if identity.Role == role {
+		if rolePermitted(identity.Role, role) {
 			return session, identity, true
 		}
 	}
@@ -190,7 +190,7 @@ func (a *App) systemWorkspaceHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response := systemWorkspaceHistoryResponse{OK: true, Role: identity.Role, Username: identity.Username}
-	if identity.Role == "administrator" {
+	if isAdministratorLevel(identity.Role) {
 		audit, err := client.AdminAudit(r.Context(), session, 100)
 		if err != nil {
 			a.writeSystemWorkspaceAPIError(w, err, ui(w, "ui.fbb800527085"))
@@ -390,8 +390,17 @@ func (a *App) systemWorkspaceUserMutation(w http.ResponseWriter, r *http.Request
 	return session, client, id, true
 }
 
+func (a *App) primaryAccountSecurityIdentity(w http.ResponseWriter, r *http.Request) (string, api.SessionInfo, bool) {
+	session, identity, ok := a.systemWorkspaceIdentity(w, r, "administrator")
+	if ok && (identity.Role != "administrator" || identity.Username != "voxel") {
+		writeSystemWorkspaceError(w, http.StatusForbidden, ui(w, "ui.031cc7a3ec82"))
+		ok = false
+	}
+	return session, identity, ok
+}
+
 func (a *App) systemWorkspaceSecurity(w http.ResponseWriter, r *http.Request) {
-	session, _, ok := a.systemWorkspaceIdentity(w, r, "administrator")
+	session, _, ok := a.primaryAccountSecurityIdentity(w, r)
 	if !ok {
 		return
 	}
@@ -415,7 +424,7 @@ func (a *App) systemWorkspaceAuthenticationChange(w http.ResponseWriter, r *http
 		writeSystemWorkspaceError(w, http.StatusForbidden, ui(w, "ui.74bccc44f472"))
 		return
 	}
-	session, _, ok := a.systemWorkspaceIdentity(w, r, "administrator")
+	session, _, ok := a.primaryAccountSecurityIdentity(w, r)
 	if !ok {
 		return
 	}
@@ -459,7 +468,7 @@ func (a *App) systemWorkspacePasswordChange(w http.ResponseWriter, r *http.Reque
 		writeSystemWorkspaceError(w, http.StatusForbidden, ui(w, "ui.74bccc44f472"))
 		return
 	}
-	session, _, ok := a.systemWorkspaceIdentity(w, r, "administrator")
+	session, _, ok := a.primaryAccountSecurityIdentity(w, r)
 	if !ok {
 		return
 	}
@@ -592,6 +601,10 @@ func (a *App) systemWorkspaceFactoryResetApply(w http.ResponseWriter, r *http.Re
 	})
 	password = ""
 	if err != nil {
+		if result.Code == "system_password_required" || result.Code == "system_password_incorrect" {
+			writeSystemWorkspaceError(w, http.StatusBadRequest, ui(w, "ui.d383cd72b8ec"))
+			return
+		}
 		a.writeSystemWorkspaceAPIError(w, err, ui(w, "ui.a80e0aec453f"))
 		return
 	}
@@ -718,6 +731,9 @@ func (a *App) writeSystemWorkspaceAPIError(w http.ResponseWriter, err error, fal
 			}
 			if responseErr.Message != "" {
 				message = responseErr.Message
+				if message == uiText("role.invalid_web_user") {
+					message = ui(w, "role.invalid_web_user")
+				}
 			}
 		}
 	}

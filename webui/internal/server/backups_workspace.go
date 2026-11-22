@@ -117,7 +117,7 @@ func (a *App) backupsWorkspaceRequest(w http.ResponseWriter, r *http.Request, re
 		a.handleBackupsWorkspaceError(w, r, err)
 		return "", nil, api.SessionInfo{}, false
 	}
-	if identity.Role != "administrator" {
+	if !isAdministratorLevel(identity.Role) {
 		http.Error(w, ui(w, "ui.031cc7a3ec82"), http.StatusForbidden)
 		return "", nil, api.SessionInfo{}, false
 	}

@@ -433,7 +433,7 @@ func (a *App) selectedWhitelist(w http.ResponseWriter, r *http.Request, session 
 	if !ok {
 		return
 	}
-	writeMinecraftWorkspaceJSON(w, 200, minecraftWorkspaceWhitelistResponse{OK: true, Entries: entries, Parsed: parsed, Output: result.Output, WhitelistEnabled: result.WhitelistEnabled, CanToggle: identity.Role == "administrator"})
+	writeMinecraftWorkspaceJSON(w, 200, minecraftWorkspaceWhitelistResponse{OK: true, Entries: entries, Parsed: parsed, Output: result.Output, WhitelistEnabled: result.WhitelistEnabled, CanToggle: isAdministratorLevel(identity.Role)})
 }
 
 func (a *App) selectedMinecraftConsole(w http.ResponseWriter, r *http.Request) {

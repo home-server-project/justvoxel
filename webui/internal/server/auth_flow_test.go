@@ -12,6 +12,7 @@ import (
 
 type authFlowAPI struct {
 	*fakeAPI
+	identity    api.SessionInfo
 	authStatus  api.AuthStatus
 	change      api.AuthModeChange
 	changeResp  api.AuthModeChangeResponse
@@ -28,6 +29,14 @@ func newAuthFlowAPI() *authFlowAPI {
 			MinimumPasswordLen: 8,
 		},
 	}
+}
+
+func (f *authFlowAPI) Session(ctx context.Context, session string) (api.SessionInfo, error) {
+	info, err := f.fakeAPI.Session(ctx, session)
+	if err != nil || f.identity.Role == "" {
+		return info, err
+	}
+	return f.identity, nil
 }
 
 func (f *authFlowAPI) AuthStatus(_ context.Context, session string) (api.AuthStatus, error) {
@@ -170,6 +179,7 @@ func TestForcedPasswordPageRemainsStandaloneRoute(t *testing.T) {
 
 func TestSystemWorkspaceAuthenticationWrongSystemPasswordStaysInPane(t *testing.T) {
 	fake := newAuthFlowAPI()
+	fake.identity = api.SessionInfo{Username: "voxel", Role: "administrator", AuthSource: "system"}
 	fake.changeErr = api.ErrUnauthorized
 	app, err := New(fake, Config{ExternalScheme: "http"})
 	if err != nil {
@@ -190,5 +200,32 @@ func TestSystemWorkspaceAuthenticationWrongSystemPasswordStaysInPane(t *testing.
 	}
 	if !strings.Contains(rr.Body.String(), "System password is incorrect.") {
 		t.Fatalf("wrong system password did not remain an in-pane validation error: %s", rr.Body.String())
+	}
+}
+
+func TestWebUIAdminAccountSecurityAndCSRF(t *testing.T) {
+	fake := newAuthFlowAPI()
+	fake.identity = api.SessionInfo{Username: "manager", Role: "webui-admin", AuthSource: "webui"}
+	app, err := New(fake, Config{ExternalScheme: "http"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		method, path, body string
+		status             int
+	}{
+		{"GET", "/api/session-info", "", 200},
+		{"GET", "/api/system/workspace/security", "", 403},
+		{"POST", "/api/system/workspace/security/authentication", "csrf=csrf-token&mode=system", 403},
+		{"POST", "/api/system/workspace/users/create", "username=test&role=operator", 403},
+	} {
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, authenticatedAdminRequest(tc.method, "http://example"+tc.path, tc.body))
+		if rr.Code != tc.status {
+			t.Fatalf("%s returned %d, want %d", tc.path, rr.Code, tc.status)
+		}
+		if tc.path == "/api/session-info" && !strings.Contains(rr.Body.String(), `"role":"webui-admin"`) {
+			t.Fatal("WebUI Admin role lost in session proxy")
+		}
 	}
 }

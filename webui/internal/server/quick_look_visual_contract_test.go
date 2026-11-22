@@ -97,7 +97,7 @@ globalThis.justVoxelServerSelection = (slot, refresh) => {
   assert.equal(slot, panel); assert.equal(refresh, true); selectionRefreshes++;
   return { then(callback) { callback(); return { catch() {} }; } };
 };
-` + script[start:start+end] + `
+` + appRoleHelper(t, script, "isAdministratorLevel") + script[start:start+end] + `
 assert.deepEqual(quickLook.style, { top: "44px", left: "8px", width: "1184px", right: "auto" });
 setOpen(true);
 assert(classes.has("is-open"));

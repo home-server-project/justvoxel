@@ -1,4 +1,7 @@
 {
+  "reset.confirm_sign_in_password": "Для подтверждения введите пароль, с которым вы входите в веб-интерфейс.",
+  "role.invalid_web_user": "Выберите администратора веб-интерфейса, оператора или наблюдателя.",
+  "role.webui_admin": "Администратор веб-интерфейса",
   "network.router.factory_reset_stage": "Не удалось удалить подключение MikroTik",
   "network.router.factory_reset_failed": "Не удалось забыть подключение MikroTik. Удаление данных не началось. Повторите сброс к заводским настройкам.",
   "network.router.identity": "Имя маршрутизатора",

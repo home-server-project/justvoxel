@@ -373,7 +373,7 @@ func (s *server) instanceLifecycleMaintenanceRefusal(w http.ResponseWriter, r *h
 	if err != nil || journal == nil || journal.State != operationNeedsAttention {
 		return false
 	}
-	if actor.Role == roleAdministrator && journal.OperationType == operationTypePluginInstall && journal.InstanceID == id {
+	if actor.Role.isAdministratorLevel() && journal.OperationType == operationTypePluginInstall && journal.InstanceID == id {
 		tx, err := s.pluginRecoveryTransaction(*journal)
 		if err == nil {
 			if _, _, ok := s.pluginRecoveryContext(r, tx); ok {
@@ -446,7 +446,7 @@ func (s *server) instanceRuntimeAction(w http.ResponseWriter, r *http.Request, a
 	// Existing administrator lifecycle callers send an empty object and
 	// retain their graceful warning behavior. Interactive callers explicitly
 	// send false before asking for confirmation, then true on the same ID.
-	warnings := actor.Role == roleAdministrator
+	warnings := actor.Role.isAdministratorLevel()
 	if request.ConfirmPlayers != nil {
 		warnings = *request.ConfirmPlayers
 	}

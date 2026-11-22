@@ -1,4 +1,7 @@
 {
+  "reset.confirm_sign_in_password": "Confirma con la contraseña que usas para iniciar sesión en la interfaz web.",
+  "role.invalid_web_user": "Elige Administrador de la interfaz web, Operador u Observador.",
+  "role.webui_admin": "Administrador de la interfaz web",
   "network.router.factory_reset_stage": "No se pudo eliminar la conexión MikroTik",
   "network.router.factory_reset_failed": "No se pudo olvidar la conexión MikroTik. No se inició ninguna eliminación de datos. Vuelve a intentar el restablecimiento de fábrica.",
   "network.router.identity": "Nombre del enrutador",

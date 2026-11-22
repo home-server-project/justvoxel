@@ -15,8 +15,6 @@ import (
 	"os/exec"
 	"strings"
 	"time"
-
-	"github.com/home-server-project/justvoxel/management/internal/systemauth"
 )
 
 const adminFactoryResetHelper = "/usr/libexec/justvoxel/mjust/admin-factory-reset-json"
@@ -232,7 +230,8 @@ func (s *server) adminFactoryResetResolve(w http.ResponseWriter, r *http.Request
 }
 
 func (s *server) adminFactoryResetApply(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.requireAdministrator(w, r); !ok {
+	actor, ok := s.requireAdministrator(w, r)
+	if !ok {
 		return
 	}
 	if s.operations == nil {
@@ -267,23 +266,22 @@ func (s *server) adminFactoryResetApply(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	authMode, err := readAuthMode()
-	if err != nil {
-		writeAdminFactoryResetApplyFailure(w, http.StatusServiceUnavailable, "auth_mode_unavailable", "authentication mode is unavailable", nil)
-		return
-	}
-	if authMode == authModeSeparate {
-		if strings.TrimSpace(request.SystemPassword) == "" {
-			writeAdminFactoryResetApplyFailure(w, http.StatusBadRequest, "system_password_required", "current voxel system password is required while WebUI uses a separate password", nil)
+	requirePassword := actor.Role == roleWebUIAdmin
+	if !requirePassword {
+		mode, err := readAuthMode()
+		if err != nil {
+			writeAdminFactoryResetApplyFailure(w, http.StatusServiceUnavailable, "auth_mode_unavailable", "authentication mode is unavailable", nil)
 			return
 		}
-		if _, err := systemAuthenticate(systemAdminUsername, request.SystemPassword); err != nil {
-			request.SystemPassword = ""
-			if errors.Is(err, systemauth.ErrInvalidCredentials) {
-				writeAdminFactoryResetApplyFailure(w, http.StatusUnauthorized, "system_password_incorrect", "current voxel system password is incorrect", nil)
-				return
-			}
-			writeAdminFactoryResetApplyFailure(w, http.StatusForbidden, "system_account_unavailable", "voxel system account authentication failed", nil)
+		requirePassword = mode == authModeSeparate
+	}
+	if requirePassword {
+		if request.SystemPassword == "" {
+			writeAdminFactoryResetApplyFailure(w, http.StatusBadRequest, "system_password_required", "current password is required", nil)
+			return
+		}
+		if !s.verifySessionPassword(actor, request.SystemPassword) {
+			writeAdminFactoryResetApplyFailure(w, http.StatusUnauthorized, "system_password_incorrect", "current password is incorrect", nil)
 			return
 		}
 	}

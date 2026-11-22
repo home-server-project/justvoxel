@@ -207,7 +207,7 @@ func insertAuditEvent(executor interface {
 	if success {
 		value = 1
 	}
-	if actor.Username == "" || (actor.Role != roleAdministrator && actor.Role != roleOperator && actor.Role != roleViewer) {
+	if actor.Username == "" || (!actor.Role.isAdministratorLevel() && actor.Role != roleOperator && actor.Role != roleViewer) {
 		return errors.New("audit actor identity is invalid")
 	}
 	if _, err := executor.Exec(`INSERT INTO audit_events(
@@ -225,7 +225,7 @@ func insertAuditEventTx(tx *sql.Tx, occurredAt time.Time, actor session, action,
 }
 
 func (s *webUIStore) resetOperatorRestartAllowance(userID int64, actor session) error {
-	if actor.Role != roleAdministrator {
+	if !actor.Role.isAdministratorLevel() {
 		return errors.New("administrator role is required")
 	}
 	tx, err := s.db.BeginTx(context.Background(), nil)

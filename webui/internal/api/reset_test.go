@@ -276,3 +276,21 @@ func TestHistoricalResetRecoveryUsesStoredImmutableTarget(t *testing.T) {
 		t.Fatal(result, err)
 	}
 }
+
+func TestFactoryResetPasswordFailureKeepsSessionDistinct(t *testing.T) {
+	for _, tc := range []struct {
+		body           string
+		sessionExpired bool
+	}{
+		{`{"ok":false,"code":"system_password_incorrect","error":"current password is incorrect"}`, false},
+		{`{"error":"invalid session"}`, true},
+	} {
+		client := &Client{http: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: 401, Body: io.NopCloser(strings.NewReader(tc.body))}, nil
+		})}}
+		result, err := client.AdminFactoryResetApply(context.Background(), "token", AdminFactoryResetApplyRequest{PlanFingerprint: resetTestFingerprint})
+		if err == nil || errors.Is(err, ErrUnauthorized) != tc.sessionExpired || (!tc.sessionExpired && result.Code != "system_password_incorrect") {
+			t.Fatalf("unexpected reset password response %+v, %v", result, err)
+		}
+	}
+}

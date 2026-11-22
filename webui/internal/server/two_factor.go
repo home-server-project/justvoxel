@@ -169,7 +169,7 @@ func (a *App) twoFactorAccount(action string) http.HandlerFunc {
 			message := "two_factor.invalid_code"
 			if action == "disable" {
 				message = "two_factor.invalid_credentials"
-				if identity.Role == "administrator" && request.UserID != nil {
+				if isAdministratorLevel(identity.Role) && request.UserID != nil {
 					message = "ui.d383cd72b8ec"
 				}
 			}

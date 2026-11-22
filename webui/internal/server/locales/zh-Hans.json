@@ -1,4 +1,7 @@
 {
+  "reset.confirm_sign_in_password": "请输入用于登录网页界面的密码以确认。",
+  "role.invalid_web_user": "请选择网页界面管理员、操作员或查看者。",
+  "role.webui_admin": "网页界面管理员",
   "network.router.factory_reset_stage": "移除 MikroTik 连接失败",
   "network.router.factory_reset_failed": "无法忘记 MikroTik 连接。尚未开始删除数据。请重试恢复出厂设置。",
   "network.router.identity": "路由器名称",

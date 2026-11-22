@@ -33,7 +33,7 @@ func (s *server) requireRoles(w http.ResponseWriter, r *http.Request, roles ...p
 		return session{}, false
 	}
 	for _, role := range roles {
-		if sess.Role == role {
+		if sess.Role == role || (role == roleAdministrator && sess.Role.isAdministratorLevel()) {
 			return sess, true
 		}
 	}
@@ -51,7 +51,7 @@ func (s *server) requireAdministratorCredentialPath(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusUnauthorized, "invalid session")
 		return session{}, false
 	}
-	if sess.Role != roleAdministrator {
+	if sess.Role != roleAdministrator || sess.Username != systemAdminUsername {
 		writeError(w, http.StatusForbidden, "operation not permitted for this role")
 		return session{}, false
 	}
@@ -68,7 +68,7 @@ func (s *server) requirePrimaryAdministrator(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return session{}, false
 	}
-	if sess.ConnectionID != "" || sess.Username != systemAdminUsername {
+	if sess.Role != roleAdministrator || sess.ConnectionID != "" || sess.Username != systemAdminUsername {
 		writeError(w, http.StatusForbidden, "primary administrator access required")
 		return session{}, false
 	}

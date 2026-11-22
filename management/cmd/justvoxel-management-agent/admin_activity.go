@@ -158,7 +158,7 @@ func (s *webUIStore) listNotifications(limit int, openOnly bool) ([]notification
 }
 
 func (s *webUIStore) resolveNotification(id int64, actor session) error {
-	if actor.Role != roleAdministrator {
+	if !actor.Role.isAdministratorLevel() {
 		return errors.New("administrator role is required")
 	}
 	now := formatWebUIStoreTime(s.now())

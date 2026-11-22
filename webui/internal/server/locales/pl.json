@@ -1,4 +1,7 @@
 {
+  "reset.confirm_sign_in_password": "Potwierdź hasłem używanym do logowania się do interfejsu WWW.",
+  "role.invalid_web_user": "Wybierz administratora interfejsu WWW, operatora lub obserwatora.",
+  "role.webui_admin": "Administrator interfejsu WWW",
   "network.router.factory_reset_stage": "Nie udało się usunąć połączenia MikroTik",
   "network.router.factory_reset_failed": "Nie udało się zapomnieć połączenia MikroTik. Usuwanie danych nie zostało rozpoczęte. Ponów przywracanie ustawień fabrycznych.",
   "network.router.identity": "Nazwa routera",

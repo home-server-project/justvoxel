@@ -210,6 +210,10 @@ func (c *Client) adminResetApply(ctx context.Context, session, path string, body
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusUnauthorized {
+		// A rejected confirmation password leaves the signed-in session valid.
+		if path == adminFactoryResetApplyPath && decodeAdminResetApply(resp.Body, &out) == nil && out.Code == "system_password_incorrect" {
+			return out, &ResponseError{StatusCode: resp.StatusCode, Message: out.Error}
+		}
 		return out, ErrUnauthorized
 	}
 	if err := decodeAdminResetApply(resp.Body, &out); err != nil {

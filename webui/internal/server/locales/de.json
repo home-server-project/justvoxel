@@ -1,4 +1,7 @@
 {
+  "reset.confirm_sign_in_password": "Bestätigen Sie mit dem Passwort, mit dem Sie sich an der Weboberfläche anmelden.",
+  "role.invalid_web_user": "Wählen Sie WebUI-Administrator, Operator oder Betrachter.",
+  "role.webui_admin": "WebUI-Administrator",
   "network.router.factory_reset_stage": "MikroTik-Verbindung konnte nicht entfernt werden",
   "network.router.factory_reset_failed": "Die MikroTik-Verbindung konnte nicht entfernt werden. Es wurden keine Daten gelöscht. Setzen Sie die Werkseinstellungen erneut zurück.",
   "network.router.identity": "Routername",

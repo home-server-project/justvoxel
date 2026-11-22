@@ -42,7 +42,7 @@ func (a *App) storageMinecraftMigrationIdentity(w http.ResponseWriter, r *http.R
 		a.writeStorageMinecraftMigrationError(w, err, ui(w, "ui.11d8b513d533"))
 		return "", nil, false
 	}
-	if identity.Role != "administrator" {
+	if !isAdministratorLevel(identity.Role) {
 		writeStorageMinecraftMigrationJSON(w, http.StatusForbidden, storageMinecraftMigrationResponse{OK: false, Error: ui(w, "ui.2d3d0b30bde9")})
 		return "", nil, false
 	}

@@ -72,7 +72,7 @@ if grep -Eq 'rm[[:space:]]+-rf.*(nfs|smb|cifs|network|external|usb)' "${helper}"
 fi
 
 grep -Fq 'SystemPassword  string' "${agent}"
-grep -Fq 'systemAuthenticate(systemAdminUsername, request.SystemPassword)' "${agent}"
+grep -Fq 's.verifySessionPassword(actor, request.SystemPassword)' "${agent}"
 grep -Fq 'request.SystemPassword = ""' "${agent}"
 grep -Fq 'const factoryBootstrapPasswordHash = "$6$0LPXGhsb5MOJ160J$K97FKtUs0SgIXum7OpGk69m.asoBR0Os86DpbUnes5JO27aV5XzfEgtpVb/Ff8RMKl.izzSgbqwK8XPpYRFV20"' "${agent}"
 grep -Fq '"/usr/sbin/usermod", "--password", "!"+factoryBootstrapPasswordHash, systemAdminUsername' "${agent}"

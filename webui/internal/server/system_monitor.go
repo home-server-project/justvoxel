@@ -86,7 +86,7 @@ func (a *App) systemMonitorProfileSave(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if identity.Role != "administrator" {
+	if !isAdministratorLevel(identity.Role) {
 		http.Error(w, ui(w, "ui.031cc7a3ec82"), http.StatusForbidden)
 		return
 	}
@@ -197,7 +197,7 @@ func (a *App) systemMonitorIdentity(w http.ResponseWriter, r *http.Request) (str
 		return "", api.SessionInfo{}, false
 	}
 	switch identity.Role {
-	case "administrator", "operator", "viewer":
+	case "administrator", "webui-admin", "operator", "viewer":
 		return session, identity, true
 	default:
 		http.Error(w, ui(w, "ui.10d0ff1ee2df"), http.StatusForbidden)

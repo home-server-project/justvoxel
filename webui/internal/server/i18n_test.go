@@ -698,3 +698,20 @@ func TestLocalizedServerPresentationKeepsOpaqueValuesAndCanonicalState(t *testin
 		}
 	}
 }
+
+func TestWebUIAdminRoleTranslations(t *testing.T) {
+	for _, locale := range []string{"de", "en", "es-419", "fr-CA", "pl", "pt-BR", "ru", "uk", "zh-Hans"} {
+		data, err := assets.ReadFile("locales/" + locale + ".json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var messages map[string]string
+		if err := json.Unmarshal(data, &messages); err != nil {
+			t.Fatal(err)
+		}
+		label := messages["role.webui_admin"]
+		if label == "" || (label == "WebUI Admin") != (locale == "en") {
+			t.Fatalf("incorrect %s role label %q", locale, label)
+		}
+	}
+}

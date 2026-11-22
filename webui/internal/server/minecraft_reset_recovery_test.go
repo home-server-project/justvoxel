@@ -33,6 +33,7 @@ const consoleCalls = [];
 const window = {JustVoxelLiveConsole: {updateState(){},open(value){consoleCalls.push(value)}}, clearTimeout(){}, setTimeout(){throw Error("terminal recovery must not poll")}};
 let resetPollTimer = 0, activeFactoryResetOperationID = "", loadSequence = 0, currentTab = "reset";
 const clearResetPoll = () => {};
+const identity = {role: "administrator"};
 const systemPanel = () => ({panel: new Element("section"),heading: new Element("header")});
 const systemResetList = () => new Element("section");
 const resetLiveConsoleUnauthorized = () => {};

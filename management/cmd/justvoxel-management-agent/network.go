@@ -136,7 +136,7 @@ func (s *server) networkStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	view := networkSnapshotView(snapshot)
-	if actor.Role == roleAdministrator {
+	if actor.Role.isAdministratorLevel() {
 		view.PendingCheckpoints = s.pendingNetworkCheckpointViews()
 	}
 	writeJSON(w, http.StatusOK, view)

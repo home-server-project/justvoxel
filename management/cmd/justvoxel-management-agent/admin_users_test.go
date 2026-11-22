@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -158,5 +159,70 @@ func TestAdministratorCanResetIndependentOperatorAllowances(t *testing.T) {
 	}
 	if restartUsed != 0 || backupUsed != 0 {
 		t.Fatalf("backup reset changed wrong counters: restart=%d backup=%d", restartUsed, backupUsed)
+	}
+}
+
+func TestWebUIAdminManagesOnlyWebAccounts(t *testing.T) {
+	withAuthTestDependencies(t)
+	systemValidatePass = func(_, _, _ string) error { return nil }
+	readAuthMode = func() (authMode, error) {
+		t.Fatal("WebUI account consulted system account authentication")
+		return "", nil
+	}
+	systemChangePassword = func(string, string, string) error { t.Fatal("WebUI account updated a system password"); return nil }
+	writeSeparateAdmin = func(string) error { t.Fatal("WebUI account updated voxel credentials"); return nil }
+	s, store := adminServerWithStore(t)
+	admin, err := store.createWebUser("manager", webUserRoleAdmin, "manager-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor := s.sessions["token"]
+	actor.Username, actor.Role, actor.WebUserID, actor.AuthSource = admin.Username, roleWebUIAdmin, admin.ID, authSourceWebUI
+	s.sessions["token"] = actor
+	mux := http.NewServeMux()
+	registerAdminUserRoutes(mux, s)
+	request := func(method, path, body string, status int) {
+		t.Helper()
+		rr := httptest.NewRecorder()
+		mux.ServeHTTP(rr, authorizedRequest(method, "/v1/admin/users"+path, body))
+		if rr.Code != status {
+			t.Fatalf("%s %s returned %d, want %d", method, path, rr.Code, status)
+		}
+	}
+	for _, role := range []webUserRole{webUserRoleAdmin, webUserRoleOperator, webUserRoleViewer} {
+		username := "new-" + string(role)
+		request("POST", "", `{"username":"`+username+`","password":"web-password","role":"`+string(role)+`"}`, 201)
+		identity, err := s.authenticateIdentity(username, "web-password")
+		if err != nil || identity.Role != principalRole(role) || identity.WebUserID <= 0 || identity.AuthSource != authSourceWebUI {
+			t.Fatalf("incorrect new %s identity: %+v, %v", role, identity, err)
+		}
+		path := "/" + strconv.FormatInt(identity.WebUserID, 10)
+		for _, next := range []string{"operator", "viewer", "webui-admin"} {
+			request("PATCH", path+"/role", `{"role":"`+next+`"}`, 200)
+			user, err := store.webUserByID(identity.WebUserID)
+			if err != nil || string(user.Role) != next {
+				t.Fatalf("role change to %s failed", next)
+			}
+		}
+		request("PATCH", path+"/role", `{"role":"administrator"}`, 400)
+		request("POST", path+"/password", `{"password":"updated-password"}`, 200)
+		if _, valid, err := store.checkWebUserPassword(username, "updated-password"); err != nil || !valid {
+			t.Fatal("password change did not update WebUI credentials", err)
+		}
+		request("PATCH", path+"/enabled", `{"enabled":false}`, 200)
+		request("PATCH", path+"/enabled", `{"enabled":true}`, 200)
+		request("DELETE", path, "", 200)
+	}
+	request("POST", "", `{"username":"other","password":"web-password","role":"administrator"}`, 400)
+	request("POST", "", `{"username":"Voxel","password":"web-password","role":"webui-admin"}`, 400)
+	for _, primary := range []string{"/0", "/voxel"} {
+		request("PATCH", primary+"/role", `{"role":"viewer"}`, 400)
+		request("PATCH", primary+"/enabled", `{"enabled":false}`, 400)
+		request("DELETE", primary, "", 400)
+	}
+	for _, role := range []principalRole{roleOperator, roleViewer} {
+		actor.Role = role
+		s.sessions["token"] = actor
+		request("POST", "", `{"username":"other","role":"webui-admin","password":"password"}`, 403)
 	}
 }

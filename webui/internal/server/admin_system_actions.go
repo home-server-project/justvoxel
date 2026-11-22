@@ -116,7 +116,7 @@ func (a *App) systemActionsRequest(w http.ResponseWriter, r *http.Request, requi
 		a.handleSystemActionsAPIError(w, err)
 		return "", nil, false
 	}
-	if identity.Role != "administrator" {
+	if !isAdministratorLevel(identity.Role) {
 		http.Error(w, ui(w, "ui.031cc7a3ec82"), http.StatusForbidden)
 		return "", nil, false
 	}

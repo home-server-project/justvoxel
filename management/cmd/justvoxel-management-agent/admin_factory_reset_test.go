@@ -97,18 +97,18 @@ func TestFactoryResetStorageActionsPreserveExternalAndNetwork(t *testing.T) {
 	}
 }
 
-func TestAdminFactoryResetApplyRequiresRealSystemPasswordBeforePlanning(t *testing.T) {
+func TestAdminFactoryResetApplyRequiresSeparateWebPasswordBeforePlanning(t *testing.T) {
 	useEmptyFactoryResetRuntime(t)
 	oldReadMode := readAuthMode
 	defer func() { readAuthMode = oldReadMode }()
 	readAuthMode = func() (authMode, error) { return authModeSeparate, nil }
-	oldAuth := systemAuthenticate
-	defer func() { systemAuthenticate = oldAuth }()
-	systemAuthenticate = func(username, password string) (systemauth.AuthResult, error) {
+	oldVerify := verifySeparateAdmin
+	defer func() { verifySeparateAdmin = oldVerify }()
+	verifySeparateAdmin = func(username, password string) bool {
 		if username != systemAdminUsername || password != "wrong-password" {
-			t.Fatalf("unexpected system authentication request username=%q password=%q", username, password)
+			t.Fatal("unexpected credential verification")
 		}
-		return systemauth.AuthResult{}, systemauth.ErrInvalidCredentials
+		return false
 	}
 
 	oldHelper := runAdminFactoryResetHelper
@@ -119,7 +119,7 @@ func TestAdminFactoryResetApplyRequiresRealSystemPasswordBeforePlanning(t *testi
 		return []byte(validFactoryResetPlanHelper), nil
 	}
 
-	s := surfaceTestServer(t, roleAdministrator)
+	s, _ := adminServerWithStore(t)
 	store := openTestOperationStore(t)
 	attachTestOperationStore(t, s, store)
 	body, _ := json.Marshal(adminFactoryResetApplyRequest{
@@ -593,5 +593,39 @@ func TestAdminFactoryResetResolveRequiresExplicitKeepCurrentState(t *testing.T) 
 	}
 	if current, err := store.currentFactoryReset(); err != nil || current == nil {
 		t.Fatalf("failed reset was released without explicit confirmation: %#v err=%v", current, err)
+	}
+}
+
+func TestWebUIAdminFactoryResetRequiresOwnPassword(t *testing.T) {
+	useEmptyFactoryResetRuntime(t)
+	withAuthTestDependencies(t)
+	readAuthMode = func() (authMode, error) {
+		t.Fatal("WebUI Admin consulted voxel credentials")
+		return "", nil
+	}
+	s := surfaceTestServer(t, roleWebUIAdmin)
+	actor := s.sessions["token"]
+	user, err := s.store.createWebUser(actor.Username, webUserRoleAdmin, "own-password")
+	if err != nil || actor.WebUserID != user.ID {
+		t.Fatal("cannot prepare WebUI administrator", err)
+	}
+	attachTestOperationStore(t, s, openTestOperationStore(t))
+	oldHelper, oldWorker := runAdminFactoryResetHelper, startFactoryResetWorker
+	t.Cleanup(func() { runAdminFactoryResetHelper, startFactoryResetWorker = oldHelper, oldWorker })
+	runAdminFactoryResetHelper = func(context.Context, ...string) ([]byte, error) { return []byte(validFactoryResetPlanHelper), nil }
+	startFactoryResetWorker = func(*server, string, string) {}
+	for _, tc := range []struct {
+		password string
+		status   int
+	}{{"", 400}, {"other-password", 401}, {"own-password", 202}} {
+		body, err := json.Marshal(adminFactoryResetApplyRequest{PlanFingerprint: exactFactoryResetFingerprint(t), SystemPassword: tc.password})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rr := httptest.NewRecorder()
+		s.adminFactoryResetApply(rr, surfaceRequest("POST", "/v1/admin/reset/factory/apply", string(body)))
+		if rr.Code != tc.status {
+			t.Fatalf("reset returned %d, want %d", rr.Code, tc.status)
+		}
 	}
 }

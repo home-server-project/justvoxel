@@ -24,6 +24,59 @@ func openTestWebUIStore(t *testing.T) (*webUIStore, string) {
 	return store, path
 }
 
+// Create a deployed schema using only the migrations that existed at that version.
+func openTestWebUIStoreAtVersion(t *testing.T, version int) (*webUIStore, string) {
+	t.Helper()
+	migrations := webUIStoreMigrations
+	defer func() { webUIStoreMigrations = migrations }()
+	webUIStoreMigrations = migrations[:version]
+	return openTestWebUIStore(t)
+}
+
+func TestWebUIAdminUpgradePreservesAccountDependencies(t *testing.T) {
+	store, _ := openTestWebUIStoreAtVersion(t, 13)
+	user, err := store.createWebUser("existing", webUserRoleOperator, "existing-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		`UPDATE operator_usage SET restart_used=2, backup_used=1 WHERE user_id=?`,
+		`INSERT INTO notifications(created_at,kind,user_id,title,message) VALUES ('before','limit',?,'title','message')`,
+		`INSERT INTO web_user_two_factor(user_id,secret,source,recovery_hashes,last_step) VALUES (?,'test-secret','administrator','[]',123)`,
+	} {
+		if _, err := store.db.Exec(statement, user.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.recordAuditEvent(administratorSession(time.Now()), "before", user.Username, true, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := applyWebUIStoreMigrations(store.db); err != nil {
+		t.Fatal(err)
+	}
+	got, valid, err := store.checkWebUserPassword(user.Username, "existing-password")
+	if err != nil || !valid || got.ID != user.ID || got.Role != user.Role {
+		t.Fatal("credential changed on upgrade", err)
+	}
+	var count int
+	err = store.db.QueryRow(`SELECT COUNT(*) FROM operator_usage u
+		JOIN notifications n ON n.user_id=u.user_id JOIN web_user_two_factor f ON f.user_id=u.user_id
+		WHERE u.user_id=? AND restart_used=2 AND backup_used=1 AND n.message='message'
+		AND f.last_step=123 AND f.secret='test-secret' AND f.source='administrator' AND f.recovery_hashes='[]'`, user.ID).Scan(&count)
+	if err != nil || count != 1 {
+		t.Fatal("lost account dependencies", err)
+	}
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE actor_role='administrator' AND action='before'`).Scan(&count); err != nil || count != 1 {
+		t.Fatal("lost audit history", err)
+	}
+	if err := store.setWebUserRole(user.ID, webUserRoleAdmin); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.recordAuditEvent(session{Username: user.Username, Role: roleWebUIAdmin}, "after", "", true, ""); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestWebUIStoreStartsWithoutWebUsers(t *testing.T) {
 	store, path := openTestWebUIStore(t)
 	users, err := store.listWebUsers()
@@ -43,7 +96,7 @@ func TestWebUIStoreStartsWithoutWebUsers(t *testing.T) {
 	}
 }
 
-func TestWebUIStoreAllowsMultipleOperatorAndViewerAccounts(t *testing.T) {
+func TestWebUIStoreAllowsMultipleWebAccounts(t *testing.T) {
 	store, _ := openTestWebUIStore(t)
 	base := time.Date(2026, time.September, 17, 1, 2, 3, 0, time.UTC)
 	store.now = func() time.Time { return base }
@@ -52,6 +105,7 @@ func TestWebUIStoreAllowsMultipleOperatorAndViewerAccounts(t *testing.T) {
 		username string
 		role     webUserRole
 	}{
+		{"Manager", webUserRoleAdmin},
 		{"Ilya", webUserRoleOperator},
 		{"Alex", webUserRoleOperator},
 		{"Maya", webUserRoleViewer},

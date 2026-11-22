@@ -50,7 +50,7 @@
       return;
     }
 
-    if (role !== "administrator") {
+    if (role !== "administrator" && role !== "webui-admin") {
       showInvitation();
       return;
     }

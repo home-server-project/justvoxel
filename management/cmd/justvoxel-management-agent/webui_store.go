@@ -20,6 +20,7 @@ const webUIDatabasePath = stateDir + "/webui.db"
 type webUserRole string
 
 const (
+	webUserRoleAdmin    webUserRole = webUserRole(roleWebUIAdmin)
 	webUserRoleOperator webUserRole = "operator"
 	webUserRoleViewer   webUserRole = "viewer"
 )
@@ -27,7 +28,7 @@ const (
 var (
 	errWebUserNotFound      = errors.New("WebUI user not found")
 	errWebUserReserved      = errors.New("voxel is reserved for the primary system administrator")
-	errWebUserInvalidRole   = errors.New("WebUI user role must be operator or viewer")
+	errWebUserInvalidRole   = errors.New("Choose WebUI Admin, Operator, or Viewer.")
 	errWebUserInvalidName   = errors.New("WebUI username is invalid")
 	errWebUserPasswordEmpty = errors.New("WebUI password is required")
 )
@@ -244,6 +245,58 @@ var webUIStoreMigrations = []webUIStoreMigration{
 		name:    "routeros_trusted_ca",
 		statements: []string{
 			`ALTER TABLE routeros_state ADD COLUMN ca_pem TEXT NOT NULL DEFAULT ''`,
+		},
+	},
+	{
+		version: 14,
+		name:    "webui_admin_role",
+		// Dropping web_users cascades to its dependents. Preserve those rows
+		// inside this transaction while replacing the role CHECK constraints.
+		statements: []string{
+			`CREATE TABLE web_users_new (
+				id INTEGER PRIMARY KEY,
+				username TEXT NOT NULL COLLATE NOCASE UNIQUE,
+				role TEXT NOT NULL CHECK (role IN ('webui-admin', 'operator', 'viewer')),
+				enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+				salt TEXT NOT NULL,
+				password_hash TEXT NOT NULL,
+				memory_kib INTEGER NOT NULL CHECK (memory_kib > 0),
+				iterations INTEGER NOT NULL CHECK (iterations > 0),
+				parallelism INTEGER NOT NULL CHECK (parallelism > 0),
+				key_length INTEGER NOT NULL CHECK (key_length > 0),
+				created_at TEXT NOT NULL,
+				updated_at TEXT NOT NULL,
+				password_changed_at TEXT NOT NULL,
+				CHECK (length(trim(username)) BETWEEN 1 AND 64),
+				CHECK (lower(username) <> 'voxel')
+			)`,
+			`INSERT INTO web_users_new SELECT * FROM web_users`,
+			`CREATE TEMP TABLE saved_operator_usage AS SELECT * FROM operator_usage`,
+			`CREATE TEMP TABLE saved_notifications AS SELECT * FROM notifications WHERE user_id IS NOT NULL`,
+			`CREATE TEMP TABLE saved_web_user_two_factor AS SELECT * FROM web_user_two_factor`,
+			`DROP TABLE web_users`,
+			`ALTER TABLE web_users_new RENAME TO web_users`,
+			`INSERT INTO operator_usage SELECT * FROM saved_operator_usage`,
+			`DROP TABLE saved_operator_usage`,
+			`INSERT INTO notifications SELECT * FROM saved_notifications`,
+			`DROP TABLE saved_notifications`,
+			`INSERT INTO web_user_two_factor SELECT * FROM saved_web_user_two_factor`,
+			`DROP TABLE saved_web_user_two_factor`,
+			`CREATE INDEX web_users_role_enabled_idx ON web_users(role, enabled)`,
+			`CREATE TABLE audit_events_new (
+				id INTEGER PRIMARY KEY,
+				occurred_at TEXT NOT NULL,
+				actor_username TEXT NOT NULL,
+				actor_role TEXT NOT NULL CHECK (actor_role IN ('administrator', 'webui-admin', 'operator', 'viewer')),
+				action TEXT NOT NULL,
+				target TEXT,
+				success INTEGER NOT NULL CHECK (success IN (0, 1)),
+				context TEXT NOT NULL DEFAULT ''
+			)`,
+			`INSERT INTO audit_events_new SELECT * FROM audit_events`,
+			`DROP TABLE audit_events`,
+			`ALTER TABLE audit_events_new RENAME TO audit_events`,
+			`CREATE INDEX audit_events_occurred_at_idx ON audit_events(occurred_at DESC, id DESC)`,
 		},
 	},
 }
@@ -719,7 +772,7 @@ func normalizeWebUsername(username string) (string, error) {
 }
 
 func validWebUserRole(role webUserRole) bool {
-	return role == webUserRoleOperator || role == webUserRoleViewer
+	return role == webUserRoleAdmin || role == webUserRoleOperator || role == webUserRoleViewer
 }
 
 func formatWebUIStoreTime(value time.Time) string {

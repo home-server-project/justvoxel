@@ -155,7 +155,7 @@ func (a *App) minecraftWorkspaceIdentity(w http.ResponseWriter, r *http.Request,
 		return "", api.SessionInfo{}, false
 	}
 	for _, role := range allowed {
-		if identity.Role == role {
+		if rolePermitted(identity.Role, role) {
 			return session, identity, true
 		}
 	}
