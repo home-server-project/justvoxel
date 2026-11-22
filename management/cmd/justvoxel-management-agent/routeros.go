@@ -11,10 +11,14 @@ import (
 	"io"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/home-server-project/justvoxel/management/internal/networking"
 )
 
 const routerOSRoute = "/v1/admin/network/router/mikrotik"
@@ -167,24 +171,26 @@ type routerMinecraftEndpoint struct {
 }
 
 type routerOSStatus struct {
-	Configured     bool                      `json:"configured"`
-	CanConfigure   bool                      `json:"can_configure"`
-	Status         string                    `json:"status"`
-	Diagnostic     string                    `json:"diagnostic,omitempty"`
-	TrustedCA      *routerOSCAMetadata       `json:"trusted_ca,omitempty"`
-	Identity       string                    `json:"identity,omitempty"`
-	Version        string                    `json:"version,omitempty"`
-	Board          string                    `json:"board,omitempty"`
-	Endpoint       string                    `json:"endpoint,omitempty"`
-	Username       string                    `json:"username,omitempty"`
-	Target         string                    `json:"target,omitempty"`
-	Ingress        *routerOSSelector         `json:"ingress,omitempty"`
-	IngressChoices []routerOSSelector        `json:"ingress_choices,omitempty"`
-	TargetChoices  []string                  `json:"target_choices,omitempty"`
-	Endpoints      []routerMinecraftEndpoint `json:"endpoints,omitempty"`
-	InventoryError bool                      `json:"inventory_error,omitempty"`
-	ServerName     string                    `json:"server_name,omitempty"`
-	NetworkMember  bool                      `json:"network_member,omitempty"`
+	Configured         bool                      `json:"configured"`
+	CanConfigure       bool                      `json:"can_configure"`
+	Status             string                    `json:"status"`
+	Diagnostic         string                    `json:"diagnostic,omitempty"`
+	TrustedCA          *routerOSCAMetadata       `json:"trusted_ca,omitempty"`
+	Identity           string                    `json:"identity,omitempty"`
+	Version            string                    `json:"version,omitempty"`
+	Board              string                    `json:"board,omitempty"`
+	Endpoint           string                    `json:"endpoint,omitempty"`
+	Username           string                    `json:"username,omitempty"`
+	Target             string                    `json:"target,omitempty"`
+	Ingress            *routerOSSelector         `json:"ingress,omitempty"`
+	RecommendedTarget  string                    `json:"recommended_target,omitempty"`
+	RecommendedIngress *routerOSSelector         `json:"recommended_ingress,omitempty"`
+	IngressChoices     []routerOSSelector        `json:"ingress_choices,omitempty"`
+	TargetChoices      []string                  `json:"target_choices,omitempty"`
+	Endpoints          []routerMinecraftEndpoint `json:"endpoints,omitempty"`
+	InventoryError     bool                      `json:"inventory_error,omitempty"`
+	ServerName         string                    `json:"server_name,omitempty"`
+	NetworkMember      bool                      `json:"network_member,omitempty"`
 }
 
 func (c routerOSCredentials) publicTextFilter() func(string) string {
@@ -204,16 +210,24 @@ func (out *routerOSStatus) discovery(d routerOSDiscovery, publicText func(string
 	out.Board = publicText(d.board)
 }
 
-func routerTargetAddresses(ctx context.Context) ([]string, error) {
+func routerNetworkSnapshot(ctx context.Context) (networking.Snapshot, error) {
 	client, err := openNetworkClient(ctx)
 	if err != nil {
-		return nil, err
+		return networking.Snapshot{}, err
 	}
 	defer client.Close()
-	snapshot, err := client.Snapshot(ctx)
+	return client.Snapshot(ctx)
+}
+
+func routerTargetAddresses(ctx context.Context) ([]string, error) {
+	snapshot, err := routerNetworkSnapshot(ctx)
 	if err != nil {
 		return nil, err
 	}
+	return routerLocalAddresses(snapshot), nil
+}
+
+func routerLocalAddresses(snapshot networking.Snapshot) []string {
 	unique := map[string]bool{}
 	var addresses []string
 	for _, device := range snapshot.Devices {
@@ -225,7 +239,132 @@ func routerTargetAddresses(ctx context.Context) ([]string, error) {
 		}
 	}
 	sort.Strings(addresses)
-	return addresses, nil
+	return addresses
+}
+
+func (out *routerOSStatus) forwardingTargets(endpoint string, snapshot networking.Snapshot, publicText func(string) string) []string {
+	var router netip.Addr
+	if u, err := url.Parse(endpoint); err == nil {
+		router, _ = netip.ParseAddr(u.Hostname())
+	}
+	var candidates, sameSubnet []string
+	for _, device := range snapshot.Devices {
+		if !device.Managed || networking.DeviceStateName(device.State) != "activated" || device.ActiveConnection == nil ||
+			(device.Kind != networking.DeviceKindEthernet && device.Kind != networking.DeviceKindWiFi) {
+			continue
+		}
+		for _, address := range device.IPv4.Addresses {
+			ip, err := netip.ParseAddr(address.Address)
+			if err != nil || !ip.Is4() || !ip.IsGlobalUnicast() || ip == router {
+				continue
+			}
+			candidates = append(candidates, address.Address)
+			if router.Is4() && router.IsGlobalUnicast() && address.Prefix > 0 && address.Prefix <= 32 &&
+				netip.PrefixFrom(ip, int(address.Prefix)).Contains(router) {
+				sameSubnet = append(sameSubnet, address.Address)
+			}
+		}
+	}
+	if len(sameSubnet) > 0 {
+		candidates = sameSubnet
+	}
+	sort.Strings(candidates)
+	candidates = slices.Compact(candidates)
+	if len(sameSubnet) > 0 && len(candidates) == 1 {
+		out.RecommendedTarget = publicText(candidates[0])
+	} else {
+		for _, address := range candidates {
+			if publicText(address) != "" {
+				out.TargetChoices = append(out.TargetChoices, address)
+			}
+		}
+	}
+	return candidates
+}
+
+func usableRouterIngress(name string) bool {
+	switch strings.ToLower(name) {
+	case "", "lan", "all", "dynamic", "none", "static":
+		return false
+	}
+	return !strings.HasPrefix(name, "!")
+}
+
+// Only use explicit, unchanged public port mappings to this appliance.
+func minecraftIngressRule(rule routerOSNATRule, endpoints []routerMinecraftEndpoint, targets []string) bool {
+	r := rule.row
+	if rule.conditional || r["action"] != "dst-nat" || !containsRouterTarget(targets, r["to-addresses"]) ||
+		!rule.ports.valid || rule.ports.invert || len(rule.ports.ranges) != 1 {
+		return false
+	}
+	ports := rule.ports.ranges[0]
+	if r["to-ports"] != "" && (ports.first != ports.last || !rule.destination.valid || rule.destination.invert ||
+		len(rule.destination.ranges) != 1 || rule.destination.ranges[0] != ports) {
+		return false
+	}
+	proto := r["protocol"]
+	switch proto {
+	case "6":
+		proto = "tcp"
+	case "17":
+		proto = "udp"
+	}
+	for _, ep := range endpoints {
+		if ports.first >= ep.Port && ports.last <= ep.LastPort && slices.Contains(ep.Protocols, proto) {
+			return true
+		}
+	}
+	return false
+}
+
+func (out *routerOSStatus) forwardingIngress(d routerOSDiscovery, rows []routerOSRow, endpoints []routerMinecraftEndpoint, targets []string, publicText func(string) string) {
+	var choices, wan []routerOSSelector
+	for name := range d.lists {
+		if !usableRouterIngress(name) || publicText(name) == "" {
+			continue
+		}
+		choice := routerOSSelector{Type: "list", Name: name}
+		choices = append(choices, choice)
+		if strings.EqualFold(name, "WAN") {
+			wan = append(wan, choice)
+		}
+	}
+	if len(wan) == 1 {
+		out.RecommendedIngress = &wan[0]
+	}
+	if evidence := routerNATIngress(d, rows, endpoints, targets, publicText); evidence != nil {
+		out.RecommendedIngress = evidence
+	}
+	if out.RecommendedIngress == nil {
+		sort.Slice(choices, func(i, j int) bool { return choices[i].Name < choices[j].Name })
+		out.IngressChoices = choices
+	}
+}
+
+func routerNATIngress(d routerOSDiscovery, rows []routerOSRow, endpoints []routerMinecraftEndpoint, targets []string, publicText func(string) string) *routerOSSelector {
+	rules, valid := routerOSNATRules(rows)
+	if !valid {
+		return nil
+	}
+	var evidence *routerOSSelector
+	for _, rule := range rules {
+		if !minecraftIngressRule(rule, endpoints, targets) {
+			continue
+		}
+		iface, list := rule.row["in-interface"], rule.row["in-interface-list"]
+		choice := routerOSSelector{Type: "interface", Name: iface}
+		if list != "" {
+			if iface != "" {
+				return nil
+			}
+			choice = routerOSSelector{Type: "list", Name: list}
+		}
+		if !usableRouterIngress(choice.Name) || publicText(choice.Name) == "" || !d.has(choice) || (evidence != nil && *evidence != choice) {
+			return nil
+		}
+		evidence = &choice
+	}
+	return evidence
 }
 
 func routerMinecraftPorts(record instanceRuntimeRecord, network minecraftNetworkConfig, name string, publicNetwork bool) []routerMinecraftEndpoint {
@@ -325,6 +464,7 @@ func registerRouterOSRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("POST "+routerOSRoute+"/test", s.routerOSTest)
 	mux.HandleFunc("PUT "+routerOSRoute, s.routerOSSave)
 	mux.HandleFunc("DELETE "+routerOSRoute, s.routerOSForget)
+	mux.HandleFunc("POST "+routerOSRoute+"/ca", s.routerOSPreviewCA)
 	mux.HandleFunc("PUT "+routerOSRoute+"/ca", s.routerOSChangeCA)
 	mux.HandleFunc("DELETE "+routerOSRoute+"/ca", s.routerOSChangeCA)
 }
@@ -450,36 +590,25 @@ func (s *server) routerOSTest(w http.ResponseWriter, r *http.Request) {
 		writeRouterOSConnectionError(w, err)
 		return
 	}
-	addresses, err := routerTargetAddresses(ctx)
+	snapshot, err := routerNetworkSnapshot(ctx)
 	if err != nil {
 		writeError(w, 503, "target_unavailable")
+		return
+	}
+	rows, err := client.readList(ctx, c, routerOSNAT)
+	if err != nil {
+		writeRouterOSConnectionError(w, err)
 		return
 	}
 	publicText := c.publicTextFilter()
 	out := routerOSStatus{Status: "connected", TrustedCA: routerOSCAInfo(cert, publicText)}
 	out.discovery(d, publicText)
-	for name := range d.lists {
-		if publicText(name) != "" {
-			out.IngressChoices = append(out.IngressChoices, routerOSSelector{Type: "list", Name: name})
-		}
+	targets := out.forwardingTargets(c.Endpoint, snapshot, publicText)
+	var inventory routerOSStatus
+	if len(rows) != 0 && inventory.inventory("") != nil {
+		inventory.Endpoints = nil
 	}
-	for name := range d.interfaces {
-		if publicText(name) != "" {
-			out.IngressChoices = append(out.IngressChoices, routerOSSelector{Type: "interface", Name: name})
-		}
-	}
-	sort.Slice(out.IngressChoices, func(i, j int) bool {
-		a, b := out.IngressChoices[i], out.IngressChoices[j]
-		if a.Type != b.Type {
-			return a.Type == "list"
-		}
-		return a.Name < b.Name
-	})
-	for _, address := range addresses {
-		if publicText(address) != "" {
-			out.TargetChoices = append(out.TargetChoices, address)
-		}
-	}
+	out.forwardingIngress(d, rows, inventory.Endpoints, targets, publicText)
 	writeJSON(w, 200, out)
 }
 
@@ -609,6 +738,31 @@ func (s *server) allowRouterOSSave(w http.ResponseWriter) bool {
 		}
 	}
 	return true
+}
+
+func (s *server) routerOSPreviewCA(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if _, ok := s.requirePrimaryAdministrator(w, r); !ok {
+		return
+	}
+	var input struct {
+		CAPEM string `json:"ca_pem"`
+	}
+	if r.URL.ForceQuery || r.URL.RawQuery != "" || decodeRouterOSRequest(r.Body, &input) != nil {
+		writeError(w, 400, "invalid_request")
+		return
+	}
+	cert, err := parseRouterOSCA(input.CAPEM)
+	if err != nil {
+		writeRouterOSConnectionError(w, err)
+		return
+	}
+	writeJSON(w, 200, routerOSCAInfo(cert, func(name string) string {
+		if len(name) > 300 {
+			return ""
+		}
+		return name
+	}))
 }
 
 func (s *server) routerOSChangeCA(w http.ResponseWriter, r *http.Request) {

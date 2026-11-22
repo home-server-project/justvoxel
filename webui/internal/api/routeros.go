@@ -44,24 +44,26 @@ type RouterOSCAMetadata struct {
 }
 
 type RouterOSStatus struct {
-	Configured     bool                      `json:"configured"`
-	CanConfigure   bool                      `json:"can_configure,omitempty"`
-	Status         string                    `json:"status"`
-	Diagnostic     string                    `json:"diagnostic,omitempty"`
-	TrustedCA      *RouterOSCAMetadata       `json:"trusted_ca,omitempty"`
-	Identity       string                    `json:"identity,omitempty"`
-	Version        string                    `json:"version,omitempty"`
-	Board          string                    `json:"board,omitempty"`
-	Endpoint       string                    `json:"endpoint,omitempty"`
-	Username       string                    `json:"username,omitempty"`
-	Target         string                    `json:"target,omitempty"`
-	Ingress        *RouterOSSelector         `json:"ingress,omitempty"`
-	IngressChoices []RouterOSSelector        `json:"ingress_choices,omitempty"`
-	TargetChoices  []string                  `json:"target_choices,omitempty"`
-	Endpoints      []RouterMinecraftEndpoint `json:"endpoints,omitempty"`
-	InventoryError bool                      `json:"inventory_error,omitempty"`
-	ServerName     string                    `json:"server_name,omitempty"`
-	NetworkMember  bool                      `json:"network_member,omitempty"`
+	Configured         bool                      `json:"configured"`
+	CanConfigure       bool                      `json:"can_configure,omitempty"`
+	Status             string                    `json:"status"`
+	Diagnostic         string                    `json:"diagnostic,omitempty"`
+	TrustedCA          *RouterOSCAMetadata       `json:"trusted_ca,omitempty"`
+	Identity           string                    `json:"identity,omitempty"`
+	Version            string                    `json:"version,omitempty"`
+	Board              string                    `json:"board,omitempty"`
+	Endpoint           string                    `json:"endpoint,omitempty"`
+	Username           string                    `json:"username,omitempty"`
+	Target             string                    `json:"target,omitempty"`
+	Ingress            *RouterOSSelector         `json:"ingress,omitempty"`
+	RecommendedTarget  string                    `json:"recommended_target,omitempty"`
+	RecommendedIngress *RouterOSSelector         `json:"recommended_ingress,omitempty"`
+	IngressChoices     []RouterOSSelector        `json:"ingress_choices,omitempty"`
+	TargetChoices      []string                  `json:"target_choices,omitempty"`
+	Endpoints          []RouterMinecraftEndpoint `json:"endpoints,omitempty"`
+	InventoryError     bool                      `json:"inventory_error,omitempty"`
+	ServerName         string                    `json:"server_name,omitempty"`
+	NetworkMember      bool                      `json:"network_member,omitempty"`
 }
 
 func (c *Client) RouterOSStatus(ctx context.Context, session, id string) (RouterOSStatus, error) {
@@ -89,6 +91,14 @@ func (c *Client) RouterOSSave(ctx context.Context, session string, input RouterO
 
 func (c *Client) RouterOSForget(ctx context.Context, session string) error {
 	return c.do(ctx, http.MethodDelete, routerOSPath, session, nil, nil)
+}
+
+func (c *Client) RouterOSPreviewCA(ctx context.Context, session, caPEM string) (RouterOSCAMetadata, error) {
+	var out RouterOSCAMetadata
+	err := c.do(ctx, http.MethodPost, routerOSPath+"/ca", session, struct {
+		CAPEM string `json:"ca_pem"`
+	}{caPEM}, &out)
+	return out, err
 }
 
 func (c *Client) RouterOSReplaceCA(ctx context.Context, session, caPEM string) error {

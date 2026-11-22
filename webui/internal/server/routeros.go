@@ -17,6 +17,7 @@ type routerOSAPI interface {
 	RouterOSTest(context.Context, string, api.RouterOSCredentials) (api.RouterOSStatus, error)
 	RouterOSSave(context.Context, string, api.RouterOSConfiguration) error
 	RouterOSForget(context.Context, string) error
+	RouterOSPreviewCA(context.Context, string, string) (api.RouterOSCAMetadata, error)
 	RouterOSReplaceCA(context.Context, string, string) error
 	RouterOSRemoveCA(context.Context, string) error
 }
@@ -27,6 +28,7 @@ func (a *App) registerRouterOSRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST "+routerOSWebPath+"/test", a.routerOS)
 	mux.HandleFunc("PUT "+routerOSWebPath, a.routerOS)
 	mux.HandleFunc("DELETE "+routerOSWebPath, a.routerOS)
+	mux.HandleFunc("POST "+routerOSWebPath+"/ca", a.routerOS)
 	mux.HandleFunc("PUT "+routerOSWebPath+"/ca", a.routerOS)
 	mux.HandleFunc("DELETE "+routerOSWebPath+"/ca", a.routerOS)
 }
@@ -74,10 +76,19 @@ func (a *App) routerOS(w http.ResponseWriter, r *http.Request) {
 		}
 		if r.URL.Path == routerOSWebPath+"/ca" {
 			switch r.Method {
-			case http.MethodPut:
+			case http.MethodPost, http.MethodPut:
 				pem := r.PostForm["ca_pem"]
 				if len(r.PostForm) != 1 || len(pem) != 1 {
 					writeNetworkWebError(w, 400, ui(w, "network.router.invalid_ca"))
+					return
+				}
+				if r.Method == http.MethodPost {
+					info, err := client.RouterOSPreviewCA(r.Context(), session, pem[0])
+					if err != nil {
+						a.writeRouterOSError(w, err, false)
+					} else {
+						writeNetworkWebJSON(w, 200, info)
+					}
 					return
 				}
 				err = client.RouterOSReplaceCA(r.Context(), session, pem[0])

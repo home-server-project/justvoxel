@@ -47,6 +47,11 @@ func (f *routerProxyFixture) RouterOSForget(context.Context, string) error {
 	return nil
 }
 
+func (f *routerProxyFixture) RouterOSPreviewCA(_ context.Context, _ string, caPEM string) (api.RouterOSCAMetadata, error) {
+	f.received, f.caPEM = "preview-ca", caPEM
+	return api.RouterOSCAMetadata{}, f.err
+}
+
 func (f *routerProxyFixture) RouterOSReplaceCA(_ context.Context, _ string, caPEM string) error {
 	f.received = "replace-ca"
 	f.caPEM = caPEM
@@ -75,6 +80,8 @@ func TestRouterOSWebAuthorizationCSRFAndProxy(t *testing.T) {
 		{"POST", "/test", "voxel", "administrator", "csrf", "test/https://router.example", 200},
 		{"PUT", "", "voxel", "administrator", "csrf", "save/uplinks", 200},
 		{"DELETE", "", "voxel", "administrator", "csrf", "forget", 200},
+		{"POST", "/ca", "voxel", "administrator", "csrf", "preview-ca", 200},
+		{"POST", "/ca", "voxel", "administrator", "", "", 403},
 		{"PUT", "/ca", "admin-voxel", "administrator", "csrf", "", 403},
 		{"DELETE", "/ca", "admin-voxel", "administrator", "csrf", "", 403},
 		{"PUT", "/ca", "voxel", "administrator", "", "", 403},

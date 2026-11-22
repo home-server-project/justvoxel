@@ -1390,11 +1390,6 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     }
   };
 
-  const routerIngressLabel = (choice) => {
-    const type = choice.type === "list" ? jvT("network.router.interface_list") : jvT("network.router.interface");
-    return type + " · " + choice.name;
-  };
-
   const routerEdition = (edition) => edition === "java" ? jvT("network.router.java") : jvT("network.router.bedrock");
 
   const routerExposureLabel = (status) => {
@@ -1506,13 +1501,19 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     }
   };
 
-  const routerCARows = (ca) => ca ? [
-    ca.common_name && row(jvT("network.router.ca_name"), ca.common_name),
-    row(jvT("network.router.ca_fingerprint"), ca.fingerprint),
-    row(jvT("network.router.ca_expires"), ca.expires_at.slice(0, 10)),
-  ].filter(Boolean) : [];
+  const routerCAText = (ca, pendingName) => [
+    jvT("network.router.trusted_ca"),
+    ca?.common_name || pendingName || (!ca && jvT("ui.59be71333c96")),
+    ca?.expires_at && jvT("network.router.expires") + " " + ca.expires_at.slice(0, 10),
+  ].filter(Boolean).join(" · ");
 
-  const renderRouterConfiguration = (stored) => {
+  const routerForwardRow = (label, value, status) => {
+    const item = row(label, value);
+    if (status) item.appendChild(badge(status));
+    return item;
+  };
+
+  const renderRouterConfiguration = (stored, section, editing) => {
     const form = document.createElement("form");
     form.className = "network-ethernet-form";
     const field = (text, control) => {
@@ -1546,78 +1547,78 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     actions.append(test, save);
     endpointRow.append(field(jvT("network.router.endpoint"), endpoint), actions);
 
-    const target = document.createElement("select");
-    target.required = true;
-    const ingress = document.createElement("select");
-    ingress.required = true;
-    const targetLabel = field(jvT("network.router.target"), target);
-    const ingressLabel = field(jvT("network.router.ingress"), ingress);
+    const forwarding = document.createElement("section");
+    forwarding.className = "network-router-forwarding";
+    const forwardingTitle = document.createElement("h3");
+    forwardingTitle.textContent = jvT("network.router.port_forwarding");
     const feedback = document.createElement("div");
     feedback.className = "network-connect-hint";
     feedback.setAttribute("role", "status");
-
-    const trust = document.createElement("section");
+    const trust = document.createElement("div");
     trust.className = "network-router-trust";
-    const trustHeading = document.createElement("h3");
-    trustHeading.textContent = jvT("network.router.trusted_ca");
-    const trustHelp = document.createElement("p");
-    trustHelp.className = "muted";
-    trustHelp.textContent = jvT("network.router.ca_help");
+    const caText = document.createElement("span");
     const caFile = document.createElement("input");
     caFile.type = "file";
     caFile.accept = ".crt,.pem";
     caFile.hidden = true;
-    const uploadCA = actionButton(stored.trusted_ca ? jvT("network.router.ca_replace") : jvT("network.router.ca_upload"), "routerUploadCA", "");
+    const caAction = actionButton("", "routerCA", "");
+    trust.append(caText);
+    if (stored.can_configure) trust.append(caFile, caAction);
+
+    const manage = document.createElement("div");
+    manage.className = "network-inline-actions";
+    const edit = actionButton(editing ? jvT("ui.19766ed6ccb2") : jvT("network.router.edit"), "routerEdit", "");
+    const forget = actionButton(jvT("network.router.forget"), "routerForget", "");
+    const commitCA = actionButton(jvT("ui.1509f561f241"), "routerSaveCA", "");
     const removeCA = actionButton(jvT("network.router.ca_remove"), "routerRemoveCA", "");
-    const clearCA = actionButton(jvT("network.router.ca_clear"), "routerClearCA", "");
-    const caActions = document.createElement("div");
-    caActions.className = "network-inline-actions";
-    caActions.append(uploadCA, caFile);
-    if (stored.trusted_ca) caActions.appendChild(removeCA);
-    if (!stored.configured) caActions.appendChild(clearCA);
-    const caDetails = document.createElement("div");
-    trust.append(trustHeading, trustHelp, caActions, caDetails);
-
-    const forget = actionButton(jvT("network.router.forget"), "routerForget", "danger");
-    form.append(credentialsRow, endpointRow, targetLabel, ingressLabel, trust, feedback);
-    if (stored.configured) {
-      const forgetActions = document.createElement("div");
-      forgetActions.className = "network-form-actions";
-      forgetActions.appendChild(forget);
-      form.appendChild(forgetActions);
+    if (stored.configured && stored.can_configure) {
+      manage.append(commitCA, edit, forget);
+      if (stored.trusted_ca && editing) manage.appendChild(removeCA);
     }
+    const showFields = stored.can_configure && (!stored.configured || editing);
+    if (showFields) {
+      form.append(credentialsRow, endpointRow);
+      section.appendChild(form);
+    }
+    if (stored.can_configure || stored.trusted_ca) section.appendChild(trust);
+    if (manage.children.length) section.appendChild(manage);
+    section.append(feedback, forwarding);
 
-    let choices = [];
+    let targetValue = "";
+    let ingressValue = null;
     let verified = false;
     let busy = false;
     let pendingCA = "";
-    let testedCA = null;
+    let pendingName = "";
+    let pendingInfo = null;
     const update = () => {
-      targetLabel.hidden = ingressLabel.hidden = !verified;
-      save.disabled = busy || !verified || !target.value || !ingress.value;
-      test.disabled = forget.disabled = uploadCA.disabled = removeCA.disabled = clearCA.disabled = busy;
-      clearCA.hidden = !pendingCA;
-      if (pendingCA && !testedCA) {
-        caDetails.replaceChildren(document.createTextNode(jvT("network.router.ca_pending")));
-      } else {
-        caDetails.replaceChildren(...routerCARows(testedCA || stored.trusted_ca));
-      }
+      save.disabled = busy || !verified || !targetValue || !ingressValue;
+      test.disabled = edit.disabled = forget.disabled = caAction.disabled = removeCA.disabled = commitCA.disabled = busy;
+      if (stored.configured && pendingCA) test.disabled = edit.disabled = removeCA.disabled = true;
+      commitCA.hidden = !stored.configured || !pendingCA;
+      caAction.textContent = pendingCA ? jvT("network.router.ca_clear") :
+        stored.trusted_ca ? jvT("network.router.ca_replace") : jvT("network.router.ca_upload");
+      caText.textContent = routerCAText(pendingCA ? pendingInfo : stored.trusted_ca, pendingName);
       endpoint.readOnly = username.readOnly = password.readOnly = busy;
-      target.disabled = ingress.disabled = busy || !verified;
-      target.required = ingress.required = verified;
+    };
+    const savedForwarding = () => {
+      forwarding.replaceChildren();
+      if (!stored.target && !stored.ingress) return;
+      const status = stored.status === "connected" ? jvT("ui.84aebc69a1bf") : "";
+      forwarding.append(forwardingTitle,
+        routerForwardRow(jvT("network.router.target"), stored.target, status),
+        routerForwardRow(jvT("network.router.ingress"), stored.ingress?.name, status));
     };
     const invalidate = () => {
       verified = false;
-      testedCA = null;
       feedback.replaceChildren();
+      savedForwarding();
       update();
     };
     endpoint.addEventListener("input", invalidate);
     username.addEventListener("input", invalidate);
     password.addEventListener("input", invalidate);
-    target.addEventListener("change", update);
-    ingress.addEventListener("change", update);
-    update();
+    invalidate();
 
     const options = (select, values, oldValue) => {
       select.replaceChildren();
@@ -1634,11 +1635,61 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       select.value = oldValue || "";
       if (select.selectedIndex < 0) select.value = "";
     };
+    const showRecommendations = (data) => {
+      const detected = jvT("network.router.detected");
+      const targetLabel = jvT("network.router.target");
+      const ingressLabel = jvT("network.router.ingress");
+      targetValue = data.recommended_target || "";
+      ingressValue = data.recommended_ingress || null;
+      forwarding.replaceChildren(forwardingTitle);
+      if (!targetValue || !ingressValue) {
+        const hint = document.createElement("p");
+        hint.textContent = jvT("network.router.manual");
+        forwarding.appendChild(hint);
+      }
+      if (targetValue) {
+        forwarding.appendChild(routerForwardRow(targetLabel, targetValue, detected));
+      } else {
+        const select = document.createElement("select");
+        options(select, (data.target_choices || []).map(address => [address, address]), stored.target);
+        targetValue = select.value;
+        select.addEventListener("change", () => { targetValue = select.value; update(); });
+        forwarding.appendChild(field(targetLabel, select));
+      }
+      if (ingressValue) {
+        forwarding.appendChild(routerForwardRow(ingressLabel, ingressValue.name, detected));
+        return;
+      }
+      const hint = document.createElement("p");
+      hint.textContent = jvT("network.router.ingress_help");
+      forwarding.appendChild(hint);
+      const choices = data.ingress_choices || [];
+      if (choices.length) {
+        const select = document.createElement("select");
+        const current = choices.find(choice => choice.type === stored.ingress?.type && choice.name === stored.ingress?.name);
+        options(select, choices.map(choice => [choice.name, choice.name]), current?.name);
+        ingressValue = current;
+        select.addEventListener("change", () => { ingressValue = choices.find(choice => choice.name === select.value); update(); });
+        forwarding.appendChild(field(ingressLabel, select));
+      } else {
+        const advanced = document.createElement("details");
+        const summary = document.createElement("summary");
+        summary.textContent = jvT("network.router.direct");
+        const input = document.createElement("input");
+        input.maxLength = 128;
+        input.addEventListener("input", () => {
+          ingressValue = input.value.trim() ? {type: "interface", name: input.value.trim()} : null;
+          update();
+        });
+        advanced.append(summary, field(ingressLabel, input));
+        forwarding.appendChild(advanced);
+      }
+    };
     const run = async (method) => {
-      if (busy) return;
+      if (busy || (stored.configured && pendingCA && method !== "DELETE")) return;
       if (method === "DELETE" && !window.confirm(jvT("network.router.forget_confirm"))) return;
       if (method !== "DELETE" && (!endpoint.reportValidity() || !username.reportValidity() || !password.reportValidity())) return;
-      if (method === "PUT" && (!verified || !target.value || !ingress.value)) return;
+      if (method === "PUT" && (!verified || !targetValue || !ingressValue)) return;
       const body = new URLSearchParams();
       if (method !== "DELETE") {
         body.set("endpoint", endpoint.value);
@@ -1647,13 +1698,13 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         if (pendingCA) body.set("ca_pem", pendingCA);
       }
       if (method === "PUT") {
-        const choice = choices[Number(ingress.value)];
-        body.set("target", target.value);
+        const choice = ingressValue;
+        body.set("target", targetValue);
         body.set("ingress_type", choice.type);
         body.set("ingress_name", choice.name);
       }
       verified = false;
-      testedCA = null;
+      savedForwarding();
       busy = true;
       update();
       feedback.textContent = jvT("ui.ec963ffc911b");
@@ -1670,14 +1721,8 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
           await refreshRouter();
           return;
         }
-        choices = data.ingress_choices || [];
-        const selected = choices.findIndex(choice => choice.type === stored.ingress?.type && choice.name === stored.ingress?.name);
-        options(target, (data.target_choices || []).map(address => [address, address]), stored.target);
-        options(ingress, choices.map((choice, i) => [String(i), routerIngressLabel(choice)]), selected < 0 ? "" : String(selected));
-        const hint = document.createElement("p");
-        hint.textContent = data.target_choices?.length && choices.length ? jvT("network.router.reenter") : jvT("network.router.no_choices");
-        feedback.replaceChildren(...routerIdentityRows(data), hint);
-        testedCA = data.trusted_ca || null;
+        showRecommendations(data);
+        feedback.replaceChildren(...routerIdentityRows(data));
         verified = true;
       } catch (error) {
         feedback.textContent = error?.message || jvT("network.router.unavailable");
@@ -1690,30 +1735,15 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       }
     };
 
-    const changeCA = async (file) => {
-      if (busy) return;
-      if (!stored.configured) pendingCA = "";
-      invalidate();
+    const changeCA = async (remove) => {
+      if (busy || (!remove && !pendingCA)) return;
       busy = true;
       update();
       try {
-        let pem = "";
-        if (file) {
-          if (!file.size || file.size > 8192) {
-            feedback.textContent = jvT("network.router.invalid_ca");
-            return;
-          }
-          pem = await file.text();
-        }
-        if (!stored.configured) {
-          pendingCA = pem;
-          return;
-        }
-        feedback.textContent = jvT("ui.ec963ffc911b");
         const data = await requestJSON(routerPath + "/ca", {
-          method: file ? "PUT" : "DELETE",
+          method: remove ? "DELETE" : "PUT",
           headers: { "Content-Type": "application/x-www-form-urlencoded", "X-CSRF-Token": csrf },
-          body: file ? new URLSearchParams({ ca_pem: pem }) : undefined,
+          body: remove ? undefined : new URLSearchParams({ ca_pem: pendingCA }),
         });
         if (data) {
           password.value = "";
@@ -1726,25 +1756,52 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
         update();
       }
     };
-    uploadCA.addEventListener("click", () => caFile.click());
-    caFile.addEventListener("change", () => {
+    caAction.addEventListener("click", () => {
+      if (!pendingCA) return caFile.click();
+      pendingInfo = null;
+      pendingCA = pendingName = "";
+      invalidate();
+    });
+    caFile.addEventListener("change", async () => {
       const file = caFile.files?.[0];
       caFile.value = "";
-      if (file) return changeCA(file);
-    });
-    removeCA.addEventListener("click", () => changeCA(null));
-    clearCA.addEventListener("click", () => {
-      pendingCA = "";
+      if (!file || busy) return;
       invalidate();
+      busy = true;
+      update();
+      try {
+        if (!file.size || file.size > 8192) throw new Error(jvT("network.router.invalid_ca"));
+        const pem = await file.text();
+        if (pem.includes("PRIVATE KEY-----")) throw new Error(jvT("network.router.invalid_ca"));
+        const info = await requestJSON(routerPath + "/ca", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded", "X-CSRF-Token": csrf },
+          body: new URLSearchParams({ ca_pem: pem }),
+        });
+        if (!info) return;
+        pendingInfo = info;
+        pendingCA = pem;
+        pendingName = file.name || jvT("network.router.selected");
+      } catch (error) {
+        feedback.textContent = error?.message || jvT("network.router.invalid_ca");
+      } finally {
+        busy = false;
+        update();
+      }
+    });
+    commitCA.addEventListener("click", () => changeCA(false));
+    removeCA.addEventListener("click", () => changeCA(true));
+    edit.addEventListener("click", () => {
+      routerConnectionView = renderRouterConnection(!editing);
+      renderNetwork();
     });
     test.addEventListener("click", () => run("POST"));
     save.addEventListener("click", () => run("PUT"));
     forget.addEventListener("click", () => run("DELETE"));
     form.addEventListener("submit", (event) => { event.preventDefault(); run("POST"); });
-    return form;
   };
 
-  const renderRouterConnection = () => {
+  const renderRouterConnection = (editing = false) => {
     const data = routerStatus || {};
     const section = document.createElement("section");
     section.className = "panel network-section network-router-connection";
@@ -1752,14 +1809,17 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
     title.textContent = jvT("network.router.mikrotik");
     title.dataset.routerHeading = "";
     title.tabIndex = -1;
-    section.append(title, row(jvT("ui.639a40e82b9a"), routerLabel(data.status)), ...routerIdentityRows(data));
-    for (const [label, value] of [
-      [jvT("network.router.endpoint"), data.endpoint],
-      [jvT("ui.e3b89e9d33f8"), data.username],
-      [jvT("network.router.target"), data.target],
-      [jvT("network.router.ingress"), data.ingress && routerIngressLabel(data.ingress)],
-    ]) {
-      if (value) section.appendChild(row(label, value));
+    if (data.configured) {
+      section.append(title, row(jvT("ui.639a40e82b9a"), routerLabel(data.status)), ...routerIdentityRows(data));
+      if (!editing) {
+        if (data.endpoint) section.appendChild(row(jvT("network.router.endpoint"), data.endpoint));
+        if (data.username) section.appendChild(row(jvT("ui.e3b89e9d33f8"), data.username));
+      }
+    } else {
+      const lane = document.createElement("div");
+      lane.className = "network-router-lane";
+      lane.append(title, badge(routerLabel(data.status)));
+      section.appendChild(lane);
     }
     const diagnostic = routerDiagnostic(data.diagnostic);
     if (diagnostic) {
@@ -1767,13 +1827,7 @@ h1{margin:0 0 14px;font-size:clamp(1.4rem,4vw,1.8rem);line-height:1.25}p{font-si
       message.textContent = diagnostic;
       section.appendChild(message);
     }
-    if (data.can_configure) {
-      section.appendChild(renderRouterConfiguration(data));
-    } else if (data.trusted_ca) {
-      const trustHeading = document.createElement("h3");
-      trustHeading.textContent = jvT("network.router.trusted_ca");
-      section.append(trustHeading, ...routerCARows(data.trusted_ca));
-    }
+    renderRouterConfiguration(data, section, editing);
     const heading = document.createElement("h3");
     heading.textContent = jvT("network.router.endpoints");
     section.appendChild(heading);

@@ -475,11 +475,23 @@ func TestRouterOSLocalRoutes(t *testing.T) {
 	expectCode(call(http.MethodPost, "/test", "primary", c.routerOSCredentials, 400), errRouterOSInvalidCA)
 	c.CAPEM = ca
 	status := call(http.MethodPost, "/test", "primary", c.routerOSCredentials, 200)
-	for _, want := range []string{"router-lab", "7.23.8", "test-board", "uplinks", "ethernet", "vlan", "192.0.2.9",
+	for _, want := range []string{"router-lab", "7.23.8", "test-board", "uplinks",
 		"trusted_ca", "router-ca-original", "fingerprint", "expires_at"} {
 		if !strings.Contains(status.Body.String(), want) {
 			t.Errorf("test response omitted %s", want)
 		}
+	}
+	if strings.Contains(status.Body.String(), "192.0.2.9") || strings.Contains(status.Body.String(), "target_choices") {
+		t.Fatal("test exposed an address from an unclassified device")
+	}
+	if strings.Contains(status.Body.String(), "ethernet") || strings.Contains(status.Body.String(), "vlan") {
+		t.Fatal("test exposed raw RouterOS interface inventory")
+	}
+	call(http.MethodPost, "/ca", "secondary", map[string]string{"ca_pem": ca}, 403)
+	call(http.MethodPost, "/ca", "primary", map[string]string{"ca_pem": "invalid"}, 400)
+	preview := call(http.MethodPost, "/ca", "primary", map[string]string{"ca_pem": ca}, 200)
+	if !strings.Contains(preview.Body.String(), "router-ca-original") {
+		t.Fatal("missing CA preview")
 	}
 	if stored, err := s.store.readRouterOS(context.Background()); stored != nil || err != nil {
 		t.Fatal("testing persisted candidate credentials or a CA")
@@ -698,5 +710,91 @@ func TestRouterOSInventoryUsesOneVelocityEntrance(t *testing.T) {
 			selected.ServerName == "" || len(selected.Endpoints) != 2 || selected.Endpoints[0].Port != n.Config.JavaPort {
 			t.Fatal("member did not resolve to the shared public endpoint", err)
 		}
+	}
+}
+
+func routerTestDevice(address string, kind networking.DeviceKind) networking.Device {
+	return networking.Device{Kind: kind, Managed: true, State: 100, ActiveConnection: &networking.ConnectionProfile{},
+		IPv4: networking.IPConfig{Addresses: []networking.IPAddress{{Address: address, Prefix: 24}}}}
+}
+
+func routerTestSnapshot() networking.Snapshot {
+	return networking.Snapshot{Devices: []networking.Device{
+		routerTestDevice("10.88.0.1", networking.DeviceKindOther),
+		routerTestDevice("100.102.16.12", networking.DeviceKindOther),
+		routerTestDevice("100.122.64.28", networking.DeviceKindOther),
+		routerTestDevice("192.168.0.28", networking.DeviceKindEthernet),
+		routerTestDevice("192.168.125.72", networking.DeviceKindEthernet),
+	}}
+}
+
+func TestRouterDestinationRecommendation(t *testing.T) {
+	snapshot := routerTestSnapshot()
+	check := func(endpoint, recommendation string, choices ...string) {
+		t.Helper()
+		var out routerOSStatus
+		out.forwardingTargets(endpoint, snapshot, func(s string) string { return s })
+		if out.RecommendedTarget != recommendation || !slices.Equal(out.TargetChoices, choices) {
+			t.Errorf("%s: recommendation %q, choices %v; want %q, %v", endpoint, out.RecommendedTarget, out.TargetChoices, recommendation, choices)
+		}
+	}
+	const endpoint = "https://192.168.0.1"
+	check(endpoint, "192.168.0.28")
+	unmanaged := routerTestDevice("192.168.0.3", networking.DeviceKindEthernet)
+	unmanaged.Managed = false
+	inactive := routerTestDevice("192.168.0.4", networking.DeviceKindEthernet)
+	inactive.State = 30
+	disconnected := routerTestDevice("192.168.0.5", networking.DeviceKindWiFi)
+	disconnected.ActiveConnection = nil
+	wifi := routerTestDevice("192.168.0.29", networking.DeviceKindWiFi)
+	snapshot.Devices = append(snapshot.Devices, unmanaged, inactive, disconnected, wifi, wifi,
+		routerTestDevice("169.254.1.2", networking.DeviceKindEthernet), routerTestDevice("2001:db8::1", networking.DeviceKindWiFi))
+	for _, host := range []string{"https://router.example", "https://172.16.0.1", "https://10.88.0.2"} {
+		check(host, "", "192.168.0.28", "192.168.0.29", "192.168.125.72")
+	}
+	snapshot.Devices = append(snapshot.Devices, routerTestDevice("192.168.0.1", networking.DeviceKindEthernet))
+	check(endpoint, "", "192.168.0.28", "192.168.0.29")
+}
+
+func TestRouterIngressRecommendation(t *testing.T) {
+	d := routerOSDiscovery{lists: map[string]routerOSRow{}, interfaces: map[string]routerOSRow{"pppoe-wan": {}, "bridge": {}}}
+	for _, name := range []string{"LAN", "WaN", "all", "dynamic", "none", "static", "uplinks"} {
+		d.lists[name] = routerOSRow{}
+	}
+	endpoints := []routerMinecraftEndpoint{{Protocols: []string{"tcp"}, Port: 25565, LastPort: 25565}}
+	snapshot := routerTestSnapshot()
+	test := func(rows []routerOSRow, want string) {
+		t.Helper()
+		var out routerOSStatus
+		publicText := func(s string) string { return s }
+		targets := out.forwardingTargets("https://192.168.0.1", snapshot, publicText)
+		out.forwardingIngress(d, rows, endpoints, targets, publicText)
+		if want == "" && out.RecommendedIngress != nil || want != "" && (out.RecommendedIngress == nil || *out.RecommendedIngress != (routerOSSelector{Type: "list", Name: want})) {
+			t.Errorf("ingress = %v, want %q", out.RecommendedIngress, want)
+		}
+		var choices []routerOSSelector
+		if want == "" {
+			choices = []routerOSSelector{{Type: "list", Name: "uplinks"}}
+		}
+		if !slices.Equal(out.IngressChoices, choices) {
+			t.Errorf("ingress choices = %v, want %v", out.IngressChoices, choices)
+		}
+	}
+	test(nil, "WaN")
+	rule := routerOSRow{"chain": "dstnat", "action": "dst-nat", "protocol": "tcp", "dst-port": "25565", "to-addresses": "192.168.0.28", "in-interface-list": "uplinks"}
+	test([]routerOSRow{rule}, "uplinks")
+	rule["disabled"] = "true"
+	test([]routerOSRow{rule}, "WaN")
+	delete(d.lists, "WaN")
+	test(nil, "")
+	delete(rule, "disabled")
+	conflict := routerOSRow{"chain": "dstnat", "action": "dst-nat", "protocol": "tcp", "dst-port": "25565", "to-addresses": "192.168.0.28", "in-interface": "pppoe-wan"}
+	test([]routerOSRow{rule, conflict}, "")
+	snapshot.Devices = append(snapshot.Devices, routerTestDevice("192.168.0.29", networking.DeviceKindWiFi))
+	rule["to-addresses"] = "192.168.0.29"
+	test([]routerOSRow{rule}, "uplinks")
+	for _, address := range []string{"10.88.0.1", "100.102.16.12", "100.122.64.28", "192.168.125.72"} {
+		rule["to-addresses"] = address
+		test([]routerOSRow{rule}, "")
 	}
 }
