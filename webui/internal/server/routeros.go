@@ -16,6 +16,7 @@ type routerOSAPI interface {
 	RouterOSStatus(context.Context, string, string) (api.RouterOSStatus, error)
 	RouterOSTest(context.Context, string, api.RouterOSCredentials) (api.RouterOSStatus, error)
 	RouterOSSave(context.Context, string, api.RouterOSConfiguration) error
+	RouterOSForwarding(context.Context, string, api.RouterForwardingRequest) (api.RouterOSStatus, error)
 	RouterOSForget(context.Context, string) error
 	RouterOSPreviewCA(context.Context, string, string) (api.RouterOSCAMetadata, error)
 	RouterOSReplaceCA(context.Context, string, string) error
@@ -23,6 +24,7 @@ type routerOSAPI interface {
 }
 
 func (a *App) registerRouterOSRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("POST "+routerOSWebPath+"/forwarding", a.routerOS)
 	mux.HandleFunc("GET "+routerOSWebPath, a.routerOS)
 	mux.HandleFunc("GET "+routerOSWebPath+"/instances/{id}", a.routerOS)
 	mux.HandleFunc("POST "+routerOSWebPath+"/test", a.routerOS)
@@ -73,6 +75,19 @@ func (a *App) routerOS(w http.ResponseWriter, r *http.Request) {
 				writeNetworkWebError(w, 400, ui(w, "network.router.invalid_request"))
 				return
 			}
+		}
+		if r.URL.Path == routerOSWebPath+"/forwarding" {
+			if len(r.PostForm) != 2 || len(r.PostForm["scope"]) != 1 || len(r.PostForm["action"]) != 1 {
+				writeNetworkWebError(w, 400, ui(w, "network.router.invalid_request"))
+				return
+			}
+			out, err = client.RouterOSForwarding(r.Context(), session, api.RouterForwardingRequest{Scope: r.PostForm.Get("scope"), Action: r.PostForm.Get("action")})
+			if err != nil {
+				a.writeRouterOSError(w, err, false)
+			} else {
+				writeNetworkWebJSON(w, 200, out)
+			}
+			return
 		}
 		if r.URL.Path == routerOSWebPath+"/ca" {
 			switch r.Method {
@@ -172,6 +187,10 @@ func (a *App) writeRouterOSError(w http.ResponseWriter, err error, removingCA bo
 			if removingCA && response.Message == "tls_error" {
 				key = "network.router.ca_remove_tls_error"
 			}
+		case "router_changed", "forwarding_incomplete", "forwarding_unknown":
+			status, key = response.StatusCode, "network.router."+response.Message
+		case "forwarding_conflict":
+			status, key = response.StatusCode, "network.router.conflict_detail"
 		case "factory_reset_pending":
 			status, key = 409, "network.router.factory_reset_pending"
 		}

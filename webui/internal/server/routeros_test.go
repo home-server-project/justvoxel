@@ -42,6 +42,11 @@ func (f *routerProxyFixture) RouterOSSave(_ context.Context, _ string, input api
 	return nil
 }
 
+func (f *routerProxyFixture) RouterOSForwarding(_ context.Context, _ string, input api.RouterForwardingRequest) (api.RouterOSStatus, error) {
+	f.received = input.Action + "/" + input.Scope
+	return api.RouterOSStatus{}, f.err
+}
+
 func (f *routerProxyFixture) RouterOSForget(context.Context, string) error {
 	f.received = "forget"
 	return nil
@@ -68,6 +73,10 @@ func TestRouterOSWebAuthorizationCSRFAndProxy(t *testing.T) {
 		method, suffix, actor, role, csrf, forwarded string
 		want                                         int
 	}{
+		{"POST", "/forwarding", "voxel", "administrator", "csrf", "enable/jv-family1", 200},
+		{"POST", "/forwarding", "voxel", "administrator", "", "", 403},
+		{"POST", "/forwarding", "admin-voxel", "administrator", "csrf", "", 403},
+		{"POST", "/forwarding", "voxel", "administrator", "csrf", "", 400},
 		{"GET", "/instances/jv-family1", "admin-voxel", "administrator", "", "status/jv-family1", 200},
 		{"GET", "?port=22", "admin-voxel", "administrator", "", "", 400},
 		{"GET", "", "viewer", "viewer", "", "", 403},
@@ -110,6 +119,12 @@ func TestRouterOSWebAuthorizationCSRFAndProxy(t *testing.T) {
 				form.Set("ingress_type", "list")
 				form.Set("ingress_name", "uplinks")
 			}
+			if tc.suffix == "/forwarding" {
+				form = url.Values{"scope": {"jv-family1"}, "action": {"enable"}}
+				if tc.want == 400 {
+					form.Set("target", "192.0.2.1")
+				}
+			}
 			request := httptest.NewRequest(tc.method, routerOSWebPath+tc.suffix, strings.NewReader(form.Encode()))
 			request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 			request.Header.Set("X-CSRF-Token", tc.csrf)
@@ -122,7 +137,7 @@ func TestRouterOSWebAuthorizationCSRFAndProxy(t *testing.T) {
 				t.Errorf("status %d, proxied %s", response.Code, fixture.received)
 			}
 			expectedPEM := ""
-			if tc.want == 200 && (tc.method == "POST" || tc.method == "PUT") {
+			if tc.suffix != "/forwarding" && tc.want == 200 && (tc.method == "POST" || tc.method == "PUT") {
 				expectedPEM = pendingCA
 			}
 			if fixture.caPEM != expectedPEM {
@@ -182,9 +197,9 @@ func TestPortForwardingDialogUsesOnlySelectedImmutableID(t *testing.T) {
 			t.Errorf("dialog missing %q", want)
 		}
 	}
-	if regexp.MustCompile(`createElement\('(input|form|select|textarea)'\)|\b(POST|PUT|PATCH|DELETE)\b|\d+px\b`).MatchString(dialog) ||
-		strings.Count(dialog, "createElement('button')") != 1 {
-		t.Fatal("port forwarding dialog must contain only display and navigation")
+	if regexp.MustCompile(`createElement\('(input|form|select|textarea)'\)|\b(PUT|PATCH|DELETE)\b|innerHTML|\d+px\b`).MatchString(dialog) ||
+		strings.Count(dialog, "createElement('button')") != 2 || !strings.Contains(dialog, "new URLSearchParams({scope: data.forwarding_scope, action})") {
+		t.Fatal("unexpected port forwarding dialog control or request")
 	}
 	if !strings.Contains(js, "const id = card.dataset.serverId;") ||
 		!strings.Contains(js, "showPortForwarding(card, id);") {

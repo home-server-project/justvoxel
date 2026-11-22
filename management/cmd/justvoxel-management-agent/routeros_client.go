@@ -228,7 +228,10 @@ func (c routerOSClient) fetch(ctx context.Context, credentials routerOSCredentia
 	}
 	req.Header.Set("Accept", "application/json")
 	req.SetBasicAuth(credentials.Username, credentials.Password)
-	resp, err := c.http.Do(req)
+	return routerOSResponse(c.http.Do(req))
+}
+
+func routerOSResponse(resp *http.Response, err error) ([]byte, error) {
 	if err != nil {
 		var verification *tls.CertificateVerificationError
 		var record tls.RecordHeaderError
@@ -242,6 +245,14 @@ func (c routerOSClient) fetch(ctx context.Context, credentials routerOSCredentia
 	defer resp.Body.Close()
 	switch resp.StatusCode {
 	case http.StatusOK:
+	case http.StatusCreated:
+		if resp.Request.Method != http.MethodPut {
+			return nil, errRouterOSResponse
+		}
+	case http.StatusNoContent:
+		if resp.Request.Method != http.MethodDelete && resp.Request.Method != http.MethodPatch {
+			return nil, errRouterOSResponse
+		}
 	case http.StatusUnauthorized, http.StatusForbidden:
 		return nil, errRouterOSAuth
 	case http.StatusNotFound, http.StatusMethodNotAllowed:
@@ -281,6 +292,20 @@ func (c routerOSClient) readList(ctx context.Context, credentials routerOSCreden
 	data, err := c.fetch(ctx, credentials, resource)
 	if err != nil {
 		return nil, err
+	}
+	if resource == routerOSNAT {
+		var raw []json.RawMessage
+		if json.Unmarshal(data, &raw) != nil || raw == nil || len(raw) > 10000 {
+			return nil, errRouterOSResponse
+		}
+		rows := make([]routerOSRow, len(raw))
+		for i, entry := range raw {
+			rows[i], err = decodeRouterNATRow(entry)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return rows, nil
 	}
 	var rows []routerOSRow
 	if json.Unmarshal(data, &rows) != nil || rows == nil || len(rows) > 10000 {

@@ -39,7 +39,7 @@ The draggable, resizable Network window provides Refresh and these administrator
 - **Wi-Fi** (when Wi-Fi hardware is present): radio, nearby networks, scan, saved-profile activation, new/hidden networks, disconnect and forget.
 - **Troubleshoot**: NetworkManager connectivity, interface/carrier state, addresses, gateway, DNS and active profile. Administrators can request a fresh connectivity check or reconnect a selected active Ethernet/Wi-Fi profile behind a checkpoint.
 - **Remote Access**: Tailscale, NetBird, Playit.gg and NordVPN Meshnet availability, enabled/running state, configuration evidence, lifecycle controls and external dashboard links.
-- **Router**: router provider cards, the MikroTik RouterOS setup guide, and live read-only forwarding status.
+- **Router**: router provider cards, the MikroTik RouterOS setup guide, and live forwarding status.
 
 Operators and Viewers receive Overview only. Management Agent authorization remains authoritative for all mutations; WebUI POST requests retain CSRF protection.
 
@@ -81,15 +81,21 @@ dst-address=<JUSTVOXEL_IP>
 
 In **System Network → Router → Connect**, the primary administrator enters the HTTPS address, username and password, then selects **Test connection**. The test uses any selected CA. Under **Port forwarding**, JustVoxel selects the destination when one active managed appliance address shares the router IPv4 endpoint’s subnet. It selects Internet ingress from consistent Minecraft forwarding rules or a unique interface list named WAN. Internet ingress is where public traffic enters the router before forwarding to JustVoxel. Choose only settings JustVoxel could not detect, then select **Save**. JustVoxel verifies the connection and selections again and saves the selected CA with the connector.
 
-The Management Agent uses HTTPS REST GET requests. It verifies the router’s certificate and endpoint identity using system trust plus the optional MikroTik CA. The CA is used only for this connector, and uploads take effect without changing system trust or restarting services. Credentials and any uploaded CA are stored in the root-owned database at `/var/lib/justvoxel/webui/webui.db`, with directory mode `0700` and database mode `0600`. The connection view shows the CA common name and expiration date. Only the primary administrator can test, save, change the trusted CA or forget the connection.
+The Management Agent reads connector status over HTTPS REST. It verifies the router’s certificate and endpoint identity using system trust plus the optional MikroTik CA. The CA is used only for this connector, and uploads take effect without changing system trust or restarting services. Credentials and any uploaded CA are stored in the root-owned database at `/var/lib/justvoxel/webui/webui.db`, with directory mode `0700` and database mode `0600`. The connection view shows the CA common name and expiration date. Only the primary administrator can test, save, change the trusted CA or forget the connection.
 
 Renewing the HTTPS server certificate with the same CA requires no change in JustVoxel. If the signing CA changes, use **Replace CA** to select the new public CA, then select **Save**. Open **Edit connection** and use **Remove CA** when the router uses an HTTPS certificate that JustVoxel already trusts through its system roots. Both actions verify the live connection with the proposed trust before saving the change. **Forget connection** and Factory Reset erase the credentials and CA from the local connector state.
 
 Administrators can view live router identity and version and the summarized NAT status for authoritative Minecraft ports. Open means an existing rule matches the selected ingress, protocol, port and JustVoxel destination. It describes the NAT rule and does not establish Internet reachability. Closed means no applicable enabled mapping, Conflict means a competing mapping, and Unknown means the router or rule state could not be verified. Use **Port forwarding** in an individual server’s menu to see its ports and status. Minecraft Network members use the shared Velocity public endpoints. JustVoxel exposes no arbitrary port controls and does not send the raw router NAT table to the WebUI.
 
-#### Future Cycle 3
+#### Minecraft port forwarding
 
-A future cycle may let JustVoxel create, enable, disable, reconcile or remove only destination-NAT (`dstnat`) records it owns.
+In a server’s **Port forwarding** dialog, the primary administrator can enable missing mappings, repair changed mappings and remove obsolete or duplicate managed rules. **Turn off port forwarding** removes only managed rules for that scope. A matching existing router rule stays open and is never adopted. A conflicting rule or an unknown state blocks the entire action before any write.
+
+The exact ownership comment is `JustVoxel | <scope> | <role>`, including spaces and capitalization. The scope is the immutable instance ID or `minecraft-network` for the shared Velocity entrance. The role is `java`, `bedrock-tcp` or `bedrock-udp`. Changing a display name preserves ownership.
+
+Each action reloads connector settings, validates the appliance destination and router ingress, derives the current Minecraft endpoints and reads the whole NAT table. JustVoxel serializes its own actions. Administrators and other tools must leave the NAT table alone until the action finishes. Immediately before each PATCH or DELETE, JustVoxel reads the exact record ID and checks its ID, ownership comment, scope, role, static status and `dstnat` chain. RouterOS REST has no atomic conditional write, so an external edit between this check and the write could still affect the wrong record.
+
+A failed check or write stops the operation. Earlier changes may have taken effect. JustVoxel attempts a fresh table read and requires verified readback before reporting success. Changes to server ports, membership or configuration can show **Needs repair**. Only an explicit administrator action changes the router. Forgetting the connector or running Factory Reset clears local connector state and leaves external NAT rules in place.
 
 Firewall filter rules, router input rules, interfaces, VLANs, routes, DNS, DHCP, RouterOS users and groups, certificates, `/ip service` settings, packages and updates, router reboots and arbitrary RouterOS commands remain outside the connector’s scope.
 

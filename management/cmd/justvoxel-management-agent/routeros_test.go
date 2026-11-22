@@ -459,6 +459,9 @@ func TestRouterOSLocalRoutes(t *testing.T) {
 		}
 		call(method, suffix, "secondary", nil, 403)
 	}
+	call(http.MethodPost, "/forwarding", "secondary", nil, 403)
+	call(http.MethodPost, "/forwarding", "primary", map[string]string{"scope": "jv-family1", "action": "enable", "port": "22"}, 400)
+	call(http.MethodPost, "/forwarding", "primary", map[string]string{"scope": "jv-family1", "action": "post"}, 400)
 	call(http.MethodPut, "/ca", "secondary", nil, 403)
 	call(http.MethodDelete, "/ca", "secondary", nil, 403)
 	call(http.MethodGet, "?port=22", "secondary", nil, 400)
@@ -706,7 +709,7 @@ func TestRouterOSInventoryUsesOneVelocityEntrance(t *testing.T) {
 	}
 	for _, config := range f.configs {
 		var selected routerOSStatus
-		if err := selected.inventory(config.ID); err != nil || !selected.NetworkMember ||
+		if err := selected.inventory(config.ID); err != nil || !selected.NetworkMember || selected.ForwardingScope != routerNetworkOwner ||
 			selected.ServerName == "" || len(selected.Endpoints) != 2 || selected.Endpoints[0].Port != n.Config.JavaPort {
 			t.Fatal("member did not resolve to the shared public endpoint", err)
 		}
@@ -726,6 +729,88 @@ func routerTestSnapshot() networking.Snapshot {
 		routerTestDevice("192.168.0.28", networking.DeviceKindEthernet),
 		routerTestDevice("192.168.125.72", networking.DeviceKindEthernet),
 	}}
+}
+
+func TestRouterMutationTargetPreflight(t *testing.T) {
+	const safeTarget = "192.168.0.28"
+	var writes atomic.Int32
+	var saved atomic.Pointer[routerOSRow]
+	router := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writes.Add(1)
+			var row routerOSRow
+			if r.Method != http.MethodPut || r.URL.Path != routerNATPath ||
+				json.NewDecoder(r.Body).Decode(&row) != nil || row["to-addresses"] != safeTarget {
+				t.Error("unexpected forwarding write", r.Method, r.URL.Path, row)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			row[".id"] = "*1"
+			saved.Store(&row)
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(row)
+			return
+		}
+		switch r.URL.Path {
+		case "/rest/system/identity":
+			fmt.Fprint(w, `{"name":"router"}`)
+		case "/rest/system/resource":
+			fmt.Fprint(w, `{"version":"7"}`)
+		case "/rest/interface":
+			fmt.Fprint(w, `[{"name":"ether1"}]`)
+		case "/rest/interface/list":
+			fmt.Fprint(w, `[{"name":"uplinks"}]`)
+		case "/rest/interface/list/member":
+			fmt.Fprint(w, `[{"list":"uplinks","interface":"ether1"}]`)
+		case routerNATPath:
+			rows := []routerOSRow{}
+			if row := saved.Load(); row != nil {
+				rows = append(rows, *row)
+			}
+			json.NewEncoder(w).Encode(rows)
+		default:
+			t.Error("unexpected read", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer router.Close()
+	oldClient, oldNetwork := liveRouterOS, openNetworkClient
+	t.Cleanup(func() { liveRouterOS, openNetworkClient = oldClient, oldNetwork })
+	liveRouterOS = trustTestRouter(t, router)
+	liveRouterOS.transport.TLSClientConfig.ServerName = "127.0.0.1"
+	liveRouterOS.transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, network, router.Listener.Addr().String())
+	}
+	openNetworkClient = func(context.Context) (networkClient, error) {
+		return &fakeNetworkClient{snapshot: routerTestSnapshot()}, nil
+	}
+	s := surfaceTestServer(t, roleAdministrator)
+	f := newInstanceActivationFixture(t)
+	oldRuntime, oldNames := instanceRuntimes, minecraftInstances
+	t.Cleanup(func() { instanceRuntimes, minecraftInstances = oldRuntime, oldNames })
+	f.backend.networkRoot = filepath.Join(t.TempDir(), "network")
+	instanceRuntimes, minecraftInstances = f.backend, f.backend.identities()
+
+	for _, target := range []string{"10.88.0.1", "100.102.16.12", "100.122.64.28", "192.168.125.72", safeTarget} {
+		t.Run(target, func(t *testing.T) {
+			config := testRouterConfiguration("https://192.168.0.1")
+			config.Target = target
+			ctx := context.Background()
+			if err := s.store.writeRouterOS(ctx, &config, administratorSession(time.Now()), "routeros_save"); err != nil {
+				t.Fatal(err)
+			}
+			saved.Store(nil)
+			writes.Store(0)
+			out, code := s.mutateForwarding(ctx, f.configs[0].ID, "enable")
+			if target == safeTarget {
+				if code != "" || writes.Load() != 1 || out.ForwardingState != "open" {
+					t.Fatalf("safe target: code %q, writes %d, state %q", code, writes.Load(), out.ForwardingState)
+				}
+			} else if code != "target_unavailable" || writes.Load() != 0 {
+				t.Fatalf("unsafe target: code %q, writes %d", code, writes.Load())
+			}
+		})
+	}
 }
 
 func TestRouterDestinationRecommendation(t *testing.T) {

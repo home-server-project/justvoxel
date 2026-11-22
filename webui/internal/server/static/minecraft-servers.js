@@ -43,12 +43,8 @@
       p.textContent = text;
       summary.appendChild(p);
     };
-    try {
-      const response = await fetch('/api/network/router/mikrotik/instances/' + encodeURIComponent(id), {
-        credentials: 'same-origin', cache: 'no-store', signal: controller.signal,
-      });
-      if (!response.ok) throw new Error();
-      const data = await response.json();
+    const render = (data) => {
+      summary.replaceChildren();
       switch (data.status) {
         case 'not_configured': {
           state.textContent = jvT("network.router.not_configured");
@@ -63,6 +59,9 @@
         case 'configuration_error': state.textContent = jvT("network.router.configuration_error"); break;
         default: state.textContent = jvT("network.router.unavailable"); break;
       }
+      if (data.forwarding_state === 'needs_repair') state.textContent = jvT("network.router.repair_state");
+      if (data.forwarding_state === 'conflict') state.textContent = jvT("network.router.conflict_detail");
+      if (data.forwarding_state === 'unknown') state.textContent = jvT("network.router.unknown_detail");
       if (data.network_member) paragraph(jvT("network.router.managed_by_network"));
       if (data.inventory_error || !data.endpoints?.length) paragraph(jvT("network.router.inventory_error"));
       for (const endpoint of data.endpoints || []) {
@@ -72,7 +71,11 @@
         switch (endpoint.state) {
           case 'open':
             label = jvT("network.router.open");
-            detail = jvT("network.router.open_detail");
+            detail = endpoint.source === 'managed' ? jvT("network.router.managed") : jvT("network.router.open_detail");
+            break;
+          case 'needs_repair':
+            label = jvT("network.router.repair_state");
+            detail = jvT("network.router.repair_detail");
             break;
           case 'closed':
             label = jvT("network.router.closed");
@@ -92,6 +95,44 @@
         summary.appendChild(heading);
         paragraph(detail);
       }
+      const labels = {
+        enable: jvT("network.router.enable"),
+        repair: jvT("network.router.repair"),
+        disable: jvT("network.router.disable"),
+      };
+      const action = data.forwarding_action;
+      if (!Object.hasOwn(labels, action) || !data.forwarding_scope || data.status !== 'connected') return;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = labels[action];
+      actions.prepend(button);
+      button.addEventListener('click', async () => {
+        button.remove();
+        state.textContent = jvT("ui.ec963ffc911b");
+        try {
+          const response = await fetch('/api/network/router/mikrotik/forwarding', {
+            method: 'POST', credentials: 'same-origin', signal: controller.signal,
+            headers: {'X-CSRF-Token': root.querySelector('[data-server-csrf]').dataset.serverCsrf},
+            body: new URLSearchParams({scope: data.forwarding_scope, action}),
+          });
+          const result = await response.json();
+          if (response.ok) render(result);
+          else {
+            summary.replaceChildren();
+            state.textContent = result.error || jvT("network.router.forwarding_unknown");
+          }
+        } catch (_) {
+          summary.replaceChildren();
+          state.textContent = jvT("network.router.forwarding_unknown");
+        }
+      }, {once: true});
+    };
+    try {
+      const response = await fetch('/api/network/router/mikrotik/instances/' + encodeURIComponent(id), {
+        credentials: 'same-origin', cache: 'no-store', signal: controller.signal,
+      });
+      if (!response.ok) throw new Error();
+      render(await response.json());
     } catch (_) {
       if (!controller.signal.aborted) state.textContent = jvT("network.router.unavailable");
     }

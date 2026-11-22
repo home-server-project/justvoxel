@@ -160,6 +160,7 @@ func (s *server) routerOSFactoryRevoke() error {
 }
 
 type routerMinecraftEndpoint struct {
+	Source    string   `json:"source,omitempty"`
 	ID        string   `json:"id,omitempty"`
 	Name      string   `json:"name,omitempty"`
 	Network   bool     `json:"network,omitempty"`
@@ -171,6 +172,10 @@ type routerMinecraftEndpoint struct {
 }
 
 type routerOSStatus struct {
+	ForwardingScope    string                    `json:"forwarding_scope,omitempty"`
+	ForwardingState    string                    `json:"forwarding_state,omitempty"`
+	ForwardingAction   string                    `json:"forwarding_action,omitempty"`
+	ExistingForwarding bool                      `json:"existing_forwarding,omitempty"`
 	Configured         bool                      `json:"configured"`
 	CanConfigure       bool                      `json:"can_configure"`
 	Status             string                    `json:"status"`
@@ -242,7 +247,7 @@ func routerLocalAddresses(snapshot networking.Snapshot) []string {
 	return addresses
 }
 
-func (out *routerOSStatus) forwardingTargets(endpoint string, snapshot networking.Snapshot, publicText func(string) string) []string {
+func routerForwardingCandidates(endpoint string, snapshot networking.Snapshot) ([]string, bool) {
 	var router netip.Addr
 	if u, err := url.Parse(endpoint); err == nil {
 		router, _ = netip.ParseAddr(u.Hostname())
@@ -269,8 +274,12 @@ func (out *routerOSStatus) forwardingTargets(endpoint string, snapshot networkin
 		candidates = sameSubnet
 	}
 	sort.Strings(candidates)
-	candidates = slices.Compact(candidates)
-	if len(sameSubnet) > 0 && len(candidates) == 1 {
+	return slices.Compact(candidates), len(sameSubnet) > 0
+}
+
+func (out *routerOSStatus) forwardingTargets(endpoint string, snapshot networking.Snapshot, publicText func(string) string) []string {
+	candidates, sameSubnet := routerForwardingCandidates(endpoint, snapshot)
+	if sameSubnet && len(candidates) == 1 {
 		out.RecommendedTarget = publicText(candidates[0])
 	} else {
 		for _, address := range candidates {
@@ -421,6 +430,15 @@ func (out *routerOSStatus) inventory(id string) error {
 	publicNetwork := func() {
 		out.Endpoints = append(out.Endpoints, routerMinecraftPorts(instanceRuntimeRecord{NetworkMember: true}, n.Config, "", true)...)
 	}
+	if id == routerNetworkOwner {
+		if !n.Config.Enabled {
+			return errInstanceNotFound
+		}
+		out.ForwardingScope = id
+		out.NetworkMember = true
+		publicNetwork()
+		return nil
+	}
 	if id != "" {
 		out.ServerName = names[id]
 		record, err := instanceRuntimes.readRecord(id)
@@ -430,8 +448,13 @@ func (out *routerOSStatus) inventory(id string) error {
 		if err != nil {
 			return err
 		}
+		if record.Runtime.ID != id || names[id] == "" {
+			return errInstanceNotFound
+		}
+		out.ForwardingScope = id
 		out.NetworkMember = effectiveMinecraftConnection(record, n.Config).networkMember
 		if out.NetworkMember {
+			out.ForwardingScope = routerNetworkOwner
 			publicNetwork()
 		} else {
 			out.Endpoints = routerMinecraftPorts(record, n.Config, names[id], false)
@@ -459,6 +482,7 @@ func containsRouterTarget(addresses []string, target string) bool {
 }
 
 func registerRouterOSRoutes(mux *http.ServeMux, s *server) {
+	mux.HandleFunc("POST "+routerOSRoute+"/forwarding", s.routerOSForwarding)
 	mux.HandleFunc("GET "+routerOSRoute, s.routerOSStatus)
 	mux.HandleFunc("GET "+routerOSRoute+"/instances/{id}", s.routerOSStatus)
 	mux.HandleFunc("POST "+routerOSRoute+"/test", s.routerOSTest)
@@ -495,6 +519,9 @@ func (s *server) routerOSStatus(w http.ResponseWriter, r *http.Request) {
 		out.Configured, out.Status = true, "configuration_error"
 	case c != nil:
 		out.inspect(ctx, *c, id == "")
+		if actor.Username != systemAdminUsername || actor.ConnectionID != "" {
+			out.ForwardingAction = ""
+		}
 	}
 	writeJSON(w, 200, out)
 }
@@ -548,6 +575,16 @@ func (out *routerOSStatus) inspect(ctx context.Context, c routerOSConfiguration,
 		return
 	}
 	out.Status = "connected"
+	if out.ForwardingScope != "" && !out.InventoryError {
+		plan := planRouterNAT(out.ForwardingScope, out.Endpoints, c, rows, d, false)
+		out.ForwardingState = plan.state
+		out.ForwardingAction = plan.action
+		out.ExistingForwarding = plan.existing
+		if plan.endpoints != nil {
+			out.Endpoints = plan.endpoints
+			return
+		}
+	}
 	rules, valid := routerOSNATRules(rows)
 	ingress, known := d.ingress(c.Ingress)
 	if !valid || !known {

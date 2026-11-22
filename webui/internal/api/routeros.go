@@ -27,6 +27,7 @@ type RouterOSConfiguration struct {
 }
 
 type RouterMinecraftEndpoint struct {
+	Source    string   `json:"source,omitempty"`
 	ID        string   `json:"id,omitempty"`
 	Name      string   `json:"name,omitempty"`
 	Network   bool     `json:"network,omitempty"`
@@ -44,6 +45,10 @@ type RouterOSCAMetadata struct {
 }
 
 type RouterOSStatus struct {
+	ForwardingScope    string                    `json:"forwarding_scope,omitempty"`
+	ForwardingState    string                    `json:"forwarding_state,omitempty"`
+	ForwardingAction   string                    `json:"forwarding_action,omitempty"`
+	ExistingForwarding bool                      `json:"existing_forwarding,omitempty"`
 	Configured         bool                      `json:"configured"`
 	CanConfigure       bool                      `json:"can_configure,omitempty"`
 	Status             string                    `json:"status"`
@@ -87,6 +92,20 @@ func (c *Client) RouterOSTest(ctx context.Context, session string, input RouterO
 
 func (c *Client) RouterOSSave(ctx context.Context, session string, input RouterOSConfiguration) error {
 	return c.do(ctx, http.MethodPut, routerOSPath, session, input, nil)
+}
+
+type RouterForwardingRequest struct {
+	Scope  string `json:"scope"`
+	Action string `json:"action"`
+}
+
+func (c *Client) RouterOSForwarding(ctx context.Context, session string, input RouterForwardingRequest) (RouterOSStatus, error) {
+	var out RouterOSStatus
+	httpClient := *c.http
+	httpClient.Timeout = 40 * time.Second
+	forwarding := Client{http: &httpClient}
+	err := forwarding.do(ctx, http.MethodPost, routerOSPath+"/forwarding", session, input, &out)
+	return out, err
 }
 
 func (c *Client) RouterOSForget(ctx context.Context, session string) error {
