@@ -1,0 +1,14 @@
+name: Validate main promotion
+on:
+  pull_request:
+    branches: [main]
+permissions: {}
+jobs:
+  promotion:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require the repository testing branch
+        env:
+          SAME_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+          SOURCE_BRANCH: ${{ github.head_ref }}
+        run: '[[ "${SAME_REPOSITORY}" == true && "${SOURCE_BRANCH}" == testing ]]'
