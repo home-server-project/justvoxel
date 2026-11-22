@@ -37,9 +37,14 @@ func TestNativeBedrockRuntimeAndApplianceTimezone(t *testing.T) {
 		t.Fatal(err)
 	}
 	env, q := string(files[0].Environment), string(files[0].Quadlet)
-	for _, value := range []string{"EULA=TRUE", "VERSION=1.26.50.1", "TRANSPORT=nethernet", "SERVER_PORT=19132", "SERVER_UDP_PORTS=19140-19159", "SERVER_NAME=", "MAX_PLAYERS=20", "GAMEMODE=survival", "ALLOW_LIST=FALSE", "ENABLE_LAN_VISIBILITY=FALSE"} {
+	for _, value := range []string{"EULA=TRUE", "VERSION=1.26.50.1", "TRANSPORT=nethernet", "SERVER_PORT=19132", "SERVER_UDP_PORTS=19140-19159", "SERVER_NAME=", "MAX_PLAYERS=20", "GAMEMODE=survival", "ALLOW_LIST=false", "ENABLE_LAN_VISIBILITY=false", "UID=1000", "GID=1000", "STOP_SERVER_ANNOUNCE_DELAY=60"} {
 		if !strings.Contains(env, value) {
 			t.Fatal("missing native environment", value)
+		}
+	}
+	for _, value := range []string{"ALLOW_LIST=FALSE", "ENABLE_LAN_VISIBILITY=FALSE"} {
+		if strings.Contains(env, value) {
+			t.Fatal("uppercase native Bedrock boolean", value)
 		}
 	}
 	for _, value := range []string{"Image=docker.io/itzg/minecraft-bedrock-server:stable", "Network=host", "Volume=" + files[0].DataPath + ":/data:Z", "Volume=/etc/localtime:/etc/localtime:ro", "validate-instance-start-memory"} {

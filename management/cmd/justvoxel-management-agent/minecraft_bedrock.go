@@ -150,7 +150,7 @@ func (b *instanceRuntimeBackend) planNativeBedrock(ctx context.Context, m *admin
 	return nil
 }
 func bedrockEnvironment(c minecraftInstanceRuntimeConfig) []byte {
-	return []byte(fmt.Sprintf("EULA=TRUE\nVERSION=%s\nTRANSPORT=nethernet\nSERVER_PORT=%d\nSERVER_UDP_PORTS=%d-%d\nSERVER_NAME=\"%s\"\nGAMEMODE=%s\nMAX_PLAYERS=%d\nENABLE_LAN_VISIBILITY=FALSE\nALLOW_LIST=FALSE\nUID=%d\nGID=%d\nSTOP_SERVER_ANNOUNCE_DELAY=60\n", c.Version, c.BedrockTCPPort, c.BedrockUDPStart, c.BedrockUDPEnd, instanceRuntimeEnvEscape(c.MOTD), c.GameMode, c.MaxPlayers, c.UID, c.GID))
+	return []byte(fmt.Sprintf("EULA=TRUE\nVERSION=%s\nTRANSPORT=nethernet\nSERVER_PORT=%d\nSERVER_UDP_PORTS=%d-%d\nSERVER_NAME=\"%s\"\nGAMEMODE=%s\nMAX_PLAYERS=%d\nENABLE_LAN_VISIBILITY=false\nALLOW_LIST=false\nUID=%d\nGID=%d\nSTOP_SERVER_ANNOUNCE_DELAY=60\n", c.Version, c.BedrockTCPPort, c.BedrockUDPStart, c.BedrockUDPEnd, instanceRuntimeEnvEscape(c.MOTD), c.GameMode, c.MaxPlayers, c.UID, c.GID))
 }
 
 var bedrockPlayersPattern = regexp.MustCompile(`There are ([0-9]+)/([0-9]+) players online`)
