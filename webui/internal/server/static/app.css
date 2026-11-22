@@ -1436,6 +1436,7 @@ input[type=checkbox].destructive-confirm-toggle::before{content:none}
 .system-user-menu .storage-action-menu-popover{position:fixed;inset:auto;margin:0;width:max-content;max-width:calc(100vw - 1rem);max-height:calc(100dvh - 1rem);overflow:auto;color:var(--jv-text)}
 .system-user-menu .storage-action-menu-popover:not(:popover-open){display:none}
 .system-user-dialog{max-height:calc(100dvh - 2rem);overflow:auto}
+.system-user-dialog button:not(.password-reveal-button){min-height:34px;padding:.45rem .65rem;font-size:.8rem}
 .system-user-dialog form>label{margin:var(--jv-space-sm) 0}
 .system-user-dialog .system-action-dialog-title>span:last-child{overflow-wrap:anywhere}
 :where(.system-user-dialog) .two-factor-fields>label{margin:var(--jv-space-sm) 0}

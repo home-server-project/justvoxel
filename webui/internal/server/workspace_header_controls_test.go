@@ -233,6 +233,10 @@ func TestGatewayHelpReferenceSectionsStayCompact(t *testing.T) {
 	if start < 0 || end <= start {
 		t.Fatal("connection Help missing")
 	}
+	css := correctionSource(t, "static/agent-gateway.css")
+	if !strings.Contains(css, `[data-agent-gateway-dialog] [data-gateway-help] > details.panel > summary { cursor: pointer; }`) {
+		t.Error("Help disclosure rows must show a pointer cursor")
+	}
 	help := markup[start:end]
 	reference := strings.Index(help, `<section class="panel" data-gateway-provider-reference>`)
 	if reference < 0 {

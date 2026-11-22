@@ -5556,22 +5556,18 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
         wrap.className = "system-action-dialog-content";
         const heading = document.createElement("h2");
         heading.id = "system-user-action-" + index;
-        if (action === "password" || action === "delete" || (action === "enabled" && dangerous)) {
-          heading.className = "system-action-dialog-title";
-          const eyebrow = document.createElement("span");
-          eyebrow.className = "eyebrow";
-          eyebrow.textContent = "JUSTVOXEL";
-          const separator = document.createElement("span");
-          separator.textContent = "·";
-          separator.setAttribute("aria-hidden", "true");
-          const actionTitle = document.createElement("span");
-          actionTitle.textContent = title;
-          const username = document.createElement("span");
-          username.textContent = user.username;
-          heading.append(eyebrow, separator, actionTitle, separator.cloneNode(true), username);
-        } else {
-          heading.textContent = `${title} · ${user.username}`;
-        }
+        heading.className = "system-action-dialog-title";
+        const eyebrow = document.createElement("span");
+        eyebrow.className = "eyebrow";
+        eyebrow.textContent = "JUSTVOXEL";
+        const separator = document.createElement("span");
+        separator.textContent = "·";
+        separator.setAttribute("aria-hidden", "true");
+        const actionTitle = document.createElement("span");
+        actionTitle.textContent = title;
+        const username = document.createElement("span");
+        username.textContent = user.username;
+        heading.append(eyebrow, separator, actionTitle, separator.cloneNode(true), username);
         dialog.setAttribute("aria-labelledby", heading.id);
         const form = document.createElement("form");
         form.innerHTML = fields;

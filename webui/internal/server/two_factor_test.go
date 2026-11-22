@@ -174,7 +174,9 @@ func TestTwoFactorManageDialogAndLocaleContract(t *testing.T) {
 		t.Fatal("two-factor action is not first or does not track account status")
 	}
 	for _, expected := range []string{
-		`"system-action-dialog system-user-dialog"`, `"system-action-dialog-title"`, `"action-row"`,
+		`"system-action-dialog system-user-dialog"`, `heading.className = "system-action-dialog-title"`, `"action-row"`,
+		`["JUSTVOXEL", "·", title, "·", user.username]`, `if (index === 1 || index === 3) part.setAttribute("aria-hidden", "true")`,
+		`heading.id = "two-factor-action-title"`, `dialog.setAttribute("aria-labelledby", "two-factor-action-title")`,
 		`disabling ? "danger" : ""`, `"two-factor-qr"`, `216`, `"two_factor.copy_key"`, `"two_factor.copy_all"`,
 		`"two_factor.download_codes"`, `"justvoxel-recovery-codes.txt"`, `URL.revokeObjectURL`,
 	} {

@@ -29,6 +29,7 @@
 [data-agent-gateway-dialog] [data-gateway-status-details],
 [data-agent-gateway-dialog] [data-gateway-safe-details] { margin: .4rem 0; }
 [data-agent-gateway-dialog] [data-gateway-advanced] > label { display: grid; gap: .35rem; max-width: 24rem; margin-top: .65rem; }
+[data-agent-gateway-dialog] [data-gateway-help] > details.panel > summary { cursor: pointer; }
 [data-agent-gateway-dialog] [data-gateway-help] h3 { margin: 0 0 .6rem; font-size: 1rem; }
 [data-agent-gateway-dialog] [data-gateway-help] p { margin: .6rem 0; }
 [data-agent-gateway-dialog] .gateway-help-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem 1.5rem; text-align: left; }

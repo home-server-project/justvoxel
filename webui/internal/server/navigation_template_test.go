@@ -1262,9 +1262,8 @@ func TestUsersManageActionDialogPresentation(t *testing.T) {
 	}
 	for _, want := range []string{
 		`dialog.className = "system-action-dialog system-user-dialog"`,
-		`heading.id = "system-user-action-" + index;`,
-		`if (action === "password" || action === "delete" || (action === "enabled" && dangerous)) {`,
-		`heading.className = "system-action-dialog-title"`,
+		`heading.id = "system-user-action-" + index;
+        heading.className = "system-action-dialog-title";`,
 		`const eyebrow = document.createElement("span");`,
 		`eyebrow.className = "eyebrow";`,
 		`eyebrow.textContent = "JUSTVOXEL";`,
@@ -1290,35 +1289,22 @@ func TestUsersManageActionDialogPresentation(t *testing.T) {
 			t.Errorf("Users action dialog missing %q", want)
 		}
 	}
-	if strings.Contains(dialog, `heading.textContent = title + " · " + user.username`) {
+	if strings.Contains(dialog, `heading.textContent =`) {
 		t.Error("Users action dialog still uses the concatenated heading")
 	}
 	if strings.Count(dialog, "submit.className") != 1 {
 		t.Error("the normal Users action must retain the default button style")
 	}
 
-	rules := regexp.MustCompile(`([^{}]+)\{([^{}]*)\}`)
-	footerSelector := regexp.MustCompile(`button|\.action-row|\.secondary|\.danger\b|\[data-destructive-submit\]`)
-	sizing := regexp.MustCompile(`(?:^|;)\s*(?:padding[^:;]*|font[^:;]*|line-height|(?:min-|max-)?(?:width|height)|border-radius)\s*:`)
-	for _, path := range []string{"static/app.css", "static/storage-browser.css"} {
-		data, err := assets.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		css := string(data)
-		if path == "static/app.css" {
-			standard := regexp.MustCompile(`(?:^|})button,\.button-link\{([^{}]*)\}`).FindString(css)
-			for _, want := range []string{"border-radius:8px;", "padding:.72rem 1rem;", "font:inherit;", "font-weight:700;"} {
-				if !strings.Contains(standard, want) {
-					t.Errorf("missing standard button sizing declaration %q", want)
-				}
-			}
-		}
-		for _, rule := range rules.FindAllStringSubmatch(css, -1) {
-			if strings.Contains(rule[1], ".system-user-dialog") && footerSelector.MatchString(rule[1]) && sizing.MatchString(rule[2]) {
-				t.Errorf("Users dialog footer must use standard button sizing: %s", rule[0])
-			}
-		}
+	css := correctionSource(t, "static/app.css")
+	if !strings.Contains(css, `.system-user-dialog button:not(.password-reveal-button){min-height:34px;padding:.45rem .65rem;font-size:.8rem}`) {
+		t.Error("Users dialog action buttons must use compact sizing and exclude password reveal buttons")
+	}
+	if regexp.MustCompile(`\.system-user-dialog\s+button\s*[,\{]`).MatchString(css) {
+		t.Error("Users dialog CSS must exclude the broad button selector")
+	}
+	if !regexp.MustCompile(`button,\.button-link\{[^}]*border-radius:8px;`).MatchString(css) {
+		t.Error("Users dialog buttons must inherit the standard 8px radius")
 	}
 }
 
