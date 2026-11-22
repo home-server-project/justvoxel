@@ -191,11 +191,33 @@ func TestPortForwardingDialogUsesOnlySelectedImmutableID(t *testing.T) {
 		`data.network_member) paragraph(jvT("network.router.managed_by_network"))`,
 		`data.endpoints || []`,
 		`/?workspace=network&tab=Router`,
-		`className = 'minecraft-server-invitation'`,
+		`dialog.className = 'system-action-dialog'`,
+		`content.className = 'system-action-dialog-content'`,
+		`title.className = 'system-action-dialog-title'`,
+		`const eyebrow = document.createElement('span')`,
+		`eyebrow.className = 'eyebrow'`,
+		`eyebrow.textContent = 'JUSTVOXEL'`,
+		`const separator = document.createElement('span')`,
+		`separator.textContent = '·'`,
+		`actionTitle.textContent = jvT("network.router.port_forwarding")`,
+		`name.textContent = card.dataset.serverName`,
+		`title.append(eyebrow, separator, actionTitle, separator.cloneNode(true), name)`,
+		`content.append(title, state, summary, actions)`,
+		`dialog.appendChild(content)`,
+		`actions.className = 'action-row'`,
+		`close.className = 'secondary'`,
 	} {
 		if !strings.Contains(dialog, want) {
 			t.Errorf("dialog missing %q", want)
 		}
+	}
+	closeIndex := strings.Index(dialog, "actions.appendChild(close)")
+	actionIndex := strings.Index(dialog, "actions.appendChild(button)")
+	if closeIndex < 0 || actionIndex <= closeIndex || strings.Contains(dialog, "actions.prepend(") {
+		t.Error("Close must appear first in the footer, followed by the available forwarding action")
+	}
+	if strings.Contains(dialog, "minecraft-server-invitation") {
+		t.Error("port forwarding must use the shared system action dialog shell")
 	}
 	if regexp.MustCompile(`createElement\('(input|form|select|textarea)'\)|\b(PUT|PATCH|DELETE)\b|innerHTML|\d+px\b`).MatchString(dialog) ||
 		strings.Count(dialog, "createElement('button')") != 2 || !strings.Contains(dialog, "new URLSearchParams({scope: data.forwarding_scope, action})") {
@@ -208,5 +230,18 @@ func TestPortForwardingDialogUsesOnlySelectedImmutableID(t *testing.T) {
 	if !strings.Contains(js, "const id = card.dataset.serverId;") ||
 		!strings.Contains(js, "showPortForwarding(card, id);") {
 		t.Fatal("port forwarding dialog did not use the selected card ID")
+	}
+	css, err := assets.ReadFile("static/minecraft-servers.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules := regexp.MustCompile(`([^{}]+)\{([^{}]*)\}`)
+	sizing := regexp.MustCompile(`(?i)(?:^|;)\s*(?:(?:min-|max-)?(?:width|height)|padding(?:-[\w-]+)?|font-size|line-height|border-radius)\s*:`)
+	for _, rule := range rules.FindAllStringSubmatch(string(css), -1) {
+		for _, selector := range strings.Split(rule[1], ",") {
+			if strings.Contains(selector, "port-forwarding") && (strings.Contains(selector, "button") || strings.Contains(selector, ".secondary")) && sizing.MatchString(rule[2]) {
+				t.Errorf("port forwarding buttons must inherit standard sizing: %s", strings.TrimSpace(selector))
+			}
+		}
 	}
 }

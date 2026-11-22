@@ -11,12 +11,24 @@
 
   const showPortForwarding = async (card, id) => {
     const dialog = document.createElement('dialog');
-    dialog.className = 'minecraft-server-invitation';
+    dialog.className = 'system-action-dialog';
+    const content = document.createElement('div');
+    content.className = 'system-action-dialog-content';
     const title = document.createElement('h2');
-    title.textContent = jvT("network.router.port_forwarding");
-    dialog.setAttribute('aria-label', title.textContent);
-    const name = document.createElement('p');
+    title.id = 'port-forwarding-title-' + id;
+    title.className = 'system-action-dialog-title';
+    const eyebrow = document.createElement('span');
+    eyebrow.className = 'eyebrow';
+    eyebrow.textContent = 'JUSTVOXEL';
+    const separator = document.createElement('span');
+    separator.textContent = '·';
+    separator.setAttribute('aria-hidden', 'true');
+    const actionTitle = document.createElement('span');
+    actionTitle.textContent = jvT("network.router.port_forwarding");
+    const name = document.createElement('span');
     name.textContent = card.dataset.serverName;
+    title.append(eyebrow, separator, actionTitle, separator.cloneNode(true), name);
+    dialog.setAttribute('aria-labelledby', title.id);
     const state = document.createElement('p');
     state.setAttribute('role', 'status');
     state.textContent = jvT("ui.ec963ffc911b");
@@ -28,7 +40,8 @@
     close.className = 'secondary';
     close.textContent = jvT("ui.7d9eb7acb13e");
     actions.appendChild(close);
-    dialog.append(title, name, state, summary, actions);
+    content.append(title, state, summary, actions);
+    dialog.appendChild(content);
     const controller = new AbortController();
     close.addEventListener('click', () => dialog.close());
     dialog.addEventListener('close', () => {
@@ -52,7 +65,7 @@
           router.className = 'button-link secondary';
           router.href = '/?workspace=network&tab=Router';
           router.textContent = jvT("network.router.open_workspace");
-          actions.prepend(router);
+          summary.appendChild(router);
           break;
         }
         case 'connected': state.textContent = jvT("ui.22965568d22a"); break;
@@ -105,7 +118,7 @@
       const button = document.createElement('button');
       button.type = 'button';
       button.textContent = labels[action];
-      actions.prepend(button);
+      actions.appendChild(button);
       button.addEventListener('click', async () => {
         button.remove();
         state.textContent = jvT("ui.ec963ffc911b");
