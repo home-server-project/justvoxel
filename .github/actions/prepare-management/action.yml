@@ -64,20 +64,43 @@ runs:
       run: |
         set -euo pipefail
         metadata="${RUNNER_TEMP}/management-package.json"
+        probe_error="${RUNNER_TEMP}/management-package-probe.err"
+        metadata_error="${RUNNER_TEMP}/management-package-metadata.err"
+        signature_error="${RUNNER_TEMP}/management-package-signature.err"
         echo 'rebuild=true' >> "${GITHUB_OUTPUT}"
         authfile="${HOME}/.docker/config.json"
-        if digest="$(skopeo inspect --authfile "${authfile}" --format '{{.Digest}}' "docker://${MANAGEMENT_PACKAGE}")" &&
+
+        if digest="$(skopeo inspect --authfile "${authfile}" --format '{{.Digest}}' "docker://${MANAGEMENT_PACKAGE}" 2>"${probe_error}")" &&
            [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
           package_ref="${MANAGEMENT_PACKAGE%:*}@${digest}"
-          if skopeo inspect --authfile "${authfile}" "docker://${package_ref}" >"${metadata}" &&
-             jq -e --arg input "${INPUT_IDENTITY}" --arg base "${BASE_IDENTITY}" '
-               .Labels["io.home-server-project.justvoxel.management-input"] == $input and
-               .Labels["io.home-server-project.justvoxel.management-base"] == $base and
-               .Labels["io.home-server-project.justvoxel.management-api"] == "v1"
-             ' "${metadata}" >/dev/null &&
-             cosign verify --new-bundle-format=false --key cosign.pub "${package_ref}" >/dev/null; then
-            echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
-            echo 'rebuild=false' >> "${GITHUB_OUTPUT}"
+
+          if skopeo inspect --authfile "${authfile}" "docker://${package_ref}" >"${metadata}" 2>"${metadata_error}"; then
+            if jq -e --arg input "${INPUT_IDENTITY}" --arg base "${BASE_IDENTITY}" '
+                 .Labels["io.home-server-project.justvoxel.management-input"] == $input and
+                 .Labels["io.home-server-project.justvoxel.management-base"] == $base and
+                 .Labels["io.home-server-project.justvoxel.management-api"] == "v1"
+               ' "${metadata}" >/dev/null; then
+              if cosign verify --new-bundle-format=false --key cosign.pub "${package_ref}" >/dev/null 2>"${signature_error}"; then
+                echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+                echo 'rebuild=false' >> "${GITHUB_OUTPUT}"
+                echo "Management Agent cache hit: verified ${package_ref}; reusing cached package."
+              else
+                echo "Management Agent cache miss: cached package signature verification failed; rebuilding."
+              fi
+            else
+              echo "Management Agent cache miss: cached package inputs, base identity, or API version changed; rebuilding."
+            fi
+          else
+            echo "Management Agent cache miss: cached package metadata could not be inspected; rebuilding."
+          fi
+        else
+          if grep -Fq 'manifest unknown' "${probe_error}"; then
+            echo "Management Agent cache miss: ${MANAGEMENT_PACKAGE} does not exist yet; building and publishing it."
+          else
+            echo "Management Agent cache miss: ${MANAGEMENT_PACKAGE} could not be inspected; rebuilding."
+            if [[ -s "${probe_error}" ]]; then
+              sed 's/^/  registry probe: /' "${probe_error}"
+            fi
           fi
         fi
 
