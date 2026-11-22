@@ -223,7 +223,7 @@
       normal.addEventListener('click', suppress, true);
       normal.addEventListener('submit', suppress, true);
     }
-    initializeCard(card, root, () => arranging);
+    initializeCard(card, root, () => arranging, showPortForwarding);
   }
   updateBounds();
   initializeLiveMemory(list, cards);
@@ -398,7 +398,7 @@
     const timer = setInterval(poll, 2000);
     poll();
   }
-  function initializeCard(card, root, isArranging) {
+  function initializeCard(card, root, isArranging, showPortForwarding) {
     const id = card.dataset.serverId;
     const inventory = root.querySelector('[data-server-csrf]');
     if (!inventory || !/^jv-[a-z0-9]{6,12}$/.test(id)) return;

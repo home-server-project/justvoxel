@@ -201,6 +201,10 @@ func TestPortForwardingDialogUsesOnlySelectedImmutableID(t *testing.T) {
 		strings.Count(dialog, "createElement('button')") != 2 || !strings.Contains(dialog, "new URLSearchParams({scope: data.forwarding_scope, action})") {
 		t.Fatal("unexpected port forwarding dialog control or request")
 	}
+	if !strings.Contains(js, "initializeCard(card, root, () => arranging, showPortForwarding);") ||
+		!strings.Contains(js, "function initializeCard(card, root, isArranging, showPortForwarding) {") {
+		t.Fatal("initializeCard must receive the port forwarding dialog launcher")
+	}
 	if !strings.Contains(js, "const id = card.dataset.serverId;") ||
 		!strings.Contains(js, "showPortForwarding(card, id);") {
 		t.Fatal("port forwarding dialog did not use the selected card ID")
