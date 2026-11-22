@@ -26,6 +26,11 @@ func setupProvisionalTestHelpers(t *testing.T, f *instanceActivationFixture) {
 			t.Fatal(err)
 		}
 	}
+	oldVerifier := runFirstSetupStackVerifier
+	runFirstSetupStackVerifier = func(ctx context.Context, id, version string) ([]byte, error) {
+		return f.backend.command(ctx, "/usr/libexec/justvoxel/mjust/verify-minecraft-stack", "--instance", id, version)
+	}
+	t.Cleanup(func() { runFirstSetupStackVerifier = oldVerifier })
 	base := f.backend.command
 	f.backend.command = func(ctx context.Context, cmd string, args ...string) ([]byte, error) {
 		if cmd == "podman" && len(args) == 4 && reflect.DeepEqual(args[:3], []string{"rm", "--ignore", "--"}) {
@@ -180,7 +185,15 @@ func TestProvisionalSetupPublicationAndAddServer(t *testing.T) {
 			}
 			for _, action := range []string{"apply", "verify"} {
 				if action == "verify" {
+					start := len(f.calls)
 					e = setupActions(t, r, "verify")
+					if add {
+						for _, call := range f.calls[start:] {
+							if strings.Contains(call, "verify-minecraft-stack") || strings.Contains(call, " start ") {
+								t.Fatalf("Add Server verification started a runtime or ran the stack verifier: %s", call)
+							}
+						}
+					}
 				}
 				got, err := b.identities().listInstances("")
 				if err != nil || !reflect.DeepEqual(got, before) {

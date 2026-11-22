@@ -53,7 +53,19 @@ func (s *operationStore) appendSetupRuntimeFailureBundleBestEffort(operationID, 
 	if s == nil || !validOperationID(operationID) {
 		return
 	}
-	values := s.setupRuntimeEvidenceForOperation(operationID, plan)
+	var values map[string]string
+	var secrets []string
+	if action == "verify" && plan != nil && !plan.AddServer {
+		if record, ok := s.provisionalSetupVerificationRecord(operationID); ok {
+			values = collectSetupRuntimeRecordEvidence(plan, record, "<unavailable>")
+			values["service_unit"] = "minecraft-" + record.Runtime.ID + ".service"
+			values["data_path"] = record.Storage.DataPath
+			secrets = []string{record.Runtime.RCONPassword}
+		}
+	}
+	if values == nil {
+		values = s.setupRuntimeEvidenceForOperation(operationID, plan)
+	}
 	values["action"] = action
 	if cause != nil {
 		values["error"] = cause.Error()
@@ -61,33 +73,31 @@ func (s *operationStore) appendSetupRuntimeFailureBundleBestEffort(operationID, 
 	values["minecraft_journal"] = "<not_created>"
 	values["validation_snapshot"] = "Runtime validation is not applicable before an authoritative instance identity exists."
 	if id := values["instance_id"]; instanceIDPattern.MatchString(id) {
-		values["minecraft_journal"] = setupDiagnosticRuntimeJournal("minecraft-" + id + ".service")
+		values["minecraft_journal"] = setupDiagnosticRuntimeJournal("minecraft-"+id+".service", secrets...)
 		values["validation_snapshot"] = "Instance runtime evidence is recorded above; fixed-server appliance validation is not applicable."
 	} else if values["container_present"] == "<unavailable>" {
 		values["minecraft_journal"] = "<unavailable>"
 	}
-	values["selinux_avc"] = setupDiagnosticRecentAVC()
+	values["selinux_avc"] = setupDiagnosticRecentAVC(secrets...)
 	_ = s.appendSetupDiagnostic(operationID, "FAILURE", "runtime failure evidence", values)
 }
 
 func collectSetupRuntimeEvidence(plan *adminSetupNormalizedPlan, instanceID ...string) map[string]string {
-	var container, unit, timer, env, quadlet, dataPath, authoritativeID string
+	var record instanceRuntimeRecord
 	runtimeStatus := "<not_created>"
 	if len(instanceID) > 0 && instanceID[0] != "" {
 		runtimeStatus = "<unavailable>"
-		id := instanceID[0]
-		if instanceIDPattern.MatchString(id) {
-			// A matching ID is only a candidate until the authoritative record resolves.
-			if record, err := instanceRuntimes.readRecord(id); err == nil {
-				authoritativeID = id
-				container = "minecraft-" + id
-				unit = container + ".service"
-				timer = instanceBackupUnit(id, "timer")
-				_, env, quadlet = instanceRuntimes.paths(id)
-				dataPath = record.Storage.DataPath
-			}
+		if resolved, err := instanceRuntimes.readRecord(instanceID[0]); err == nil {
+			record = resolved
 		}
 	}
+	return collectSetupRuntimeRecordEvidence(plan, record, runtimeStatus)
+}
+
+func collectSetupRuntimeRecordEvidence(plan *adminSetupNormalizedPlan, record instanceRuntimeRecord, runtimeStatus string) map[string]string {
+	id := record.Runtime.ID
+	dataPath := record.Storage.DataPath
+	var container, unit string
 
 	values := map[string]string{
 		"quadlet_present":          runtimeStatus,
@@ -110,8 +120,12 @@ func collectSetupRuntimeEvidence(plan *adminSetupNormalizedPlan, instanceID ...s
 
 	values["backup_timer_enabled"] = runtimeStatus
 	values["backup_timer_active"] = runtimeStatus
-	if authoritativeID != "" {
-		values["instance_id"] = authoritativeID
+	if id != "" {
+		container = "minecraft-" + id
+		unit = container + ".service"
+		timer := instanceBackupUnit(id, "timer")
+		_, env, quadlet := instanceRuntimes.paths(id)
+		values["instance_id"] = id
 		values["quadlet_present"] = setupDiagnosticPathPresence(quadlet)
 		values["minecraft_env_present"] = setupDiagnosticPathPresence(env)
 		values["container_present"] = setupDiagnosticCommandPresence(4*time.Second, "podman", "container", "exists", container)
@@ -222,15 +236,18 @@ func setupDiagnosticSELinuxType(path string) string {
 	return parts[2]
 }
 
-func setupDiagnosticRuntimeJournal(unit string) string {
+func setupDiagnosticRuntimeJournal(unit string, secrets ...string) string {
 	if strings.TrimSpace(unit) == "" {
 		return "<not_created>"
 	}
 	output, _ := setupDiagnosticRunCommand(6*time.Second, "journalctl", "-u", unit, "--no-pager", "-n", "80", "-o", "short-iso")
+	if len(secrets) > 0 {
+		output = []byte(sanitizeOperationTrace(string(output), secrets))
+	}
 	return setupDiagnosticBoundedText(output, 12*1024)
 }
 
-func setupDiagnosticRecentAVC() string {
+func setupDiagnosticRecentAVC(secrets ...string) string {
 	output, _ := setupDiagnosticRunCommand(6*time.Second, "journalctl", "-k", "--no-pager", "-n", "300", "-o", "short-iso")
 	lines := make([]string, 0, 8)
 	for _, line := range strings.Split(string(output), "\n") {
@@ -242,7 +259,11 @@ func setupDiagnosticRecentAVC() string {
 	if len(lines) == 0 {
 		return "<none>"
 	}
-	return setupDiagnosticBoundedText([]byte(strings.Join(lines, "\n")), 6*1024)
+	value := strings.Join(lines, "\n")
+	if len(secrets) > 0 {
+		value = sanitizeOperationTrace(value, secrets)
+	}
+	return setupDiagnosticBoundedText([]byte(value), 6*1024)
 }
 
 func setupDiagnosticDNSStatus(host string) string {
@@ -294,6 +315,20 @@ func setupDiagnosticBoundedText(output []byte, max int) string {
 		value = value[:max] + "…"
 	}
 	return value
+}
+
+// setupInstanceRead validates private transaction ownership, record placement,
+// operation ID and plan fingerprint before any provisional probe is issued.
+func (s *operationStore) provisionalSetupVerificationRecord(operationID string) (instanceRuntimeRecord, bool) {
+	op, err := s.get(operationID)
+	if err != nil || !op.InstanceSetup || op.OperationType != operationTypeSetup {
+		return instanceRuntimeRecord{}, false
+	}
+	e, err := setupInstanceRead(operationID, op.PlanFingerprint)
+	if err != nil || e.Schema != 2 || e.Request.AddServer || e.RolledBack || e.Publication == nil || e.Publication.Stage != "runtime_prepared" || !instanceIDPattern.MatchString(e.Record.Runtime.ID) {
+		return instanceRuntimeRecord{}, false
+	}
+	return e.Record, true
 }
 
 func (s *operationStore) setupRuntimeEvidenceForOperation(operationID string, plan *adminSetupNormalizedPlan) map[string]string {

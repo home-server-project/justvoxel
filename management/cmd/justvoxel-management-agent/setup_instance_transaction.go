@@ -37,6 +37,37 @@ var runSetupInstanceRuntimeAction = runSetupInstanceAction
 var setupPolicyRoot = "/etc/justvoxel"
 var setupInstanceMarker = "/var/lib/justvoxel/management/setup-in-progress"
 
+func (b *instanceRuntimeBackend) setupPolicyDirectory(addServer, create bool) (*os.File, error) {
+	if addServer {
+		return b.privateDirectory(setupPolicyRoot, create)
+	}
+	if !filepath.IsAbs(setupPolicyRoot) || filepath.Clean(setupPolicyRoot) != setupPolicyRoot || setupPolicyRoot == "/" {
+		return nil, errInstanceRecovery
+	}
+	dir, err := instanceOpen(setupPolicyRoot, os.O_RDONLY|syscall.O_DIRECTORY)
+	if create && errors.Is(err, os.ErrNotExist) {
+		// Preserve Setup's existing root:root 0700 creation and recovery contract.
+		return b.privateDirectory(setupPolicyRoot, true)
+	}
+	if err != nil {
+		return nil, err
+	}
+	info, err := dir.Stat()
+	if err != nil {
+		dir.Close()
+		return nil, err
+	}
+	// The management service's effective group is justvoxel-web.
+	store := b.identities()
+	stat, ok := infoSysStat(info)
+	shared := ok && int(stat.Uid) == store.uid && int(stat.Gid) == os.Getegid() && info.Mode() == os.ModeDir|0750
+	if !shared && !store.private(info, 0700) {
+		dir.Close()
+		return nil, instanceRuntimeFailure("Unsafe setup policy directory ownership or permissions.")
+	}
+	return dir, nil
+}
+
 func setupInstancePath(id string) string {
 	return filepath.Join(instanceRuntimes.staging, "setup-"+id+".json")
 }
@@ -105,7 +136,7 @@ func runSetupInstanceAction(ctx context.Context, action string, r setupRuntimeTr
 	}
 	e, err := setupInstanceRead(r.OperationID, r.PlanFingerprint)
 	if action == "validate" && errors.Is(err, os.ErrNotExist) {
-		policyDir, policyErr := b.privateDirectory(setupPolicyRoot, false)
+		policyDir, policyErr := b.setupPolicyDirectory(r.AddServer, false)
 		hadPolicyRoot := policyErr == nil
 		if policyErr == nil {
 			policyDir.Close()
@@ -153,7 +184,7 @@ func runSetupInstanceAction(ctx context.Context, action string, r setupRuntimeTr
 		if err = b.writePrivate(setupInstanceMarker, []byte(r.OperationID+" "+r.PlanFingerprint+"\n"), false); err != nil {
 			return response, err
 		}
-		policyDir, policyErr := b.privateDirectory(setupPolicyRoot, true)
+		policyDir, policyErr := b.setupPolicyDirectory(r.AddServer, true)
 		if policyErr != nil {
 			return response, policyErr
 		}
@@ -214,7 +245,7 @@ func runSetupInstanceAction(ctx context.Context, action string, r setupRuntimeTr
 		response.Applied = true
 	case "verify":
 		if e.Schema == 2 {
-			err = b.verifyProvisionalSetup(ctx, &e, save)
+			err = b.verifyProvisionalSetup(ctx, &e, save, &response)
 			response.OK, response.Applied = err == nil, err == nil
 			return response, err
 		}
@@ -549,6 +580,20 @@ func rollbackSetupInstance(ctx context.Context, e *setupInstanceEvidence, save f
 			return err
 		}
 	}
+	if err := b.rollbackSetupPolicy(e); err != nil {
+		return err
+	}
+	if err := clearSetupInstanceMarker(*e); err != nil {
+		return err
+	}
+	e.RolledBack = true
+	if e.Schema == 2 && e.Publication != nil {
+		e.Publication.Stage = "rolled_back"
+	}
+	return save()
+}
+
+func (b *instanceRuntimeBackend) rollbackSetupPolicy(e *setupInstanceEvidence) error {
 	for name, expected := range e.Policy {
 		path := filepath.Join(setupPolicyRoot, name)
 		raw, err := b.readPrivate(path)
@@ -569,23 +614,18 @@ func rollbackSetupInstance(ctx context.Context, e *setupInstanceEvidence, save f
 	// evidence leaves it alone. Unrelated content is preserved by rmdir semantics.
 	if e.HadPolicyRoot != nil && !*e.HadPolicyRoot {
 		dir, err := b.privateDirectory(setupPolicyRoot, false)
-		if err == nil {
-			dir.Close()
-			if err = os.Remove(setupPolicyRoot); err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, syscall.ENOTEMPTY) && !errors.Is(err, syscall.EEXIST) {
-				return err
-			}
-		} else if !errors.Is(err, os.ErrNotExist) {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		defer dir.Close()
+		if err := syscall.Rmdir(setupPolicyRoot); err != nil && !errors.Is(err, os.ErrNotExist) && !errors.Is(err, syscall.ENOTEMPTY) && !errors.Is(err, syscall.EEXIST) {
 			return err
 		}
 	}
-	if err := clearSetupInstanceMarker(*e); err != nil {
-		return err
-	}
-	e.RolledBack = true
-	if e.Schema == 2 && e.Publication != nil {
-		e.Publication.Stage = "rolled_back"
-	}
-	return save()
+	return nil
 }
 
 // A restart loads protected instance evidence, never reconstructs a target from

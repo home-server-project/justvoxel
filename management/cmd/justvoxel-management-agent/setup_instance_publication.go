@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -441,7 +442,64 @@ func (b *instanceRuntimeBackend) permitSetupStart(e setupInstanceEvidence) error
 	}
 	return b.writeJSON(setupPermitPath(e.Record.Runtime.ID), map[string]any{"schema": 1, "id": e.Record.Runtime.ID, "operation_id": e.Request.OperationID, "plan_fingerprint": e.Request.PlanFingerprint, "evidence_sha256": instanceHash(raw), "agent_pid": os.Getpid(), "agent_start": fields[19]}, true)
 }
-func (b *instanceRuntimeBackend) verifyProvisionalSetup(ctx context.Context, e *setupInstanceEvidence, save func() error) (result error) {
+
+// Keep verifier stderr private. Only an exact, known terminal error line
+// can become diagnostic evidence. Other output can contain runtime secrets.
+var runFirstSetupStackVerifier = func(ctx context.Context, id, version string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "/usr/libexec/justvoxel/mjust/verify-minecraft-stack", "--instance", id, version)
+	var tail boundedMigrationDiagnostic
+	cmd.Stderr = &tail
+	cmd.WaitDelay = time.Second
+	finish, err := attachOperationTrace(ctx, cmd)
+	if err != nil {
+		return nil, err
+	}
+	err = cmd.Run()
+	finish(err)
+	return tail.bytes, err
+}
+
+func setupVerifierFailureReason(output []byte) string {
+	line := strings.TrimSpace(string(output))
+	if i := strings.LastIndexByte(line, '\n'); i >= 0 {
+		line = line[i+1:]
+	}
+	reason, ok := strings.CutPrefix(line, "ERROR: ")
+	if ok {
+		switch reason {
+		case "another Minecraft maintenance operation is running.",
+			"Minecraft service is not active.",
+			"Minecraft RCON is not ready.",
+			"Minecraft status probe failed.",
+			"Minecraft status version is invalid.",
+			"Minecraft is not running the selected game version.",
+			"Minecraft RCON check failed.",
+			"the selected Spigot game version could not be verified.",
+			"the configured mod loader version could not be verified.",
+			"Minecraft status probe did not become ready after RCON.",
+			"Minecraft status version is invalid or missing.",
+			"the selected Minecraft game version could not be verified.",
+			"the selected mod loader could not be verified in the current server log.",
+			"Minecraft final RCON check failed.",
+			"managed cross-play mod ownership could not be verified.",
+			"Geyser version query failed.",
+			"Geyser Floodgate authentication could not be verified.",
+			"Minecraft server software cannot use the local version fallback.",
+			"Minecraft is not running the selected server software.",
+			"Minecraft version response could not be verified.",
+			"ViaVersion could not be verified.",
+			"Network Floodgate could not be verified.",
+			"Backend Geyser must be absent while enrolled in Minecraft Network.",
+			"Cross-play plugins could not be verified.",
+			"Geyser version response could not be verified.",
+			"instance runtime is incomplete or requires recovery.":
+			return reason
+		}
+	}
+	return "Minecraft stack verifier failed without a recognized diagnostic."
+}
+
+func (b *instanceRuntimeBackend) verifyProvisionalSetup(ctx context.Context, e *setupInstanceEvidence, save func() error, response *setupRuntimeTransactionResponse) (result error) {
 	if e.Publication == nil || e.Publication.Stage != "runtime_prepared" {
 		return errInstanceRecovery
 	}
@@ -474,7 +532,8 @@ func (b *instanceRuntimeBackend) verifyProvisionalSetup(ctx context.Context, e *
 			if err = b.waitNativeBedrockReady(ctx, id); err != nil {
 				return err
 			}
-		} else if _, err = b.command(ctx, "/usr/libexec/justvoxel/mjust/verify-minecraft-stack", "--instance", id, e.Record.Runtime.Version); err != nil {
+		} else if output, verifyErr := runFirstSetupStackVerifier(ctx, id, e.Record.Runtime.Version); verifyErr != nil {
+			response.Evidence = map[string]string{"verification_reason": setupVerifierFailureReason(output)}
 			return instanceRuntimeFailure("The selected Minecraft instance did not pass readiness verification.")
 		}
 	} else {

@@ -191,7 +191,7 @@ func TestSetupRuntimeEvidenceHelpersRequireExplicitTarget(t *testing.T) {
 }
 
 func TestSetupRuntimeEvidenceFailureBundle(t *testing.T) {
-	for _, mode := range []string{"selected", "pending", "unresolved", "stale", "session"} {
+	for _, mode := range []string{"selected", "pending", "unresolved", "stale", "wrong-operation", "wrong-plan", "session"} {
 		t.Run(mode, func(t *testing.T) {
 			backend, records := setupRuntimeEvidenceFixture(t)
 			calls := captureSetupRuntimeEvidenceCommands(t)
@@ -214,6 +214,15 @@ func TestSetupRuntimeEvidenceFailureBundle(t *testing.T) {
 					evidence := setupInstanceEvidence{Schema: 1, Request: request, Policy: setupInstancePolicy(request)}
 					if mode != "pending" {
 						evidence.Record = records[0]
+					}
+					if mode == "wrong-operation" || mode == "wrong-plan" {
+						evidence.Schema = 2
+						evidence.Publication = &setupInstancePublication{Stage: "runtime_prepared", Name: "Family"}
+						if mode == "wrong-operation" {
+							evidence.Request.OperationID = "12345678-1234-4123-8123-123456789abc"
+						} else {
+							evidence.Request.PlanFingerprint = "sha256:" + strings.Repeat("d", 64)
+						}
 					}
 					if err := backend.writeJSON(setupInstancePath(id), evidence, false); err != nil {
 						t.Fatal(err)
@@ -265,4 +274,111 @@ func TestSetupRuntimeEvidenceFailureBundle(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestFirstSetupVerificationEvidenceSurvivesRollback(t *testing.T) {
+	f, fixture := newProvisionalSetupFixture(t, false)
+	calls := captureSetupRuntimeEvidenceCommands(t)
+	store := openTestOperationStore(t)
+	op, _, err := store.beginSetup(testSetupFingerprint, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ensureSetupOperationDiagnostic(op.OperationID); err != nil {
+		t.Fatal(err)
+	}
+	plan := setupPlanForRuntimeTest(t)
+	plan.Storage.Path, plan.Backups.Path = fixture.Storage.Path, fixture.Backups.Path
+	plan.Server.BedrockEnabled = false
+	plan.Minecraft.JavaPort = fixture.Minecraft.JavaPort
+	plan.Minecraft.JavaMemory, plan.Minecraft.ContainerMemory = fixture.Minecraft.JavaMemory, fixture.Minecraft.ContainerMemory
+	plan.Minecraft.VersionPolicy, plan.Minecraft.Version = fixture.Minecraft.VersionPolicy, fixture.Minecraft.Version
+	runSetupInstanceRuntimeAction = runSetupInstanceAction
+	oldStorage := runAdminSetupStorageTransactionHelper
+	t.Cleanup(func() { runAdminSetupStorageTransactionHelper = oldStorage })
+	runAdminSetupStorageTransactionHelper = func(_ context.Context, action string, _ []byte) ([]byte, error) {
+		switch action {
+		case "validate":
+			return []byte(`{"ok":true,"phase":"storage_preflight","rollback_state":"not_started"}`), nil
+		case "apply":
+			return []byte(`{"ok":true,"applied":true,"phase":"storage_verified","rollback_state":"not_started"}`), nil
+		case "rollback":
+			return []byte(`{"ok":true,"phase":"storage_rolled_back","rollback_state":"succeeded","rollback_result":"rolled_back"}`), nil
+		}
+		t.Fatal(action)
+		return nil, nil
+	}
+	var record instanceRuntimeRecord
+	runFirstSetupStackVerifier = func(_ context.Context, id, version string) ([]byte, error) {
+		e, err := setupInstanceRead(op.OperationID, op.PlanFingerprint)
+		if err != nil || id != e.Record.Runtime.ID || version != e.Record.Runtime.Version {
+			t.Fatal("verifier target does not match Setup evidence", err)
+		}
+		if _, err := f.backend.readRecord(id); !errors.Is(err, errInstanceNotFound) {
+			t.Fatal("expected unpublished runtime", err)
+		}
+		record = e.Record
+		return []byte("private verifier output " + record.Runtime.RCONPassword + "\nERROR: Minecraft RCON is not ready.\n"), errors.New("private execution detail")
+	}
+	probe := runSetupDiagnosticCommand
+	runSetupDiagnosticCommand = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		out, err := probe(ctx, name, args...)
+		if name == "journalctl" && len(args) >= 2 && args[0] == "-u" {
+			if record.Runtime.ID == "" || f.containers[record.Runtime.ID] != "running" {
+				t.Fatal("journal collected outside provisional runtime lifetime")
+			}
+			return []byte("selected runtime journal " + record.Runtime.RCONPassword + " --password private-argument"), nil
+		}
+		return out, err
+	}
+	err = executeSetupTransaction(context.Background(), store, op.OperationID, plan, nil)
+	if err == nil || err.Error() != "The selected Minecraft instance did not pass readiness verification." {
+		t.Fatalf("unexpected public failure: %v", err)
+	}
+	id := record.Runtime.ID
+	finished, err := store.get(op.OperationID)
+	if err != nil || finished.State != operationRolledBack || id == "" || f.containers[id] != "" {
+		t.Fatal("provisional runtime was not rolled back", err)
+	}
+	dir, env, quadlet := f.backend.paths(id)
+	for _, path := range []string{dir, env, quadlet, setupPermitPath(id), record.Storage.DataPath, filepath.Join(f.backend.store.directory, id+".json")} {
+		if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatal("provisional resource survived", path, err)
+		}
+	}
+	for _, rule := range record.Firewall {
+		if f.firewall[rule] {
+			t.Fatal("provisional firewall rule survived")
+		}
+	}
+	data, err := store.readSetupDiagnostic(op.OperationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`verification_reason="Minecraft RCON is not ready."`,
+		`instance_id="` + id + `"`,
+		`service_unit="minecraft-` + id + `.service"`,
+		`service_active_state="active"`,
+		`service_result="success"`,
+		`service_exit_status="0"`,
+		`container_present="present"`,
+		`container_state="available"`,
+		`container_exit_code="available"`,
+		`container_image_id="available"`,
+		`container_networks="available"`,
+		`data_path="` + record.Storage.DataPath + `"`,
+		`data_selinux_type="container_file_t"`,
+		"selected runtime journal",
+	} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("missing diagnostic %q", want)
+		}
+	}
+	for _, private := range []string{record.Runtime.RCONPassword, "private verifier output", "private execution detail", "private-argument"} {
+		if strings.Contains(string(data), private) {
+			t.Error("private verifier or runtime data in diagnostic")
+		}
+	}
+	assertSetupRuntimeProbeScope(t, *calls, id)
 }

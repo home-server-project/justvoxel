@@ -415,3 +415,11 @@ func TestSetupDiagnosticPreservesSystemdUnitNamesWhileRedactingHosts(t *testing.
 		t.Fatalf("network identity was not redacted: %s", value)
 	}
 }
+
+func TestSetupVerifierDiscardsUnrecognizedPrivateOutput(t *testing.T) {
+	for _, output := range []string{"ERROR: RCON_PASSWORD=private", "ERROR: Minecraft RCON is not ready. --password private", strings.Repeat("private ", 9000)} {
+		if got := setupVerifierFailureReason([]byte(output)); got != "Minecraft stack verifier failed without a recognized diagnostic." {
+			t.Fatal("unrecognized verifier output entered diagnostic evidence")
+		}
+	}
+}

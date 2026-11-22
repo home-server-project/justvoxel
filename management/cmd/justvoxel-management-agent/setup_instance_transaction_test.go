@@ -44,14 +44,21 @@ func testFreshSetupCreatesOneNormalInstance(t *testing.T, existing bool, name st
 	}
 	old, oldPolicy, oldMarker := instanceRuntimes, setupPolicyRoot, setupInstanceMarker
 	instanceRuntimes = f.backend
-	setupPolicyRoot = filepath.Join(t.TempDir(), "justvoxel")
-	if existing {
-		if err := os.Mkdir(setupPolicyRoot, 0700); err != nil {
-			t.Fatal(err)
-		}
-	}
+	setupPolicyRoot = filepath.Join(filepath.Dir(f.backend.root), "justvoxel")
 	setupInstanceMarker = filepath.Join(t.TempDir(), "setup-in-progress")
 	t.Cleanup(func() { instanceRuntimes = old; setupPolicyRoot = oldPolicy; setupInstanceMarker = oldMarker })
+	if existing {
+		if err := os.Mkdir(setupPolicyRoot, 0750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(setupPolicyRoot, 0750); err != nil {
+			t.Fatal(err)
+		}
+		if dir, err := f.backend.privateDirectory(setupPolicyRoot, false); err == nil {
+			dir.Close()
+			t.Fatal("private runtime validator accepted shared directory")
+		}
+	}
 	r := setupRuntimeTransactionRequest{InstanceOnly: true, SchemaVersion: operationSchemaVersion, OperationID: "12345678-1234-4123-8123-123456789abc", PlanFingerprint: testSetupFingerprint,
 		Server:    setupRuntimeServer{DisplayName: name, MOTD: "Family", MaxPlayers: 20, Timezone: "UTC"},
 		Minecraft: setupRuntimeMinecraft{ServerType: "paper", GameMode: "survival", JavaMemory: "1G", ContainerMemory: "2G", JavaPort: instanceTestPort(t), BedrockPort: 19132, ImageTag: "stable", VersionPolicy: "pinned", Version: "1.21.4", MinecraftUID: 1000, MinecraftGID: 1000},
@@ -146,7 +153,7 @@ func TestSetupPolicyPublicationAndBoundedRollback(t *testing.T) {
 			setupInstanceMarker = filepath.Join(t.TempDir(), "setup-in-progress")
 			t.Cleanup(func() { instanceRuntimes = old; setupPolicyRoot = oldRoot; setupInstanceMarker = oldMarker })
 			if mode == "existing" || mode == "old-evidence" {
-				if err := os.Mkdir(setupPolicyRoot, 0700); err != nil {
+				if err := os.Mkdir(setupPolicyRoot, 0750); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -212,7 +219,7 @@ func TestSetupPolicyPublicationAndBoundedRollback(t *testing.T) {
 }
 
 func TestSetupRejectsUnsafePolicyRootAndPreservesUnexpectedFiles(t *testing.T) {
-	for _, mode := range []string{"symlink", "unsafe", "changed-file"} {
+	for _, mode := range []string{"symlink", "unsafe", "wrong-owner", "changed-file"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newInstanceActivationFixture(t)
 			old, oldRoot := instanceRuntimes, setupPolicyRoot
@@ -225,11 +232,21 @@ func TestSetupRejectsUnsafePolicyRootAndPreservesUnexpectedFiles(t *testing.T) {
 				if err := os.Symlink(t.TempDir(), setupPolicyRoot); err != nil {
 					t.Fatal(err)
 				}
+			case "wrong-owner":
+				if err := os.Mkdir(setupPolicyRoot, 0750); err != nil {
+					t.Fatal(err)
+				}
+				f.backend.store.uid++
+				// Check directly so a later failure writing evidence cannot mask acceptance.
+				if dir, err := f.backend.setupPolicyDirectory(false, false); err == nil {
+					dir.Close()
+					t.Fatal("wrong policy root owner accepted")
+				}
 			case "unsafe":
 				if err := os.Mkdir(setupPolicyRoot, 0777); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.Chmod(setupPolicyRoot, 0777); err != nil {
+				if err := os.Chmod(setupPolicyRoot, 0770); err != nil {
 					t.Fatal(err)
 				}
 			}
