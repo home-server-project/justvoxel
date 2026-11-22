@@ -1,5 +1,5 @@
 ---
-name: Build signed JustVoxel testing images
+name: Development
 
 on:
   workflow_dispatch:

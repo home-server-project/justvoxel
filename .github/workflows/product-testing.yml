@@ -1,4 +1,4 @@
-name: Product testing
+name: Testing
 on: workflow_dispatch
 concurrency:
   group: product-testing
