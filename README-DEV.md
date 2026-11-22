@@ -113,7 +113,7 @@ See [`docs/SYSTEM.md`](docs/SYSTEM.md) for operating-system maintenance and [`do
 
 Start with the document that matches what you are trying to do:
 
-- [JustVoxel ISO Builder](https://github.com/home-server-project/justvoxel-iso) — install JustVoxel on a VM or physical machine
+- [Installation guide](docs/INSTALLER.md) and [installer design](docs/INSTALLER-DESIGN.md) — install JustVoxel on a VM or physical machine
 - [`docs/MJUST.md`](docs/MJUST.md) — operate the appliance
 - [`docs/MINECRAFT_RUNTIME.md`](docs/MINECRAFT_RUNTIME.md) — current multi-instance runtime design and implementation history
 - [`docs/server-software.md`](docs/server-software.md) — supported Java and Bedrock server software and capability rules

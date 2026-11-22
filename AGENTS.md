@@ -25,7 +25,7 @@ Upstream platform:
 
 Home Server Base 10 -> AlmaLinux 10 -> bootc
 
-This repository does not own the JustVoxel ISO installer.
+This repository owns the installer source in `installer/`, Anaconda customization, the ISO build workflow, and installer documentation. The ISO is built manually only, from `main`, and installs only the VM or HWS `:stable` product. Installer changes normally develop on `testing` and reach `main` through the protected `testing` -> PR -> `main` promotion path. Never bypass **Protect main** for ISO work.
 
 ## Product boundary
 
@@ -198,7 +198,14 @@ Available skills:
 - `justvoxel-networking`: appliance networking, HSP Network Manager CLI integration, WebUI networking, LAN behavior, and Tailscale, NetBird, Playit, and NordVPN Meshnet flows.
 - `justvoxel-review`: independent human-directed verification/review of a completed change.
 
+- `justvoxel-iso-installer`: installer architecture, image-builder/bootc integration, installer environment, payload selection, storage defaults, networking/account behavior, and edition/source rules.
+- `justvoxel-iso-webui`: Anaconda WebUI customization, upstream patching, wizard flow, branding, storage UI behavior, and edition/login presentation.
+- `justvoxel-iso-ci`: GitHub Actions, ISO build mechanics, artifacts, checksums, workflow triggers, permissions, and CI diagnosis.
+- `justvoxel-iso-review`: independent read-only verification/review of completed installer changes.
+
 Typical routing examples:
+
+- Pair `justvoxel-iso-webui` with `justvoxel-iso-installer` when wizard changes affect installation behavior. For independent installer review, pair `justvoxel-iso-review` with the relevant installer domain skill.
 
 - WebUI layout or copy: `justvoxel-webui` + `justvoxel-human-experience`.
 - New privileged WebUI operation: `justvoxel-webui` + `justvoxel-management-api`; add human-experience only when user-facing behavior changes.

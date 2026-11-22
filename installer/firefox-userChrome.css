@@ -1,0 +1,9 @@
+/* Hide Firefox UI when there's just one tab */
+#navigator-toolbox:has(tab:only-of-type) {
+  visibility: collapse;
+}
+
+/* Hide the close button */
+.titlebar-close {
+  display: none;
+}

@@ -344,14 +344,12 @@ If a comparison entry is outdated or unfair, please open an issue. Corrections t
 
 JustVoxel is still in pre-release validation.
 
-The release installation path is the **[JustVoxel ISO Builder](https://github.com/home-server-project/justvoxel-iso)**, which is being prepared as the installation-media factory for VM and physical-hardware deployments.
+One online ISO supports both editions. See the [installation guide](docs/INSTALLER.md) for the Actions artifact, disk preparation, and first login.
 
 The intended choices are simple:
 
 - **JustVoxel VM** for virtual machines and compatible hosted VM environments
 - **JustVoxel HWS** for PCs, laptops, mini PCs, physical home servers, and compatible bare-metal hosting
-
-Final stable installation instructions and release artifacts will be published when release validation is complete.
 
 ## 📚 Documentation
 

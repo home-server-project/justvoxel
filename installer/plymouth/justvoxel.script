@@ -1,0 +1,19 @@
+# Installer-only logo on the dark-green background.
+Window.SetBackgroundTopColor(0.063, 0.208, 0.133);
+Window.SetBackgroundBottomColor(0.031, 0.102, 0.067);
+
+logo.image = Image("logo.png");
+logo.image = logo.image.Scale(720, 240);
+logo.sprite = Sprite(logo.image);
+
+# Recenter when the display becomes available or its dimensions change.
+fun refresh_callback ()
+{
+    logo.sprite.SetPosition(
+        Window.GetX() + (Window.GetWidth() - logo.image.GetWidth()) / 2,
+        Window.GetY() + (Window.GetHeight() - logo.image.GetHeight()) / 2,
+        0);
+}
+
+refresh_callback();
+Plymouth.SetRefreshFunction(refresh_callback);

@@ -1,0 +1,24 @@
+/*
+ * Copyright (C) 2025 Red Hat, Inc.
+ * SPDX-License-Identifier: LGPL-2.1-or-later
+ */
+@import "global-variables";
+@import "../../styles/cockpit-iframe-backdrop";
+
+.network-configuration-page-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-t--global--spacer--md);
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.network-configuration-iframe {
+  width: 100%;
+  min-height: 32rem;
+  flex: 1;
+  border-radius: var(--pf-t--global--border--radius--medium);
+  border: var(--pf-t--global--border--width--box--default) solid var(--pf-t--global--border--color--default);
+  background-clip: content-box;
+}

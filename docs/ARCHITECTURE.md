@@ -209,7 +209,7 @@ The documentation is intentionally split by purpose:
 - [STORAGE.md](STORAGE.md) — storage and migration
 - [RESTORE.md](RESTORE.md) — Minecraft-data recovery
 - [BUILD.md](BUILD.md) — image composition, CI, signing, and release mechanics
-- [JustVoxel ISO Builder](https://github.com/home-server-project/justvoxel-iso) — fresh installation, hardware/disk guidance, installation access, and installer-media creation
+- [Installation guide](INSTALLER.md) and [installer design](INSTALLER-DESIGN.md) — fresh installation, hardware/disk guidance, installation access, and installer-media creation
 
 The design goal is straightforward: a normal user should be able to install and operate JustVoxel without deep Linux administration knowledge, while the full underlying system remains available to administrators who want it.
 

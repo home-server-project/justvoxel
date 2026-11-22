@@ -56,6 +56,12 @@ A push to `main`, a manual dispatch on `main`, or the Saturday 08:00 UTC schedul
 
 CI rechunks Development and both products with a target of 127 layers and enforces a 128-layer limit. Published image digests are signed and verified with Cosign.
 
+## ISO
+
+After Stable publishes both products, manually dispatch **ISO** from `main`. The workflow builds the installer from this repository’s `installer/` at the dispatched revision. It checks both current stable tags with `cosign.pub` before building. At installation time, the wizard downloads the selected VM or HWS `:stable` image from GHCR. A later installation can therefore receive a newer stable image.
+
+The workflow uploads one Actions artifact containing the ISO and its SHA256 checksum for 90 days. See the [installation guide](INSTALLER.md) and [installer design](INSTALLER-DESIGN.md).
+
 ## Local development
 
 The human-run `jv-build.sh` builds and validates `justvoxel-dev:local` on the development VM. It publishes to `192.168.125.100:5000/justvoxel-dev` with an immutable `local-YYYYMMDD-HHMMSS-<short-commit>` tag and moves `local` to the signed digest. The local registry cleanup retains the newest two immutable builds and protects digests referenced by retained tags.
