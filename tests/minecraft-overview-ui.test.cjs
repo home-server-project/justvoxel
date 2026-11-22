@@ -1,0 +1,727 @@
+// Approved Minecraft presentation and existing-endpoint coordination regressions.
+const assert = require('node:assert/strict');
+const {readFileSync, englishPresentationSource} = require('./helpers/webui-i18n.cjs');
+const {test} = require('node:test');
+const vm = require('node:vm');
+const read = name => readFileSync(`${__dirname}/../webui/internal/server/${name}`, 'utf8');
+const source = read('static/app.js');
+const css = read('static/app.css');
+const header = read('templates/header.html');
+const between = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
+const overview = between('  const renderOverview =', '  const formatRemainingMemory =');
+const deletion = between('  const openDeleteDialog =', '  const renderOverview =');
+const workspaceRequests = between('  const requestWorkspaceJSON =', '  const openDeleteDialog =');
+const workspaceReload = between('  async function loadCurrentTab', '  const selectTab =');
+const servers = read('static/minecraft-servers.js');
+const gameplay = between('    } else if (tab === "gameplay")', '    } else if (tab === "crossplay")');
+
+test('Minecraft navigation orders Recent logs after Overview with operator-plus permissions', () => {
+  const nav = header.slice(header.indexOf('<nav class="minecraft-workspace-tabs"'), header.indexOf('<div class="minecraft-workspace-body">'));
+  assert.deepEqual([...nav.matchAll(/data-minecraft-tab="([^"]+)"[^>]*>([^<]+)/g)].map(m => [m[1], m[2]]),
+    [['overview', 'Overview'], ['logs', 'Recent logs'], ['memory', 'Memory'], ['gameplay', 'Gameplay'], ['players', 'Players'], ['crossplay', 'Cross-play'], ['rcon', 'RCON']]);
+  assert.match(nav, /class="nav-operator-plus"[^>]*data-minecraft-tab="logs"/);
+  assert.match(source, /else if \(currentTab === "logs"\) await renderLogs\(sequence, message\)/);
+  assert.match(between('  const renderLogs =', '  async function loadCurrentTab'), /requestWorkspaceJSON\("\/api\/minecraft\/workspace\/logs"\)/);
+  assert.doesNotMatch(overview, /workspace\/logs|Recent logs|log-box/);
+});
+
+test('Overview puts Online directly after summary and uses the same label typography', () => {
+  const grid = overview.indexOf('root.appendChild(grid)');
+  const online = overview.indexOf('root.appendChild(playerLine)');
+  const admin = overview.indexOf('if (document.body.classList.contains("role-administrator"))');
+  assert.ok(grid >= 0 && grid < online && online < admin);
+  assert.match(overview, /playerLabel.className = "minecraft-summary-label"/);
+  const label = css.match(/\.minecraft-overview-playerline>\.minecraft-summary-label\{([^}]+)\}/)[1];
+  for (const declaration of ['font-size:.72rem', 'font-weight:800', 'letter-spacing:.05em', 'text-transform:uppercase', 'color:var(--jv-muted)']) {
+    assert.ok(label.includes(declaration));
+    assert.ok(css.includes(declaration));
+  }
+});
+
+test('Overview uses the setup-style toggle, combined framed Save and compact delete', () => {
+  assert.doesNotMatch(overview, /<select|>Rename<|Danger zone|Type the current server name|name="confirm_name"/);
+  assert.match(overview, /date-time-switch" type="checkbox" role="switch" name="start_on_boot"/);
+  assert.match(overview, /lane.className = "minecraft-overview-lifecycle"/);
+  assert.match(overview, /start_on_boot: String\(requested\)/);
+  assert.doesNotMatch(overview, />Review changes</);
+  assert.match(overview, /minecraft-overview-details/);
+  assert.match(overview, /minecraft-native-grid.*Server name.*Server welcome message \(MOTD\).*minecraft-native-actions.*>Save</);
+  assert.equal((overview.match(/>Save</g) || []).length, 1);
+  assert.doesNotMatch(gameplay, /Server welcome message|<label[^>]*>.*MOTD/);
+  assert.match(gameplay, /Maximum players/);
+  assert.match(gameplay, /Game mode/);
+  assert.match(gameplay, /name="motd" type="hidden"/);
+  assert.match(overview, /title.textContent = `Delete \$\{name\}`/);
+  assert.match(css, /\.minecraft-overview-delete h3\{[^}]*color:var\(--jv-error\);font-weight:800/);
+  assert.match(overview, /remove.addEventListener\("click", \(\) => openDeleteDialog\(name, description, sequence\)\)/);
+  assert.match(overview, /Permanently removes this active server and its world data\. Existing backup archives are preserved as historical archives\./);
+});
+
+test('Cross-play reuses Version opener inline and diagnostic reports share a scoped gap', () => {
+  const crossplay = between('    } else if (tab === "crossplay")', '    const actions = document.createElement("div");');
+  assert.ok(crossplay.indexOf('if (!status.managed_crossplay_available)') < crossplay.indexOf('shortcut.innerHTML'));
+  assert.match(crossplay, /shortcut.innerHTML = .*· open.*data-open-version>Version</);
+  assert.ok(source.includes('node.textContent = `Cross-play enabled · Minecraft ${installed} · Geyser/Floodgate compatible with ${status.geyser_supported_version}`;'));
+  assert.match(source, /querySelector\('\[data-open-version\]'\).*document.querySelector\("\[data-version-open\]"\)\?\.click\(\)/);
+  assert.match(css, /\.minecraft-crossplay-status\{[^}]*flex-wrap:wrap/);
+  assert.doesNotMatch(source, /generateSupport.className = "secondary"/);
+  assert.match(source, /generateSupport.textContent = "Generate support report"/);
+  assert.doesNotMatch(source, /Create a local network diagnostics report for troubleshooting or attaching to a JustVoxel GitHub issue\./);
+  assert.doesNotMatch(source, /networkDescription/);
+  assert.match(source, /fileList.className = selectedGroup === "Network" \|\| selectedGroup === "Support"\s*\? "system-logs-list system-diagnostic-report-files" : "system-logs-list"/);
+  assert.match(css, /\.system-logs-list.system-diagnostic-report-files\{margin-top:\.8rem\}/);
+  assert.doesNotMatch(header + read('templates/dashboard.html'), /(?:href|src)="[^"']*setup\.css/);
+});
+
+// Minimal DOM for the production Overview and deletion functions, including forms
+// inserted through innerHTML. No browser or extra dependency is needed.
+class Element {
+  constructor(tag) {
+    this.tag = tag; this.children = []; this.events = {}; this.attrs = {}; this.dataset = {};
+    this.value = ''; this.checked = false; this.disabled = false;
+    this.style = {setProperty() {}};
+    this.classList = {contains: name => name === 'role-administrator', toggle() {}};
+  }
+  append(...nodes) { nodes.forEach(node => { node.parentElement = this; this.children.push(node); }); }
+  appendChild(node) { this.append(node); }
+  prepend(node) { node.parentElement = this; this.children.unshift(node); }
+  replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
+  setAttribute(key, value) { this.attrs[key] = value; }
+  addEventListener(name, fn) { this.events[name] = fn; }
+  all() { return [this, ...this.children.flatMap(node => node.all())]; }
+  matches(selector) {
+    if (selector.startsWith('[')) {
+      const [, key, value] = selector.match(/^\[([^=\]]+)(?:="([^"]*)")?\]$/);
+      const dataKey = key.startsWith('data-') ? key.slice(5).replace(/-([a-z])/g, (_, c) => c.toUpperCase()) : null;
+      const actual = this.attrs[key] ?? (dataKey ? this.dataset[dataKey] : undefined);
+      return actual !== undefined && (value === undefined || actual === value);
+    }
+    return this.tag === selector;
+  }
+  closest(selector) {
+    for (let node = this; node; node = node.parentElement) if (node.matches(selector)) return node;
+    return null;
+  }
+  querySelector(selector) { return this.all().slice(1).find(node => node.matches(selector)); }
+  querySelectorAll(selector) {
+    if (selector.startsWith('[data-destructive-confirmation]')) return this.all().filter(node => node.matches('[data-destructive-confirmation]') && !node.dataset.destructiveReady);
+    return this.all().slice(1).filter(node => node.matches(selector));
+  }
+  closest(selector) { return this.matches(selector) ? this : this.parentElement?.closest(selector); }
+  get elements() { return Object.fromEntries(this.all().filter(node => node.attrs.name).map(node => [node.attrs.name, node])); }
+  set innerHTML(html) {
+    this.children = []; const stack = [this];
+    for (const match of html.matchAll(/<\/?([\w-]+)([^>]*)>/g)) {
+      if (match[0].startsWith('</')) { stack.pop(); continue; }
+      const node = new Element(match[1]);
+      for (const attr of match[2].matchAll(/([\w-]+)(?:="([^"]*)")?/g)) {
+        node.attrs[attr[1]] = attr[2] ?? '';
+        if (attr[1].startsWith('data-')) node.dataset[attr[1].slice(5).replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = attr[2] ?? '';
+      }
+      node.value = node.attrs.value || ''; node.disabled = Object.hasOwn(node.attrs, 'disabled');
+      stack.at(-1).append(node);
+      if (!['input', 'br', 'hr'].includes(node.tag)) stack.push(node);
+    }
+  }
+  showModal() { this.open = true; }
+  close() { this.open = false; this.events.close?.(); }
+  remove() {
+    if (!this.parentElement) return;
+    this.parentElement.children = this.parentElement.children.filter(child => child !== this);
+    this.parentElement = null;
+  }
+}
+const submit = {preventDefault() {}};
+function harness({
+  networkMember = false, savedStartOnBoot = true, motd = 'Old welcome',
+  plan = {review: 'real-fingerprint', warnings: ['The server stays stopped. Start it normally when ready.']},
+  apply = {applied: true}, renameError, deleteError, runtimeState = 'stopped',
+  lifecycle = {ok: true}, lifecycleStatus = 200, restoreRuntime, renderOnRefresh = false,
+} = {}) {
+  const calls = [], reviews = [], redirects = [];
+  const body = new Element('body'), content = new Element('content'), state = {};
+  let reloads = 0, refreshes = 0, selectedID = 'jv-family1';
+  const context = vm.createContext({
+    URLSearchParams, document: {body, createElement: tag => new Element(tag), querySelector: () => null, querySelectorAll: () => []}, content, state,
+    csrf: 'csrf-token', loadSequence: 1, justVoxelSelectionGeneration: {minecraft: 0},
+    currentTab: 'overview', settingsTabs: new Set(), refreshButton: null,
+    justVoxelSelectionReady: Promise.resolve(),
+    justVoxelSelectedURL: url => url.includes('?server=') ? url : url + '?server=' + selectedID,
+    justVoxelStaleSelection: () => Object.assign(new Error('Selection changed'), {staleSelection: true}),
+    window: {location: {reload() { reloads++; }, assign(url) { redirects.push(url); }}, addEventListener() {}, removeEventListener() {}},
+    messageNode: text => Object.assign(new Element('p'), {textContent: text}), noticeNode: text => Object.assign(new Element('p'), {textContent: text}),
+    settingsParams() { return new URLSearchParams({csrf: 'csrf-token', tab: 'overview'}); },
+    renderSettingsReview: (...args) => reviews.push(args),
+    loadCurrentTab: async () => {
+      refreshes++;
+      return renderOnRefresh ? context.reloadOverview() : ++context.loadSequence;
+    },
+    fetch: async (url, options) => {
+      calls.push({url, body: options.body, method: options.method});
+      const path = url.split('?')[0];
+      let status = 200, payload;
+      if (path.endsWith('/snapshot')) payload = {status: {minecraft: {configured: true, state: runtimeState}}, players: {online: 0}};
+      else if (path.endsWith('/selection')) payload = {selected: {id: selectedID, name: 'Family'}, servers: [{id: selectedID, name: 'Family'}]};
+      else if (path.endsWith('/settings')) payload = {configured: true, minecraft: {motd, max_players: 23, game_mode: 'creative', start_on_boot: savedStartOnBoot, network_member: networkMember}};
+      else if (path.endsWith('/lifecycle')) {
+        status = lifecycleStatus;
+        payload = typeof lifecycle === 'function' ? await lifecycle() : lifecycle;
+      } else if (path.endsWith('/install/restore-runtime')) [status, payload] = await restoreRuntime();
+      else if (path.endsWith('/plan')) payload = typeof plan === 'function' ? await plan() : plan;
+      else if (path.endsWith('/apply')) payload = apply;
+      else if (path.endsWith('/rename')) { if (renameError) throw new Error(renameError); payload = {redirect: '/rename-is-not-delete'}; }
+      else if (path.endsWith('/delete')) { if (deleteError) throw new Error(deleteError); payload = {redirect: '/?deleted=1'}; }
+      else throw new Error(`Unexpected ${url}`);
+      return {status, ok: status < 400, json: async () => payload};
+    },
+  });
+  const shared = between('const initDestructiveConfirmations =', 'const initializeSharedWebUIControls =');
+  const sharedDelete = between('globalThis.justVoxelOpenDeleteServer =', 'const minecraftDialog =');
+  vm.runInContext(servers + shared + sharedDelete + workspaceRequests + deletion + overview +
+    '\nglobalThis.render = renderOverview; globalThis.openDelete = openDeleteDialog; globalThis.init = initDestructiveConfirmations;' +
+    `\nglobalThis.reloadOverview = (${workspaceReload});`, context);
+  return {context, body, content, state, calls, reviews, redirects,
+    setRuntime(value) { runtimeState = value; },
+    selectServer(id) { selectedID = id; context.justVoxelSelectionGeneration.minecraft++; },
+    get reloads() { return reloads; }, get refreshes() { return refreshes; }};
+}
+async function editDetails(r, name = 'New family') {
+  await r.context.render(1);
+  const form = r.content.all().find(node => node.tag === 'form' && node.elements.display_name);
+  assert.equal(form.elements.display_name.value, 'Family');
+  assert.equal(form.elements.motd.value, 'Old welcome');
+  form.elements.display_name.value = name; form.elements.motd.value = 'New welcome';
+  await form.events.submit(submit);
+}
+
+test('Save plans and applies MOTD with current gameplay and real review before selected rename', async () => {
+  const r = harness(); await editDetails(r);
+  const mutations = r.calls.filter(call => call.body);
+  assert.deepEqual(mutations.map(call => call.url), ['plan', 'apply', 'rename'].map(action => `/api/minecraft/workspace/${action === 'rename' ? action : 'settings/' + action}?server=jv-family1`));
+  for (const call of mutations.slice(0, 2)) {
+    assert.equal(call.body.get('motd'), 'New welcome'); assert.equal(call.body.get('max_players'), '23');
+    assert.equal(call.body.get('game_mode'), 'creative'); assert.equal(call.body.get('tab'), 'gameplay');
+    assert.equal(call.body.has('confirm_players'), false);
+  }
+  assert.equal(mutations[1].body.get('review'), 'real-fingerprint');
+  assert.equal(mutations[2].body.get('display_name'), 'New family');
+  assert.equal(r.reloads, 1); assert.deepEqual(r.redirects, []);
+});
+
+for (const safety of [{confirmation_required: true}, {restart_required: true}, {memory_restart_required: true}]) {
+  test(`Save presents existing review for ${Object.keys(safety)[0]}`, async () => {
+    const r = harness({plan: {review: 'fingerprint', ...safety}}); await editDetails(r);
+    assert.equal(r.reviews.length, 1);
+    assert.equal(r.calls.some(call => /\/apply|\/rename/.test(call.url)), false);
+    assert.equal(typeof r.reviews[0][3].onApplied, 'function');
+    assert.equal(r.reloads, 0);
+  });
+}
+
+test('Partial save failure reloads authoritative state and displays rename error without success', async () => {
+  const r = harness({renameError: 'Name already used.'}); await editDetails(r);
+  assert.ok(r.calls.some(call => call.url.includes('/apply')));
+  assert.ok(r.calls.at(-1).url.includes('/selection'));
+  assert.equal(r.refreshes, 1); assert.equal(r.state.textContent, 'Name already used.'); assert.equal(r.reloads, 0);
+});
+
+test('Unapplied settings do not rename or claim success; unexpected confirmation presents review', async () => {
+  const failure = harness({apply: {applied: false, error: 'Settings changed.'}}); await editDetails(failure);
+  assert.equal(failure.calls.some(call => call.url.includes('/rename')), false);
+  assert.equal(failure.state.textContent, 'Settings changed.'); assert.equal(failure.reloads, 0);
+  const review = harness({apply: {applied: false, confirmation_required: true}}); await editDetails(review);
+  assert.equal(review.reviews.length, 1); assert.equal(review.reloads, 0);
+});
+
+for (const deleteError of [undefined, 'Stop this server normally before deleting.']) {
+  test(`Delete uses shared two-stage gate and authoritative name: ${deleteError ? 'recoverable error' : 'redirect'}`, async () => {
+    const r = harness({deleteError}); r.context.openDelete('Family', 'Deletion description', 1);
+    const dialog = r.body.children[0], form = dialog.querySelector('form');
+    assert.equal(dialog.open, true); assert.equal(r.calls.length, 0);
+    // Mirrors the existing MutationObserver initializing inserted controls.
+    r.context.init(dialog);
+    const slider = dialog.querySelector('[data-destructive-slider]'), toggle = dialog.querySelector('[data-destructive-toggle]');
+    const apply = dialog.querySelector('[data-destructive-submit]');
+    assert.equal(apply.disabled, true);
+    await form.events.submit(submit); assert.equal(r.calls.length, 0);
+    toggle.checked = true; toggle.events.change(); assert.equal(apply.disabled, true);
+    slider.value = '100'; slider.events.input(); toggle.checked = false; toggle.events.change();
+    assert.equal(apply.disabled, true); await form.events.submit(submit); assert.equal(r.calls.length, 0);
+    toggle.checked = true; toggle.events.change(); assert.equal(apply.disabled, false);
+    await form.events.submit(submit);
+    assert.equal(r.calls[0].body.get('confirm_name'), 'Family');
+    assert.equal(r.calls[0].url, '/api/minecraft/workspace/delete?server=jv-family1');
+    if (deleteError) {
+      assert.deepEqual(r.redirects, []); assert.equal(dialog.open, true);
+      assert.equal(dialog.querySelector('[data-delete-error]').textContent, deleteError);
+      assert.equal(apply.disabled, false); assert.equal(slider.disabled, false);
+    } else assert.deepEqual(r.redirects, ['/?deleted=1']);
+  });
+}
+
+test('Cancel and X dismiss without requests; stale selection cannot delete', async () => {
+  for (const selector of ['[data-delete-close]', '[data-delete-cancel]']) {
+    const r = harness(); r.context.openDelete('Family', '', 1);
+    const dialog = r.body.children[0];
+    dialog.querySelector(selector).events.click();
+    assert.equal(dialog.open, false); assert.equal(r.body.children.length, 0); assert.equal(r.calls.length, 0);
+  }
+  const r = harness(); r.context.openDelete('Family', '', 1);
+  const dialog = r.body.children[0];
+  dialog.querySelector('[data-destructive-slider]').value = '100';
+  dialog.querySelector('[data-destructive-toggle]').checked = true;
+  r.context.justVoxelSelectionGeneration.minecraft++;
+  await dialog.querySelector('form').events.submit(submit);
+  assert.equal(r.calls.length, 0);
+});
+
+test('Production workspace requests keep rename and settings scoped to the selected immutable ID', async () => {
+  const urls = [];
+  const context = vm.createContext({
+    URL, URLSearchParams, document: {querySelector: () => null},
+    location: {origin: 'https://example.test', search: '?server=jv-family1'},
+    fetch: async url => { urls.push(url); return {ok: true, status: 200, json: async () => ({ok: true})}; },
+  });
+  const selectedURLs = source.slice(0, source.indexOf('globalThis.justVoxelServerSelection ='));
+  const requests = between('  const requestWorkspaceJSON =', '  const openDeleteDialog =');
+  vm.runInContext(selectedURLs + requests + '\nglobalThis.request = requestWorkspaceJSON;', context);
+  for (const action of ['rename', 'settings/plan', 'settings/apply']) {
+    await context.request(`/api/minecraft/workspace/${action}`, {method: 'POST', body: new URLSearchParams({display_name: 'New name'})});
+  }
+  assert.deepEqual(urls, ['rename', 'settings/plan', 'settings/apply'].map(action => `/api/minecraft/workspace/${action}?server=jv-family1`));
+});
+
+test('Empty MOTD blocks both operations and unchanged name skips rename', async () => {
+  const empty = harness(); await empty.context.render(1);
+  const form = empty.content.all().find(node => node.tag === 'form' && node.elements.display_name);
+  form.elements.motd.value = '   ';
+  await form.events.submit(submit);
+  assert.equal(empty.calls.some(call => call.body), false);
+  assert.equal(empty.state.textContent, 'Server welcome message is required.');
+  const unchanged = harness(); await editDetails(unchanged, 'Family');
+  assert.equal(unchanged.calls.some(call => call.url.includes('/rename')), false);
+  assert.equal(unchanged.reloads, 1);
+});
+
+test('Overview places both exact switch labels in one wrapping lane', () => {
+  const lane = overview.slice(overview.indexOf('lane.innerHTML ='), overview.indexOf('const runtimeState'));
+  assert.match(lane, />Server running</);
+  assert.match(lane, />Start on Boot</);
+  assert.equal((lane.match(/role="switch"/g) || []).length, 2);
+  assert.doesNotMatch(lane, />Server<|Review changes/);
+  assert.match(css, /\.minecraft-overview-lifecycle\{display:flex;flex-wrap:wrap;gap:/);
+  assert.match(css, /\.minecraft-overview-lifecycle>\.minecraft-overview-boot-card\{flex:1 1 260px\}/);
+});
+
+test('Start on Boot immediately plans and applies the real fingerprint for the immutable selection', async () => {
+  const r = harness(); await r.context.render(1);
+  const boot = r.content.querySelector('[name="start_on_boot"]');
+  boot.checked = false;
+  await boot.events.change();
+  const mutations = r.calls.filter(call => call.body);
+  assert.deepEqual(mutations.map(call => call.url), ['plan', 'apply'].map(action => `/api/minecraft/workspace/settings/${action}?server=jv-family1`));
+  assert.equal(mutations[0].body.get('start_on_boot'), 'false');
+  assert.equal(mutations[1].body.get('review'), 'real-fingerprint');
+  assert.equal(mutations[1].body.get('csrf'), 'csrf-token');
+  assert.equal(mutations[1].body.get('tab'), 'overview');
+  assert.equal(mutations[1].body.has('confirm_players'), false);
+  assert.equal(boot.checked, true);
+  assert.equal(r.refreshes, 1);
+  assert.equal(r.reviews.length, 0);
+});
+
+for (const condition of ['confirmation_required', 'restart_required', 'memory_restart_required', 'compatibility_blocked']) {
+  test(`Start on Boot refuses ${condition} without fabricating confirmation`, async () => {
+    const r = harness({plan: {review: 'real', [condition]: true, warnings: ['Stop the server before changing this setting.']}});
+    await r.context.render(1);
+    const boot = r.content.querySelector('[name="start_on_boot"]');
+    boot.checked = false; await boot.events.change();
+    assert.equal(r.calls.some(call => call.url.includes('/apply')), false);
+    assert.equal(boot.checked, true);
+    assert.equal(r.refreshes, 1);
+    assert.equal(r.state.textContent, 'Stop the server before changing this setting.');
+    assert.equal(r.reviews.length, 0);
+  });
+}
+
+for (const apply of [{applied: false, error: 'Settings changed. Review again.'}, {applied: false, confirmation_required: true, message: 'Players must leave first.'}]) {
+  test(`Start on Boot reloads after apply refusal: ${apply.error || apply.message}`, async () => {
+    const r = harness({apply}); await r.context.render(1);
+    const boot = r.content.querySelector('[name="start_on_boot"]');
+    boot.checked = false; await boot.events.change();
+    assert.equal(r.refreshes, 1);
+    assert.equal(boot.checked, true);
+    assert.equal(r.state.textContent, apply.error || apply.message);
+    assert.equal(r.reviews.length, 0);
+  });
+}
+
+test('Missing fingerprint and transport errors reload without applying', async () => {
+  for (const plan of [{}, () => { throw new Error('Settings are unavailable.'); }]) {
+    const r = harness({plan}); await r.context.render(1);
+    const boot = r.content.querySelector('[name="start_on_boot"]');
+    boot.checked = false; await boot.events.change();
+    assert.equal(r.calls.some(call => call.url.includes('/apply')), false);
+    assert.equal(r.refreshes, 1);
+    assert.equal(boot.checked, true);
+    assert.ok(r.state.textContent);
+  }
+});
+
+for (const runtimeState of ['running', 'stopped', 'starting', 'stopping', 'unavailable', 'failed', 'recovery_required', 'unknown']) {
+  test(`Overview running switch follows authoritative ${runtimeState}`, async () => {
+    const r = harness({runtimeState}); await r.context.render(1);
+    const running = r.content.querySelector('[name="server_running"]');
+    assert.equal(running.checked, runtimeState === 'running');
+    assert.equal(running.disabled, !['running', 'stopped'].includes(runtimeState));
+    assert.equal(r.content.querySelector('[name="start_on_boot"]').disabled, !['running', 'stopped'].includes(runtimeState));
+    running.checked = !running.checked;
+    await running.events.change();
+    const mutations = r.calls.filter(call => call.body);
+    if (['running', 'stopped'].includes(runtimeState)) {
+      assert.equal(mutations.length, 1);
+      assert.equal(mutations[0].url, '/api/minecraft/servers/lifecycle?server=jv-family1');
+      assert.equal(mutations[0].body.get('action'), runtimeState === 'running' ? 'stop' : 'start');
+      assert.equal(mutations[0].body.get('csrf'), 'csrf-token');
+      assert.equal(r.refreshes, 1);
+    } else assert.equal(mutations.length, 0);
+    const lifecycle = overview.slice(overview.indexOf('const lane ='), overview.indexOf('const details ='));
+    assert.doesNotMatch(lifecycle, /kill|force|confirm_players/i);
+  });
+}
+
+test('Pending operation disables both switches and keeps authoritative values', async () => {
+  let resolve;
+  const r = harness({lifecycle: () => new Promise(done => { resolve = done; })});
+  await r.context.render(1);
+  const running = r.content.querySelector('[name="server_running"]');
+  const boot = r.content.querySelector('[name="start_on_boot"]');
+  running.checked = true;
+  const request = running.events.change();
+  assert.equal(running.checked, false);
+  assert.equal(running.disabled, true);
+  assert.equal(boot.disabled, true);
+  assert.equal(r.refreshes, 0);
+  // The real JSON request waits for selection readiness before dispatch.
+  await new Promise(done => setImmediate(done));
+  resolve({ok: true}); await request;
+  assert.equal(r.refreshes, 1);
+});
+
+test('Lifecycle failure reloads and reports the real error', async () => {
+  const r = harness({lifecycle: () => { throw new Error('Memory admission refused.'); }});
+  await r.context.render(1);
+  const running = r.content.querySelector('[name="server_running"]');
+  running.checked = true; await running.events.change();
+  assert.equal(running.checked, false);
+  assert.equal(r.refreshes, 1);
+  assert.equal(r.state.textContent, 'Memory admission refused.');
+});
+
+const recoveryInstanceID = 'jv-family1';
+const recoveryOperationID = '12345678-1234-4123-8123-123456789abc';
+const lifecycleURL = '/api/minecraft/servers/lifecycle?server=' + recoveryInstanceID;
+const restoreRuntimeURL = '/api/plugins/workspace/install/restore-runtime?server=' + recoveryInstanceID;
+const pluginRecovery = action => ({
+  id: recoveryInstanceID,
+  recovery_required: true,
+  recovery_kind: 'plugin_install',
+  recovery_operation_id: recoveryOperationID,
+  recovery_action: action,
+});
+const restoreBody = {csrf: 'csrf-token', operation_id: recoveryOperationID, restore_runtime: 'true'};
+const mutationsIn = r => r.calls.filter(call => call.method === 'POST').map(call => [call.url, Object.fromEntries(call.body)]);
+
+for (const action of ['start', 'stop']) {
+  test(`Overview offers explicit ${action} recovery and reloads the selected server on resolution`, async () => {
+    const recovery = pluginRecovery(action);
+    const stop = action === 'stop';
+    const replies = stop ? [[409, {...recovery, confirmation_required: true, online: 2, players: ['Alex', 'Steve']}]] : [];
+    const r = harness({
+      runtimeState: stop ? 'running' : 'stopped',
+      lifecycle: recovery, lifecycleStatus: 409, renderOnRefresh: true,
+      restoreRuntime: () => {
+        if (replies.length) return replies.shift();
+        r.setRuntime(stop ? 'stopped' : 'running');
+        return [200, {operation: {instance_id: recoveryInstanceID, operation_id: recoveryOperationID, state: 'resolved'}}];
+      },
+    });
+    await r.context.render(1);
+    const running = r.content.querySelector('[name="server_running"]');
+    running.checked = !stop;
+    await running.events.change();
+    assert.equal(running.checked, stop);
+    const refreshed = r.content.querySelector('[name="server_running"]');
+    assert.notEqual(refreshed, running);
+    assert.equal(refreshed.checked, stop);
+    assert.equal(r.refreshes, 1);
+    assert.equal(r.state.textContent, '');
+    const lifecyclePost = [lifecycleURL, {csrf: 'csrf-token', action}];
+    assert.deepEqual(mutationsIn(r), [lifecyclePost]);
+
+    const dialog = r.body.children[0];
+    assert.equal(dialog.open, true);
+    assert.equal(dialog.querySelector('h2').textContent, 'Minecraft recovery required');
+    const apply = dialog.querySelector('button'), details = dialog.querySelector('a');
+    assert.equal(apply.textContent, (stop ? 'Stop' : 'Start') + ' Minecraft and re-check');
+    assert.equal(details.textContent, 'Open recovery details');
+    assert.equal(details.href, '/?workspace=plugins&server=' + recoveryInstanceID);
+    await apply.events.click();
+    const expected = [lifecyclePost, [restoreRuntimeURL, restoreBody]];
+    assert.deepEqual(mutationsIn(r), expected);
+    if (stop) {
+      assert.equal(dialog.open, true);
+      assert.equal(r.refreshes, 1);
+      assert.equal(apply.textContent, 'Confirm stop and re-check');
+      assert.match(dialog.querySelector('[role="status"]').textContent, /Players online \(2\).*Alex, Steve/);
+      await apply.events.click();
+      assert.deepEqual(mutationsIn(r), [...expected, [restoreRuntimeURL, {...restoreBody, confirm_players: 'true'}]]);
+    }
+    assert.equal(r.refreshes, 2);
+    assert.equal(r.content.querySelector('[name="server_running"]').checked, !stop);
+    assert.equal(dialog.open, false);
+    assert.equal(r.body.children.length, 0);
+  });
+}
+
+test('Overview treats unrelated maintenance and a different server as ordinary lifecycle refusals', async () => {
+  const message = 'Maintenance requires attention.';
+  for (const lifecycle of [
+    {error: message},
+    {...pluginRecovery('start'), recovery_kind: 'migration_import', error: message},
+    {...pluginRecovery('start'), id: 'jv-kids001', error: message},
+  ]) {
+    const r = harness({lifecycle, lifecycleStatus: 409, renderOnRefresh: true});
+    await r.context.render(1);
+    const running = r.content.querySelector('[name="server_running"]');
+    running.checked = true;
+    await running.events.change();
+    assert.equal(r.content.querySelector('[name="server_running"]').checked, false);
+    assert.equal(r.refreshes, 1);
+    assert.equal(r.state.textContent, message);
+    assert.equal(r.body.children.length, 0);
+    assert.deepEqual(mutationsIn(r), [[lifecycleURL, {csrf: 'csrf-token', action: 'start'}]]);
+  }
+});
+
+test('Overview cannot recover an old transaction after the selected server changes', async () => {
+  const r = harness({lifecycle: pluginRecovery('start'), lifecycleStatus: 409, renderOnRefresh: true});
+  await r.context.render(1);
+  const running = r.content.querySelector('[name="server_running"]');
+  running.checked = true;
+  await running.events.change();
+  const dialog = r.body.children[0];
+  assert.equal(dialog.open, true);
+  r.selectServer('jv-kids001');
+  await dialog.querySelector('button').events.click();
+  assert.deepEqual(mutationsIn(r), [[lifecycleURL, {csrf: 'csrf-token', action: 'start'}]]);
+  assert.equal(dialog.open, false);
+  assert.equal(r.body.children.length, 0);
+});
+
+test('Overview ignores lifecycle recovery received after selection changes', async () => {
+  let resolve;
+  const lifecycle = new Promise(done => { resolve = done; });
+  const r = harness({lifecycle: () => lifecycle, lifecycleStatus: 409, renderOnRefresh: true});
+  await r.context.render(1);
+  const running = r.content.querySelector('[name="server_running"]');
+  running.checked = true;
+  const request = running.events.change();
+  await new Promise(done => setImmediate(done));
+  assert.deepEqual(mutationsIn(r), [[lifecycleURL, {csrf: 'csrf-token', action: 'start'}]]);
+  r.selectServer('jv-kids001');
+  resolve(pluginRecovery('start'));
+  await request;
+  assert.equal(r.refreshes, 0);
+  assert.equal(r.body.children.length, 0);
+});
+
+test('Selection changes during planning cannot apply the previous server plan', async () => {
+  let resolve;
+  const r = harness({plan: () => new Promise(done => { resolve = done; })});
+  await r.context.render(1);
+  const boot = r.content.querySelector('[name="start_on_boot"]');
+  boot.checked = false;
+  const request = boot.events.change();
+  await new Promise(done => setImmediate(done));
+  assert.equal(typeof resolve, 'function');
+  r.context.justVoxelSelectionGeneration.minecraft++;
+  r.context.loadSequence++;
+  resolve({review: 'previous-server'}); await request;
+  assert.equal(r.calls.some(call => call.url.includes('/apply')), false);
+  assert.equal(r.refreshes, 0);
+});
+
+test('Recent logs has an uninterrupted Health-style flex chain and overrides the general log ceiling', () => {
+  assert.match(between('  const renderLogs =', '  async function loadCurrentTab'), /root.className = "minecraft-recent-logs-view"/);
+  for (const selector of ['.minecraft-workspace-body:has(.minecraft-recent-logs-view)', '.minecraft-workspace-content:has(.minecraft-recent-logs-view)', '.minecraft-recent-logs-view', '.minecraft-recent-logs-view>.panel']) {
+    const start = css.indexOf(selector + '{');
+    const rule = css.slice(start, css.indexOf('}', start));
+    assert.match(rule, /display:flex/);
+    assert.match(rule, /flex:1/);
+    assert.match(rule, /min-height:0/);
+  }
+  const selector = '.minecraft-workspace-content .minecraft-recent-logs-view .log-box';
+  const start = css.indexOf(selector + '{');
+  assert.ok(start > css.indexOf('.minecraft-workspace-content .log-box{max-height:430px'));
+  const rule = css.slice(start, css.indexOf('}', start));
+  for (const declaration of ['flex:1', 'min-height:0', 'max-height:none', 'overflow:auto']) assert.ok(rule.includes(declaration));
+  assert.match(css, /\.system-health-view>\.panel\{display:flex;flex:1;min-height:0;flex-direction:column;margin:0!important;overflow:hidden\}/);
+  assert.match(css, /\.system-health-view>\.panel \.log-box\{flex:1;min-height:120px;max-height:none\}/);
+});
+
+test('Recent logs reuses the System Health inline baseline heading geometry', () => {
+  const logs = between('  const renderLogs =', '  async function loadCurrentTab');
+  assert.match(logs, /heading.className = "section-heading"/);
+  assert.match(logs, /headingText.append\(eyebrow, title\)/);
+  assert.match(logs, /eyebrow.textContent = "Diagnostics"/);
+  assert.match(logs, /title.textContent = "Recent Minecraft logs"/);
+  assert.match(css, /\.system-workspace-content \.panel>\.section-heading>div:first-child,\.minecraft-recent-logs-view>\.panel>\.section-heading>div:first-child\{display:flex;align-items:baseline;gap:\.4rem;flex-wrap:wrap\}/);
+  assert.match(css, /\.minecraft-recent-logs-view>\.panel>\.section-heading\{margin-bottom:\.35rem\}/);
+  assert.match(css, /\.minecraft-recent-logs-view>\.panel>\.section-heading :is\(h2,\.eyebrow\)\{margin:0\}/);
+});
+
+test('Running Overview Start on Boot stays enabled and uses reviewed apply without lifecycle changes', async () => {
+  const r = harness({runtimeState:'running', plan:{review:'running-boot-review', warnings:["Only Start on Boot changes. The server's current running or stopped state is preserved."]}});
+  await r.context.render(1);
+  const boot = r.content.querySelector('[name="start_on_boot"]');
+  assert.equal(boot.disabled, false);
+  boot.checked = false; await boot.events.change();
+  const mutations = r.calls.filter(call=>call.body);
+  assert.deepEqual(mutations.map(call=>call.url), ['plan','apply'].map(action=>`/api/minecraft/workspace/settings/${action}?server=jv-family1`));
+  assert.equal(mutations[1].body.get('review'),'running-boot-review');
+  assert.equal(r.refreshes,1);
+  assert.equal(r.reviews.length,0);
+  assert.doesNotMatch(r.state.textContent || '', /stays stopped|restart|restarted/i);
+  assert.equal(r.content.querySelector('[name="server_running"]').checked,true);
+});
+
+function settingsReviewHarness(plan, result = {applied: true}, tab = 'memory') {
+  const root = new Element('div'), form = new Element('form'), state = {}, calls = [];
+  root.append(form);
+  let refreshed = 0;
+  const context = vm.createContext({
+    URLSearchParams, document: {createElement: tag => new Element(tag)}, state,
+    justVoxelSelectionGeneration: {minecraft: 0},
+    noticeNode: text => Object.assign(new Element('p'), {textContent: text}),
+    messageNode: text => Object.assign(new Element('p'), {textContent: text}),
+    loadCurrentTab: async () => { refreshed++; },
+    requestWorkspaceJSON: async (url, options) => { calls.push({url, body: new URLSearchParams(options.body)}); return result; },
+  });
+  vm.runInContext(between('  const minecraftSettingsReviewValue =', '  const renderSettingsTab =') + '\nglobalThis.render = renderSettingsReview;', context);
+  context.render(root, {changes: [{field: 'java_memory', label: 'Memory', before: '2G', after: '4G'}], ...plan}, new URLSearchParams({tab, csrf: 'csrf-token'}), {form});
+  const card = () => root.children[0];
+  return {root, form, state, calls, card, context, get refreshed() { return refreshed; }};
+}
+const textIn = node => node.all().map(child => child.textContent || '').join(' ');
+const applyIn = node => node.all().find(child => child.tag === 'button' && child.textContent === 'Apply changes');
+
+for (const tab of ['memory', 'gameplay', 'crossplay']) {
+  test(`${tab} uses shared stopped Review card and enabled Apply`, () => {
+    const r = settingsReviewHarness({reviewed_settings: true, review: 'real', warnings: ['The server stays stopped. Start it normally when ready.']}, undefined, tab);
+    assert.match(textIn(r.card()), /Review\s+Proposed changes/);
+    assert.match(textIn(r.card()), /The server stays stopped. Start it normally when ready./);
+    assert.equal(applyIn(r.card()).disabled, false);
+    assert.equal(r.card().all().some(node => node.name === 'confirm_players'), false);
+    assert.equal(r.form.hidden, true);
+    assert.match(source, /const settingsTabs = new Set\(\["memory", "gameplay", "crossplay"\]\)/);
+    assert.match(between('  const renderSettingsTab =', '  const renderPlayers ='), /renderSettingsReview\(root, plan, params\)/);
+  });
+}
+
+for (const online of [0, 3]) {
+  test(`Running Review shows ${online} players and requires actual toggle consent only with players`, async () => {
+    const r = settingsReviewHarness({reviewed_settings: true, review: 'fingerprint', restart_required: true, server_name: 'Paper1', online,
+      confirmation_required: online > 0, warnings: [`Paper1 is running. Players online: ${online}. Applying these changes will restart Paper1 automatically.`]});
+    assert.match(textIn(r.card()), new RegExp(`Paper1 is running. Players online: ${online}`));
+    assert.doesNotMatch(textIn(r.card()), /will not restart automatically/);
+    const apply = applyIn(r.card()), toggle = r.card().all().find(node => node.name === 'confirm_players');
+    assert.equal(apply.disabled, online > 0);
+    assert.equal(Boolean(toggle), online > 0);
+    if (toggle) {
+      assert.equal(toggle.attrs.role, 'switch');
+      assert.match(toggle.parentElement.className, /system-ups-shutdown-switch/);
+      assert.match(textIn(r.card()), /Confirm that you want to restart Paper1 now/);
+      await apply.events.click(); assert.equal(r.calls.length, 0);
+      toggle.checked = true; toggle.events.change(); assert.equal(apply.disabled, false);
+    }
+    await apply.events.click();
+    assert.equal(r.calls.length, 1);
+    assert.equal(r.calls[0].body.get('review'), 'fingerprint');
+    assert.equal(r.calls[0].body.get('confirm_players'), online > 0 ? 'yes' : null);
+  });
+}
+
+test('Apply-time player race replaces Review card with current count and unchecked consent', async () => {
+  const r = settingsReviewHarness({reviewed_settings: true, review: 'fingerprint', restart_required: true, online: 0},
+    {applied: false, reviewed_settings: true, review: 'fingerprint', confirmation_required: true, online: 2, server_name: 'Paper1',
+      warnings: ['Paper1 is running. Players online: 2.'], changes: [{field: 'java_memory', before: '2G', after: '4G'}]});
+  await applyIn(r.card()).events.click();
+  assert.match(textIn(r.card()), /Players online: 2/);
+  assert.equal(applyIn(r.card()).disabled, true);
+  assert.equal(r.card().all().find(node => node.name === 'confirm_players').checked, false);
+  assert.equal(r.calls[0].body.has('confirm_players'), false);
+  assert.equal(r.refreshed, 0);
+  assert.equal(r.state.textContent, '');
+});
+
+test('Unavailable player state stays in Review with disabled Apply and a Review again action', async () => {
+  const r = settingsReviewHarness({reviewed_settings: true, apply_blocked: true, restart_required: true,
+    warnings: ['Player information is unavailable. Review again before applying changes.']});
+  assert.match(textIn(r.card()), /Player information is unavailable/);
+  assert.equal(applyIn(r.card()).disabled, true);
+  await applyIn(r.card()).events.click();
+  assert.equal(r.calls.length, 0);
+  assert.ok(r.card().all().some(node => node.textContent === 'Review again'));
+});
+
+for (const [software, available, enabled] of [['vanilla', false, false], ['fabric', false, false], ['paper', true, false], ['paper', true, true]]) {
+  test(`Cross-play Version shortcut follows capability: ${software}, enabled=${enabled}`, async () => {
+    const context = vm.createContext({
+      document: {createElement: tag => new Element(tag), querySelector: () => null},
+      noticeNode: text => Object.assign(new Element('p'), {textContent: text}),
+      requestWorkspaceJSON: async () => ({managed_crossplay_available: available, crossplay_enabled: enabled, crossplay_compatible: true, installed: '1.21', geyser_supported_version: '1.21'}),
+    });
+    vm.runInContext(between('  const buildSettingsForm =', '  const settingsParams =') + '\nglobalThis.build = buildSettingsForm;', context);
+    const root = context.build('crossplay', {configured: true, minecraft: {server_type: software}});
+    await Promise.resolve();
+    const shortcut = root.querySelector('[data-open-version]');
+    assert.equal(Boolean(shortcut), available);
+    // Both the separator and the opener are inserted together only on capability success.
+    const fragments = root.all().filter(node => node.attrs.class === 'muted' && node.tag === 'span' && node.parentElement === shortcut?.parentElement);
+    assert.equal(fragments.length, available ? 1 : 0);
+  });
+}
+
+test('Reviewed settings reuse confirmed graceful lifecycle and preserve protected RAM policy files', () => {
+  const backend = read('selected_server.go');
+  assert.match(backend, /MinecraftInstanceActionConfirmed\(r.Context\(\), session, selected.ID, "stop", confirm\)/);
+  assert.match(backend, /MinecraftInstanceActionConfirmed\(r.Context\(\), session, selected.ID, "start", false\)/);
+  assert.doesNotMatch(backend, /"kill"|"force"|exec\.Command/);
+  // Pin the protected policy files independently of any RAM controls in app.js.
+  const {createHash} = require('node:crypto');
+  const protectedFiles = {
+    'webui/internal/server/static/settings.js': '5e00a04a32c36455b3abf266af91e65653fc956d1533a67551230630b5b2e826',
+    'mjust/libexec/common.sh': '0f1ad2dd79242e8882b7d39e4b823308a77730184112699df215ed30daeb396d',
+  };
+  for (const [path, expected] of Object.entries(protectedFiles)) {
+    const data = readFileSync(`${__dirname}/../${path}`);
+    // Keep the original policy pin: resolving only catalog calls must reproduce
+    // every byte of the reviewed English script, including its behavior.
+    const canonical = path.endsWith('/settings.js') ? englishPresentationSource(data.toString('utf8'), path) : data;
+    assert.equal(createHash('sha256').update(canonical).digest('hex'), expected, path);
+  }
+});
+
+
+test('Network member Overview locks effective boot without changing saved preference', async () => {
+  const r = harness({networkMember: true, savedStartOnBoot: false});
+  await r.context.render(1);
+  const boot = r.content.querySelector('[name="start_on_boot"]');
+  assert.equal(boot.checked, true);
+  assert.equal(boot.disabled, true);
+  assert.equal(boot.closest('label').querySelector('span').textContent, 'Start on Boot · Managed by Network');
+  boot.checked = false;
+  await boot.events.change();
+  assert.equal(r.calls.some(call => call.body), false);
+});

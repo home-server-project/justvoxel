@@ -1,0 +1,6 @@
+#%PAM-1.0
+# JustVoxel delegates authentication and password policy to the authselect-managed
+# AlmaLinux/RHEL system stack. Do not copy system-auth rules into this file.
+auth       include      system-auth
+account    include      system-auth
+password   include      system-auth

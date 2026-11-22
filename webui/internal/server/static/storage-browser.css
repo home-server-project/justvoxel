@@ -1,0 +1,239 @@
+.storage-browser-shell [hidden]{display:none!important}
+.storage-browser-shell{max-width:1280px;padding-top:1rem}
+.storage-browser-content{max-width:none;padding-top:0}
+.storage-browser-intro{margin:0 0 .85rem}
+.storage-drive-section{margin-top:.85rem}
+.storage-drive-section:first-of-type{margin-top:0}
+.storage-drive-section-heading{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:.5rem}
+.storage-drive-section-heading h3{margin:.05rem 0 0;font-size:.96rem}
+.storage-drive-empty{margin:.35rem 0 0;padding:.65rem .75rem;border:1px dashed #303942;border-radius:10px;background:#10161a;font-size:.8rem}
+.storage-external-section{padding-top:.8rem;border-top:1px solid #293139}
+.storage-disk-browser{margin-top:1rem}
+.storage-disk-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.7rem}
+.storage-disk-card{display:flex;align-items:center;gap:.8rem;min-width:0;padding:.85rem 1rem;border:1px solid #303942;border-radius:12px;background:#171d22;color:#eef1f4;text-align:left;cursor:pointer;transition:border-color .14s ease,background-color .14s ease,transform .14s ease}
+.storage-disk-card:hover,.storage-disk-card:focus-visible{border-color:#4f8b69;background:#1d2a23}
+.storage-disk-card.is-selected{border-color:#68bd8e;background:#203128;box-shadow:inset 0 0 0 1px #315940}
+.storage-disk-card-external .storage-disk-icon{color:#8ad4a9}
+.storage-disk-icon{display:grid;place-items:center;flex:0 0 38px;width:38px;height:38px;border-radius:10px;background:#10161a}
+.storage-disk-icon svg{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.storage-disk-copy{display:grid;min-width:0;gap:.08rem}
+.storage-disk-copy strong,.storage-disk-copy span,.storage-disk-copy small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.storage-disk-copy strong{font-size:.92rem}
+.storage-disk-copy span{color:#aab5bd;font-size:.78rem}
+.storage-disk-copy small{color:#77838c;font-size:.7rem}
+
+.storage-partition-browser{margin-top:.85rem}
+.storage-partition-group{padding:.9rem;border:1px solid #303942;border-radius:14px;background:#13191e}
+.storage-selected-heading{margin-bottom:.7rem}
+.storage-selected-heading h2{margin:.05rem 0 0;font-size:1.1rem}
+.storage-partition-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:.55rem}
+.storage-partition-card{display:grid;align-content:start;gap:.18rem;min-width:0;min-height:105px;padding:.7rem .8rem;border:1px solid #303942;border-radius:10px;background:#171d22;color:#eef1f4;text-align:left}
+button.storage-partition-card{cursor:pointer;transition:border-color .14s ease,background-color .14s ease,transform .14s ease}
+button.storage-partition-card:hover,button.storage-partition-card:focus-visible{border-color:#4f8b69;background:#1d2a23}
+[data-setup-storage-form] .storage-partition-card[data-setup-existing-partition].is-selected,
+[data-setup-backup-form] .storage-partition-card[data-setup-backup-existing].is-selected{border-color:#68bd8e;background:#203128;box-shadow:inset 0 0 0 1px #315940}
+.storage-partition-card strong{font-size:.88rem;overflow-wrap:anywhere}
+.storage-partition-card>span:not(.storage-partition-state){color:#aab5bd;font-size:.76rem}
+.storage-partition-card small{color:#77838c;font-size:.7rem;overflow-wrap:anywhere}
+.storage-partition-state{justify-self:start;padding:.2rem .45rem;border-radius:999px;background:#25382e;color:#b9ebca;font-size:.62rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase}
+.storage-partition-swap{opacity:.7;cursor:default}
+.storage-partition-swap .storage-partition-state{background:#252b31;color:#b7c1c8}
+.storage-empty-disk{margin:0}
+.storage-empty-disk p{margin:.45rem 0 0}
+.storage-empty-actions{display:flex;flex-wrap:wrap;align-items:center;gap:.55rem;margin-top:.7rem}
+.storage-empty-actions form{margin:0}
+.storage-empty-disk .compact{font-size:.72rem}
+
+.storage-detail-dialog{width:min(680px,calc(100% - 1.4rem));max-height:min(86dvh,820px);padding:0;border:1px solid #3b454e;border-radius:16px;background:#171d22;color:#eef1f4;box-shadow:0 28px 80px #000b}
+.storage-detail-dialog::backdrop{background:#050708a8;backdrop-filter:blur(3px)}
+.storage-detail-card{padding:1rem}
+.storage-detail-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;padding-bottom:.7rem;border-bottom:1px solid #2b333b}
+.storage-detail-heading h2{margin:.08rem 0 0;font-size:1.25rem}
+.storage-dialog-close{display:grid;place-items:center;width:36px;height:36px;padding:0;border:1px solid #3a454e;border-radius:9px;background:#222a31;color:#eef1f4;font-size:1.5rem;line-height:1}
+.storage-dialog-close:hover,.storage-dialog-close:focus-visible{background:#313c46;border-color:#5c6b76}
+.storage-detail-role{display:inline-block;margin:.75rem 0 .45rem;padding:.28rem .55rem;border-radius:999px;background:#25382e;color:#b9ebca;font-size:.72rem;font-weight:800}
+.storage-detail-list{overflow:visible}
+.storage-detail-list div{padding:.48rem 0}
+.storage-detail-actions-preview{margin-top:.7rem;padding:.65rem .75rem;border:1px dashed #3a454e;border-radius:9px;background:#10161a;font-size:.78rem;line-height:1.35}
+
+@media(max-width:700px){
+  .storage-browser-shell{padding-top:.7rem}
+  .storage-disk-grid{grid-template-columns:1fr}
+  .storage-partition-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:420px){
+  .storage-partition-grid{grid-template-columns:1fr}
+}
+@media(prefers-color-scheme:light){
+  .storage-drive-empty{background:#f7f9fa;border-color:#d9dfe3}
+  .storage-external-section{border-color:#e2e7ea}
+  .storage-disk-card,.storage-partition-card,.storage-partition-group,.storage-detail-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025}
+  .storage-disk-card:hover,.storage-disk-card:focus-visible,button.storage-partition-card:hover,button.storage-partition-card:focus-visible{background:#eef6f1;border-color:#9fc9ae}
+  .storage-disk-card.is-selected{background:#e3f1e8;border-color:#86b99a;box-shadow:inset 0 0 0 1px #b5d3c0}
+  [data-setup-storage-form] .storage-partition-card[data-setup-existing-partition].is-selected,
+  [data-setup-backup-form] .storage-partition-card[data-setup-backup-existing].is-selected{background:#e3f1e8;border-color:#86b99a;box-shadow:inset 0 0 0 1px #b5d3c0}
+  .storage-disk-icon,.storage-detail-actions-preview{background:#f6f8f9}
+  .storage-detail-heading{border-color:#e2e7ea}
+  .storage-dialog-close{background:#f1f4f6;border-color:#cbd4da;color:#1a2025}
+}
+
+
+.storage-detail-actions{display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin-top:.75rem;padding-top:.7rem;border-top:1px solid #2b333b}
+.storage-action-menu{position:relative}
+.storage-action-menu>summary{display:grid;place-items:center;width:38px;height:34px;border:1px solid #3a454e;border-radius:9px;background:#222a31;color:#eef1f4;cursor:pointer;list-style:none;font-size:1.25rem;font-weight:800;line-height:1}
+.storage-action-menu>summary::-webkit-details-marker{display:none}
+.storage-action-menu[open]>summary,.storage-action-menu>summary:hover,.storage-action-menu>summary:focus-visible{background:#313c46;border-color:#5c6b76}
+.storage-action-menu-popover{position:absolute;right:0;bottom:calc(100% + .45rem);z-index:10;display:grid;min-width:180px;padding:.4rem;border:1px solid #3a454e;border-radius:10px;background:#171d22;box-shadow:0 14px 36px #0008}
+[data-storage-detail-actions] .storage-action-menu-popover{width:max-content;white-space:nowrap}
+.storage-action-menu-popover :is(button,a){display:flex;align-items:center;gap:.5rem;width:100%;padding:.58rem .65rem;border:0;border-radius:7px;background:transparent;color:#eef1f4;text-align:left;font-family:inherit;font-size:.82rem;font-weight:650;line-height:normal}
+.storage-action-menu-popover :is(button,a):hover,.storage-action-menu-popover :is(button,a):focus-visible{background:#273039}
+.storage-action-icon{display:inline-grid;place-items:center;flex:0 0 18px;width:18px;height:18px;color:#9fb3a7}
+.storage-action-icon svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.storage-action-menu-popover .storage-action-danger{color:#ffb29a}
+.storage-action-menu-popover .storage-action-danger:hover,.storage-action-menu-popover .storage-action-danger:focus-visible{background:#3a2420}
+.storage-protected-note{margin:.75rem 0 0;font-size:.8rem}
+
+.storage-action-dialog{width:min(540px,calc(100% - 1.4rem));max-height:calc(100vh - 2rem);padding:0;border:1px solid #3b454e;border-radius:16px;background:#171d22;color:#eef1f4;box-shadow:0 30px 90px #000c}
+.storage-action-dialog::backdrop{background:#050708b8;backdrop-filter:blur(4px)}
+.storage-action-card{padding:1rem}
+.storage-action-card>p{line-height:1.45}
+.storage-action-mount-field{margin:.8rem 0}
+.storage-action-review{margin-top:.8rem;padding:.8rem;border:1px solid #303942;border-radius:10px;background:#10161a}
+.storage-action-review dl div{padding:.42rem 0}
+.storage-action-warnings{display:grid;gap:.45rem;margin-top:.7rem}
+.storage-action-warnings .notice{margin:0;font-size:.8rem}
+.storage-action-warnings .storage-warning-panel{padding:.5rem .65rem;line-height:1.35}
+.storage-warning-panel ul{margin:0;padding-left:1.1rem}
+.storage-warning-panel li+li{margin-top:.25rem}
+.storage-action-review label{margin:.75rem 0 0}
+.storage-action-review label code{display:inline-block;margin-left:.25rem;color:#ffbd9f}
+.storage-action-error{margin:.75rem 0 0;padding:.65rem .75rem;border:1px solid #a64c4c;border-radius:8px;background:#5b282833;color:#ffc1b8;font-size:.8rem}
+.storage-action-buttons{justify-content:flex-end}
+.storage-action-buttons button{min-width:105px}
+
+@media(max-width:520px){
+  .storage-action-menu-popover{position:fixed;left:.75rem;right:.75rem;bottom:1rem;min-width:0}
+  [data-storage-detail-actions] .storage-action-menu-popover{width:auto}
+  .storage-action-dialog{width:calc(100% - .8rem)}
+}
+@media(prefers-color-scheme:light){
+  .storage-detail-actions{border-color:#e2e7ea}
+  .storage-action-menu>summary{background:#f1f4f6;border-color:#cbd4da;color:#1a2025}
+  .storage-action-menu[open]>summary,.storage-action-menu>summary:hover,.storage-action-menu>summary:focus-visible{background:#e5eaed;border-color:#aab8c1}
+  .storage-action-menu-popover,.storage-action-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025;box-shadow:0 14px 36px #0003}
+  .storage-action-menu-popover :is(button,a){color:#34414a}
+  .storage-action-menu-popover :is(button,a):hover,.storage-action-menu-popover :is(button,a):focus-visible{background:#eef2f4}
+  .storage-action-icon{color:#60746a}
+  .storage-action-menu-popover .storage-action-danger{color:#a0442f}
+  .storage-action-menu-popover .storage-action-danger:hover,.storage-action-menu-popover .storage-action-danger:focus-visible{background:#fff0eb}
+  .storage-action-review{background:#f6f8f9;border-color:#d9dfe3}
+}
+
+
+.storage-minecraft-dialog .storage-action-card{display:grid;gap:.65rem}
+.storage-minecraft-dialog label{margin:0}
+.storage-minecraft-selected{margin:.15rem 0 0;font-size:.82rem}
+.storage-minecraft-selected code{overflow-wrap:anywhere}
+.storage-minecraft-dialog .compact{margin:-.35rem 0 0;font-size:.74rem}
+
+.storage-whole-player-confirmation{display:flex;flex-wrap:wrap;align-items:center;gap:.45rem}
+.storage-whole-player-confirmation input{width:auto}
+.storage-whole-player-confirmation .compact{flex-basis:100%}
+
+.storage-confirmation{margin-top:.85rem;padding-top:.8rem;border-top:1px solid #2b333b}
+.storage-confirm-selected{margin:0 0 .65rem;color:#aab5bd;font-size:.88rem}
+.storage-confirm-selected strong{display:block;margin-top:.15rem;color:#ff6b61;font-size:1rem;font-weight:800}
+.storage-confirm-slider{--confirm-progress:0;position:relative;height:54px;border:1px solid #4a5862;border-radius:14px;background:#10161a;overflow:hidden;transition:border-color .16s ease,background-color .16s ease,box-shadow .16s ease}
+.storage-confirm-slider:focus-within{box-shadow:0 0 0 2px #80caa055}
+.storage-confirm-slider-text{position:absolute;inset:0;display:grid;place-items:center;padding:0 62px;color:#aab5bd;font-size:.84rem;font-weight:700;opacity:.28;filter:blur(1.2px);transition:color .16s ease,opacity .16s ease,filter .16s ease,font-weight .16s ease}
+.storage-confirm-slider-thumb{position:absolute;top:3px;left:calc(3px + (100% - 54px) * var(--confirm-progress));display:grid;place-items:center;width:48px;height:48px;border:1px solid #89959e;border-radius:11px;background:linear-gradient(145deg,#d8dee3,#aeb8c0);color:#172027;font-size:1.5rem;font-weight:950;box-shadow:inset 0 1px #ffffff88,0 2px 8px #0005;transition:left .08s linear,background-color .16s ease,color .16s ease}
+.storage-confirm-slider input[type="range"]{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:.001;cursor:ew-resize}
+.storage-confirm-slider.is-armed{border-color:#ff5f56;background:#3b1719;box-shadow:0 0 0 1px #ff5f5644}
+.storage-confirm-slider.is-armed .storage-confirm-slider-text{color:#ff6b61;opacity:1;filter:none;font-weight:850}
+.storage-confirm-slider.is-armed .storage-confirm-slider-thumb{background:#ea554d;color:#fff}
+.storage-confirm-toggle-row{display:flex;align-items:center;justify-content:flex-end;gap:.8rem;margin:.65rem 0 0}
+.storage-confirm-toggle-callout{display:inline-flex;align-items:center;gap:.5rem;color:#eef1f4;font-size:1.08rem;font-weight:850}
+.storage-confirm-toggle-callout::before{content:">";color:#aeb8c0;font-size:1.25rem;font-weight:950}
+.storage-confirm-toggle-arrow{font-size:1.65rem;font-weight:900;line-height:1}
+.storage-confirm-toggle{appearance:none;width:50px;height:28px;margin:0;border:1px solid #4a5862;border-radius:999px;background:radial-gradient(circle at 13px 50%,#f2f5f7 0 9px,transparent 10px),#303942;cursor:pointer;transition:background .16s ease,border-color .16s ease,box-shadow .16s ease}
+.storage-confirm-toggle:checked{border-color:#ff5f56;background:radial-gradient(circle at calc(100% - 13px) 50%,#fff 0 9px,transparent 10px),#e6534b;box-shadow:0 0 0 1px #ff5f5644}
+.storage-confirm-toggle:focus-visible{outline:2px solid #80caa0;outline-offset:2px}
+.storage-action-buttons .danger:disabled{opacity:.45;cursor:not-allowed}
+@media(max-width:520px){
+  .storage-confirm-slider{height:50px}
+  .storage-confirm-slider-thumb{width:44px;height:44px}
+  .storage-confirm-slider-text{padding:0 55px;font-size:.78rem}
+  .storage-confirm-toggle-callout{font-size:1rem}
+  .storage-confirm-toggle-arrow{font-size:1.5rem}
+}
+@media(prefers-color-scheme:light){
+  .storage-confirmation{border-color:#e2e7ea}
+  .storage-confirm-slider{background:#f5f7f8;border-color:#c5d0d7}
+  .storage-confirm-slider-text{color:#64747f}
+  .storage-confirm-slider-thumb{background:linear-gradient(145deg,#eef1f3,#c6ced4);color:#23303a;border:1px solid #aab6be}
+  .storage-confirm-slider.is-armed{background:#fff1ef;border-color:#c94e45}
+  .storage-confirm-slider.is-armed .storage-confirm-slider-text,.storage-confirm-selected strong{color:#b63f37}
+  .storage-confirm-slider.is-armed .storage-confirm-slider-thumb{background:#d64c43;color:#fff}
+  .storage-confirm-toggle-callout{color:#26313a}
+}
+
+.storage-free-space-card{border-style:dashed}
+.storage-option-toggle-row{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:12px 0}
+.storage-option-toggle-row span{display:grid;gap:2px}
+.storage-option-toggle-row small{color:#91a0aa;font-weight:500}
+.storage-option-toggle{appearance:none;width:50px;height:28px;margin:0;border:1px solid #4a5862;border-radius:999px;background:radial-gradient(circle at 13px 50%,#f2f5f7 0 9px,transparent 10px),#303942;cursor:pointer;transition:background .16s ease,border-color .16s ease,box-shadow .16s ease}
+.storage-option-toggle:checked{border-color:#5bb98b;background:radial-gradient(circle at calc(100% - 13px) 50%,#fff 0 9px,transparent 10px),#3b966d;box-shadow:0 0 0 1px #5bb98b44}
+.storage-option-toggle:focus-visible{outline:2px solid #80caa0;outline-offset:2px}
+
+.storage-minecraft-progress-heading{display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin-bottom:.45rem}
+.storage-minecraft-progress-heading strong{font-size:.95rem}
+.storage-minecraft-dialog [data-storage-minecraft-progress] .details{margin:.65rem 0}
+.storage-minecraft-dialog [data-storage-minecraft-review-panel]{display:grid;gap:.7rem}
+.storage-minecraft-dialog [data-storage-minecraft-progress]{display:grid;gap:.7rem}
+/* The selected disk card above already identifies this partition group. */
+.storage-partition-group{padding:0;border:0;background:transparent}
+.storage-selected-heading{display:none}
+.storage-partition-grid{gap:.4rem}
+.storage-partition-card{min-height:0;padding:.55rem .7rem}
+@media(prefers-color-scheme:light){.storage-partition-group{background:transparent;border:0}}
+
+/* Keep device selection and the selected disk in the same FHD workspace. */
+.storage-browser-shell{max-width:none;padding-top:0;min-width:0}
+.storage-browser-intro{margin-bottom:.55rem;line-height:1.4}
+.storage-drive-section{margin-top:.55rem}
+.storage-drive-section-heading{margin-bottom:.35rem}
+.storage-drive-section-heading>div{display:flex;align-items:baseline;gap:.4rem;flex-wrap:wrap}
+.storage-drive-section-heading .eyebrow{margin:0}
+.storage-external-section{padding-top:.55rem}
+.storage-disk-grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr));gap:.45rem;max-height:174px;overflow-y:auto;overscroll-behavior:contain;padding-right:.2rem}
+.storage-disk-card{gap:.55rem;min-height:58px;padding:.45rem .6rem}
+.storage-disk-copy :is(strong,span,small){white-space:normal;overflow-wrap:anywhere}
+.storage-disk-icon{flex-basis:32px;width:32px;height:32px}
+.storage-disk-icon svg{width:20px;height:20px}
+.storage-partition-browser{margin-top:.65rem;padding-top:.55rem;border-top:1px solid var(--jv-border,#303942)}
+.storage-partition-grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,190px),1fr));gap:.4rem;max-height:290px;overflow-y:auto;overscroll-behavior:contain;padding-right:.2rem}
+.storage-partition-card{min-height:0;padding:.5rem .65rem;gap:.12rem}
+.storage-partition-state{padding:.15rem .4rem}
+.storage-drive-empty{padding:.45rem .6rem}
+.storage-detail-dialog{overflow-y:auto;max-height:min(86dvh,820px)}
+.storage-action-dialog{overflow-y:auto;overscroll-behavior:contain;max-height:calc(100dvh - 2rem)}
+body:has(.storage-action-dialog:modal){overflow:hidden}
+.storage-detail-card,.storage-action-card{padding:.8rem}
+.storage-detail-heading{padding-bottom:.5rem}
+.storage-detail-heading h2{font-size:1.1rem}
+.storage-detail-role{margin:.55rem 0 .3rem}
+.storage-detail-list{max-height:none;overflow:visible}
+.storage-detail-list div{padding:.35rem 0}
+.storage-detail-actions-preview{margin-top:.5rem;padding:.5rem .6rem}
+.storage-detail-actions{margin-top:.5rem;padding-top:.5rem}
+.storage-action-review{margin-top:.55rem;padding:.6rem}
+.storage-action-review dl div{padding:.3rem 0}
+.storage-action-warnings{max-height:none;overflow:visible}
+.storage-action-card>p{margin:.55rem 0}
+.storage-minecraft-dialog .storage-action-card{gap:.5rem}
+@media(max-width:700px){
+  .storage-disk-grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,210px),1fr))}
+  .storage-partition-grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,165px),1fr))}
+}
+
+.storage-action-menu-popover a{text-decoration:none;box-sizing:border-box}

@@ -1,0 +1,1007 @@
+package server
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/home-server-project/justvoxel-webui/internal/api"
+)
+
+const setupDraftLifetime = 24 * time.Hour
+
+const (
+	setupServerStep = iota + 1
+	setupCrossplayStep
+	setupMemoryStep
+	setupStorageStep
+	setupBackupsStep
+	setupReviewStep
+)
+
+var setupMemoryPattern = regexp.MustCompile(`^([1-9][0-9]*)([mMgG])$`)
+var setupImageTagPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+var setupVersionPattern = regexp.MustCompile(`^[0-9A-Za-z._-]+$`)
+
+type setupDraftKey struct {
+	app     *App
+	session [32]byte
+}
+
+type setupServerDraft struct {
+	MOTD           string
+	MOTDAutomatic  bool
+	MaxPlayers     string
+	BedrockEnabled bool
+	Complete       bool
+}
+
+type setupMinecraftDraft struct {
+	BedrockTCPPort      int
+	BedrockUDPStart     int
+	BedrockUDPEnd       int
+	ResolvedVersion     string
+	RuntimeImageTag     string
+	LoaderVersion       string
+	GameMode            string
+	ServerType          string
+	JavaMemory          string
+	ContainerMemory     string
+	JavaPort            string
+	BedrockPort         string
+	ImageTag            string
+	VersionPolicy       string
+	Version             string
+	ConnectionsComplete bool
+	VersionComplete     bool
+	ResourcesComplete   bool
+	Complete            bool
+}
+
+type setupDraft struct {
+	SimpleState           int
+	SimpleFamily          string
+	StartCapacityUnknown  bool
+	BootCapacityUnknown   bool
+	StartAfterUnavailable bool
+	StartBootUnavailable  bool
+	RunningMemoryMiB      int
+	BootMemoryMiB         int
+	AddServer             bool
+	DisplayName           string
+	StartAfterSetup       bool
+	StartOnBoot           bool
+	BackupAvailable       bool
+	OtherMemoryMiB        int
+	CreatedRuntime        api.InstanceRuntimeSettings
+	CoreCreated           bool
+	CreatedID             string
+	CreationAttempted     bool
+	CreationError         string
+	Started               bool
+	Mode                  string
+	CurrentStep           int
+	HighestStep           int
+	DiagnosticSessionID   string
+	Server                setupServerDraft
+	Minecraft             setupMinecraftDraft
+	Storage               setupStorageDraft
+	Backups               setupBackupDraft
+	Defaults              api.AdminSetupDefaults
+	Inventory             api.AdminStorageDiscovery
+	UpdatedAt             time.Time
+}
+
+type setupDraftStore struct {
+	mu     sync.Mutex
+	drafts map[setupDraftKey]setupDraft
+}
+
+var setupDrafts = setupDraftStore{drafts: make(map[setupDraftKey]setupDraft)}
+
+type setupWizardStepView struct {
+	Number      int
+	Name        string
+	Description string
+	Active      bool
+	Complete    bool
+	Visited     bool
+}
+
+type setupWizardPageData struct {
+	SimpleState              int
+	SimpleFamily             string
+	SimpleSoftware           []setupSoftwareChoice
+	SoftwareGroups           []setupSoftwareGroup
+	RunningMemory            string
+	StartAfterUnavailable    bool
+	StartBootUnavailable     bool
+	AddServer                bool
+	BasePath                 string
+	DisplayName              string
+	StartAfterSetup          bool
+	StartOnBoot              bool
+	BackupAvailable          bool
+	OtherMemoryMiB           int
+	Title                    string
+	Version                  string
+	ManagementAPI            string
+	CSRF                     string
+	Identity                 api.SessionInfo
+	Started                  bool
+	CurrentStep              int
+	Current                  setupWizardStepView
+	Steps                    []setupWizardStepView
+	CanBack                  bool
+	CanNext                  bool
+	Error                    string
+	Server                   setupServerDraft
+	Minecraft                setupMinecraftDraft
+	Storage                  setupStorageDraft
+	Backups                  setupBackupDraft
+	MinecraftFilesystems     []setupFilesystemView
+	Filesystems              []setupFilesystemView
+	StorageDisks             []setupStorageDiskView
+	BackupDisks              []setupStorageDiskView
+	StorageBrowser           storageBrowserPageData
+	BackupBrowser            storageBrowserPageData
+	ExternalStorageCount     int
+	SameDiskWarning          string
+	Defaults                 api.AdminSetupDefaults
+	SystemMemory             string
+	SystemReserveMinimum     string
+	SystemReserveRecommended string
+}
+
+var setupWizardSteps = []setupWizardStepView{
+	{Number: setupServerStep, Name: uiText("ui.aef7de28d529"), Description: uiText("ui.56155c701af2")},
+	{Number: setupCrossplayStep, Name: uiText("ui.3ea657a3bed3"), Description: uiText("ui.a2d06718165a")},
+	{Number: setupMemoryStep, Name: uiText("ui.c3963aedaac6"), Description: uiText("ui.04ddf5ea6a8a")},
+	{Number: setupStorageStep, Name: uiText("ui.a69c4dece144"), Description: uiText("ui.c94733afdeb2")},
+	{Number: setupBackupsStep, Name: uiText("ui.3334fee2c77f"), Description: uiText("ui.43357c17c842")},
+	{Number: setupReviewStep, Name: uiText("ui.aff0766a5290"), Description: uiText("ui.b9bfb4f46eb4")},
+}
+
+func (a *App) registerSetupWizardRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /setup", a.setupWizardPage)
+	mux.HandleFunc("POST /setup/start", a.setupWizardStart)
+	mux.HandleFunc("POST /setup/recommended", a.setupWizardSimple)
+	mux.HandleFunc("POST /setup/simple", a.setupWizardSimple)
+	mux.HandleFunc("POST /setup/server", a.setupWizardSaveServer)
+	mux.HandleFunc("POST /setup/connections", a.setupWizardSaveConnections)
+	mux.HandleFunc("POST /setup/resources", a.setupWizardSaveResources)
+	mux.HandleFunc("GET /setup/version-preview", a.setupWizardVersionPreview)
+	mux.HandleFunc("POST /setup/navigate", a.setupWizardNavigate)
+	mux.HandleFunc("POST /setup/cancel", a.setupWizardCancel)
+	a.registerAddServerWizardRoutes(mux)
+	a.registerSetupWizardStorageRoutes(mux)
+}
+
+type setupVersionPreviewAPI interface {
+	AdminSetupVersionPreview(context.Context, string, string, string, bool, string) (api.AdminVersionStatus, error)
+}
+
+func (a *App) setupWizardVersionPreview(w http.ResponseWriter, r *http.Request) {
+	session, _, _, ok := a.setupWizardRequest(w, r, false)
+	if !ok {
+		return
+	}
+	draft, exists := setupDrafts.get(a, session)
+	if !exists || !draft.Started || draft.CurrentStep != setupCrossplayStep {
+		http.Error(w, ui(w, "ui.dc22c4a5d894"), http.StatusConflict)
+		return
+	}
+	client, ok := a.api.(setupVersionPreviewAPI)
+	if !ok {
+		http.Error(w, ui(w, "ui.7a50a1009c04"), http.StatusServiceUnavailable)
+		return
+	}
+	bedrock := draft.Server.BedrockEnabled
+	if r.URL.Query().Has("bedrock_enabled") {
+		bedrock = r.URL.Query().Get("bedrock_enabled") == "on" && recommendedServerSupportsBedrock(draft.Minecraft.ServerType)
+	}
+	status, err := client.AdminSetupVersionPreview(r.Context(), session, r.URL.Query().Get("policy"), r.URL.Query().Get("version"), bedrock, draft.Minecraft.ServerType)
+	if err != nil {
+		http.Error(w, ui(w, "ui.7a50a1009c04"), http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	json.NewEncoder(w).Encode(status)
+}
+
+func (a *App) setupWizardPage(w http.ResponseWriter, r *http.Request) {
+	session, client, identity, ok := a.setupWizardRequest(w, r, false)
+	if !ok {
+		return
+	}
+	if a.redirectCurrentSetupOperation(w, r, session, client) {
+		return
+	}
+	draft, exists := setupDrafts.get(a, session)
+	if isAddServerRequest(r) && r.URL.Query().Get("new") == "1" {
+		// Never discard another context or uncertain/partially created evidence.
+		if exists && (!draft.AddServer || draft.CreationAttempted || draft.CoreCreated) {
+			http.Redirect(w, r, setupBasePath(r)+"/review", http.StatusSeeOther)
+			return
+		}
+		setupReviews.delete(a, session)
+		setupDrafts.delete(a, session)
+		http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
+		return
+	}
+	if !exists {
+		draft = setupDraft{AddServer: isAddServerRequest(r)}
+	} else if draft.Started && draft.CurrentStep == setupReviewStep {
+		if setupDraftReadyForReview(draft) {
+			http.Redirect(w, r, setupBasePath(r)+"/review", http.StatusSeeOther)
+			return
+		}
+		// A revisited form may have invalidated a previously visited Review.
+		switch {
+		case !draft.Server.Complete:
+			draft.CurrentStep = setupServerStep
+		case !draft.Minecraft.ConnectionsComplete || !draft.Minecraft.VersionComplete:
+			draft.CurrentStep = setupCrossplayStep
+		case !draft.Minecraft.ResourcesComplete:
+			draft.CurrentStep = setupMemoryStep
+		case !draft.Minecraft.Complete:
+			draft.CurrentStep = setupCrossplayStep
+		case !draft.Storage.Complete:
+			draft.CurrentStep = setupStorageStep
+		default:
+			draft.CurrentStep = setupBackupsStep
+		}
+		setupDrafts.save(a, session, draft)
+	} else if draft.Started && (draft.CurrentStep == setupStorageStep || draft.CurrentStep == setupBackupsStep) {
+		storage, err := client.AdminStorage(r.Context(), session)
+		if err != nil {
+			a.handleAdminDiscoveryError(w, r, err)
+			return
+		}
+		draft.Inventory = storage
+		setupDrafts.save(a, session, draft)
+	}
+	a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), "")
+}
+
+// Initialization is the only context-specific entry into the shared wizard.
+func (a *App) newSetupDraft(ctx context.Context, session string, client adminDiscoveryAPI, addServer bool) (setupDraft, error) {
+	if addServer {
+		return a.newAddServerDraft(ctx, session, client)
+	}
+	diagnosticID := a.beginSetupDiagnosticBestEffort(ctx, client, session)
+	defaults, err := client.AdminSetupDefaults(ctx, session)
+	if err != nil {
+		return setupDraft{}, err
+	}
+	storage, err := client.AdminStorage(ctx, session)
+	if err != nil {
+		return setupDraft{}, err
+	}
+	draft := draftFromSetupDefaults(defaults, storage)
+	draft.DisplayName = "Minecraft server"
+	draft.StartOnBoot, draft.StartAfterSetup = true, true
+	draft.DiagnosticSessionID = diagnosticID
+	a.recordSetupDraftDiagnosticBestEffort(ctx, client, session, "initial WebUI setup defaults loaded", draft)
+	return draft, nil
+}
+
+func (a *App) setupWizardStart(w http.ResponseWriter, r *http.Request) {
+	session, client, _, ok := a.setupWizardRequest(w, r, true)
+	if !ok {
+		return
+	}
+	if a.redirectCurrentSetupOperation(w, r, session, client) {
+		return
+	}
+	draft, err := a.newSetupDraft(r.Context(), session, client, isAddServerRequest(r))
+	if err != nil {
+		if isAddServerRequest(r) {
+			message := ui(w, "ui.b2186731d416")
+			if detail, ok := api.ErrorMessage(err); ok {
+				message += " " + detail
+			}
+			http.Error(w, message, http.StatusServiceUnavailable)
+		} else {
+			a.handleAdminDiscoveryError(w, r, err)
+		}
+		return
+	}
+	draft.Mode = "advanced"
+	setupReviews.delete(a, session)
+	setupDrafts.save(a, session, draft)
+	http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
+}
+
+func validSetupServerType(value string) bool {
+	switch value {
+	case "paper", "purpur", "pufferfish", "leaf", "vanilla", "spigot", "fabric", "forge", "neoforge", "quilt", "bedrock":
+		return true
+	}
+	return false
+}
+
+func recommendedServerSupportsBedrock(serverType string) bool {
+	switch serverType {
+	case "paper", "purpur", "pufferfish", "leaf", "spigot", "fabric", "neoforge":
+		return true
+	default:
+		return false
+	}
+}
+
+func (a *App) setupWizardSaveServer(w http.ResponseWriter, r *http.Request) {
+	session, client, identity, ok := a.setupWizardRequest(w, r, true)
+	if !ok {
+		return
+	}
+	draft, exists := setupDrafts.get(a, session)
+	if !exists || !draft.Started {
+		http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
+		return
+	}
+
+	serverType := strings.ToLower(strings.TrimSpace(r.FormValue("server_type")))
+	if serverType == "" {
+		serverType = draft.Minecraft.ServerType
+	}
+	if serverType == "" {
+		serverType = "paper"
+	}
+	if !validSetupServerType(serverType) {
+		draft.Server.Complete = false
+		setupDrafts.save(a, session, draft)
+		w.WriteHeader(http.StatusBadRequest)
+		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), ui(w, "ui.9751f6c717f5"))
+		return
+	}
+
+	if draft.Minecraft.ServerType == "bedrock" && serverType != "bedrock" {
+		defaults := draft.Defaults
+		if draft.AddServer {
+			fresh, err := a.newAddServerDraft(r.Context(), session, client)
+			if err != nil {
+				http.Error(w, ui(w, "ui.27af82be2b6c"), http.StatusServiceUnavailable)
+				return
+			}
+			draft.Minecraft.JavaPort, draft.Minecraft.BedrockPort = fresh.Minecraft.JavaPort, fresh.Minecraft.BedrockPort
+		} else {
+			draft.Minecraft.JavaPort, draft.Minecraft.BedrockPort = strconv.Itoa(defaults.JavaPort), strconv.Itoa(defaults.BedrockPort)
+		}
+		draft.Minecraft.JavaMemory = defaults.JavaMemory
+		draft.Minecraft.ImageTag, draft.Minecraft.VersionPolicy, draft.Minecraft.Version = defaults.ImageTag, "recommended", ""
+		draft.Minecraft.BedrockTCPPort, draft.Minecraft.BedrockUDPStart, draft.Minecraft.BedrockUDPEnd = 0, 0, 0
+		draft.Minecraft.ResourcesComplete = false
+	}
+	if draft.Minecraft.ServerType != serverType {
+		draft.Minecraft.ResolvedVersion, draft.Minecraft.RuntimeImageTag, draft.Minecraft.LoaderVersion = "", "", ""
+		if setupNeedsExactRuntime(serverType) {
+			draft.Server.BedrockEnabled = false
+		}
+		draft.Minecraft.ConnectionsComplete = false
+		draft.Minecraft.VersionComplete = false
+		draft.Minecraft.Complete = false
+	}
+	draft.Minecraft.ServerType = serverType
+	if !recommendedServerSupportsBedrock(serverType) {
+		draft.Server.BedrockEnabled = false
+	}
+	if draft.AddServer || draft.Mode == "advanced" {
+		draft.DisplayName = r.FormValue("display_name")
+		draft.StartAfterSetup = r.FormValue("start_after_setup") == "on"
+		draft.StartOnBoot = r.FormValue("start_on_boot") == "on"
+		if err := a.validateAddServerName(r.Context(), session, draft.DisplayName); err != nil {
+			draft.Server.Complete = false
+			setupDrafts.save(a, session, draft)
+			w.WriteHeader(http.StatusBadRequest)
+			a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), err.Error())
+			return
+		}
+		draft.DisplayName = strings.TrimSpace(draft.DisplayName)
+	}
+	draft.Minecraft.GameMode = r.FormValue("game_mode")
+	draft.Server.MOTDAutomatic = r.FormValue("motd_automatic") == "true"
+	draft.Server.MOTD = r.FormValue("motd")
+	draft.Server.MaxPlayers = strings.TrimSpace(r.FormValue("max_players"))
+	if err := validateSetupServer(draft.Server); err != nil {
+		draft.Server.Complete = false
+		setupDrafts.save(a, session, draft)
+		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "server settings rejected", draft)
+		w.WriteHeader(http.StatusBadRequest)
+		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), err.Error())
+		return
+	}
+	if !validSetupGameMode(draft.Minecraft.GameMode) || serverType == "bedrock" && draft.Minecraft.GameMode == "spectator" {
+		draft.Server.Complete = false
+		setupDrafts.save(a, session, draft)
+		w.WriteHeader(http.StatusBadRequest)
+		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), ui(w, "ui.9b4e69acae19"))
+		return
+	}
+	if serverType == "bedrock" {
+		draft.Minecraft.ResolvedVersion = ""
+		if err := a.resolveSetupRuntime(r.Context(), session, &draft, false); err != nil {
+			setupDrafts.save(a, session, draft)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), err.Error())
+			return
+		}
+	}
+	draft.Server.Complete = true
+	draft.CurrentStep = setupCrossplayStep
+	setupReviews.delete(a, session)
+	setupDrafts.save(a, session, draft)
+	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "server settings saved", draft)
+	http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
+}
+
+func (a *App) setupWizardSaveConnections(w http.ResponseWriter, r *http.Request) {
+	session, client, identity, ok := a.setupWizardRequest(w, r, true)
+	if !ok {
+		return
+	}
+	draft, exists := setupDrafts.get(a, session)
+	if !exists || !draft.Started {
+		http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
+		return
+	}
+
+	draft.CurrentStep = setupCrossplayStep
+	if draft.Minecraft.ServerType != "bedrock" {
+		draft.Server.BedrockEnabled = r.FormValue("bedrock_enabled") == "on"
+		draft.Minecraft.JavaPort = strings.TrimSpace(r.FormValue("java_port"))
+		draft.Minecraft.BedrockPort = strings.TrimSpace(r.FormValue("bedrock_port"))
+		draft.Minecraft.ImageTag = strings.TrimSpace(r.FormValue("image_tag"))
+		draft.Minecraft.VersionPolicy = strings.TrimSpace(r.FormValue("version_policy"))
+		draft.Minecraft.Version = strings.TrimSpace(r.FormValue("version"))
+	}
+	draft.Minecraft.ConnectionsComplete = false
+	draft.Minecraft.VersionComplete = false
+	draft.Minecraft.Complete = false
+	setupReviews.delete(a, session)
+
+	if r.FormValue("direction") == "back" {
+		draft.Minecraft.ConnectionsComplete = false
+		draft.CurrentStep = setupServerStep
+		setupReviews.delete(a, session)
+		setupDrafts.save(a, session, draft)
+		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "connection settings changed; user returned to Server", draft)
+		http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
+		return
+	}
+	if err := a.resolveSetupRuntime(r.Context(), session, &draft, false); err != nil {
+		if !recommendedServerSupportsBedrock(draft.Minecraft.ServerType) {
+			draft.Server.BedrockEnabled = false
+		}
+		draft.Minecraft.ConnectionsComplete = false
+		setupDrafts.save(a, session, draft)
+		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "connection settings rejected", draft)
+		w.WriteHeader(http.StatusBadRequest)
+		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), err.Error())
+		return
+	}
+	if draft.Minecraft.VersionPolicy != "pinned" {
+		draft.Minecraft.Version = ""
+	}
+	draft.Minecraft.VersionComplete = true
+	draft.Minecraft.ConnectionsComplete = true
+	draft.Minecraft.Complete = draft.Minecraft.ResourcesComplete && draft.Minecraft.VersionComplete
+	draft.CurrentStep = setupMemoryStep
+	setupReviews.delete(a, session)
+	setupDrafts.save(a, session, draft)
+	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "connection settings saved", draft)
+	http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
+}
+
+func (a *App) setupWizardSaveResources(w http.ResponseWriter, r *http.Request) {
+	session, client, identity, ok := a.setupWizardRequest(w, r, true)
+	if !ok {
+		return
+	}
+	draft, exists := setupDrafts.get(a, session)
+	if !exists || !draft.Started {
+		http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
+		return
+	}
+
+	draft.Minecraft.JavaMemory = strings.TrimSpace(r.FormValue("java_memory"))
+	draft.Minecraft.ContainerMemory = strings.TrimSpace(r.FormValue("container_memory"))
+
+	if r.FormValue("direction") == "back" {
+		draft.Minecraft.ResourcesComplete = false
+		draft.Minecraft.Complete = false
+		draft.CurrentStep = setupCrossplayStep
+		setupReviews.delete(a, session)
+		setupDrafts.save(a, session, draft)
+		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "resource settings changed; user returned to Cross-play", draft)
+		http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
+		return
+	}
+	if err := validateSetupResources(draft.Minecraft, draft.Defaults); err != nil {
+		draft.Minecraft.ResourcesComplete = false
+		draft.Minecraft.Complete = false
+		setupDrafts.save(a, session, draft)
+		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "resource settings rejected", draft)
+		w.WriteHeader(http.StatusBadRequest)
+		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), err.Error())
+		return
+	}
+	draft.Minecraft.ResourcesComplete = true
+	draft.Minecraft.Complete = draft.Minecraft.ConnectionsComplete && draft.Minecraft.VersionComplete
+	draft.CurrentStep = setupStorageStep
+	setupReviews.delete(a, session)
+	setupDrafts.save(a, session, draft)
+	a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "resource settings saved", draft)
+	http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
+}
+
+func (a *App) setupWizardNavigate(w http.ResponseWriter, r *http.Request) {
+	session, client, _, ok := a.setupWizardRequest(w, r, true)
+	if !ok {
+		return
+	}
+	direction := r.FormValue("direction")
+	if direction != "next" && direction != "back" && direction != "jump" {
+		http.Error(w, ui(w, "ui.206f6ee68aa5"), http.StatusBadRequest)
+		return
+	}
+	target, _ := strconv.Atoi(r.FormValue("step"))
+	if !setupDrafts.navigateTo(a, session, direction, target) {
+		if direction != "jump" {
+			http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
+			return
+		}
+		http.Error(w, ui(w, "ui.9e74df88d315"), http.StatusBadRequest)
+		return
+	}
+	setupReviews.delete(a, session)
+	if draft, exists := setupDrafts.get(a, session); exists {
+		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "wizard navigation changed", draft)
+		if draft.CurrentStep == setupReviewStep {
+			http.Redirect(w, r, setupBasePath(r)+"/review", http.StatusSeeOther)
+			return
+		}
+	}
+	http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
+}
+
+func (a *App) setupWizardCancel(w http.ResponseWriter, r *http.Request) {
+	session, client, _, ok := a.setupWizardRequest(w, r, true)
+	if !ok {
+		return
+	}
+	if a.redirectCurrentSetupOperation(w, r, session, client) {
+		return
+	}
+	if draft, exists := setupDrafts.get(a, session); exists {
+		a.recordSetupDraftDiagnosticBestEffort(r.Context(), client, session, "WebUI setup wizard cancelled", draft)
+	}
+	setupReviews.delete(a, session)
+	setupDrafts.delete(a, session)
+	if isAddServerRequest(r) {
+		if r.Header.Get("Accept") == "application/json" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		a.renderAdminDiscovery(w, "add_server_cancelled.html", nil)
+		return
+	}
+	http.Redirect(w, r, setupBasePath(r), http.StatusSeeOther)
+}
+
+func (a *App) setupWizardRequest(w http.ResponseWriter, r *http.Request, requireCSRF bool) (string, adminDiscoveryAPI, api.SessionInfo, bool) {
+	if requireCSRF && !a.validCSRF(r) {
+		http.Error(w, "invalid CSRF token", http.StatusForbidden)
+		return "", nil, api.SessionInfo{}, false
+	}
+	session, client, identity, ok := a.adminDiscoveryRequest(w, r)
+	if !ok {
+		return "", nil, api.SessionInfo{}, false
+	}
+	configuration, err := client.AdminConfiguration(r.Context(), session)
+	if err != nil {
+		a.handleAdminDiscoveryError(w, r, err)
+		return "", nil, api.SessionInfo{}, false
+	}
+	if isAddServerRequest(r) {
+		if mustChange(r) {
+			http.Error(w, ui(w, "ui.77288ba735df"), http.StatusForbidden)
+			return "", nil, api.SessionInfo{}, false
+		}
+		if !configuration.Configured {
+			if r.Method == http.MethodGet {
+				http.Redirect(w, r, "/setup", http.StatusSeeOther)
+				return "", nil, api.SessionInfo{}, false
+			}
+			http.Error(w, ui(w, "ui.6ebbfdec1e9a"), http.StatusConflict)
+			return "", nil, api.SessionInfo{}, false
+		}
+		if draft, exists := setupDrafts.get(a, session); exists && !draft.AddServer {
+			if a.redirectCurrentSetupOperation(w, r, session, client) {
+				return "", nil, api.SessionInfo{}, false
+			}
+			http.Error(w, ui(w, "ui.853d0de131fb"), http.StatusConflict)
+			return "", nil, api.SessionInfo{}, false
+		}
+		return session, client, identity, true
+	}
+	if configuration.Configured {
+		if draft, exists := setupDrafts.get(a, session); exists && !draft.AddServer {
+			setupReviews.delete(a, session)
+			setupDrafts.delete(a, session)
+		}
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return "", nil, api.SessionInfo{}, false
+	}
+	return session, client, identity, true
+}
+
+func (a *App) renderSetupWizard(w http.ResponseWriter, identity api.SessionInfo, draft setupDraft, csrf, errorMessage string) {
+	if draft.SimpleState == 0 {
+		draft.SimpleState = 1
+	}
+	candidate, valid := setupMemoryMiB(draft.Minecraft.ContainerMemory)
+	draft.StartAfterUnavailable = draft.StartCapacityUnknown || !valid || draft.RunningMemoryMiB+candidate+1024 > draft.Defaults.SystemMemoryMiB
+	draft.StartBootUnavailable = draft.BootCapacityUnknown || !valid || draft.BootMemoryMiB+candidate+1024 > draft.Defaults.SystemMemoryMiB
+	steps := make([]setupWizardStepView, len(setupWizardSteps))
+	copy(steps, setupWizardSteps)
+	current := setupWizardStepView{}
+	if draft.Started {
+		if draft.CurrentStep < 1 || draft.CurrentStep > len(steps) {
+			draft.CurrentStep = setupServerStep
+		}
+		for i := range steps {
+			steps[i].Active = steps[i].Number == draft.CurrentStep
+			steps[i].Complete = steps[i].Number < draft.CurrentStep
+			steps[i].Visited = steps[i].Number < draft.CurrentStep
+			if steps[i].Active {
+				current = steps[i]
+			}
+		}
+	}
+	storageDisks, externalStorageCount := setupStorageDiskViews(draft.Inventory)
+	minecraftFilesystems := []setupFilesystemView{}
+	for _, filesystem := range setupFilesystemViews(draft.Inventory) {
+		if _, ok := safeSetupMinecraftDevice(draft.Inventory, filesystem.Path); ok {
+			minecraftFilesystems = append(minecraftFilesystems, filesystem)
+		}
+	}
+	runningMemory := ""
+	if draft.RunningMemoryMiB > 0 {
+		runningMemory = formatMemoryMiB(draft.RunningMemoryMiB)
+	}
+	basePath := "/setup"
+	if draft.AddServer {
+		basePath = addServerBasePath
+	}
+	softwareGroups := setupSoftwareGroups()
+	data := setupWizardPageData{
+		SoftwareGroups: softwareGroups, SimpleState: draft.SimpleState, SimpleFamily: draft.SimpleFamily, SimpleSoftware: simpleSoftware(draft.SimpleFamily),
+		AddServer: draft.AddServer, BasePath: basePath, DisplayName: draft.DisplayName, RunningMemory: runningMemory,
+		StartOnBoot: draft.StartOnBoot, StartAfterSetup: draft.StartAfterSetup, StartAfterUnavailable: draft.StartAfterUnavailable, StartBootUnavailable: draft.StartBootUnavailable, BackupAvailable: draft.BackupAvailable, OtherMemoryMiB: draft.OtherMemoryMiB,
+		Title: ui(w, "ui.a64036d36e20"), Version: a.config.Version, ManagementAPI: a.config.ManagementAPI,
+		CSRF: csrf, Identity: identity, Started: draft.Started, CurrentStep: draft.CurrentStep,
+		Current: current, Steps: steps, Error: errorMessage,
+		Server: draft.Server, Minecraft: draft.Minecraft, Storage: draft.Storage, Backups: draft.Backups,
+		StorageBrowser: setupStorageBrowserData(draft, csrf, false), BackupBrowser: setupStorageBrowserData(draft, csrf, true),
+		MinecraftFilesystems: minecraftFilesystems, Filesystems: setupFilesystemViews(draft.Inventory), StorageDisks: storageDisks, BackupDisks: setupBackupDiskViews(draft.Inventory),
+		ExternalStorageCount: externalStorageCount, SameDiskWarning: setupSameDiskWarning(draft), Defaults: draft.Defaults,
+		SystemMemory:             formatMemoryMiB(draft.Defaults.SystemMemoryMiB),
+		SystemReserveMinimum:     formatMemoryMiB(draft.Defaults.SystemReserveMinimumMiB),
+		SystemReserveRecommended: formatMemoryMiB(draft.Defaults.SystemReserveRecommendedMiB),
+		CanBack:                  draft.Started && draft.CurrentStep > 1,
+		CanNext:                  draft.Started && draft.CurrentStep < len(steps),
+	}
+	a.renderAdminDiscovery(w, "setup_wizard.html", data)
+}
+
+func normalizedSetupDefaults(defaults api.AdminSetupDefaults) api.AdminSetupDefaults {
+	if defaults.DataPath == "" {
+		defaults.DataPath = "/var/lib/justvoxel/minecraft"
+	}
+	if defaults.BackupPath == "" {
+		defaults.BackupPath = "/var/lib/justvoxel/backups"
+	}
+	if defaults.JavaMemory == "" {
+		defaults.JavaMemory = "4G"
+	}
+	if defaults.ContainerMemory == "" {
+		defaults.ContainerMemory = "6G"
+	}
+	if defaults.JavaPort == 0 {
+		defaults.JavaPort = 25565
+	}
+	if defaults.BedrockPort == 0 {
+		defaults.BedrockPort = 19132
+	}
+	if defaults.Timezone == "" {
+		defaults.Timezone = "UTC"
+	}
+	if defaults.MaxPlayers == 0 {
+		defaults.MaxPlayers = 10
+	}
+	if defaults.ImageTag == "" {
+		defaults.ImageTag = "stable"
+	}
+	if defaults.BackupKeep == 0 {
+		defaults.BackupKeep = 7
+	}
+	if defaults.BackupDailyTime == "" {
+		defaults.BackupDailyTime = "04:30"
+	}
+	if defaults.SystemReserveMinimumMiB == 0 {
+		defaults.SystemReserveMinimumMiB = 1024
+	}
+	if defaults.SystemReserveRecommendedMiB == 0 {
+		defaults.SystemReserveRecommendedMiB = 1536
+	}
+	return defaults
+}
+
+func draftFromSetupDefaults(defaults api.AdminSetupDefaults, inventory api.AdminStorageDiscovery) setupDraft {
+	defaults = normalizedSetupDefaults(defaults)
+	policy := defaults.VersionMode
+	if policy != "latest" {
+		// First setup has no pinned version yet. Let the later validated setup
+		// plan resolve the newest stable Paper-backed Minecraft release.
+		policy = "recommended"
+	}
+	version := ""
+	if policy == "latest" {
+		version = "LATEST"
+	}
+	return setupDraft{
+		Started: true, CurrentStep: setupServerStep, HighestStep: setupServerStep, Defaults: defaults, Inventory: inventory,
+		Server: setupServerDraft{
+			MOTDAutomatic: true, MaxPlayers: strconv.Itoa(defaults.MaxPlayers),
+			BedrockEnabled: defaults.BedrockEnabled,
+		},
+		Minecraft: setupMinecraftDraft{
+			ServerType: "paper",
+			JavaMemory: defaults.JavaMemory, ContainerMemory: defaults.ContainerMemory,
+			JavaPort: strconv.Itoa(defaults.JavaPort), BedrockPort: strconv.Itoa(defaults.BedrockPort),
+			ImageTag: defaults.ImageTag, VersionPolicy: policy, Version: version, GameMode: "survival",
+		},
+		Storage: initialSetupStorageDraft(defaults),
+		Backups: initialSetupBackupDraft(defaults),
+	}
+}
+
+func validateSetupServer(server setupServerDraft) error {
+	if strings.ContainsAny(server.MOTD, "\r\n") {
+		return errors.New(uiText("ui.471148d47bdf"))
+	}
+	if _, err := parsePositiveFormInt(server.MaxPlayers, uiText("ui.e1f268f4f175")); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateSetupResources(minecraft setupMinecraftDraft, defaults api.AdminSetupDefaults) error {
+	if minecraft.ServerType == "bedrock" {
+		limit, ok := setupMemoryMiB(minecraft.ContainerMemory)
+		if !ok || limit < 512 || defaults.SystemMemoryMiB > 0 && limit > defaults.SystemMemoryMiB-1024 {
+			return errors.New(uiText("ui.fc22812ed3ae"))
+		}
+		return nil
+	}
+	javaMiB, ok := setupMemoryMiB(minecraft.JavaMemory)
+	if !ok {
+		return errors.New(uiText("ui.fa44f3dc9abc"))
+	}
+	containerMiB, ok := setupMemoryMiB(minecraft.ContainerMemory)
+	if !ok {
+		return errors.New(uiText("ui.79316905d4b4"))
+	}
+	if containerMiB <= javaMiB {
+		return errors.New(uiText("ui.ee2308252ddd"))
+	}
+	if containerMiB-javaMiB < 512 {
+		return errors.New(uiText("ui.732fc517a8e0"))
+	}
+	if defaults.SystemMemoryMiB > 0 && containerMiB > defaults.SystemMemoryMiB-1024 {
+		return errors.New(uiText("ui.bca51603e2ef"))
+	}
+	return nil
+}
+
+func validateSetupConnections(minecraft setupMinecraftDraft) error {
+	if minecraft.ServerType == "bedrock" {
+		if minecraft.BedrockTCPPort < 1 || minecraft.BedrockTCPPort > 65535 || minecraft.BedrockUDPStart < 1 || minecraft.BedrockUDPEnd < minecraft.BedrockUDPStart || minecraft.BedrockUDPEnd > 65535 {
+			return errors.New(uiText("ui.0cd24e3d834e"))
+		}
+		return nil
+	}
+	if _, err := parseSetupPort(minecraft.JavaPort, uiText("ui.7658b8ed58ab")); err != nil {
+		return err
+	}
+	if _, err := parseSetupPort(minecraft.BedrockPort, uiText("ui.60abc420b980")); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validSetupGameMode(mode string) bool {
+	switch mode {
+	case "survival", "creative", "adventure", "spectator":
+		return true
+	}
+	return false
+}
+
+func validateSetupMinecraft(minecraft setupMinecraftDraft, defaults api.AdminSetupDefaults) error {
+	if !validSetupGameMode(minecraft.GameMode) || minecraft.ServerType == "bedrock" && minecraft.GameMode == "spectator" {
+		return errors.New(uiText("ui.9b4e69acae19"))
+	}
+	if err := validateSetupResources(minecraft, defaults); err != nil {
+		return err
+	}
+	if err := validateSetupConnections(minecraft); err != nil {
+		return err
+	}
+	return validateSetupVersion(minecraft)
+}
+
+func validateSetupVersion(minecraft setupMinecraftDraft) error {
+	if minecraft.ServerType == "spigot" && minecraft.RuntimeImageTag != "" {
+		required := setupRuntimeImage(minecraft.ServerType, minecraft.ResolvedVersion)
+		if required == "" || minecraft.RuntimeImageTag != required {
+			return errors.New(uiText("ui.c1f08010ae17"))
+		}
+	}
+
+	if !setupImageTagPattern.MatchString(minecraft.ImageTag) {
+		return errors.New(uiText("ui.785f5f4ad87e"))
+	}
+	switch minecraft.VersionPolicy {
+	case "recommended":
+		// A4.4 resolves and validates the newest stable Paper-backed version.
+	case "latest":
+		// The planner resolves an exact preview; runtime keeps this policy moving.
+	case "pinned":
+		if minecraft.Version == "" || minecraft.Version == "LATEST" || !setupVersionPattern.MatchString(minecraft.Version) {
+			return errors.New(uiText("ui.e4fcec805dbc"))
+		}
+	default:
+		return errors.New(uiText("ui.921968d62cc1"))
+	}
+	return nil
+}
+
+func validateSetupConnectionDraft(draft setupDraft) error {
+	if draft.Server.BedrockEnabled && !recommendedServerSupportsBedrock(draft.Minecraft.ServerType) {
+		return errors.New(uiText("ui.59d898937352"))
+	}
+	return validateSetupConnections(draft.Minecraft)
+}
+
+func parseSetupPort(value, label string) (int, error) {
+	port, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || port < 1 || port > 65535 {
+		return 0, fmt.Errorf(uiText("ui.2763142982e3"), label)
+	}
+	return port, nil
+}
+
+func setupMemoryMiB(value string) (int, bool) {
+	match := setupMemoryPattern.FindStringSubmatch(strings.TrimSpace(value))
+	if len(match) != 3 {
+		return 0, false
+	}
+	amount, err := strconv.Atoi(match[1])
+	if err != nil || amount <= 0 {
+		return 0, false
+	}
+	if strings.EqualFold(match[2], "G") {
+		amount *= 1024
+	}
+	return amount, true
+}
+
+func setupKey(app *App, session string) setupDraftKey {
+	return setupDraftKey{app: app, session: sha256.Sum256([]byte(session))}
+}
+
+func (s *setupDraftStore) pruneLocked(now time.Time) {
+	for key, draft := range s.drafts {
+		if now.Sub(draft.UpdatedAt) > setupDraftLifetime {
+			delete(s.drafts, key)
+		}
+	}
+}
+
+func (s *setupDraftStore) get(app *App, session string) (setupDraft, bool) {
+	now := time.Now()
+	key := setupKey(app, session)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pruneLocked(now)
+	draft, ok := s.drafts[key]
+	return draft, ok
+}
+
+func (s *setupDraftStore) start(app *App, session string, defaults api.AdminSetupDefaults, inventory api.AdminStorageDiscovery) {
+	now := time.Now()
+	key := setupKey(app, session)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pruneLocked(now)
+	draft := draftFromSetupDefaults(defaults, inventory)
+	draft.UpdatedAt = now
+	s.drafts[key] = draft
+}
+
+func (s *setupDraftStore) save(app *App, session string, draft setupDraft) {
+	now := time.Now()
+	key := setupKey(app, session)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pruneLocked(now)
+	if previous, ok := s.drafts[key]; ok && previous.HighestStep > draft.HighestStep {
+		draft.HighestStep = previous.HighestStep
+	}
+	if draft.CurrentStep > draft.HighestStep {
+		draft.HighestStep = draft.CurrentStep
+	}
+	draft.UpdatedAt = now
+	s.drafts[key] = draft
+}
+
+func (s *setupDraftStore) navigate(app *App, session, direction string) bool {
+	return s.navigateTo(app, session, direction, 0)
+}
+
+func (s *setupDraftStore) navigateTo(app *App, session, direction string, target int) bool {
+	now := time.Now()
+	key := setupKey(app, session)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pruneLocked(now)
+	draft, ok := s.drafts[key]
+	if !ok || !draft.Started {
+		return false
+	}
+	switch direction {
+	case "next":
+		// Steps before Review have real forms and cannot be skipped through the generic
+		// navigation endpoint. The validated Review has its own route.
+		if draft.CurrentStep < setupReviewStep {
+			return false
+		}
+	case "back":
+		if draft.CurrentStep > 1 {
+			draft.CurrentStep--
+		}
+	case "jump":
+		if target < 1 || target >= draft.CurrentStep || target > len(setupWizardSteps) {
+			return false
+		}
+		previousStep := draft.CurrentStep
+		draft.CurrentStep = target
+		if target == setupReviewStep && !setupDraftReadyForReview(draft) {
+			draft.CurrentStep = previousStep
+			return false
+		}
+	default:
+		return false
+	}
+	draft.UpdatedAt = now
+	s.drafts[key] = draft
+	return true
+}
+
+func (s *setupDraftStore) delete(app *App, session string) {
+	key := setupKey(app, session)
+	s.mu.Lock()
+	delete(s.drafts, key)
+	s.mu.Unlock()
+}

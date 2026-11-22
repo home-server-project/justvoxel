@@ -1,0 +1,160 @@
+#!/usr/bin/bash
+set -ouex pipefail
+
+source /ctx/build_files/packages.env
+: "${JUSTVOXEL_COMMON_PACKAGES:?JUSTVOXEL_COMMON_PACKAGES must be set}"
+
+cp -avf /ctx/system_files/. /
+install -m0440 /ctx/system_files/etc/sudoers.d/justvoxel-pwfeedback /etc/sudoers.d/justvoxel-pwfeedback
+install -m0440 /ctx/system_files/etc/sudoers.d/justvoxel-ups-event /etc/sudoers.d/justvoxel-ups-event
+install -m0440 /ctx/system_files/etc/sudoers.d/justvoxel-remote-access-status /etc/sudoers.d/justvoxel-remote-access-status
+
+if ! dnf repolist --enabled | grep -Eiq '(^|[[:space:]])crb([[:space:]]|$)'; then
+    echo "ERROR: AlmaLinux CRB repository is not enabled."
+    exit 1
+fi
+
+read -r -a common_packages <<< "${JUSTVOXEL_COMMON_PACKAGES}"
+dnf install -y "${common_packages[@]}"
+
+superfile_rpm="$(find /ctx/superfile-rpms -maxdepth 1 -type f -name 'superfile-*.x86_64.rpm' -print -quit)"
+if [[ -z ${superfile_rpm} ]]; then
+    echo "ERROR: verified Superfile RPM artifact is missing."
+    exit 1
+fi
+dnf install -y "${superfile_rpm}"
+
+glances_rpm="$(find /ctx/glances-rpms -maxdepth 1 -type f -name 'glances-*.noarch.rpm' -print -quit)"
+if [[ -z ${glances_rpm} ]]; then
+    echo "ERROR: verified Glances RPM artifact is missing."
+    exit 1
+fi
+dnf install -y "${glances_rpm}"
+
+playit_rpm="$(find /ctx/playit-rpms -maxdepth 1 -type f -name 'playit-*.x86_64.rpm' -print -quit)"
+if [[ -z ${playit_rpm} ]]; then
+    echo "ERROR: verified Playit RPM artifact is missing."
+    exit 1
+fi
+dnf install -y "${playit_rpm}"
+# Appliance policy: enabled for deployed boot, never started in composition.
+systemctl enable playit.service
+
+# Official native RPM; resolve the current Nord package only during composition.
+dnf install -y https://repo.nordvpn.com/yum/nordvpn/centos/noarch/Packages/n/nordvpn-release-1.0.0-1.noarch.rpm
+dnf install -y --setopt=install_weak_deps=False nordvpn
+# Disable every repository shipped by the bootstrap package for deployed hosts.
+while IFS= read -r nord_repo; do
+    case "${nord_repo}" in
+        /etc/yum.repos.d/*.repo)
+            # Explicitly disable sections even when enabled was omitted.
+            python3 - "${nord_repo}" <<'NORD_REPO'
+import configparser
+import sys
+path = sys.argv[1]
+repo = configparser.RawConfigParser()
+repo.read(path)
+for section in repo.sections():
+    repo.set(section, 'enabled', '0')
+with open(path, 'w') as target:
+    repo.write(target)
+NORD_REPO
+            ;;
+    esac
+done < <(rpm -ql nordvpn-release)
+# Undo vendor installation enablement. No account, identity or Meshnet setup.
+# Composition has no running systemd; --root changes only finished-image links.
+if systemctl is-active --quiet nordvpnd.socket nordvpnd.service 2>/dev/null; then
+    systemctl stop nordvpnd.socket nordvpnd.service
+fi
+systemctl --root=/ disable nordvpnd.socket nordvpnd.service
+
+systemctl enable NetworkManager.service 2>/dev/null || true
+systemctl enable systemd-resolved.service
+systemctl enable firewalld.service 2>/dev/null || true
+systemctl enable sshd.service 2>/dev/null || true
+systemctl enable justvoxel-web-bootstrap.service
+systemctl enable justvoxel-minecraft-shutdown-guard.service
+systemctl enable justvoxel-system-update-stage.timer
+# JustVoxel owns download scheduling; only a confirmed appliance operation reboots.
+systemctl --root=/ disable bootc-fetch-apply-updates.timer
+systemctl --root=/ mask bootc-fetch-apply-updates.timer
+
+install -d -m0755 /usr/share/doc/justvoxel
+cp -avf /ctx/docs/. /usr/share/doc/justvoxel/
+
+install -d -m0755 /usr/share/justvoxel/templates
+cp -avf /ctx/templates/. /usr/share/justvoxel/templates/
+
+install -d -m0755 /usr/share/justvoxel/mjust
+install -m0644 /ctx/mjust/justfile /usr/share/justvoxel/mjust/justfile
+install -m0755 /ctx/mjust/bin/mjust /usr/bin/mjust
+
+install -d -m0755 /usr/libexec/justvoxel
+install -m0755 /ctx/runtime/minecraft-backup /usr/libexec/justvoxel/minecraft-backup
+install -m0755 /ctx/runtime/system-update-reboot-worker /usr/libexec/justvoxel/system-update-reboot-worker
+install -m0755 /ctx/runtime/justvoxel-remote-access-status /usr/libexec/justvoxel/remote-access-status
+install -m0755 /ctx/runtime/justvoxel-motd /usr/libexec/justvoxel/motd
+install -m0755 /ctx/runtime/justvoxel-console-issue /usr/libexec/justvoxel/console-issue-refresh
+install -d -m0755 /usr/libexec/justvoxel/mjust
+install -m0755 /ctx/mjust/libexec/* /usr/libexec/justvoxel/mjust/
+
+if [[ ! -x /ctx/build_artifacts/management/management-agent ]]; then
+    echo 'ERROR: verified JustVoxel management agent build artifact is missing.' >&2
+    exit 1
+fi
+if [[ ! -x /ctx/build_artifacts/webui/justvoxel-webui || ! -r /ctx/build_artifacts/webui/webui-release.json ]]; then
+    echo 'ERROR: verified JustVoxel WebUI build artifacts are missing.' >&2
+    exit 1
+fi
+install -m0755 /ctx/build_artifacts/management/management-agent /usr/libexec/justvoxel/management-agent
+install -m0755 /ctx/build_artifacts/webui/justvoxel-webui /usr/libexec/justvoxel/justvoxel-webui
+install -d -m0755 /usr/lib/justvoxel
+# Home Server Packages runtime plugins are baked into the immutable image.
+install -d -m0755 /usr/lib/justvoxel/minecraft-network
+for network_plugin in limboapi justvoxel-lobby; do
+    [[ -s "/ctx/minecraft-network-artifacts/${network_plugin}.jar" ]]
+    install -o0 -g0 -m0644 "/ctx/minecraft-network-artifacts/${network_plugin}.jar" "/usr/lib/justvoxel/minecraft-network/${network_plugin}.jar"
+done
+install -m0644 /ctx/build_artifacts/webui/webui-release.json /usr/lib/justvoxel/webui-release.json
+jq -e '.management_api == "v1" and (.version | type == "string" and length > 0) and (.source_commit | test("^[0-9a-f]{40}$")) and (.build_date | type == "string" and length > 0) and (.go_version | type == "string" and length > 0) and (has("artifact_sha256") | not) and (has("release_tag") | not)' /usr/lib/justvoxel/webui-release.json >/dev/null
+webui_version="$(jq -r '.version' /usr/lib/justvoxel/webui-release.json)"
+webui_source="$(jq -r '.source_commit' /usr/lib/justvoxel/webui-release.json)"
+webui_api="$(jq -r '.management_api' /usr/lib/justvoxel/webui-release.json)"
+webui_version_output="$(/usr/libexec/justvoxel/justvoxel-webui -version)"
+grep -Fqx "JustVoxel WebUI ${webui_version}" <<<"${webui_version_output}"
+grep -Fqx "source=${webui_source}" <<<"${webui_version_output}"
+grep -Fqx "management-api=${webui_api}" <<<"${webui_version_output}"
+/usr/libexec/justvoxel/management-agent version | grep -Fq 'JustVoxel Management API v1'
+
+install -d -m0755 /usr/libexec/justvoxel/health
+install -m0755 /ctx/build_files/validate/common.sh /usr/libexec/justvoxel/health/common
+
+for cmd in \
+    bootc podman skopeo just mjust fzf gum \
+    findmnt mountpoint flock timeout mkfs.xfs btrfs mount.nfs mount.cifs mount.ntfs-3g umount \
+    lsblk blkid wipefs parted partprobe udevadm spf python3 btop; do
+    command -v "${cmd}"
+done
+command -v rsvg-convert
+command -v sgitopnm
+command -v pnmtopng
+command -v glances
+command -v ttyd
+rpm -q ttyd
+
+rpm -q superfile glances
+spf --version
+glances --version
+
+bash -n /usr/libexec/justvoxel/minecraft-backup
+bash -n /usr/libexec/justvoxel/system-update-reboot-worker
+bash -n /usr/libexec/justvoxel/motd
+bash -n /usr/libexec/justvoxel/console-issue-refresh
+bash -n /etc/profile.d/90-justvoxel-motd.sh
+for script in /usr/bin/mjust /usr/libexec/justvoxel/mjust/*; do
+    [[ -f "${script}" ]] || continue
+    bash -n "${script}"
+done
+just --justfile /usr/share/justvoxel/mjust/justfile --list >/dev/null
+semodule -l >/dev/null

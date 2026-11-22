@@ -1,0 +1,77 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/ui.sh
+
+if ! jui_is_interactive; then
+    cat <<'TEXT'
+JustVoxel network management requires an interactive terminal.
+
+Use:
+  mjust net
+
+For direct advanced Linux administration, nm-hsp and nmtui are also installed
+as normal host commands.
+TEXT
+    exit 0
+fi
+
+playit_menu() {
+    while true; do
+        local state configured active choice
+        local -a options=()
+        configured=no
+        active=no
+        state='Not configured'
+        if sudo test -s /etc/playit/playit.toml; then
+            configured=yes
+            state='Stopped'
+        fi
+        if systemctl is-active --quiet playit.service; then
+            active=yes
+            [[ ${configured} == yes ]] && state='Running'
+        fi
+        if [[ ${configured} == no || ${active} == no ]]; then
+            options+=('Activate Playit')
+        fi
+        [[ ${active} == yes ]] && options+=('Deactivate Playit')
+        options+=('Playit status' 'Back')
+        choice="$(jui_choose "Playit.gg public game access · ${state}" "${options[@]}")" || return 0
+        case "${choice}" in
+            'Activate Playit')
+                if sudo systemctl enable --now playit.service; then
+                    if ! sudo test -s /etc/playit/playit.toml; then
+                        sudo /usr/bin/playit setup || true
+                        echo 'Further tunnel and account management: https://playit.gg/account/'
+                    fi
+                fi
+                jui_pause
+                ;;
+            'Deactivate Playit')
+                sudo systemctl disable --now playit.service || true
+                jui_pause
+                ;;
+            'Playit status')
+                systemctl --no-pager --lines=0 status playit.service || true
+                sudo /usr/bin/playit status || true
+                sudo /usr/libexec/justvoxel/remote-access-status playit --details || true
+                jui_pause
+                ;;
+            'Back') return 0 ;;
+        esac
+    done
+}
+
+while true; do
+    echo
+    echo 'nm-hsp - Friendly network manager from Home Server Project'
+    echo '  Normal Ethernet, Wi-Fi and easy network troubleshooting.'
+    echo 'nmtui - Classic NetworkManager interface'
+    echo '  Advanced/classic Linux networking configuration.'
+    choice="$(jui_choose 'Network' 'Friendly network manager (nm-hsp)' 'Classic NetworkManager interface (nmtui)' 'Playit.gg public game access' 'Back')" || exit 0
+    case "${choice}" in
+        'Friendly network manager (nm-hsp)') sudo /usr/bin/nm-hsp || true ;;
+        'Classic NetworkManager interface (nmtui)') sudo /usr/bin/nmtui || true ;;
+        'Playit.gg public game access') playit_menu ;;
+        'Back') exit 0 ;;
+    esac
+done

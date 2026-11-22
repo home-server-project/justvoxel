@@ -1,0 +1,475 @@
+{{define "storage_browser_content"}}
+<div class="storage-browser-shell storage-browser-content" data-storage-browser-root>
+  <p class="muted storage-browser-intro">{{if .SetupPurpose}}{{t "ui.b75183f57bcf"}}{{else}}{{t "ui.d52d16d72484"}}{{end}}</p>
+  <input type="hidden" value="{{.CSRF}}" data-storage-action-csrf>
+
+  <section class="storage-drive-section" aria-label="{{t "ui.3c4932de404b"}}">
+    <div class="storage-drive-section-heading">
+      <div><p class="eyebrow">{{t "ui.a69c4dece144"}}</p><h3>{{t "ui.3c4932de404b"}}</h3></div>
+      <span class="badge">{{len .InternalDisks}}</span>
+    </div>
+    {{if .InternalDisks}}
+    <div class="storage-disk-grid" role="list">
+      {{range .InternalDisks}}
+      <button class="storage-disk-card{{if eq $.SelectedDisk .Name}} is-selected{{end}}" type="button" role="listitem"
+              data-storage-disk="{{.Name}}" data-disk-identity="{{.Path}}|{{.Model}}|{{.Size}}|{{.Transport}}" aria-pressed="{{if eq $.SelectedDisk .Name}}true{{else}}false{{end}}">
+        <span class="storage-disk-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M7 15h.01M17 15h.01M7 9h10"></path></svg>
+        </span>
+        <span class="storage-disk-copy">
+          <strong>{{if .Model}}{{.Model}}{{else}}{{.Path}}{{end}}</strong>
+          <span>{{.Size}}{{if .Transport}} · {{.Transport}}{{end}}</span>
+          <small><code>{{.Path}}</code> · {{ts .PartitionTableLabel}}{{if .System}} {{t "ui.4bbc0f81fa4b"}}{{end}}</small>
+        </span>
+      </button>
+      {{end}}
+    </div>
+    {{else}}
+    <p class="muted storage-drive-empty">{{t "ui.20eef3ad28e2"}}</p>
+    {{end}}
+  </section>
+
+  {{if ne .SetupPurpose "minecraft"}}
+  <section class="storage-drive-section storage-external-section" aria-label="{{t "ui.4435cf23d696"}}">
+    <div class="storage-drive-section-heading">
+      <div><p class="eyebrow">{{t "ui.68c114ea9c8c"}}</p><h3>{{t "ui.f92015a72b7e"}}</h3></div>
+      <span class="badge">{{len .ExternalDisks}}</span>
+    </div>
+    {{if .ExternalDisks}}
+    <div class="storage-disk-grid" role="list">
+      {{range .ExternalDisks}}
+      <button class="storage-disk-card storage-disk-card-external{{if eq $.SelectedDisk .Name}} is-selected{{end}}" type="button" role="listitem"
+              data-storage-disk="{{.Name}}" data-disk-identity="{{.Path}}|{{.Model}}|{{.Size}}|{{.Transport}}" aria-pressed="{{if eq $.SelectedDisk .Name}}true{{else}}false{{end}}">
+        <span class="storage-disk-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M9 3h6v5h2v9H7V8h2z"></path><path d="M11 3v3M13 3v3M9 20h6"></path></svg>
+        </span>
+        <span class="storage-disk-copy">
+          <strong>{{if .Model}}{{.Model}}{{else}}{{.Path}}{{end}}</strong>
+          <span>{{.Size}} {{t "ui.57b8f0ff6a36"}}</span>
+          <small><code>{{.Path}}</code> · {{ts .PartitionTableLabel}}{{if .System}} {{t "ui.4bbc0f81fa4b"}}{{end}}</small>
+        </span>
+      </button>
+      {{end}}
+    </div>
+    {{end}}
+  </section>
+
+  {{end}}
+
+  {{if .Disks}}
+  <section class="storage-partition-browser" aria-live="polite">
+    {{range .Disks}}
+    <div class="storage-partition-group" data-storage-partitions="{{.Name}}" {{if ne $.SelectedDisk .Name}}hidden{{end}}>
+      <div class="section-heading storage-selected-heading">
+        <div><p class="eyebrow">{{t "ui.4f1cb28f6ea0"}}</p><h2>{{if .Model}}{{.Model}}{{else}}{{.Path}}{{end}}</h2></div>
+        <span class="badge">{{.Size}}</span>
+      </div>
+
+      {{if or .Partitions .FreeSpaces}}
+      <div class="storage-partition-grid">
+        {{range .Partitions}}
+          {{if .Swap}}
+          <article class="storage-partition-card storage-partition-swap" aria-label="{{.Path}} swap partition">
+            <span class="storage-partition-state">{{t "ui.6ec282d40a8a"}}</span>
+            <strong>{{.Path}}</strong>
+            <span>{{.Size}}</span>
+          </article>
+          {{else}}
+          <button class="storage-partition-card" type="button"
+                  data-storage-partition
+                  {{if .SetupSelectable}}{{if eq $.SetupPurpose "minecraft"}}data-setup-existing-partition{{else}}data-setup-backup-existing{{end}} data-device="{{.Path}}" data-mountpoint="{{.SetupMountPoint}}"{{end}}
+                  data-name="{{.Name}}"
+                  data-type="{{.Type}}"
+                  data-transport="{{.Transport}}"
+                  data-partition-table="{{.PartitionTable}}"
+                  data-can-initialize="{{if .CanInitialize}}Yes{{else}}No{{end}}"
+                  data-path="{{.Path}}"
+                  data-size="{{.Size}}"
+                  data-filesystem="{{.Filesystem}}"
+                  data-filesystem-display="{{.FilesystemDisplay}}"
+                  data-label="{{.Label}}"
+                  data-uuid="{{.UUID}}"
+                  data-mountpoints="{{if .System}}System partition{{else}}{{.Mountpoints}}{{end}}"
+                  data-role="{{.Role}}"
+                  data-mounted="{{if .Mounted}}Yes{{else}}No{{end}}"
+                  data-system="{{if .System}}Yes{{else}}No{{end}}"
+                  data-readonly="{{if .ReadOnly}}Yes{{else}}No{{end}}"
+                  data-minecraft-candidate="{{if .MinecraftCandidate}}Yes{{else}}No{{end}}"
+                  data-minecraft-mount-point="{{.MinecraftMountPoint}}"
+                  data-filesystem-usage-known="{{if .FilesystemUsageKnown}}Yes{{else}}No{{end}}"
+                  data-filesystem-used="{{.FilesystemUsed}}"
+                  data-filesystem-free="{{.FilesystemFree}}">
+            <span class="storage-partition-state">{{.Role}}</span>
+            <strong>{{.Path}}</strong>
+            <span>{{.Size}}{{if .Filesystem}} · {{.FilesystemDisplay}}{{end}}</span>
+            {{if .System}}<small>{{t "ui.31f023724e64"}}</small>{{else if .Mountpoints}}<small>{{.Mountpoints}}</small>{{else if not .Formatted}}<small>{{t "ui.af9d8f12b31f"}}</small>{{else}}<small>{{t "ui.669cf449a506"}}</small>{{end}}
+          </button>
+          {{end}}
+        {{end}}
+        {{range .FreeSpaces}}
+        <button class="storage-partition-card storage-free-space-card" type="button"
+                data-storage-free-space
+                data-device="{{.Device}}"
+                data-start="{{.Start}}"
+                data-end="{{.End}}"
+                data-size="{{.Size}}"
+                data-size-bytes="{{.SizeBytes}}">
+          <span class="storage-partition-state">{{t "ui.353cd62295b0"}}</span>
+          <strong>{{t "ui.ec73a3cd610c"}}</strong>
+          <span>{{.Size}}</span>
+          <small>{{t "ui.4374b78f540b"}}</small>
+        </button>
+        {{end}}
+      </div>
+      {{end}}
+      {{if or .CanInitialize .MinecraftWholeDisk .BackupWholeDisk}}
+      <details class="storage-advanced-actions"><summary>{{if $.SetupPurpose}}{{t "ui.39ef3daa5333"}}{{else}}{{t "ui.a37520d397dd"}}{{end}}</summary>
+      {{if .CanInitialize}}
+      <div class="storage-empty-actions">
+        <button class="secondary" type="button" data-storage-initialize data-path="{{.Path}}">{{t "ui.086fe3083f79"}}</button>
+        <p class="muted compact">{{t "ui.610e8a2df2b8"}}</p>
+      </div>
+      {{end}}
+      {{if or .MinecraftWholeDisk .BackupWholeDisk}}
+      <div class="notice storage-empty-disk">
+        <strong>{{t "ui.fa79cc792223"}}</strong>
+        <p class="muted">{{t "ui.b438805492dd"}}</p>
+        <div class="storage-empty-actions">
+          {{if .MinecraftWholeDisk}}
+          <button type="button" data-storage-whole-disk data-storage-whole-purpose="minecraft" data-storage-whole-device="{{.Path}}" data-storage-whole-size="{{.Size}}">{{t "ui.4d0865818811"}}</button>
+          {{end}}
+          {{if .BackupWholeDisk}}<button class="secondary" type="button" data-storage-whole-disk data-storage-whole-purpose="backups" data-storage-whole-device="{{.Path}}" data-storage-whole-size="{{.Size}}">{{t "ui.cf1e135f678e"}}</button>{{end}}
+        </div>
+        <p class="muted compact">{{t "ui.5e8709f31a8a"}}</p>
+      </div>
+      {{end}}
+      </details>
+      {{end}}
+    </div>
+    {{end}}
+  </section>
+  {{else}}
+  <div class="notice">{{t "ui.f88a450cceb1"}}</div>
+  {{end}}
+  <dialog class="storage-detail-dialog" data-storage-detail-dialog>
+    {{template "storage_partition_operation" .}}
+  </dialog>
+
+  <dialog class="storage-detail-dialog" data-storage-free-detail-dialog>
+    {{template "storage_free_operation" .}}
+  </dialog>
+
+  {{template "storage_partition_create_review" .}}
+
+  <dialog class="storage-action-dialog" data-storage-whole-disk-dialog>
+    <div class="storage-action-card">
+      <div class="storage-detail-heading">
+        <div><p class="eyebrow">{{t "ui.06d1404bfa96"}}</p><h2 data-storage-whole-title>{{t "ui.4af75f7b889d"}}</h2></div>
+        <button class="storage-dialog-close" type="button" data-storage-whole-close aria-label="{{t "ui.408cd923ca9d"}}">×</button>
+      </div>
+      <p class="muted" data-storage-whole-description></p>
+      <dl class="storage-action-review">
+        <div><dt>{{t "ui.340e0cf3bfa8"}}</dt><dd><code data-storage-whole-device-label></code></dd></div>
+        <div><dt>{{t "ui.1af851907331"}}</dt><dd data-storage-whole-size-label></dd></div>
+        <div data-storage-whole-plan-row hidden><dt>{{t "ui.7b68fe551085"}}</dt><dd data-storage-whole-after></dd></div>
+        <div data-storage-whole-mount-row hidden><dt>{{t "ui.6f934ef11ef8"}}</dt><dd><code data-storage-whole-mount></code></dd></div>
+      </dl>
+      <div class="storage-action-warnings" data-storage-whole-warnings></div>
+      <label class="storage-whole-player-confirmation" data-storage-whole-players-field hidden>
+        <input type="checkbox" data-storage-whole-players>
+        {{t "ui.2d1f53ac3741"}}
+        <span class="muted compact" data-storage-whole-players-note></span>
+      </label>
+      <div class="storage-confirmation" data-storage-whole-confirmation-field hidden>
+        <p class="storage-confirm-selected">{{t "ui.9046767d0148"}} <strong data-storage-whole-confirmation-summary></strong></p>
+        <div class="storage-confirm-slider" data-storage-whole-confirm-slider-shell style="--confirm-progress:0">
+          <span class="storage-confirm-slider-text" data-storage-whole-confirm-slider-text>{{t "ui.507319d1e586"}}</span>
+          <span class="storage-confirm-slider-thumb" aria-hidden="true">{{t "ui.62b67e1f685b"}}</span>
+          <input type="range" min="0" max="100" step="1" value="0" data-storage-whole-confirm-slider aria-label="{{t "ui.204bf0871d27"}}">
+        </div>
+        <label class="storage-confirm-toggle-row" data-storage-whole-confirm-toggle-row hidden>
+          <span class="storage-confirm-toggle-callout">{{t "ui.eebdd24a77d9"}} <span class="storage-confirm-toggle-arrow" aria-hidden="true">{{t "ui.62b67e1f685b"}}</span></span>
+          <input class="storage-confirm-toggle" type="checkbox" data-storage-whole-confirm-toggle aria-label="{{t "ui.a1d192cba721"}}">
+        </label>
+      </div>
+      <p class="storage-action-error" data-storage-whole-error hidden></p>
+      <div class="action-row storage-action-buttons">
+        <button class="secondary" type="button" data-storage-whole-cancel>{{t "ui.19766ed6ccb2"}}</button>
+        <button type="button" data-storage-whole-review>{{t "ui.8f102c2baf65"}}</button>
+        <button class="danger" type="button" data-storage-whole-apply hidden>{{t "ui.a6e53d6b90d2"}}</button>
+      </div>
+    </div>
+  </dialog>
+
+  {{if not .SetupPurpose}}
+  <dialog class="storage-action-dialog storage-minecraft-dialog" data-storage-minecraft-dialog>
+    <div class="storage-action-card">
+      <div class="storage-detail-heading">
+        <div><p class="eyebrow">{{t "ui.d81e5d45c7f0"}}</p><h2 data-storage-minecraft-title>{{t "ui.76885b1c6c88"}}</h2></div>
+        <button class="storage-dialog-close" type="button" data-storage-minecraft-close aria-label="{{t "ui.107e74c91a7f"}}">×</button>
+      </div>
+
+      <div data-storage-minecraft-setup>
+        <input type="hidden" value="" data-storage-minecraft-device>
+        <p class="storage-minecraft-selected">{{t "ui.acf919cb1d24"}} <code data-storage-minecraft-selected></code></p>
+        <p class="muted">{{t "ui.18096139bc4a"}}</p>
+        <label>{{t "ui.6f934ef11ef8"}}
+          <input data-storage-minecraft-mount required autocomplete="off">
+        </label>
+        <p class="muted compact" data-storage-minecraft-mount-note></p>
+        <label>{{t "ui.39312672a899"}}
+          <input data-storage-minecraft-path required autocomplete="off">
+        </label>
+        <p class="muted compact">{{t "ui.98971699a794"}}</p>
+        <p class="storage-action-error" data-storage-minecraft-error hidden></p>
+        <div class="action-row storage-action-buttons">
+          <button class="secondary" type="button" data-storage-minecraft-cancel>{{t "ui.19766ed6ccb2"}}</button>
+          <button type="button" data-storage-minecraft-review>{{t "ui.03e285059a0f"}}</button>
+        </div>
+      </div>
+
+      <div data-storage-minecraft-review-panel hidden>
+        <dl class="storage-action-review">
+          <div><dt>{{t "ui.96fcb2509b3f"}}</dt><dd><code data-storage-minecraft-current-path></code></dd></div>
+          <div><dt>{{t "ui.90632a94bcc0"}}</dt><dd><code data-storage-minecraft-review-device></code></dd></div>
+          <div><dt>{{t "ui.8230c68a6158"}}</dt><dd data-storage-minecraft-review-filesystem></dd></div>
+          <div><dt>{{t "ui.0b0f4060dafa"}}</dt><dd><code data-storage-minecraft-review-mount></code></dd></div>
+          <div><dt>{{t "ui.a13302481412"}}</dt><dd><code data-storage-minecraft-review-path></code></dd></div>
+          <div><dt>{{t "ui.a82b46747351"}}</dt><dd data-storage-minecraft-review-capacity></dd></div>
+        </dl>
+        <div class="storage-action-warnings" data-storage-minecraft-warnings></div>
+        <label class="storage-whole-player-confirmation" data-storage-minecraft-players-field hidden>
+          <input type="checkbox" data-storage-minecraft-players>
+          {{t "ui.2d1f53ac3741"}}
+          <span class="muted compact" data-storage-minecraft-players-note></span>
+        </label>
+        <div data-storage-minecraft-destructive-field hidden>
+          <div class="confirmation-example confirmation-required">
+            <span>{{t "ui.d74f041c3973"}}</span>
+            <code data-storage-minecraft-destructive-phrase></code>
+          </div>
+          <label>{{t "ui.dd4597183588"}}
+            <input data-storage-minecraft-destructive autocomplete="off" spellcheck="false">
+          </label>
+        </div>
+        <label><strong>{{t "ui.4b16003efc4e"}}</strong>
+          <input data-storage-minecraft-confirmation autocomplete="off" spellcheck="false">
+        </label>
+        <p class="storage-action-error" data-storage-minecraft-review-error hidden></p>
+        <div class="action-row storage-action-buttons">
+          <button class="secondary" type="button" data-storage-minecraft-back>{{t "ui.76900f1bfd16"}}</button>
+          <button type="button" data-storage-minecraft-apply disabled>{{t "ui.91d77a655ec1"}}</button>
+        </div>
+      </div>
+
+      <div data-storage-minecraft-progress hidden>
+        <div class="storage-minecraft-progress-heading">
+          <span class="badge" data-storage-minecraft-progress-state>{{t "ui.a92f0449a9f7"}}</span>
+          <strong data-storage-minecraft-progress-stage>{{t "ui.a1bdfe679916"}}</strong>
+        </div>
+        <p data-storage-minecraft-progress-status>{{t "ui.dde3c697d2f2"}}</p>
+        <div class="details">{{t "ui.204c7b2a7911"}} <code data-storage-minecraft-progress-id></code></div>
+        <div class="notice" data-storage-minecraft-reconnect hidden><strong>{{t "ui.2f7a8aae9569"}}</strong><br>{{t "ui.17e80a2b4e38"}}</div>
+        <div class="notice success" data-storage-minecraft-success hidden><strong>{{t "ui.82f423f0f93e"}}</strong><br>{{t "ui.eb82e4990904"}}</div>
+        <div class="notice warning" data-storage-minecraft-rollback hidden><strong>{{t "ui.5cc938bc9e37"}}</strong><br>{{t "ui.afed5945e991"}}</div>
+        <div class="notice error" data-storage-minecraft-attention hidden><strong>{{t "ui.b80629977dcc"}}</strong><br>{{t "ui.103d76d17a6c"}}</div>
+        <div class="action-row storage-action-buttons">
+          <button class="secondary" type="button" data-storage-minecraft-progress-close>{{t "ui.7d9eb7acb13e"}}</button>
+          <button type="button" data-storage-minecraft-refresh hidden>{{t "ui.a6d0ac28a990"}}</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  {{end}}
+
+  {{template "storage_partition_action_review" .}}
+
+</div>
+{{end}}
+
+{{define "storage_browser.html"}}<!doctype html>
+<html lang="{{locale}}">
+<head><script src="/i18n.js"></script><script src="/static/i18n.js"></script>
+  <link rel="icon" type="image/png" href="/static/justvoxel-favicon.png">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{t "ui.1703af7aec8c"}}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/storage-browser.css">
+  <script src="/static/app.js" defer></script>
+  <script src="/static/storage-browser.js" defer></script>
+</head>
+<body class="role-administrator">
+{{template "app-header" .}}
+<main>
+  <div class="title-row">
+    <div><p class="eyebrow">{{t "ui.75f9fe5a435c"}}</p><h1>{{t "ui.a69c4dece144"}}</h1></div>
+    <span class="badge">{{.Identity.Username}}</span>
+  </div>
+  {{template "storage_browser_content" .}}
+</main>
+{{template "language-dialog" .}}</body>
+</html>{{end}}
+
+{{define "storage_partition_operation"}}
+
+    <div class="storage-detail-card">
+      <div class="storage-detail-heading">
+        <div><p class="eyebrow">{{t "ui.bedc335dbd68"}}</p><h2 data-detail-title>{{t "ui.4dbdd221e957"}}</h2></div>
+        <button class="storage-dialog-close" type="button" data-storage-detail-close aria-label="{{t "ui.2cbb4aeaced4"}}">×</button>
+      </div>
+      <div class="storage-detail-role" data-detail-role></div>
+      <dl class="storage-detail-list">
+        <div><dt>{{t "ui.6ba0bdeccb42"}}</dt><dd><code data-detail-path></code></dd></div>
+        <div><dt>{{t "ui.1af851907331"}}</dt><dd data-detail-size></dd></div>
+        <div data-detail-used-row hidden><dt>{{t "ui.ae7d8dfac9ff"}}</dt><dd data-detail-used></dd></div>
+        <div data-detail-free-row hidden><dt>{{t "ui.f411a1fb6275"}}</dt><dd data-detail-free></dd></div>
+        <div data-detail-usage-unavailable-row hidden><dt>{{t "ui.f411a1fb6275"}}</dt><dd>{{t "ui.0e9191db3271"}}</dd></div>
+        <div><dt>{{t "ui.8230c68a6158"}}</dt><dd data-detail-filesystem></dd></div>
+        <div data-detail-label-row><dt>{{t "ui.0e66373f45dc"}}</dt><dd data-detail-label></dd></div>
+        <div data-detail-uuid-row><dt>{{t "ui.2a898bc98aaf"}}</dt><dd><code data-detail-uuid></code></dd></div>
+        <div data-detail-mount-row><dt data-detail-mount-label>{{t "ui.63a2b13c2fdc"}}</dt><dd><code data-detail-mount></code></dd></div>
+        <div><dt>{{t "ui.81f39eb58b3b"}}</dt><dd data-detail-mounted></dd></div>
+        <div data-detail-mount-type-row hidden><dt>{{t "ui.18c45115ba7d"}}</dt><dd data-detail-mount-type></dd></div>
+        <div><dt>{{t "ui.03a94e18279e"}}</dt><dd data-detail-system></dd></div>
+        <div><dt>{{t "ui.8ac767353080"}}</dt><dd data-detail-readonly></dd></div>
+      </dl>
+      <div class="storage-detail-actions" data-storage-detail-actions hidden>
+        <span class="muted">{{t "ui.1d210499376b"}}</span>
+        <details class="storage-action-menu" data-storage-action-menu>
+          <summary aria-label="{{t "ui.25113546af26"}}">⋯</summary>
+          <div class="storage-action-menu-popover">
+            <button type="button" data-storage-action="mount-for-now" hidden><span class="storage-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"></circle><path d="M12 8v5l3 2"></path></svg></span><span>{{t "ui.b38026295cf7"}}</span></button>
+            <button type="button" data-storage-action="mount-permanently" hidden><span class="storage-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 4h6l-1 5 3 3v2H7v-2l3-3-1-5Z"></path><path d="M12 14v6"></path></svg></span><span>{{t "ui.c25aca017ad2"}}</span></button>
+            <button type="button" data-storage-action="make-permanent" hidden><span class="storage-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 4h6l-1 5 3 3v2H7v-2l3-3-1-5Z"></path><path d="M12 14v6"></path></svg></span><span>{{t "ui.47c6c7c07b5a"}}</span></button>
+            <button type="button" data-storage-action="mount-now" hidden><span class="storage-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 4h6l-1 5 3 3v2H7v-2l3-3-1-5Z"></path><path d="M12 14v6"></path></svg></span><span>{{t "ui.ee66044030fe"}}</span></button>
+            <button type="button" data-storage-action="unmount-for-now" hidden><span class="storage-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"></circle><path d="M12 8v5l3 2"></path></svg></span><span>{{t "ui.3bfad184955d"}}</span></button>
+            <button type="button" data-storage-action="remove-permanent" hidden><span class="storage-action-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 4h6l-1 5 3 3v2H7v-2l3-3-1-5Z"></path><path d="M12 14v6"></path></svg></span><span>{{t "ui.5b8d0b0a935c"}}</span></button>
+            <button type="button" data-storage-minecraft-migrate hidden>{{t "ui.4d0865818811"}}</button>
+            <button type="button" data-storage-action="use-for-backups" hidden>{{t "ui.3e445d7176e5"}}</button>
+            <button class="storage-action-danger" type="button" data-storage-action="format">{{t "ui.9c138f81e8f1"}}</button>
+            <button class="storage-action-danger" type="button" data-storage-action="delete_partition" hidden>{{t "ui.c122a05a345e"}}</button>
+            <button class="storage-action-danger" type="button" data-storage-action="initialize_disk" hidden>{{t "ui.25a4b0df9763"}}</button>
+          </div>
+        </details>
+      </div>
+      <div class="notice storage-protected-note" data-storage-protected-note hidden>{{t "ui.a6fba1b19c7b"}}</div>
+    </div>
+
+{{end}}
+
+{{define "storage_free_operation"}}
+
+    <div class="storage-detail-card">
+      <div class="storage-detail-heading">
+        <div><p class="eyebrow">{{t "ui.263903c4c2d3"}}</p><h2>{{t "ui.ec73a3cd610c"}}</h2></div>
+        <button class="storage-dialog-close" type="button" data-storage-free-detail-close aria-label="{{t "ui.41720643eb43"}}">×</button>
+      </div>
+      <div class="storage-detail-role">{{t "ui.e674447337e8"}}</div>
+      <dl class="storage-detail-list">
+        <div><dt>{{t "ui.340e0cf3bfa8"}}</dt><dd><code data-storage-free-device></code></dd></div>
+        <div><dt>{{t "ui.e674447337e8"}}</dt><dd data-storage-free-size></dd></div>
+      </dl>
+      <div class="storage-detail-actions">
+        <span class="muted">{{t "ui.dfef473eaf10"}}</span>
+        <details class="storage-action-menu" data-storage-free-action-menu>
+          <summary aria-label="{{t "ui.51e41f30015e"}}">⋯</summary>
+          <div class="storage-action-menu-popover">
+            <button type="button" data-storage-create-partition>{{t "ui.c5c57b753681"}}</button>
+          </div>
+        </details>
+      </div>
+    </div>
+
+{{end}}
+
+{{define "storage_partition_create_review"}}
+  <dialog class="storage-action-dialog" data-storage-create-dialog>
+    <div class="storage-action-card">
+      <div class="storage-detail-heading">
+        <div><p class="eyebrow">{{t "ui.1a562da59068"}}</p><h2>{{t "ui.c5ab45c9751d"}}</h2></div>
+        <button class="storage-dialog-close" type="button" data-storage-create-close aria-label="{{t "ui.d8cda093f3b3"}}">×</button>
+      </div>
+      <p class="muted">{{t "ui.590bd0f956ba"}}</p>
+      <dl class="storage-action-review">
+        <div><dt>{{t "ui.340e0cf3bfa8"}}</dt><dd><code data-storage-create-device></code></dd></div>
+        <div><dt>{{t "ui.e674447337e8"}}</dt><dd data-storage-create-available></dd></div>
+      </dl>
+      <label class="storage-option-toggle-row">
+        <span><strong>{{t "ui.2f8c6c7dd319"}}</strong><small>{{t "ui.036a388f889b"}}</small></span>
+        <input class="storage-option-toggle" type="checkbox" data-storage-create-all aria-label="{{t "ui.9f4c2153adfb"}}">
+      </label>
+      <label>{{t "ui.39854edabad1"}}
+        <input type="number" min="1" step="1" inputmode="numeric" placeholder="{{t "ui.39f42e45cecb"}}" data-storage-create-size>
+        <span class="muted compact">{{t "ui.371b2e582c94"}}</span>
+      </label>
+      <div data-storage-create-review-panel hidden>
+        <dl class="storage-action-review">
+          <div><dt>{{t "ui.f17552592e3a"}}</dt><dd data-storage-create-after></dd></div>
+        </dl>
+        <div class="storage-action-warnings" data-storage-create-warnings></div>
+        <div class="storage-confirmation" data-storage-create-confirmation-field hidden>
+          <p class="storage-confirm-selected">{{t "ui.6450d238a465"}} <strong data-storage-create-confirmation-summary></strong></p>
+          <div class="storage-confirm-slider" data-storage-create-confirm-slider-shell style="--confirm-progress:0">
+            <span class="storage-confirm-slider-text" data-storage-create-confirm-slider-text>{{t "ui.973f04f1623c"}}</span>
+            <span class="storage-confirm-slider-thumb" aria-hidden="true">{{t "ui.62b67e1f685b"}}</span>
+            <input type="range" min="0" max="100" step="1" value="0" data-storage-create-confirm-slider aria-label="{{t "ui.abe944b4a48a"}}">
+          </div>
+          <label class="storage-confirm-toggle-row" data-storage-create-confirm-toggle-row hidden>
+            <span class="storage-confirm-toggle-callout">{{t "ui.eebdd24a77d9"}} <span class="storage-confirm-toggle-arrow" aria-hidden="true">{{t "ui.62b67e1f685b"}}</span></span>
+            <input class="storage-confirm-toggle" type="checkbox" data-storage-create-confirm-toggle aria-label="{{t "ui.1513e4b58fbb"}}">
+          </label>
+        </div>
+      </div>
+      <p class="storage-action-error" data-storage-create-error hidden></p>
+      <div class="action-row storage-action-buttons">
+        <button class="secondary" type="button" data-storage-create-cancel>{{t "ui.19766ed6ccb2"}}</button>
+        <button type="button" data-storage-create-review>{{t "ui.8f102c2baf65"}}</button>
+        <button class="danger" type="button" data-storage-create-apply hidden>{{t "ui.a6e53d6b90d2"}}</button>
+      </div>
+    </div>
+  </dialog>
+{{end}}
+
+{{define "storage_partition_action_review"}}
+  <dialog class="storage-action-dialog" data-storage-action-dialog>
+    <div class="storage-action-card">
+      <div class="storage-detail-heading">
+        <div><p class="eyebrow">{{t "ui.674abd83dab3"}}</p><h2 data-storage-action-title>{{t "ui.8f102c2baf65"}}</h2></div>
+        <button class="storage-dialog-close" type="button" data-storage-action-close aria-label="{{t "ui.61dad77c7ce1"}}">×</button>
+      </div>
+      <p class="muted" data-storage-action-description></p>
+      <label class="storage-action-mount-field" data-storage-mount-field hidden>{{t "ui.6f934ef11ef8"}}
+        <input data-storage-mount-input autocomplete="off" placeholder="/var/mnt/vdb1">
+      </label>
+      <div class="storage-action-review" data-storage-action-review hidden>
+        <dl>
+          <div><dt>{{t "ui.4dbdd221e957"}}</dt><dd><code data-storage-review-device></code></dd></div>
+          <div><dt>{{t "ui.5be5a7acc73b"}}</dt><dd data-storage-review-role></dd></div>
+          <div><dt>{{t "ui.d9d934dfbb8f"}}</dt><dd data-storage-review-filesystem></dd></div>
+          <div data-storage-review-target-row><dt>{{t "ui.f17552592e3a"}}</dt><dd data-storage-review-target></dd></div>
+        </dl>
+        <div class="storage-action-warnings" data-storage-action-warnings></div>
+        <div class="storage-confirmation" data-storage-confirmation-field hidden>
+          <p class="storage-confirm-selected">{{t "ui.acf919cb1d24"}} <strong data-storage-confirmation-summary></strong></p>
+          <div class="storage-confirm-slider" data-storage-confirm-slider-shell style="--confirm-progress:0">
+            <span class="storage-confirm-slider-text" data-storage-confirm-slider-text>{{t "ui.d17f992c0114"}}</span>
+            <span class="storage-confirm-slider-thumb" aria-hidden="true">{{t "ui.62b67e1f685b"}}</span>
+            <input type="range" min="0" max="100" step="1" value="0" data-storage-confirm-slider aria-label="{{t "ui.233d2e5415b9"}}">
+          </div>
+          <label class="storage-confirm-toggle-row" data-storage-confirm-toggle-row hidden>
+            <span class="storage-confirm-toggle-callout">{{t "ui.eebdd24a77d9"}} <span class="storage-confirm-toggle-arrow" aria-hidden="true">{{t "ui.62b67e1f685b"}}</span></span>
+            <input class="storage-confirm-toggle" type="checkbox" data-storage-confirm-toggle aria-label="{{t "ui.4927aec5b7a2"}}">
+          </label>
+        </div>
+      </div>
+      <p class="storage-action-error" data-storage-action-error hidden></p>
+      <div class="action-row storage-action-buttons">
+        <button class="secondary" type="button" data-storage-action-cancel>{{t "ui.19766ed6ccb2"}}</button>
+        <button type="button" data-storage-action-review-button>{{t "ui.8f102c2baf65"}}</button>
+        <button class="danger" type="button" data-storage-action-apply-button hidden>{{t "ui.79ca6b45e0ef"}}</button>
+      </div>
+    </div>
+  </dialog>
+{{end}}

@@ -1,0 +1,252 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+base="${repo_root}/mjust/libexec/storage-common-base.sh"
+discovery="${repo_root}/mjust/libexec/admin-discovery-json"
+common="${repo_root}/mjust/libexec/admin-storage-actions-common.sh"
+planner="${repo_root}/mjust/libexec/admin-storage-actions-json"
+apply="${repo_root}/mjust/libexec/admin-storage-actions-apply.sh"
+provision="${repo_root}/mjust/libexec/admin-storage-provision-json"
+migration_transaction="${repo_root}/mjust/libexec/admin-data-migration-transaction-json"
+
+for script in "${base}" "${discovery}" "${common}" "${planner}" "${apply}" "${provision}" "${migration_transaction}"; do
+    bash -n "${script}"
+done
+
+grep -Fq 'storage_mountpoint_is_system' "${base}" || {
+    echo 'ERROR: shared system-mount classification is missing.' >&2
+    exit 1
+}
+grep -Fq 'startsWith("/sysroot/")' "${base}" && {
+    echo 'ERROR: invalid jq spelling in system-mount detection.' >&2
+    exit 1
+}
+grep -Fq 'startswith("/sysroot/")' "${base}" || {
+    echo 'ERROR: bootc/OSTree /sysroot mount detection is missing.' >&2
+    exit 1
+}
+grep -Fq 'storage_create_partition' "${base}" || {
+    echo 'ERROR: shared partition creation helper is missing.' >&2
+    exit 1
+}
+grep -Fq 'mkpart justvoxel' "${base}" || {
+    echo 'ERROR: GPT partition creation no longer uses a GPT partition name.' >&2
+    exit 1
+}
+if grep -Fq 'mkpart primary xfs' "${base}" "${provision}" "${migration_transaction}"; then
+    echo 'ERROR: invalid duplicated mkpart primary xfs command remains.' >&2
+    exit 1
+fi
+grep -Fq 'storage_create_partition "${DEVICE}"' "${provision}" || {
+    echo 'ERROR: backup provisioning does not use shared partition creation.' >&2
+    exit 1
+}
+grep -Fq 'storage_create_partition "${device}"' "${migration_transaction}" || {
+    echo 'ERROR: Minecraft migration does not use shared partition creation.' >&2
+    exit 1
+}
+
+grep -Fq 'if (( ${#label} > 12 )); then' "${base}" || {
+    echo 'ERROR: XFS label length guard is missing from shared storage formatting.' >&2
+    exit 1
+}
+for invalid_label in JUSTVOXEL_BACKUP JUSTVOXEL_DATA JUSTVOXEL_STORAGE; do
+    if grep -Fq "${invalid_label}" "${base}" "${apply}" "${provision}" "${migration_transaction}"; then
+        echo "ERROR: overlong XFS label remains: ${invalid_label}" >&2
+        exit 1
+    fi
+done
+for valid_label in JV_BACKUP JV_DATA JV_STORAGE; do
+    if (( ${#valid_label} > 12 )); then
+        echo "ERROR: XFS label exceeds 12 characters: ${valid_label}" >&2
+        exit 1
+    fi
+done
+if grep -Fq 'mkfs.xfs' "${provision}" "${migration_transaction}"; then
+    echo 'ERROR: storage provisioning bypasses the shared XFS label-length guard.' >&2
+    exit 1
+fi
+grep -Fq 'storage_mkfs_xfs JV_BACKUP' "${provision}" || {
+    echo 'ERROR: backup provisioning is not using the validated short XFS label.' >&2
+    exit 1
+}
+grep -Fq 'storage_mkfs_xfs JV_DATA' "${migration_transaction}" || {
+    echo 'ERROR: Minecraft migration is not using the validated short XFS label.' >&2
+    exit 1
+}
+grep -Fq 'storage_mkfs_xfs JV_STORAGE "${device}"' "${apply}" || {
+    echo 'ERROR: generic partition formatting is not using the validated short XFS label.' >&2
+    exit 1
+}
+grep -Fq 'nsenter --mount=/proc/1/ns/mnt -- lsblk -nro MOUNTPOINTS' "${common}" || {
+    echo 'ERROR: storage actions do not query the host mount namespace.' >&2
+    exit 1
+}
+grep -Fq 'nsenter --mount=/proc/1/ns/mnt -- umount -- "$1"' "${common}" || {
+    echo 'ERROR: storage actions do not unmount in the host mount namespace.' >&2
+    exit 1
+}
+grep -Fq 'nsenter --mount=/proc/1/ns/mnt -- lsblk -J' "${discovery}" || {
+    echo 'ERROR: Storage discovery does not report host mounts.' >&2
+    exit 1
+}
+grep -Fq 'current_mountpoint="$(storage_action_mountpoint "${device}")"' "${planner}" || {
+    echo 'ERROR: Format Review does not query host mount state.' >&2
+    exit 1
+}
+grep -Fq 'storage_action_host_unmount "${current_mountpoint}"' "${apply}" || {
+    echo 'ERROR: Format does not unmount the reviewed host mount.' >&2
+    exit 1
+}
+grep -Fq 'mounted_after="$(storage_action_host_mountpoints "${device}")"' "${apply}" || {
+    echo 'ERROR: Format does not verify host unmount before mkfs.' >&2
+    exit 1
+}
+grep -Fq 'if [[ -n ${mounted_after} ]]; then' "${apply}" || {
+    echo 'ERROR: Format does not fail closed when the host still reports a mount.' >&2
+    exit 1
+}
+grep -Fq 'storage_action_mkfs_error "${mkfs_output}"' "${apply}" || {
+    echo 'ERROR: Format failure output is not bounded for the UI.' >&2
+    exit 1
+}
+grep -Fq 'cut -c1-240' "${common}" || {
+    echo 'ERROR: Format failure output is not length bounded.' >&2
+    exit 1
+}
+grep -Fq 'storage_mkfs_xfs JV_STORAGE "${partition}" 2>&1' "${apply}" || {
+    echo 'ERROR: new partition format does not report bounded XFS errors.' >&2
+    exit 1
+}
+format_block="$(sed -n '/^        format)/,/^        create_partition)/p' "${apply}")"
+unmount_line="$(grep -nF 'storage_action_host_unmount "${current_mountpoint}"' <<< "${format_block}" | head -n1 | cut -d: -f1)"
+verify_line="$(grep -nF 'mounted_after="$(storage_action_host_mountpoints "${device}")"' <<< "${format_block}" | head -n1 | cut -d: -f1)"
+mkfs_line="$(grep -nF 'storage_mkfs_xfs JV_STORAGE "${device}"' <<< "${format_block}" | head -n1 | cut -d: -f1)"
+if [[ -z ${unmount_line} || -z ${verify_line} || -z ${mkfs_line} ]] || (( unmount_line >= verify_line || verify_line >= mkfs_line )); then
+    echo 'ERROR: Format must unmount, verify the host state, then format.' >&2
+    exit 1
+fi
+grep -Fq 'The partition is still in use and could not be unmounted. It was not formatted.' <<< "${format_block}" || {
+    echo 'ERROR: failed host unmount no longer fails closed.' >&2
+    exit 1
+}
+grep -Fq 'The partition is still mounted on the host. It was not formatted.' <<< "${format_block}" || {
+    echo 'ERROR: remaining host mount no longer fails closed.' >&2
+    exit 1
+}
+if grep -Fq 'mkfs.xfs' "${apply}"; then
+    echo 'ERROR: generic partition formatting bypasses the shared XFS label-length guard.' >&2
+    exit 1
+fi
+grep -Fq 'storage_target_block_device' "${base}" || {
+    echo 'ERROR: system-disk detection lost bootc/OSTree block-device resolution.' >&2
+    exit 1
+}
+grep -Fq 'source="${source%%' "${base}" || {
+    echo 'ERROR: system-disk detection no longer strips findmnt subpath notation.' >&2
+    exit 1
+}
+grep -Fq 'MAJ:MIN' "${base}" || {
+    echo 'ERROR: system-disk detection lost major:minor fallback identity.' >&2
+    exit 1
+}
+grep -Fq 'startswith("zram")' "${discovery}" || {
+    echo 'ERROR: storage discovery can expose zram as physical storage.' >&2
+    exit 1
+}
+grep -Fq 'filesystem_usage_known' "${discovery}" || {
+    echo 'ERROR: storage discovery no longer reports mounted filesystem capacity.' >&2
+    exit 1
+}
+grep -Fq 'free_spaces' "${discovery}" || {
+    echo 'ERROR: storage discovery no longer reports unallocated disk segments.' >&2
+    exit 1
+}
+grep -Fq 'storage_require_identified_system_disk' "${common}" || {
+    echo 'ERROR: generic storage actions must fail closed when the system disk cannot be identified.' >&2
+    exit 1
+}
+grep -Fq 'storage_action_is_system_partition' "${common}" || {
+    echo 'ERROR: generic storage actions lost system-partition protection.' >&2
+    exit 1
+}
+grep -Fq 'storage_system_partitions' "${base}" || {
+    echo 'ERROR: exact active system-partition discovery is missing.' >&2
+    exit 1
+}
+grep -Fq 'swap partitions are not managed from the storage browser' "${common}" || {
+    echo 'ERROR: generic storage actions lost swap protection.' >&2
+    exit 1
+}
+grep -Fq 'confirmation="FORMAT ${device}"' "${planner}" || {
+    echo 'ERROR: destructive partition formatting lost exact typed confirmation.' >&2
+    exit 1
+}
+grep -Fq 'confirmation="CREATE PARTITION ${device}"' "${planner}" || {
+    echo 'ERROR: partition creation lost exact reviewed confirmation.' >&2
+    exit 1
+}
+grep -Fq 'storage_create_partition "${device}" "${STORAGE_ACTION_START}" "${planned_end}"' "${apply}" || {
+    echo 'ERROR: Storage partition creation is not bound to reviewed free-space geometry.' >&2
+    exit 1
+}
+grep -Fq 'comm -13 "${before}" "${after}"' "${apply}" || {
+    echo 'ERROR: Storage partition creation no longer identifies the exact new partition.' >&2
+    exit 1
+}
+grep -Fq 'storage_mkfs_xfs JV_STORAGE "${partition}"' "${apply}" || {
+    echo 'ERROR: Storage partition creation does not format the exact new partition as XFS.' >&2
+    exit 1
+}
+grep -Fq 'storage_action_mountable_filesystem "${filesystem}"' "${planner}" || {
+    echo 'ERROR: generic mount planning is not using the expanded mountable-filesystem policy.' >&2
+    exit 1
+}
+grep -Fq 'storage_action_mountable_filesystem "${filesystem}"' "${planner}" || {
+    echo 'ERROR: format planning lost the supported-filesystem boundary.' >&2
+    exit 1
+}
+grep -Fq 'storage_action_mount_device "${device}" "${mountpoint}" "${filesystem}"' "${apply}" || {
+    echo 'ERROR: temporary mount apply is not using filesystem-specific mount behavior.' >&2
+    exit 1
+}
+grep -Fq 'mounted filesystem did not match the reviewed filesystem' "${apply}" || {
+    echo 'ERROR: temporary mount apply lost post-mount identity verification.' >&2
+    exit 1
+}
+grep -Fq 'submitted_fingerprint' "${apply}" || {
+    echo 'ERROR: storage apply lost reviewed device fingerprint verification.' >&2
+    exit 1
+}
+grep -Fq 'The selected partition changed after Review. Nothing was changed.' "${apply}" || {
+    echo 'ERROR: storage apply lost its bounded changed-device failure.' >&2
+    exit 1
+}
+
+# Initialization tools may print normal success diagnostics; helper stdout is JSON only.
+initialize_commands="$(grep -F 'if ! wipefs --all --' "${apply}")"
+for command in \
+    'wipefs --all -- "${device}" >/dev/null' \
+    'parted -s -- "${device}" mklabel gpt >/dev/null' \
+    'partprobe "${device}" >/dev/null' \
+    'udevadm settle >/dev/null'; do
+    grep -Fq "${command}" <<< "${initialize_commands}" || {
+        echo "ERROR: disk initialization leaks tool stdout: ${command}" >&2
+        exit 1
+    }
+done
+grep -Eq 'lsblk[[:space:]][^)]*[[:space:]]-o[[:space:]]+([[:alnum:]_:]+,)*PTTYPE(,|[[:space:]]|\))' "${discovery}" || {
+    echo 'ERROR: discovery must read actual partition-table type from lsblk.' >&2
+    exit 1
+}
+grep -Fq '$table == "" or $table == "loop" then "none"' "${discovery}" || {
+    echo 'ERROR: whole-device filesystems must not be mistaken for a real partition table.' >&2
+    exit 1
+}
+grep -Fq '$table == "dos" then "msdos"' "${discovery}" || {
+    echo 'ERROR: discovery must normalize MBR partition-table type.' >&2
+    exit 1
+}
+
+echo 'New Storage action safety source checks passed.'

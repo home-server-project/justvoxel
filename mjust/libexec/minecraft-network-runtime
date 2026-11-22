@@ -1,0 +1,1695 @@
+#!/usr/bin/bash
+set -euo pipefail
+# Unit startup shares the existing maintenance lock. Agent publication already
+# holds it; backend startup inherits instance-crossplay-start's checked lock.
+if [[ ${1:-} == start-velocity ]]; then
+    exec 9>/run/justvoxel-minecraft-maintenance.lock
+    flock -w 5 9 || { echo 'ERROR: Minecraft Network is busy.' >&2; exit 1; }
+fi
+exec python3 - "$@" <<'PYTHON'
+"""Fixed Minecraft Network file preparation; called only by the root Agent/units.
+
+No relabel operations. Container volumes use the dedicated private Velocity label.
+All copying into existing instance data uses the existing private data mount.
+"""
+import base64
+import hashlib
+import json
+import os
+import re
+import stat
+import sys
+import tempfile
+import time
+import urllib.request
+import urllib.parse
+
+ROOT = '/etc/justvoxel/minecraft-network'
+INSTANCE_ROOT = '/etc/justvoxel/instances'
+PINNED_WHITELIST_SHA256 = '35c059c0913f2fa3cb75265edda4d84df84465c1ebebaefef3918e02be8bfbf5'
+MAX_JAR = 64 * 1024 * 1024
+BAKED_ROOT = '/usr/lib/justvoxel/minecraft-network'
+EXTERNAL_ARTIFACTS = {'global-whitelist.jar','Geyser-Velocity.jar','floodgate-velocity.jar','floodgate-spigot.jar'}
+BAKED_ARTIFACTS = {'limboapi.jar','justvoxel-lobby.jar'}
+VELOCITY_ARTIFACTS = ['global-whitelist.jar','Geyser-Velocity.jar','floodgate-velocity.jar','limboapi.jar','justvoxel-lobby.jar']
+
+
+def baked_artifacts():
+    result = {}
+    for name in sorted(BAKED_ARTIFACTS):
+        path = BAKED_ROOT+'/'+name
+        data = read(path, MAX_JAR)
+        info = os.stat(path)
+        if not data or info.st_uid != 0 or stat.S_IMODE(info.st_mode) != 0o644:
+            raise ValueError('invalid baked artifact')
+        result[name] = data
+    return result
+
+
+def validate_artifacts(allow_old=False):
+    manifest = private_json(ROOT+'/artifacts.json')
+    allowed = [EXTERNAL_ARTIFACTS | BAKED_ARTIFACTS]
+    if allow_old:
+        allowed.append(EXTERNAL_ARTIFACTS)
+    if not isinstance(manifest, dict) or set(manifest) not in allowed or manifest.get('global-whitelist.jar') != PINNED_WHITELIST_SHA256:
+        raise ValueError('invalid artifact evidence')
+    for name, expected in manifest.items():
+        if not isinstance(expected,str) or not re.fullmatch('[a-f0-9]{64}',expected):
+            raise ValueError('invalid artifact checksum')
+        data = read(ROOT+'/artifacts/'+name,MAX_JAR)
+        if not data or hashlib.sha256(data).hexdigest() != expected:
+            raise ValueError('installed artifact checksum mismatch')
+    return manifest
+
+
+def add_baked_artifacts(manifest):
+    # Verify the old evidence first, then prepare both immutable replacements
+    # before publishing either. Preserve all external hashes verbatim.
+    baked = baked_artifacts()
+    result = dict(manifest)
+    for name, data in baked.items():
+        result[name] = hashlib.sha256(data).hexdigest()
+        atomic(ROOT+'/artifacts/'+name,data)
+    atomic(ROOT+'/artifacts.json',json.dumps(result).encode())
+
+
+def legacy_rollback_generated():
+    marker = private_json(ROOT+'/legacy-rollback.json')
+    data = read(ROOT+'/generated.json')
+    if marker.get('schema') != 1 or marker.get('generated_sha256') != hashlib.sha256(data).hexdigest():
+        raise ValueError('invalid legacy rollback evidence')
+    return json.loads(data)
+
+
+def safe(path):
+    if not os.path.isabs(path) or os.path.realpath(path) != path:
+        raise ValueError('unsafe path')
+    part = '/'
+    for name in path.split('/')[1:]:
+        part = os.path.join(part, name)
+        if os.path.lexists(part) and os.path.islink(part):
+            raise ValueError('symlink')
+    return path
+
+
+def read(path, limit=1024*1024):
+    safe(path)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, 'rb') as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise ValueError('not a regular file')
+        data = stream.read(limit+1)
+    if len(data) > limit:
+        raise ValueError('file too large')
+    return data
+
+
+def private_json(path):
+    data = read(path)
+    info = os.stat(path)
+    if info.st_uid != 0 or stat.S_IMODE(info.st_mode) != 0o600:
+        raise ValueError('not private')
+    return json.loads(data)
+
+
+def directory(path, uid=0, gid=0):
+    safe(path)
+    if not os.path.exists(path):
+        parent = os.path.dirname(path)
+        if parent.startswith(ROOT):
+            directory(parent)
+        os.mkdir(path, 0o700)
+        os.chown(path, uid, gid)
+    if not os.path.isdir(path):
+        raise ValueError('not a directory')
+
+
+def atomic(path, data, uid=0, gid=0, mode=0o600):
+    safe(path)
+    if os.path.lexists(path) and not stat.S_ISREG(os.lstat(path).st_mode):
+        raise ValueError('not a regular file')
+    parent = os.path.dirname(path)
+    safe(parent)
+    fd, temporary = tempfile.mkstemp(prefix='.jv-network-', dir=parent)
+    try:
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(data)
+            os.fchmod(stream.fileno(), mode)
+            os.fchown(stream.fileno(), uid, gid)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        sync = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(sync)
+        finally:
+            os.close(sync)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+class HTTPSRedirect(urllib.request.HTTPRedirectHandler):
+    max_redirections = 3
+
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        target = urllib.parse.urlsplit(newurl)
+        if target.scheme != 'https' or target.username is not None or target.password is not None:
+            raise ValueError('unsafe artifact redirect')
+        return super().redirect_request(request, fp, code, msg, headers, newurl)
+
+
+HTTP = urllib.request.build_opener(HTTPSRedirect)
+
+
+def fetch(url, limit):
+    if not url.startswith('https://'):
+        raise ValueError('HTTPS required')
+    request = urllib.request.Request(url, headers={'User-Agent': 'JustVoxel/MinecraftNetwork'})
+    with HTTP.open(request, timeout=30) as response:
+        if response.status != 200:
+            raise ValueError('bad response')
+        data = response.read(limit+1)
+    if len(data) > limit:
+        raise ValueError('download too large')
+    return data
+
+
+def prepare():
+    directory(ROOT)
+    directory(ROOT+'/velocity', 1000, 1000)
+    directory(ROOT+'/artifacts')
+    if os.path.exists(ROOT+'/artifacts.json'):
+        artifacts = validate_artifacts(allow_old=True)
+        baked_hashes = {name: hashlib.sha256(data).hexdigest() for name, data in baked_artifacts().items()}
+        # External artifacts retain verified evidence; baked artifacts track the image.
+        if set(artifacts) == EXTERNAL_ARTIFACTS or any(artifacts[name] != digest for name, digest in baked_hashes.items()):
+            add_baked_artifacts(artifacts)
+        return
+    artifacts = {}
+    # The reviewed Modrinth project/version, loader, primary JAR, metadata hash,
+    # published release hash and exact size all have to agree.
+    version = json.loads(fetch('https://api.modrinth.com/v2/project/aKrMZ5cC/version/1.2.1', 1024*1024))
+    if version['project_id'] != 'aKrMZ5cC' or version['version_number'] != '1.2.1' or 'velocity' not in version['loaders']:
+        raise ValueError('wrong whitelist version')
+    files = [f for f in version['files'] if f['primary'] and f['filename'].endswith('.jar')]
+    if len(files) != 1:
+        raise ValueError('ambiguous whitelist artifact')
+    f = files[0]
+    if not re.fullmatch(r'https://cdn\.modrinth\.com/data/aKrMZ5cC/versions/[A-Za-z0-9]+/[A-Za-z0-9._-]+\.jar', f['url']):
+        raise ValueError('untrusted whitelist artifact')
+    data = fetch(f['url'], MAX_JAR)
+    if len(data) != f['size'] or hashlib.sha512(data).hexdigest() != f['hashes']['sha512'] or hashlib.sha256(data).hexdigest() != PINNED_WHITELIST_SHA256:
+        raise ValueError('whitelist checksum mismatch')
+    artifacts['global-whitelist.jar'] = data
+    for project, platform, filename in [('geyser','velocity','Geyser-Velocity.jar'), ('floodgate','velocity','floodgate-velocity.jar'), ('floodgate','spigot','floodgate-spigot.jar')]:
+        metadata = json.loads(fetch('https://download.geysermc.org/v2/projects/'+project+'/versions/latest/builds/latest',1024*1024))
+        if metadata['project_id'] != project or metadata['channel'] != 'default' or not re.fullmatch(r'[0-9.]+(?:-SNAPSHOT)?',metadata['version']) or not isinstance(metadata['build'],int) or metadata['build'] <= 0:
+            raise ValueError('untrusted platform metadata')
+        expected = metadata['downloads'][platform]['sha256']
+        if not re.fullmatch('[a-f0-9]{64}',expected):
+            raise ValueError('missing platform checksum')
+        url = 'https://download.geysermc.org/v2/projects/{}/versions/{}/builds/{}/downloads/{}'.format(project,metadata['version'],metadata['build'],platform)
+        data = fetch(url,MAX_JAR)
+        if hashlib.sha256(data).hexdigest() != expected:
+            raise ValueError('platform checksum mismatch')
+        artifacts[filename] = data
+    manifest = {}
+    # Publish the entire verified set only after all downloads are verified.
+    for name,data in artifacts.items():
+        atomic(ROOT+'/artifacts/'+name,data)
+        manifest[name] = hashlib.sha256(data).hexdigest()
+    add_baked_artifacts(manifest)
+
+
+def remove_legacy_config():
+    # Remove only the obsolete generated file; rollback can regenerate it from
+    # the journal's prior state. Never recursively remove container-owned data.
+    legacy_config = safe(ROOT+'/picolobby/server.toml')
+    if os.path.lexists(legacy_config):
+        if not stat.S_ISREG(os.lstat(legacy_config).st_mode):
+            raise ValueError('unsafe legacy configuration')
+        os.unlink(legacy_config)
+
+
+def publish(component=None):
+    state = private_json(ROOT+'/state.json')
+    if not state['config']['enabled']:
+        remove_legacy_config()
+        return
+    generated = private_json(ROOT+'/generated.json')
+    allowed = {'velocity/velocity.toml','velocity/forwarding.secret','velocity/plugins/global-whitelist/config.properties','velocity/plugins/global-whitelist/whitelist.json','velocity/plugins/floodgate/key.pem','velocity/plugins/floodgate/config.yml','velocity/plugins/Geyser-Velocity/config.yml','velocity/plugins/justvoxel-lobby/lobby.conf'}
+    if set(generated) != allowed:
+        # Only Management recovery can create the private, hash-bound marker.
+        # This is not a selectable engine or an ordinary publication path.
+        publish_legacy_rollback(generated, allowed)
+        return
+    for name,encoded in generated.items():
+        if component is not None and not name.startswith(component+'/'):
+            continue
+        uid = 1000
+        directory(os.path.dirname(ROOT+'/'+name),uid,uid)
+        atomic(ROOT+'/'+name,base64.b64decode(encoded,validate=True),uid,uid)
+    artifacts = validate_artifacts()
+    for name in VELOCITY_ARTIFACTS:
+        data = read(ROOT+'/artifacts/'+name,MAX_JAR)
+        if hashlib.sha256(data).hexdigest() != artifacts[name]:
+            raise ValueError('artifact changed')
+        atomic(ROOT+'/velocity/plugins/'+name,data,1000,1000,0o644)
+    remove_legacy_config()
+
+
+def publish_legacy_rollback(generated, normal_allowed):
+    # Historical pre-commit recovery only. Never called for a normal generated
+    # configuration. Existing four-artifact evidence remains sufficient here.
+    if generated != legacy_rollback_generated() or set(generated) != (normal_allowed - {'velocity/plugins/justvoxel-lobby/lobby.conf'}) | {'picolobby/server.toml'}:
+        raise ValueError('unexpected legacy rollback files')
+    artifacts = validate_artifacts(allow_old=True)
+    for name,encoded in generated.items():
+        uid = 65532 if name == 'picolobby/server.toml' else 1000
+        directory(os.path.dirname(ROOT+'/'+name),uid,uid)
+        atomic(ROOT+'/'+name,base64.b64decode(encoded,validate=True),uid,uid)
+    for name in sorted(EXTERNAL_ARTIFACTS - {'floodgate-spigot.jar'}):
+        data = read(ROOT+'/artifacts/'+name,MAX_JAR)
+        if hashlib.sha256(data).hexdigest() != artifacts[name]:
+            raise ValueError('legacy artifact changed')
+        atomic(ROOT+'/velocity/plugins/'+name,data,1000,1000,0o644)
+    # A rolled-back proxy must not load the replacement lobby as well.
+    for name in sorted(BAKED_ARTIFACTS):
+        path = safe(ROOT+'/velocity/plugins/'+name)
+        if os.path.lexists(path):
+            if not stat.S_ISREG(os.lstat(path).st_mode):
+                raise ValueError('unsafe legacy plugin target')
+            os.unlink(path)
+
+
+# Network owns this lifecycle; standalone managed-crossplay transactions are never
+# called. Range evaluation follows managed-crossplay-mods' conservative subset.
+FPL_PROJECT = '8dI2tmqs'
+API_PROJECT = 'P7dR8mSH'
+FPL_FILE = 'mods/justvoxel-network-fabricproxy-lite.jar'
+API_FILE = 'mods/justvoxel-network-fabric-api.jar'
+FPL_CONFIG = 'config/FabricProxy-Lite.toml'
+FABRIC_ARTIFACTS = {FPL_FILE: 'fabricproxy-lite', API_FILE: 'fabric-api'}
+COMPONENT_DEADLINE = None
+COMPONENT_REQUESTS = 0
+COMPONENT_BYTES = 0
+
+
+def numeric(value):
+    match = re.fullmatch(r'([0-9]+(?:\.[0-9]+){0,3})(?:-(alpha|beta|rc)(?:[.-]([0-9]+(?:\.[0-9]+){0,2})(?:\.([a-z]))?)?)?(?:\+[A-Za-z0-9.-]+)?', value)
+    if not match:
+        raise ValueError('unrecognized dependency version')
+    parts = tuple(map(int, match[1].split('.')))
+    # Numeric prerelease identifiers sort numerically; the historical snapshot
+    # letter is a separate textual identifier, never an arbitrary version string.
+    prerelease = tuple((0,int(n)) for n in match[3].split('.')) if match[3] else ()
+    if match[4]:
+        prerelease += ((1,match[4]),)
+    return parts + (0,) * (4-len(parts)) + ({None:0, 'alpha':-3, 'beta':-2, 'rc':-1}[match[2]],prerelease)
+
+
+def accepts(rule, value):
+    if isinstance(rule,list):
+        return 0 < len(rule) <= 32 and any(accepts(item,value) for item in rule)
+    if not isinstance(rule,str) or len(rule)>128:
+        return False
+    if rule == '*':
+        return True
+    if rule in (value,'='+value,'~'+value):
+        try:
+            numeric(value)
+            return True
+        except (ValueError,TypeError):
+            return False
+    match = re.fullmatch(r'~([0-9]+)\.([0-9]+)-',rule)
+    if match:
+        return numeric(value)[:2] == (int(match[1]),int(match[2]))
+    match = re.fullmatch(r'([0-9]+(?:\.[0-9]+)*)\.[x*]',rule)
+    if match:
+        prefix = tuple(map(int,match[1].split('.')))
+        return numeric(value)[:len(prefix)] == prefix
+    match = re.fullmatch(r'~([0-9]+(?:\.[0-9]+){1,2})',rule)
+    if match:
+        parts = tuple(map(int,match[1].split('.')))
+        return numeric(value) >= numeric(match[1]) and numeric(value)[:len(parts)-1] == parts[:-1]
+    if re.fullmatch(r'\[[0-9.]+\]',rule):
+        return rule == '['+value+']'
+    match = re.fullmatch(r'\[([0-9.]+),([0-9.]+)?\)',rule)
+    if match:
+        return numeric(match[1]) <= numeric(value) and (not match[2] or numeric(value)<numeric(match[2]))
+    version = r'[0-9]+(?:\.[0-9]+){0,3}(?:-(?:alpha|beta|rc)(?:[.-][0-9]+(?:\.[0-9]+){0,2}(?:\.[a-z])?)?)?(?:\+[A-Za-z0-9.-]+)?'
+    if re.fullmatch(r'(?:>=|>|<=|<|=)?'+version+r'(?: (?:>=|>|<=|<|=)?'+version+r')*',rule):
+        for clause in rule.split():
+            match = re.fullmatch(r'(>=|>|<=|<|=)?('+version+r')',clause)
+            a,b = numeric(value),numeric(match[2])
+            if not {None:a==b,'=':a==b,'>=':a>=b,'>':a>b,'<=':a<=b,'<':a<b}[match[1]]:
+                return False
+        return True
+    return False
+
+
+def jar_descriptors(data):
+    import io
+    import zipfile
+    result = {}
+    budget = [0]
+    def visit(blob, depth):
+        budget[0] += len(blob)
+        if depth>4 or budget[0]>2*MAX_JAR or len(result)>256:
+            raise ValueError('oversized nested mod set')
+        with zipfile.ZipFile(io.BytesIO(blob)) as jar:
+            entries = jar.infolist()
+            if len(entries)>8192:
+                raise ValueError('oversized archive')
+            names = [e.filename for e in entries]
+            if len(names) != len(set(names)):
+                raise ValueError('ambiguous archive')
+            info = jar.getinfo('fabric.mod.json')
+            if info.file_size>65536:
+                raise ValueError('oversized mod descriptor')
+            desc = json.loads(jar.read(info))
+            identity = desc.get('id')
+            if not isinstance(identity,str) or not re.fullmatch('[a-z][a-z0-9_-]{1,63}',identity) or identity in result or not isinstance(desc.get('version'),str):
+                raise ValueError('ambiguous mod identity')
+            result[identity] = desc
+            nested = desc.get('jars',[])
+            if not isinstance(nested,list) or len(nested)>256:
+                raise ValueError('invalid nested mods')
+            for item in nested:
+                name = item['file']
+                if not isinstance(name,str) or not re.fullmatch(r'META-INF/jars/[A-Za-z0-9._+-]+\.jar',name):
+                    raise ValueError('unsafe nested mod')
+                entry = jar.getinfo(name)
+                if entry.file_size>MAX_JAR:
+                    raise ValueError('oversized nested mod')
+                visit(jar.read(entry),depth+1)
+        return desc
+    root = visit(data,0)
+    return root,result
+
+
+def verify_dependencies(mods, game, loader, java, external=None):
+    if set(mods).intersection(external or {}):
+        raise ValueError('duplicate dependency identities')
+    available = {'minecraft':game,'fabricloader':loader,'java':java}
+    for identity,desc in {**(external or {}),**mods}.items():
+        available[identity] = desc['version']
+    for desc in mods.values():
+        deps = desc.get('depends',{})
+        if not isinstance(deps,dict):
+            raise ValueError('invalid dependencies')
+        for identity,rule in deps.items():
+            if identity not in available or not accepts(rule,available[identity]):
+                raise ValueError('required dependency cannot be proven')
+        # Breaks/conflicts are not guessed away, even for a newly published jar.
+        for field in ('breaks','conflicts'):
+            rules = desc.get(field,{})
+            if not isinstance(rules,dict):
+                raise ValueError('invalid conflicts')
+            for identity in rules:
+                if identity in available:
+                    raise ValueError('conflicting dependency')
+
+
+def modrinth_metadata(url):
+    try:
+        return json.loads(fetch_modrinth_artifact(url,2*1024*1024))
+    except (json.JSONDecodeError,UnicodeDecodeError) as error:
+        raise CompatibilityCheckUnavailable() from error
+
+
+def modrinth_release(project, game, version_id=None, platform="fabric"):
+    query = urllib.parse.urlencode({'loaders':json.dumps([platform]), 'game_versions':json.dumps([game])})
+    address = 'https://api.modrinth.com/v2/' + ('version/'+version_id if version_id else 'project/'+project+'/version?'+query)
+    versions = modrinth_metadata(address)
+    if version_id:
+        versions = [versions]
+    if not isinstance(versions,list) or len(versions)>1000:
+        raise ValueError('invalid release list')
+    releases = []
+    for release in versions:
+        if not isinstance(release,dict):
+            raise ValueError('invalid release')
+        if (release.get('project_id') == project and release.get('version_type') == 'release'
+                and (version_id is None or release.get('id') == version_id)
+                and isinstance(release.get('game_versions'),list) and all(isinstance(v,str) for v in release['game_versions'])
+                and isinstance(release.get('loaders'),list) and all(isinstance(v,str) for v in release['loaders'])
+                and release.get('status','listed') == 'listed' and game in release.get('game_versions',[])
+                and platform in release.get('loaders',[]) and isinstance(release.get('date_published'),str)
+                and isinstance(release.get('id'),str) and re.fullmatch('[A-Za-z0-9]{1,64}',release['id'])):
+            releases.append(release)
+    if not releases:
+        raise ValueError('no compatible release')
+    # Bounded candidates; each must pass descriptor/dependency verification too.
+    return sorted(releases,key=lambda v:(v['date_published'],v['id']),reverse=True)[:16]
+
+
+def release_bytes(release,project,game,platform):
+    if release.get('project_id') != project or game not in release.get('game_versions',[]) or platform not in release.get('loaders',[]):
+        raise ValueError('release context mismatch')
+    files = release.get('files',[])
+    primary = [f for f in files if f.get('primary') is True]
+    if len(primary)!=1:
+        raise ValueError('ambiguous primary artifact')
+    artifact = primary[0]
+    name = artifact.get('filename','')
+    if not re.fullmatch(r'[A-Za-z0-9._+-]+\.jar',name):
+        raise ValueError('invalid primary name')
+    url = artifact.get('url','')
+    expected = 'https://cdn.modrinth.com/data/'+project+'/versions/'+release['id']+'/'+urllib.parse.quote(name)
+    if url != expected:
+        raise ValueError('artifact identity mismatch')
+    digest = artifact.get('hashes',{}).get('sha512','')
+    if not re.fullmatch('[a-f0-9]{128}',digest) or type(artifact.get('size')) is not int or not 0<artifact['size']<=MAX_JAR:
+        raise ValueError('invalid publisher checksum')
+    data = fetch_modrinth_artifact(url)
+    if len(data)!=artifact['size'] or hashlib.sha512(data).hexdigest()!=digest:
+        raise ValueError('artifact hash mismatch')
+    return data,{'project_id':project,'release_id':release['id'],'sha512':digest,'sha256':hashlib.sha256(data).hexdigest()}
+
+
+def release_artifact(release,project,game,identity):
+    data,entry = release_bytes(release,project,game,"fabric")
+    desc,mods = jar_descriptors(data)
+    if desc['id'] != identity:
+        raise ValueError('wrong mod identity')
+    if not isinstance(desc.get('depends'),dict) or not {'minecraft','fabricloader'} <= set(desc['depends']):
+        raise ValueError('missing game/loader dependency evidence')
+    if project == API_PROJECT and any(d.get('dependency_type')=='required' for d in release.get('dependencies',[])):
+        raise ValueError('unknown required API publisher dependency')
+    return data,mods,entry
+
+
+class CompatibilityCheckUnavailable(Exception):
+    pass
+
+
+def fetch_modrinth_artifact(url,limit=MAX_JAR):
+    import urllib.error
+    import http.client
+    try:
+        return fetch_compatibility_bytes(url,limit)
+    except (urllib.error.URLError,TimeoutError,OSError,http.client.HTTPException) as error:
+        raise CompatibilityCheckUnavailable() from error
+
+
+def fetch_compatibility_bytes(url,limit=MAX_JAR):
+    global COMPONENT_REQUESTS, COMPONENT_BYTES
+    COMPONENT_REQUESTS += 1
+    remaining = COMPONENT_DEADLINE-time.monotonic() if COMPONENT_DEADLINE is not None else 30
+    if remaining<=0 or COMPONENT_REQUESTS>40 or COMPONENT_BYTES>256*1024*1024:
+        raise CompatibilityCheckUnavailable()
+    # No redirect can change the selected CDN/path identity.
+    request = urllib.request.Request(url,headers={'User-Agent':'JustVoxel/MinecraftNetwork'})
+    with urllib.request.build_opener(NoRedirect()).open(request,timeout=min(30,remaining)) as response:
+        if response.status != 200 or response.url != url:
+            raise ValueError('artifact redirected')
+        data = response.read(limit+1)
+    COMPONENT_BYTES += len(data)
+    if len(data)>limit or COMPONENT_BYTES>256*1024*1024 or (COMPONENT_DEADLINE is not None and time.monotonic()>COMPONENT_DEADLINE):
+        raise CompatibilityCheckUnavailable()
+    return data
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self,*args,**kwargs):
+        raise ValueError('artifact redirect refused')
+
+
+def fabric_context(record):
+    runtime = record['runtime']
+    software,game,loader = runtime['software'],runtime['version'],runtime.get('loader_version','')
+    if software not in ('fabric','quilt') or not re.fullmatch(r'[0-9]+\.[0-9]+(?:\.[0-9]+)?',game) or not re.fullmatch(r'[0-9]+(?:\.[0-9]+){1,3}(?:-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*)?',loader) or len(loader)>64:
+        raise ValueError('exact game and loader required')
+    java = {'java21':'21.0','java25':'25.0'}.get(runtime.get('image_tag'))
+    if java is None:
+        raise ValueError('unknown Java runtime')
+    return {'profile':'fabric-family','software':software,'game':game,'loader':loader,'java':java,'data_path':record['storage']['data_path']}
+
+
+def selected_runtime(record,context):
+    import subprocess
+    try:
+        subprocess.run(['/usr/libexec/justvoxel/mjust/instance-runtime-prerequisites','version',context['software'],context['game'],record['runtime'].get('paper_channel','default'),context['loader']],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=60)
+    except (subprocess.SubprocessError,OSError) as error:
+        # The upstream runtime verifier cannot distinguish absence from outage.
+        raise CompatibilityCheckUnavailable() from error
+
+
+def fabric_loader(record):
+    context = fabric_context(record)
+    selected_runtime(record,context)
+    if context['software']=='fabric':
+        return context['loader']
+    # Quilt's version is NOT a Fabric Loader version. Only the selected official
+    # loader artifact's explicit provides evidence can authorize Fabric depends.
+    base = 'https://maven.quiltmc.org/repository/release/org/quiltmc/quilt-loader/'+context['loader']+'/quilt-loader-'+context['loader']+'.jar'
+    digest = fetch_modrinth_artifact(base+'.sha512',256).decode().strip()
+    if not re.fullmatch('[a-fA-F0-9]{128}',digest):
+        raise ValueError('missing selected Quilt checksum')
+    data = fetch_modrinth_artifact(base)
+    if hashlib.sha512(data).hexdigest()!=digest.lower():
+        raise ValueError('selected Quilt checksum mismatch')
+    import io
+    import zipfile
+    with zipfile.ZipFile(io.BytesIO(data)) as jar:
+        entries = [e for e in jar.infolist() if e.filename=='quilt.mod.json']
+        if len(entries)!=1 or entries[0].file_size>65536:
+            raise ValueError('missing authoritative Quilt compatibility')
+        selected = json.loads(jar.read(entries[0]))['quilt_loader']
+    provided = [p for p in selected.get('provides',[]) if isinstance(p,dict) and p.get('id')=='fabricloader']
+    if selected.get('id')!='quilt_loader' or selected.get('version')!=context['loader'] or len(provided)!=1:
+        raise ValueError('unknown selected Quilt runtime')
+    numeric(provided[0]['version'])
+    return provided[0]['version']
+
+
+def user_mod_descriptors(data):
+    import io
+    import zipfile
+    with zipfile.ZipFile(io.BytesIO(data)) as jar:
+        entries = jar.infolist()
+        if len(entries)>8192 or len({e.filename for e in entries})!=len(entries):
+            raise ValueError('ambiguous user mod archive')
+        if any(e.filename=='fabric.mod.json' for e in entries):
+            return jar_descriptors(data)
+        # Quilt-only mods need not contain a Fabric descriptor. Inspect their
+        # identity without pretending they are Fabric artifacts or adopting them.
+        quilt = [e for e in entries if e.filename=='quilt.mod.json']
+        if quilt:
+            if quilt[0].file_size>65536:
+                raise ValueError('oversized Quilt descriptor')
+            desc = json.loads(jar.read(quilt[0]))['quilt_loader']
+            protected = {'fabricproxy-lite','fabric-api','fabric-networking-api-v1'}
+            provided = desc.get('provides',[])
+            aliases = {p if isinstance(p,str) else p['id'] for p in provided}
+            if desc.get('id') in protected or aliases.intersection(protected) or desc.get('jars'):
+                raise ValueError('unproven Quilt compatibility mod identity')
+    return {},{}
+
+
+def scan_fabric_mods(root,owned=None):
+    folder = safe(root+'/mods')
+    if os.path.lexists(folder) and not os.path.isdir(folder):
+        raise ValueError('unsafe mods directory')
+    entries = os.listdir(folder) if os.path.isdir(folder) else []
+    if len(entries)>1024:
+        raise ValueError('too many mod files')
+    inventory,apis = {},[]
+    identities = set()
+    for name in sorted(entries):
+        path = safe(folder+'/'+name)
+        if not name.endswith('.jar'):
+            continue
+        data = read(path,MAX_JAR)
+        desc,mods = user_mod_descriptors(data)
+        protected = {'fabricproxy-lite','fabric-api','fabric-networking-api-v1'}
+        for component in mods.values():
+            aliases = component.get('provides',[])
+            if not isinstance(aliases,list) or any(not isinstance(alias,str) for alias in aliases) or protected.intersection(aliases):
+                raise ValueError('ambiguous provided compatibility identity')
+        digest = hashlib.sha256(data).hexdigest()
+        relative = 'mods/'+name
+        if relative in FABRIC_ARTIFACTS:
+            if not owned or owned.get(relative,{}).get('sha256')!=digest or desc.get('id')!=FABRIC_ARTIFACTS[relative]:
+                raise ValueError('unowned or changed Network canonical mod')
+            continue
+        if 'fabricproxy-lite' in mods:
+            raise ValueError('user FabricProxy-Lite conflicts with Network compatibility')
+        relevant = set(mods).intersection({'fabric-api','fabric-networking-api-v1'})
+        if identities.intersection(relevant):
+            raise ValueError('conflicting Fabric API identities')
+        identities.update(relevant)
+        if 'fabric-api' in mods:
+            deps = mods['fabric-api'].get('depends',{})
+            if not isinstance(deps,dict) or not {'minecraft','fabricloader'} <= set(deps):
+                raise ValueError('user API game/loader compatibility not proven')
+            apis.append(mods)
+        elif relevant:
+            # A partial user API module cannot safely be combined with an
+            # automatically selected full API distribution. Never overwrite it.
+            raise ValueError('partial user API cannot be proven compatible')
+        inventory[name] = digest
+    if len(apis)>1:
+        raise ValueError('duplicate Fabric API identities')
+    # Canonical paths without a .jar entry (directories, links, etc.) fail too.
+    for relative in FABRIC_ARTIFACTS:
+        path = safe(root+'/'+relative)
+        if os.path.lexists(path) and not stat.S_ISREG(os.lstat(path).st_mode):
+            raise ValueError('unsafe canonical mod')
+    return inventory,apis[0] if apis else {}
+
+
+def forwarding_config(data,secret):
+    import tomllib
+    if len(data)>256*1024 or not re.fullmatch('[a-f0-9]{64}',secret):
+        raise ValueError('invalid forwarding configuration')
+    text = data.decode('utf-8')
+    parsed = tomllib.loads(text)
+    # Only an unambiguous single-line top-level secret is changed. Preserve every
+    # other byte, comment and setting. Quoted/dotted/multiline forms fail closed.
+    pattern = re.compile(r'(?m)^[ \t]*secret[ \t]*=[ \t]*(?:"[^"\n]*"|\'[^\'\n]*\')[ \t]*(?:#[^\n]*)?$')
+    matches = list(pattern.finditer(text))
+    if 'secret' in parsed:
+        if len(matches)!=1 or not isinstance(parsed['secret'],str):
+            raise ValueError('ambiguous forwarding secret')
+        match = matches[0]
+        if re.search(r'(?m)^\s*\[',text[:match.start()]):
+            raise ValueError('secret outside root table')
+        line = match.group()
+        value = re.search(r'=(\s*)("[^"\n]*"|\'[^\'\n]*\')',line)
+        updated = line[:value.start(2)]+json.dumps(secret)+line[value.end(2):]
+        text = text[:match.start()]+updated+text[match.end():]
+    else:
+        if matches:
+            raise ValueError('ambiguous forwarding configuration')
+        text = 'secret = '+json.dumps(secret)+'\n'+text
+    if tomllib.loads(text).get('secret') != secret:
+        raise ValueError('forwarding secret not applied')
+    return text.encode()
+
+
+def load_fabric_stage(instance,record,root,evidence,strict_inventory=True):
+    folder = INSTANCE_ROOT+'/'+instance+'/network-staging'
+    safe(folder)
+    info = os.stat(folder)
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid!=0 or stat.S_IMODE(info.st_mode)!=0o700:
+        raise ValueError('staging is not private')
+    manifest = private_json(folder+'/manifest.json')
+    current = read(root+'/'+FPL_CONFIG,256*1024) if os.path.exists(safe(root+'/'+FPL_CONFIG)) else None
+    forwarding_config(current or b'','0'*64)
+    original_hash = evidence['files'][FPL_CONFIG] if evidence else (hashlib.sha256(current).hexdigest() if current is not None else None)
+    if original_hash!=manifest.get('original_config_sha256'):
+        raise ValueError('configuration changed since preflight')
+    if manifest.get('schema')!=1 or manifest.get('instance')!=instance or manifest.get('context')!=fabric_context(record):
+        raise ValueError('staging context changed')
+    artifacts = manifest.get('artifacts',{})
+    if set(artifacts) not in ({FPL_FILE},{FPL_FILE,API_FILE}):
+        raise ValueError('invalid staged file set')
+    mods = {}
+    for name,entry in artifacts.items():
+        if entry.get('project_id') != (FPL_PROJECT if name==FPL_FILE else API_PROJECT) or not re.fullmatch('[A-Za-z0-9]{1,64}',entry.get('release_id','')):
+            raise ValueError('staged publisher mismatch')
+        data = read(folder+'/'+name.split('/')[-1],MAX_JAR)
+        info = os.stat(folder+'/'+name.split('/')[-1])
+        if info.st_uid!=0 or stat.S_IMODE(info.st_mode)!=0o600 or hashlib.sha256(data).hexdigest()!=entry.get('sha256') or hashlib.sha512(data).hexdigest()!=entry.get('sha512'):
+            raise ValueError('staged artifact changed')
+        desc,components = jar_descriptors(data)
+        if desc['id']!=FABRIC_ARTIFACTS[name] or set(mods).intersection(components):
+            raise ValueError('staged identity mismatch')
+        mods.update(components)
+    inventory,api = scan_fabric_mods(root,artifacts if evidence else None)
+    if strict_inventory and inventory!=manifest.get('inventory'):
+        raise ValueError('installed mods changed since preflight')
+    if set(mods).intersection(api):
+        raise ValueError('duplicate staged and user API identities')
+    if api:
+        verify_dependencies(api,manifest['context']['game'],manifest['fabric_loader'],manifest['context']['java'])
+    verify_dependencies(mods,manifest['context']['game'],manifest['fabric_loader'],manifest['context']['java'],api)
+    # A root-private manifest plus the profile snapshot authorizes these fixed
+    # canonical files. No filename alone establishes ownership.
+    return manifest
+
+
+def resolve_fabric(record,root):
+    if os.path.lexists(safe(root+'/'+PORTABLE_NAME)):
+        # Standalone startup owns portable restoration. Do not consume imported
+        # evidence as a side effect of an enrollment that has not committed.
+        raise ValueError('complete standalone restoration before Network enrollment')
+    context = fabric_context(record)
+    loader = fabric_loader(record)
+    inventory,api = scan_fabric_mods(root)
+    if api:
+        verify_dependencies(api,context['game'],loader,context['java'])
+    original = read(root+'/'+FPL_CONFIG,256*1024) if os.path.exists(safe(root+'/'+FPL_CONFIG)) else b''
+    forwarding_config(original,'0'*64) # validate TOML before downtime, without live writes
+    selected = None
+    for release in modrinth_release(FPL_PROJECT,context['game']):
+        try:
+            data,mods,entry = release_artifact(release,FPL_PROJECT,context['game'],'fabricproxy-lite')
+            dependencies = release.get('dependencies',[])
+            if not isinstance(dependencies,list) or len(dependencies)>64:
+                raise ValueError('invalid publisher dependencies')
+            api_version = None
+            needs_api = False
+            for dep in dependencies:
+                if dep.get('dependency_type')!='required':
+                    continue
+                project = dep.get('project_id')
+                dependency_version = dep.get('version_id')
+                if dependency_version is not None and (not isinstance(dependency_version,str) or not re.fullmatch('[A-Za-z0-9]{1,64}',dependency_version)):
+                    raise ValueError('invalid dependency release')
+                if project is None and dependency_version:
+                    # Modrinth permits version-only references. Resolve their
+                    # publisher identity rather than treating a null ID as API.
+                    modrinth_release(API_PROJECT,context['game'],dependency_version)
+                    project = API_PROJECT
+                if project!=API_PROJECT or needs_api:
+                    raise ValueError('unknown or ambiguous required publisher dependency')
+                needs_api = True
+                api_version = dependency_version
+            missing = {identity for desc in mods.values() for identity in desc.get('depends',{}) if identity not in mods and identity not in ('minecraft','fabricloader','java')}
+            if missing - {'fabric-api','fabric-networking-api-v1'}:
+                raise ValueError('unknown required mod dependency')
+            needs_api = needs_api or bool(missing)
+            artifacts = {FPL_FILE:(data,entry)}
+            external = api
+            if api_version and 'fabric-api' in mods:
+                exact_api = modrinth_release(API_PROJECT,context['game'],api_version)[0]
+                _,required_api,_ = release_artifact(exact_api,API_PROJECT,context['game'],'fabric-api')
+                if mods['fabric-api']['version']!=required_api['fabric-api']['version']:
+                    raise ValueError('bundled API does not satisfy exact publisher dependency')
+            if api and api_version:
+                exact_api = modrinth_release(API_PROJECT,context['game'],api_version)[0]
+                _,_,exact_entry = release_artifact(exact_api,API_PROJECT,context['game'],'fabric-api')
+                if exact_entry['sha256'] not in inventory.values():
+                    raise ValueError('user API does not match required exact dependency')
+            if needs_api and not api and 'fabric-api' not in mods:
+                found = False
+                for candidate in modrinth_release(API_PROJECT,context['game'],api_version):
+                    try:
+                        api_data,api_mods,api_entry = release_artifact(candidate,API_PROJECT,context['game'],'fabric-api')
+                        verify_dependencies(api_mods,context['game'],loader,context['java'])
+                        verify_dependencies(mods,context['game'],loader,context['java'],api_mods)
+                        external = api_mods
+                        artifacts[API_FILE] = (api_data,api_entry)
+                        found = True
+                        break
+                    except (ValueError,KeyError):
+                        continue
+                if not found:
+                    raise ValueError('no verified API dependency')
+            verify_dependencies(mods,context['game'],loader,context['java'],external)
+            selected = artifacts
+            break
+        except (ValueError,KeyError):
+            continue
+    if selected is None:
+        raise ValueError('no verified compatibility component')
+    return context,loader,inventory,original,selected
+
+
+def prepare_fabric(instance,record,root,evidence):
+    global COMPONENT_DEADLINE, COMPONENT_REQUESTS, COMPONENT_BYTES
+    COMPONENT_DEADLINE, COMPONENT_REQUESTS, COMPONENT_BYTES = time.monotonic()+150, 0, 0
+    if evidence:
+        manifest = load_fabric_stage(instance,record,root,evidence,strict_inventory=False)
+        # Mods may legitimately change between Network operations. Bind this
+        # Apply to its current verified inventory without resolving new releases.
+        manifest['inventory'],_ = scan_fabric_mods(root,manifest['artifacts'])
+        atomic(INSTANCE_ROOT+'/'+instance+'/network-staging/manifest.json',json.dumps(manifest).encode())
+        return
+    context,loader,inventory,original,selected = resolve_fabric(record,root)
+    folder = INSTANCE_ROOT+'/'+instance+'/network-staging'
+    directory(folder)
+    for name,(data,entry) in selected.items():
+        atomic(folder+'/'+name.split('/')[-1],data)
+    manifest = {'schema':1,'instance':instance,'context':context,'fabric_loader':loader,'inventory':inventory,'original_config_sha256':hashlib.sha256(original).hexdigest() if os.path.exists(root+'/'+FPL_CONFIG) else None,'artifacts':{name:entry for name,(data,entry) in selected.items()}}
+    atomic(folder+'/manifest.json',json.dumps(manifest).encode())
+    load_fabric_stage(instance,record,root,None)
+
+
+def validate_portable_fabric(root,artifacts):
+    if not isinstance(artifacts,dict) or set(artifacts)!=set(FABRIC_ARTIFACTS):
+        raise ValueError('invalid portable artifact ownership')
+    for name,digest in artifacts.items():
+        if digest is None:
+            continue
+        if not isinstance(digest,str) or not re.fullmatch('[a-f0-9]{64}',digest):
+            raise ValueError('invalid portable artifact hash')
+        path = safe(root+'/'+name)
+        if os.path.lexists(path):
+            data = read(path,MAX_JAR)
+            desc,_ = jar_descriptors(data)
+            if hashlib.sha256(data).hexdigest()!=digest or desc['id']!=FABRIC_ARTIFACTS[name]:
+                raise ValueError('Network-owned mod changed; files preserved')
+
+
+def validate_fabric_owned(instance,root,evidence):
+    if validate_backend_evidence(instance,evidence)!='fabric-family':
+        raise ValueError('wrong restore profile')
+    manifest = private_json(INSTANCE_ROOT+'/'+instance+'/network-staging/manifest.json')
+    if manifest.get('instance')!=instance or manifest.get('context',{}).get('profile')!='fabric-family':
+        raise ValueError('invalid Network ownership')
+    artifacts = manifest.get('artifacts',{})
+    if set(artifacts) not in ({FPL_FILE},{FPL_FILE,API_FILE}):
+        raise ValueError('invalid Network artifact ownership')
+    for name in FABRIC_ARTIFACTS:
+        if evidence['files'][name] is not None:
+            raise ValueError('unexpected pre-Network canonical artifact')
+        if name not in artifacts and os.path.lexists(safe(root+'/'+name)):
+            raise ValueError('unowned canonical file preserved')
+    validate_portable_fabric(root,{name:artifacts.get(name,{}).get('sha256') for name in FABRIC_ARTIFACTS})
+
+
+def publish_fabric(instance,record,root,evidence,state,strict_inventory=True):
+    manifest = load_fabric_stage(instance,record,root,evidence,strict_inventory=strict_inventory)
+    original = read(root+'/'+FPL_CONFIG,256*1024) if os.path.exists(safe(root+'/'+FPL_CONFIG)) else b''
+    config = forwarding_config(original,state['forwarding_secret'])
+    publish_managed(instance,record,root,manifest,FPL_CONFIG,config)
+
+
+def publish_managed(instance,record,root,manifest,config_path,config):
+    uid,gid = record['runtime']['uid'],record['runtime']['gid']
+    for folder in ('mods','config'):
+        path = safe(root+'/'+folder)
+        if not os.path.exists(path):
+            os.mkdir(path,mode=0o755)
+            os.chown(path,uid,gid)
+        elif not os.path.isdir(path):
+            raise ValueError('unsafe publication directory')
+    # All staged inputs and destination ownership were checked before any copy.
+    for name in manifest['artifacts']:
+        data = read(INSTANCE_ROOT+'/'+instance+'/network-staging/'+name.split('/')[-1],MAX_JAR)
+        if hashlib.sha256(data).hexdigest()!=manifest['artifacts'][name]['sha256']:
+            raise ValueError('staging changed during publication')
+        atomic(root+'/'+name,data,uid,gid,0o644)
+    atomic(root+'/'+config_path,config,uid,gid,0o600)
+
+
+# PCF lifecycle stays inside Network's durable transaction, never cross-play.
+PCF_SLUG = 'proxy-compatible-forge'
+PCF_FILE = 'mods/justvoxel-network-proxy-compatible-forge.jar'
+PCF_CONFIG = 'config/proxy-compatible-forge.toml'
+# Reviewed tags: Constants.CONFIG_FILE_NAME and EarlyConfig.load, plus the
+# publisher version and matching packaged class/descriptor metadata below.
+# https://github.com/adde0109/Proxy-Compatible-Forge/tree/v1.3.0/common/src/main
+# Later versions must prove this same packaged contract; version alone grants nothing.
+
+
+def forge_descriptors(data, platform=None, selected_descriptors=None):
+    """Same TOML identities/dependencies as the existing mod inspection helpers.
+
+    Inspect both platform descriptors for ownership; select the actual platform
+    descriptor for compatibility. Nested JarJar entries are bounded and inspected.
+    """
+    import io
+    import tomllib
+    import zipfile
+    identities = {}
+    budget = [0]
+    def visit(blob, depth):
+        budget[0] += len(blob)
+        if depth>4 or budget[0]>2*MAX_JAR:
+            raise ValueError('oversized nested mod set')
+        with zipfile.ZipFile(io.BytesIO(blob)) as jar:
+            entries = jar.infolist()
+            if len(entries)>8192 or len({e.filename for e in entries})!=len(entries):
+                raise ValueError('ambiguous mod archive')
+            def bounded(name,limit=65536):
+                entry = jar.getinfo(name)
+                if entry.file_size>limit:
+                    raise ValueError('oversized mod metadata')
+                return jar.read(entry)
+            descriptors = {}
+            local = {}
+            for loader,name in (('forge','META-INF/mods.toml'),('neoforge','META-INF/neoforge.mods.toml')):
+                if name not in jar.namelist():
+                    continue
+                desc = tomllib.loads(bounded(name).decode('utf-8'))
+                mods = desc.get('mods')
+                if not isinstance(mods,list) or not 0<len(mods)<=256:
+                    raise ValueError('missing mod identities')
+                seen = set()
+                for mod in mods:
+                    identity = mod.get('modId')
+                    if not isinstance(identity,str) or not re.fullmatch('[a-z][a-z0-9_]{1,63}',identity) or identity in seen:
+                        raise ValueError('ambiguous mod identity')
+                    seen.add(identity)
+                    version = mod.get('version')
+                    if not isinstance(version,str) or not 0<len(version)<=128:
+                        raise ValueError('missing mod version')
+                    if identity in local and local[identity]!=version:
+                        raise ValueError('platform identity disagreement')
+                    local[identity] = version
+                descriptors[loader] = desc
+                if selected_descriptors is not None and loader==platform:
+                    selected_descriptors.append(desc)
+            if set(identities).intersection(local) or len(identities)+len(local)>256:
+                raise ValueError('duplicate nested mod identity')
+            identities.update(local)
+            nested = 'META-INF/jarjar/metadata.json'
+            if nested in jar.namelist():
+                items = json.loads(bounded(nested)).get('jars')
+                if not isinstance(items,list) or len(items)>256:
+                    raise ValueError('invalid nested mod evidence')
+                for item in items:
+                    name = item.get('path')
+                    if not isinstance(name,str) or not re.fullmatch(r'META-INF/jarjar/[A-Za-z0-9._+-]+\.jar',name):
+                        raise ValueError('unsafe nested mod')
+                    visit(bounded(name,MAX_JAR),depth+1)
+            return descriptors
+    descriptors = visit(data,0)
+    if platform is not None and platform not in descriptors:
+        raise ValueError('missing selected platform descriptor')
+    return descriptors.get(platform),identities
+
+
+def forge_accepts(rule,value):
+    # Existing conservative Maven range subset; Fabric-specific syntax does not
+    # establish Forge dependency evidence. Unknown syntax is rejected.
+    return isinstance(rule,str) and bool(re.fullmatch(r'\[[0-9.]+(?:\]|,[0-9.]*\))',rule)) and accepts(rule,value)
+
+
+def verify_pcf(data,context,version):
+    import io
+    import zipfile
+    selected_descriptors = []
+    desc,mods = forge_descriptors(data,context['software'],selected_descriptors)
+    if set(m['modId'] for m in desc['mods']) != {'pcf'} or mods.get('pcf')!=version or not isinstance(version,str) or not 0<len(version)<=128 or desc.get('modLoader')!='javafml':
+        raise ValueError('unproven PCF identity/configuration generation')
+    # loaderVersion describes FML, not the Forge/NeoForge distribution version.
+    # Require the explicit distribution dependency, never substitute FML's range.
+    deps = desc.get('dependencies',{}).get('pcf')
+    if not isinstance(deps,list) or len(deps)>128:
+        raise ValueError('invalid PCF dependencies')
+    for identity,selected in (('minecraft',context['game']),(context['software'],context['loader'])):
+        matches = [d for d in deps if d.get('modId')==identity]
+        if len(matches)!=1 or not forge_accepts(matches[0].get('versionRange'),selected):
+            raise ValueError('exact game/loader compatibility not proven')
+    if set(mods).intersection({'minecraft','forge','neoforge'}):
+        raise ValueError('bundled runtime identity conflict')
+    bundled = {m['modId']:m['version'] for component in selected_descriptors for m in component['mods']}
+    available = {'minecraft':context['game'],context['software']:context['loader'],**bundled}
+    for component in selected_descriptors:
+        dependencies = component.get('dependencies',{})
+        if not isinstance(dependencies,dict):
+            raise ValueError('invalid dependency metadata')
+        required = []
+        for mod in component['mods']:
+            entries = dependencies.get(mod['modId'],[])
+            if not isinstance(entries,list) or len(entries)>128 or any(not isinstance(d,dict) for d in entries):
+                raise ValueError('invalid dependency metadata')
+            required.extend(entries)
+        for dep in required:
+            mandatory,kind = dep.get('mandatory'),dep.get('type')
+            if mandatory is not None and type(mandatory) is not bool or kind not in (None,'required','optional','incompatible','discouraged'):
+                raise ValueError('unknown dependency semantics')
+            if mandatory is None and kind is None:
+                raise ValueError('missing dependency semantics')
+            if mandatory is not None and kind is not None and mandatory != (kind=='required'):
+                raise ValueError('ambiguous dependency semantics')
+            if mandatory is True or kind=='required':
+                identity = dep.get('modId')
+                if identity not in available or not forge_accepts(dep.get('versionRange'),available[identity]):
+                    raise ValueError('external required dependency unavailable')
+            if kind=='incompatible' and dep.get('modId') in available:
+                raise ValueError('incompatible dependency')
+    # Publisher release information alone cannot prove the config generation.
+    # Verify the packaged constants used by the reviewed source implementation.
+    with zipfile.ZipFile(io.BytesIO(data)) as jar:
+        for name,markers in (
+                ('org/adde0109/pcf/Constants.class',(b'proxy-compatible-forge.toml',version.encode())),
+                ('org/adde0109/pcf/EarlyConfig.class',(b'forwarding.enabled',b'forwarding.mode',b'forwarding.secret')),
+                ('org/adde0109/pcf/forwarding/Mode.class',(b'MODERN',))):
+            try:
+                entry = jar.getinfo(name)
+            except KeyError:
+                raise ValueError('PCF configuration contract unavailable') from None
+            if entry.file_size>256*1024:
+                raise ValueError('oversized PCF configuration metadata')
+            blob = jar.read(entry)
+            if not blob.startswith(b'\xca\xfe\xba\xbe') or any(marker not in blob for marker in markers):
+                raise ValueError('PCF configuration contract unavailable')
+    return mods
+
+
+def pcf_config(data,secret):
+    import tomllib
+    if len(data)>256*1024 or not re.fullmatch('[a-f0-9]{64}',secret):
+        raise ValueError('invalid forwarding configuration')
+    text = data.decode('utf-8')
+    parsed = tomllib.loads(text)
+    table = parsed.get('forwarding')
+    if not isinstance(table,dict):
+        raise ValueError('exactly one forwarding table required')
+    # Find only real syntactic table lines: each candidate prefix must itself
+    # parse as TOML, so strings/comments cannot impersonate a table boundary.
+    tables = []
+    for match in re.finditer(r'(?m)^[ \t]*\[[^\r\n]+\][ \t]*(?:#[^\r\n]*)?\r?$',text):
+        try:
+            tomllib.loads(text[:match.end()])
+        except tomllib.TOMLDecodeError:
+            continue
+        tables.append(match)
+    forwarding = [m for m in tables if re.fullmatch(r'[ \t]*\[forwarding\][ \t]*(?:#[^\r\n]*)?\r?',m.group())]
+    if len(forwarding)!=1:
+        raise ValueError('ambiguous forwarding table')
+    start = forwarding[0].end()
+    end = next((m.start() for m in tables if m.start()>start),len(text))
+    body = text[start:end]
+    values = {'enabled':(bool,'true'),'mode':(str,'"MODERN"'),'secret':(str,json.dumps(secret))}
+    for key,(expected,replacement) in values.items():
+        if key in table:
+            if type(table[key]) is not expected:
+                raise ValueError('invalid forwarding scalar')
+            scalar = r'(?:true|false)' if expected is bool else r'(?:"(?:[^"\\\r\n]|\\.)*"|\'[^\'\r\n]*\')'
+            pattern = re.compile(r'(?m)^([ \t]*'+key+r'[ \t]*=[ \t]*)('+scalar+r')([ \t]*(?:#[^\r\n]*)?\r?)$')
+            matches = list(pattern.finditer(body))
+            if len(matches)!=1:
+                raise ValueError('ambiguous forwarding target')
+            match = matches[0]
+            # Reject target-looking text inside multiline values too.
+            prefix = text[:start]+body[:match.end()]
+            try:
+                if tomllib.loads(prefix).get('forwarding',{}).get(key)!=table[key]:
+                    raise ValueError('ambiguous forwarding target')
+            except tomllib.TOMLDecodeError:
+                raise ValueError('multiline forwarding target') from None
+            body = body[:match.start(2)]+replacement+body[match.end(2):]
+        else:
+            body += ('' if body.endswith('\n') else '\n')+key+' = '+replacement+'\n'
+    updated = text[:start]+body+text[end:]
+    result = tomllib.loads(updated)['forwarding']
+    if result.get('enabled') is not True or result.get('mode')!='MODERN' or result.get('secret')!=secret:
+        raise ValueError('forwarding configuration not applied')
+    return updated.encode()
+
+
+def forge_config(root,secret):
+    parent = safe(root+'/config')
+    if os.path.lexists(parent) and not os.path.isdir(parent):
+        raise ValueError('unsafe configuration directory')
+    path = safe(root+'/'+PCF_CONFIG)
+    # An existing empty config is not an absent config.
+    return pcf_config(read(path,256*1024) if os.path.exists(path) else b'[forwarding]\n',secret)
+
+
+def forge_context(record):
+    runtime = record['runtime']
+    # Go's networkRecordEligible calls validateJavaServerSelection before
+    # preflight. Bind that complete selection here, rather than inventing another
+    # game support policy. The existing exact upstream verifier runs below.
+    software,game,loader = runtime['software'],runtime['version'],runtime.get('loader_version','')
+    if software not in ('forge','neoforge') or not re.fullmatch(r'[0-9]+\.[0-9]+(?:\.[0-9]+)?',game) or not re.fullmatch(r'[0-9]+(?:\.[0-9]+){1,3}(?:-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*)?',loader) or len(loader)>64:
+        raise ValueError('exact game and loader required')
+    if runtime.get('version_policy')!='pinned' or runtime.get('image_tag') not in ('java21','java25'):
+        raise ValueError('invalid selected runtime')
+    path = safe(record['storage']['data_path'])
+    info = os.stat(path)
+    return {'profile':'forge-family','software':software,'game':game,'loader':loader,
+            'image_tag':runtime['image_tag'],'version_policy':runtime['version_policy'],
+            'bedrock_enabled':runtime.get('bedrock_enabled',False),'data_path':path,
+            'storage':record['storage'],'data_inode':info.st_ino}
+
+
+def scan_forge_mods(root,owned=None):
+    folder = safe(root+'/mods')
+    if os.path.lexists(folder) and not os.path.isdir(folder):
+        raise ValueError('unsafe mods directory')
+    entries = os.listdir(folder) if os.path.isdir(folder) else []
+    if len(entries)>1024:
+        raise ValueError('too many mod files')
+    inventory = {}
+    for name in sorted(entries):
+        path = safe(folder+'/'+name)
+        if not name.lower().endswith('.jar'):
+            continue
+        data = read(path,MAX_JAR)
+        _,mods = forge_descriptors(data)
+        relative,digest = 'mods/'+name,hashlib.sha256(data).hexdigest()
+        if relative==PCF_FILE:
+            if not owned or owned.get(PCF_FILE,{}).get('sha256')!=digest or 'pcf' not in mods:
+                raise ValueError('unowned or changed Network PCF; file preserved')
+        elif 'pcf' in mods:
+            raise ValueError('user PCF conflicts with Network compatibility; file preserved')
+        else:
+            inventory[name] = digest
+    canonical = safe(root+'/'+PCF_FILE)
+    if os.path.lexists(canonical) and not stat.S_ISREG(os.lstat(canonical).st_mode):
+        raise ValueError('unsafe canonical mod')
+    return inventory
+
+
+def resolve_pcf(context):
+    import zipfile
+    project = modrinth_metadata('https://api.modrinth.com/v2/project/'+PCF_SLUG)
+    if (not isinstance(project,dict) or project.get('slug')!=PCF_SLUG or project.get('title')!='Proxy Compatible Forge'
+            or project.get('project_type')!='mod' or project.get('source_url') not in
+            ('https://github.com/adde0109/Proxy-Compatible-Forge','https://github.com/adde0109/Proxy-Compatible-Forge/')
+            or not isinstance(project.get('id'),str) or not re.fullmatch('[A-Za-z0-9]{1,64}',project['id'])):
+        raise ValueError('unexpected PCF project identity')
+    for release in modrinth_release(project['id'],context['game'],platform=context['software']):
+        try:
+            if (not isinstance(release.get('version_number'),str) or release.get('status')!='listed'
+                    or not re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?Z',release.get('date_published',''))):
+                continue
+            dependencies = release.get('dependencies',[])
+            files = release.get('files')
+            if not isinstance(dependencies,list) or len(dependencies)>64 or any(not isinstance(d,dict) or d.get('dependency_type') not in ('optional','incompatible','embedded') for d in dependencies):
+                raise ValueError('external required publisher dependency unavailable')
+            if not isinstance(files,list) or not 0<len(files)<=128 or any(not isinstance(f,dict) or type(f.get('primary')) is not bool or not isinstance(f.get('filename'),str) or len(f['filename'])>255 or f.get('file_type') is not None for f in files):
+                raise ValueError('invalid artifact metadata')
+            data,entry = release_bytes(release,project['id'],context['game'],context['software'])
+            verify_pcf(data,context,release['version_number'])
+            entry.update(version=release['version_number'],destination=PCF_FILE,project_slug=PCF_SLUG)
+            return data,entry
+        except (ValueError,KeyError,TypeError,AttributeError,OSError,zipfile.BadZipFile):
+            continue
+    raise ValueError('verified PCF compatibility unavailable')
+
+
+def load_forge_stage(instance,record,root,evidence,strict_inventory=True):
+    folder = safe(INSTANCE_ROOT+'/'+instance+'/network-staging')
+    info = os.stat(folder)
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid!=0 or stat.S_IMODE(info.st_mode)!=0o700:
+        raise ValueError('staging is not private')
+    manifest = private_json(folder+'/manifest.json')
+    if manifest.get('schema')!=1 or manifest.get('instance')!=instance or manifest.get('context')!=forge_context(record):
+        raise ValueError('staging context changed')
+    artifacts = manifest.get('artifacts',{})
+    if not isinstance(artifacts,dict) or set(artifacts)!={PCF_FILE}:
+        raise ValueError('invalid staged file set')
+    entry = artifacts[PCF_FILE]
+    if (entry.get('project_slug')!=PCF_SLUG or entry.get('destination')!=PCF_FILE
+            or not re.fullmatch('[A-Za-z0-9]{1,64}',entry.get('project_id',''))
+            or manifest.get('project_id')!=entry['project_id']
+            or not re.fullmatch('[A-Za-z0-9]{1,64}',entry.get('release_id',''))):
+        raise ValueError('staged publisher mismatch')
+    path = folder+'/'+PCF_FILE.split('/')[-1]
+    data = read(path,MAX_JAR)
+    info = os.stat(path)
+    if info.st_uid!=0 or stat.S_IMODE(info.st_mode)!=0o600 or hashlib.sha256(data).hexdigest()!=entry.get('sha256') or hashlib.sha512(data).hexdigest()!=entry.get('sha512'):
+        raise ValueError('staged artifact changed')
+    verify_pcf(data,manifest['context'],entry.get('version'))
+    forge_config(root,'0'*64)
+    path = safe(root+'/'+PCF_CONFIG)
+    original = evidence['files'][PCF_CONFIG] if evidence else (hashlib.sha256(read(path,256*1024)).hexdigest() if os.path.exists(path) else None)
+    if original!=manifest.get('original_config_sha256'):
+        raise ValueError('configuration changed since preflight')
+    inventory = scan_forge_mods(root,artifacts if evidence else None)
+    if strict_inventory and inventory!=manifest.get('inventory'):
+        raise ValueError('installed mods changed since preflight')
+    return manifest
+
+
+def resolve_forge(record,root):
+    if os.path.lexists(safe(root+'/'+PORTABLE_NAME)):
+        raise ValueError('complete standalone restoration before Network enrollment')
+    context = forge_context(record)
+    inventory = scan_forge_mods(root)
+    forge_config(root,'0'*64)
+    selected_runtime(record,context)
+    data,entry = resolve_pcf(context)
+    return context,inventory,data,entry
+
+
+def prepare_forge(instance,record,root,evidence):
+    global COMPONENT_DEADLINE, COMPONENT_REQUESTS, COMPONENT_BYTES
+    COMPONENT_DEADLINE, COMPONENT_REQUESTS, COMPONENT_BYTES = time.monotonic()+150,0,0
+    if evidence:
+        manifest = load_forge_stage(instance,record,root,evidence,strict_inventory=False)
+        manifest['inventory'] = scan_forge_mods(root,manifest['artifacts'])
+        atomic(INSTANCE_ROOT+'/'+instance+'/network-staging/manifest.json',json.dumps(manifest).encode())
+        return
+    context,inventory,data,entry = resolve_forge(record,root)
+    folder = safe(INSTANCE_ROOT+'/'+instance+'/network-staging')
+    directory(folder)
+    atomic(folder+'/'+PCF_FILE.split('/')[-1],data)
+    original = safe(root+'/'+PCF_CONFIG)
+    manifest = {'schema':1,'instance':instance,'context':context,'project_id':entry['project_id'],
+                'inventory':inventory,'original_config_sha256':hashlib.sha256(read(original,256*1024)).hexdigest() if os.path.exists(original) else None,
+                'artifacts':{PCF_FILE:entry}}
+    atomic(folder+'/manifest.json',json.dumps(manifest).encode())
+    load_forge_stage(instance,record,root,None)
+
+
+def validate_portable_forge(root,artifacts):
+    if not isinstance(artifacts,dict) or set(artifacts)!={PCF_FILE}:
+        raise ValueError('invalid portable artifact ownership')
+    digest = artifacts[PCF_FILE]
+    if not isinstance(digest,str) or not re.fullmatch('[a-f0-9]{64}',digest):
+        raise ValueError('invalid portable artifact hash')
+    path = safe(root+'/'+PCF_FILE)
+    if os.path.lexists(path):
+        data = read(path,MAX_JAR)
+        _,mods = forge_descriptors(data)
+        if hashlib.sha256(data).hexdigest()!=digest or 'pcf' not in mods:
+            raise ValueError('Network-owned PCF changed; file preserved')
+
+
+def validate_forge_owned(instance,root,evidence):
+    if validate_backend_evidence(instance,evidence)!='forge-family' or evidence['files'][PCF_FILE] is not None:
+        raise ValueError('wrong PCF restore ownership')
+    manifest = private_json(INSTANCE_ROOT+'/'+instance+'/network-staging/manifest.json')
+    if manifest.get('schema')!=1 or manifest.get('instance')!=instance or manifest.get('context',{}).get('profile')!='forge-family' or set(manifest.get('artifacts',{}))!={PCF_FILE}:
+        raise ValueError('invalid Network ownership')
+    validate_portable_forge(root,{PCF_FILE:manifest['artifacts'][PCF_FILE].get('sha256')})
+
+
+def publish_forge(instance,record,root,evidence,state,strict_inventory=True):
+    manifest = load_forge_stage(instance,record,root,evidence,strict_inventory)
+    publish_managed(instance,record,root,manifest,PCF_CONFIG,forge_config(root,state['forwarding_secret']))
+
+
+# Ordered, fixed ownership per profile. Snapshot blob indices are persisted:
+# preserve this paper-family order for deployed network-before evidence.
+# Worlds, whitelist.json and server.properties are never owned by this helper.
+BACKEND_PROFILES = {
+    'paper-family': {
+        'files': ('config/paper-global.yml','paper.yml','plugins/floodgate/key.pem','plugins/floodgate/config.yml','plugins/floodgate-spigot.jar','plugins/Geyser-Spigot.jar','.justvoxel-network-patches.json'),
+        'portable_configs': ('config/paper-global.yml','paper.yml','plugins/floodgate/key.pem','plugins/floodgate/config.yml'),
+    },
+    'forge-family': {
+        'files': (PCF_FILE, PCF_CONFIG),
+        'portable_configs': (PCF_CONFIG,),
+    },
+    'fabric-family': {
+        'files': (FPL_FILE, API_FILE, FPL_CONFIG),
+        'portable_configs': (FPL_CONFIG,),
+    },
+}
+
+
+def backend_profile(software):
+    if software in ('paper', 'purpur', 'pufferfish', 'leaf'):
+        return 'paper-family'
+    if software in ('fabric','quilt'):
+        return 'fabric-family'
+    if software in ('forge','neoforge'):
+        return 'forge-family'
+    raise ValueError('unsupported network backend software')
+
+
+def backend_paths(profile):
+    if profile not in BACKEND_PROFILES:
+        raise ValueError('unsupported network backend profile')
+    return BACKEND_PROFILES[profile]
+
+
+def validate_backend_evidence(instance, evidence):
+    if not re.fullmatch(r'jv-[a-z0-9]{6,12}',instance) or not isinstance(evidence,dict):
+        raise ValueError('invalid standalone evidence')
+    # Only the exact historical Paper shape authorizes no-profile evidence.
+    profile = evidence['profile'] if 'profile' in evidence else 'paper-family'
+    paths = backend_paths(profile)
+    if evidence.get('id') != instance or not isinstance(evidence.get('files'),dict) or set(evidence['files']) != set(paths['files']):
+        raise ValueError('invalid standalone evidence')
+    return profile
+
+
+def backend_context(instance):
+    if not re.fullmatch(r'jv-[a-z0-9]{6,12}',instance):
+        raise ValueError('invalid instance')
+    record = private_json(INSTANCE_ROOT+'/'+instance+'/config.json')
+    root = safe(record['storage']['data_path'])
+    if not root.endswith('/minecraft-instances/'+instance+'/data') or not os.path.isdir(root):
+        raise ValueError('wrong storage')
+    snapshot = INSTANCE_ROOT+'/'+instance+'/network-before.json'
+    evidence = private_json(snapshot) if os.path.exists(snapshot) else None
+    if evidence is not None:
+        profile = validate_backend_evidence(instance,evidence)
+        if record.get('network_member',False) and backend_profile(record['runtime']['software']) != profile:
+            raise ValueError('backend snapshot profile mismatch')
+    else:
+        profile = backend_profile(record['runtime']['software'])
+    return record,root,profile,evidence
+
+
+def availability_key(instance):
+    record,root,profile,evidence = backend_context(instance)
+    digest = hashlib.sha256(json.dumps(record,sort_keys=True).encode())
+    root_info = os.stat(root)
+    digest.update(str((root_info.st_dev,root_info.st_ino)).encode())
+    # Use the verifier's per-file/count bounds, rather than a smaller aggregate
+    # modpack limit that could hide a valid installed inventory from Network.
+    folders = ((root+'/mods',True),
+               (INSTANCE_ROOT+'/'+instance+'/network-staging',False))
+    config = FPL_CONFIG if profile=='fabric-family' else PCF_CONFIG
+    paths = [INSTANCE_ROOT+'/'+instance+'/network-before.json',root+'/'+PORTABLE_NAME,root+'/'+config]
+    for folder,jars_only in folders:
+        safe(folder)
+        digest.update(folder.encode())
+        if os.path.lexists(folder):
+            info = os.stat(folder)
+            digest.update(str((info.st_uid,info.st_gid,info.st_mode,info.st_ino)).encode())
+        else:
+            digest.update(b'absent')
+        names = sorted(os.listdir(folder)) if os.path.isdir(folder) else []
+        if len(names)>1024:
+            raise ValueError('inventory too large')
+        for name in names:
+            path = safe(folder+'/'+name)
+            if jars_only and not name.lower().endswith('.jar'):
+                continue
+            if os.path.isdir(path):
+                continue
+            paths.append(path)
+    for path in sorted(paths):
+        safe(path)
+        digest.update(path.encode())
+        if not os.path.lexists(path):
+            digest.update(b'absent')
+            continue
+        info = os.stat(path)
+        digest.update(str((info.st_uid,info.st_gid,info.st_mode,info.st_ino)).encode())
+        data = read(path,MAX_JAR)
+        digest.update(hashlib.sha256(data).digest())
+    return digest.hexdigest()
+
+
+def backend_availability(instance):
+    global COMPONENT_DEADLINE, COMPONENT_REQUESTS, COMPONENT_BYTES
+    COMPONENT_DEADLINE, COMPONENT_REQUESTS, COMPONENT_BYTES = time.monotonic()+150,0,0
+    phase = 'local'
+    try:
+        record,root,profile,evidence = backend_context(instance)
+        if profile == 'paper-family':
+            return 'supported'
+        if evidence:
+            # Existing private publisher evidence and staged bytes remain subject
+            # to the same context, hash, dependency and ownership checks as Apply.
+            if profile == 'fabric-family':
+                validate_fabric_owned(instance,root,evidence)
+                load_fabric_stage(instance,record,root,evidence,strict_inventory=False)
+            else:
+                validate_forge_owned(instance,root,evidence)
+                load_forge_stage(instance,record,root,evidence,strict_inventory=False)
+            return 'supported'
+        # Identify local conflicts before contacting any provider.
+        if profile == 'fabric-family':
+            scan_fabric_mods(root)
+        else:
+            scan_forge_mods(root)
+        phase = 'provider'
+        if profile == 'fabric-family':
+            resolve_fabric(record,root)
+        else:
+            resolve_forge(record,root)
+        return 'supported'
+    except CompatibilityCheckUnavailable:
+        return 'compatibility-check-unavailable'
+    except Exception:
+        return 'compatibility-conflict' if phase=='local' else 'compatibility-unavailable'
+
+
+def backend_preflight(instance, joining=True):
+    record,root,profile,evidence = backend_context(instance)
+    if joining and backend_profile(record['runtime']['software']) != profile:
+        raise ValueError('backend snapshot profile mismatch')
+    paths = backend_paths(profile)
+    # Restoration needs only its saved evidence, not publication artifacts.
+    if profile == 'fabric-family':
+        if joining:
+            prepare_fabric(instance,record,root,evidence)
+        elif evidence:
+            validate_fabric_owned(instance,root,evidence)
+    elif profile == 'forge-family':
+        if joining:
+            prepare_forge(instance,record,root,evidence)
+        elif evidence:
+            validate_forge_owned(instance,root,evidence)
+    elif joining:
+        prepare_backend_profile(profile,root)
+    else:
+        check_backend_profile(profile,root)
+    for index,name in enumerate(paths['files']):
+        path = safe(root+'/'+name)
+        if os.path.exists(path):
+            read(path,MAX_JAR)
+        if evidence is not None and evidence['files'][name] is not None:
+            data = read(INSTANCE_ROOT+'/'+instance+'/network-before/'+str(index),MAX_JAR)
+            if hashlib.sha256(data).hexdigest() != evidence['files'][name]:
+                raise ValueError('standalone evidence checksum mismatch')
+
+
+PORTABLE_NAME = '.justvoxel-network-standalone.json'
+
+
+def restore_portable(root,uid,gid,profile):
+    paths = backend_paths(profile)
+    path = safe(root+'/'+PORTABLE_NAME)
+    if not os.path.exists(path):
+        return
+    evidence = json.loads(read(path,2*1024*1024))
+    expected_schema = {'paper-family':1,'fabric-family':2,'forge-family':3}[profile]
+    if evidence.get('schema') != expected_schema or set(evidence.get('configs',{})) != set(paths['portable_configs']):
+        raise ValueError('invalid portable standalone evidence')
+    decoded = {}
+    for name,entry in evidence['configs'].items():
+        if entry is None:
+            decoded[name] = None
+        else:
+            data = base64.b64decode(entry['data'],validate=True)
+            if len(data)>256*1024 or hashlib.sha256(data).hexdigest() != entry['sha256']:
+                raise ValueError('invalid portable standalone checksum')
+            decoded[name] = data
+    if profile == 'fabric-family':
+        if evidence.get('profile') != profile:
+            raise ValueError('invalid portable profile')
+        validate_portable_fabric(root,evidence.get('artifacts'))
+    if profile == 'forge-family':
+        if evidence.get('profile') != profile:
+            raise ValueError('invalid portable profile')
+        validate_portable_forge(root,evidence.get('artifacts'))
+    # Destination paths are fixed, relative to the validated selected data root.
+    # No identity, host path, runtime settings or whitelist is imported here.
+    for name,data in decoded.items():
+        target = safe(root+'/'+name)
+        if data is None:
+            if os.path.exists(target):
+                if not stat.S_ISREG(os.stat(target).st_mode):
+                    raise ValueError('invalid portable target')
+                os.unlink(target)
+        else:
+            safe(os.path.dirname(target))
+            os.makedirs(os.path.dirname(target),mode=0o755,exist_ok=True)
+            atomic(target,data,uid,gid,0o600 if name.endswith('key.pem') else 0o644)
+    if profile == 'paper-family':
+        remove_paper_patch(root)
+    else:
+        for name,digest in evidence['artifacts'].items():
+            if digest is not None and os.path.exists(root+'/'+name):
+                os.unlink(safe(root+'/'+name))
+    os.unlink(path)
+    sync = os.open(root,os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(sync)
+    finally:
+        os.close(sync)
+
+
+def remove_paper_patch(root):
+    patch = safe(root+'/.justvoxel-network-patches.json')
+    if os.path.exists(patch):
+        if not stat.S_ISREG(os.stat(patch).st_mode):
+            raise ValueError('invalid managed patch')
+        os.unlink(patch)
+
+
+def backend(instance, publishing=False):
+    record,root,profile,evidence = backend_context(instance)
+    paths = backend_paths(profile)
+    backend_files = paths['files']
+    uid,gid = record['runtime']['uid'],record['runtime']['gid']
+    snapshot = INSTANCE_ROOT+'/'+instance+'/network-before.json'
+    blobdir = INSTANCE_ROOT+'/'+instance+'/network-before'
+    member = record.get('network_member',False)
+    if member and profile == 'fabric-family':
+        # Validate before even portable restoration or other data publication.
+        load_fabric_stage(instance,record,root,evidence,strict_inventory=publishing)
+    if member and profile == 'forge-family':
+        load_forge_stage(instance,record,root,evidence,strict_inventory=publishing)
+    if not os.path.exists(snapshot):
+        restore_portable(root,uid,gid,profile)
+    if profile == 'fabric-family' and evidence is not None and not member:
+        validate_fabric_owned(instance,root,evidence)
+    if profile == 'forge-family' and evidence is not None and not member:
+        validate_forge_owned(instance,root,evidence)
+    if not member:
+        if os.path.exists(snapshot):
+            evidence = private_json(snapshot)
+            validate_backend_evidence(instance,evidence)
+            for name,hashvalue in evidence['files'].items():
+                target = safe(root+'/'+name)
+                if hashvalue is None:
+                    if os.path.exists(target):
+                        if not stat.S_ISREG(os.stat(target).st_mode):
+                            raise ValueError('not a file')
+                        os.unlink(target)
+                else:
+                    data = read(blobdir+'/'+str(backend_files.index(name)),MAX_JAR)
+                    if hashlib.sha256(data).hexdigest() != hashvalue:
+                        raise ValueError('standalone evidence checksum mismatch')
+                    safe(os.path.dirname(target))
+                    os.makedirs(os.path.dirname(target),mode=0o755,exist_ok=True)
+                    atomic(target,data,uid,gid,0o600 if name.endswith('key.pem') else 0o644)
+            portable = safe(root+'/'+PORTABLE_NAME)
+            if os.path.exists(portable):
+                if not stat.S_ISREG(os.stat(portable).st_mode):
+                    raise ValueError('invalid portable evidence')
+                os.unlink(portable)
+            os.unlink(snapshot)
+            sync = os.open(INSTANCE_ROOT+'/'+instance,os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                os.fsync(sync)
+            finally:
+                os.close(sync)
+        if os.path.isdir(safe(blobdir)):
+            # Fixed private snapshot files only. Unknown contents are preserved.
+            for name in os.listdir(blobdir):
+                if name not in [str(i) for i in range(len(backend_files))]:
+                    raise ValueError('unexpected standalone snapshot file')
+                path = safe(blobdir+'/'+name)
+                info = os.stat(path)
+                if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or stat.S_IMODE(info.st_mode) != 0o600:
+                    raise ValueError('unsafe standalone snapshot file')
+                os.unlink(path)
+            os.rmdir(blobdir)
+        return
+    if not publishing:
+        check()
+    state = private_json(ROOT+'/state.json')
+    if instance not in state['config']['members']:
+        raise ValueError('invalid membership')
+    check_backend_profile(profile,root)
+    if profile == 'fabric-family':
+        load_fabric_stage(instance,record,root,evidence,strict_inventory=publishing)
+    if not os.path.exists(snapshot):
+        directory(blobdir)
+        evidence = {'id':instance,'profile':profile,'files':{}}
+        for index,name in enumerate(backend_files):
+            path = safe(root+'/'+name)
+            if os.path.exists(path):
+                data = read(path,MAX_JAR)
+                atomic(blobdir+'/'+str(index),data)
+                evidence['files'][name] = hashlib.sha256(data).hexdigest()
+            else:
+                evidence['files'][name] = None
+        atomic(snapshot,json.dumps(evidence).encode())
+    # Backups/exports carry bounded standalone configuration evidence. A restored
+    # member can join this network; an imported standalone server can restore its
+    # original proxy/identity settings without copying appliance state or IDs.
+    evidence = private_json(snapshot)
+    validate_backend_evidence(instance,evidence)
+    portable = {'schema':1,'configs':{}}
+    if profile == 'fabric-family':
+        staged = load_fabric_stage(instance,record,root,evidence,strict_inventory=publishing)
+        portable.update(schema=2,profile=profile,artifacts={name:staged['artifacts'].get(name,{}).get('sha256') for name in FABRIC_ARTIFACTS})
+    if profile == 'forge-family':
+        staged = load_forge_stage(instance,record,root,evidence,strict_inventory=publishing)
+        portable.update(schema=3,profile=profile,artifacts={PCF_FILE:staged['artifacts'][PCF_FILE]['sha256']})
+    for name in paths['portable_configs']:
+        hashvalue = evidence['files'][name]
+        if hashvalue is None:
+            portable['configs'][name] = None
+        else:
+            data = read(blobdir+'/'+str(backend_files.index(name)),256*1024)
+            if hashlib.sha256(data).hexdigest() != hashvalue:
+                raise ValueError('standalone evidence changed')
+            portable['configs'][name] = {'sha256':hashvalue,'data':base64.b64encode(data).decode()}
+    atomic(root+'/'+PORTABLE_NAME,json.dumps(portable).encode())
+    if profile == 'fabric-family':
+        publish_fabric(instance,record,root,evidence,state,strict_inventory=publishing)
+    elif profile == 'forge-family':
+        publish_forge(instance,record,root,evidence,state,strict_inventory=publishing)
+    else:
+        publish_backend_profile(profile,root,uid,gid,record,state)
+
+
+def prepare_backend_profile(profile,root):
+    # Profile preparation belongs before downtime. Any future compatibility
+    # component resolution/verification must remain behind this boundary.
+    check_backend_profile(profile,root)
+    validate_artifacts()
+
+
+def check_backend_profile(profile,root):
+    if profile == 'forge-family':
+        safe(root+'/mods')
+        safe(root+'/'+PCF_CONFIG)
+        return
+    if profile == 'fabric-family':
+        safe(root+'/mods')
+        safe(root+'/'+FPL_CONFIG)
+        return
+    # Cheap local ownership revalidation is also safe during publication.
+    if profile != 'paper-family':
+        raise ValueError('unsupported network backend profile')
+    import subprocess
+    # Refuse duplicate/noncanonical managed artifacts before taking a snapshot;
+    # standalone restoration must never discard an unrecorded plugin filename.
+    for component, keep in [('geyser','Geyser-Spigot.jar'),('floodgate','floodgate-spigot.jar')]:
+        subprocess.run(['/usr/libexec/justvoxel/mjust/managed-plugin-files',root+'/plugins',component,keep,'--check'],check=True,stdout=subprocess.DEVNULL)
+
+
+def publish_backend_profile(profile,root,uid,gid,record,state):
+    if profile != 'paper-family':
+        raise ValueError('unsupported network backend profile')
+    # Stop the managed backend listener; identity handling stays in Floodgate.
+    geyser = safe(root+'/plugins/Geyser-Spigot.jar')
+    if os.path.exists(geyser):
+        os.unlink(geyser)
+    safe(root+'/plugins')
+    os.makedirs(root+'/plugins', mode=0o755, exist_ok=True)
+    os.chown(root+'/plugins', uid, gid)
+    safe(root+'/plugins/floodgate')
+    os.makedirs(root+'/plugins/floodgate',mode=0o755,exist_ok=True)
+    os.chown(root+'/plugins/floodgate',uid,gid)
+    secret = state['forwarding_secret']
+    version = record['runtime']['version']
+    match = re.match(r'^(\d+)\.(\d+)',version)
+    old_paper = bool(match) and tuple(map(int,match.groups())) < (1,19)
+    path, parent, field = ('/data/paper.yml','$.settings','velocity-support') if old_paper else ('/data/config/paper-global.yml','$.proxies','velocity')
+    patches = {'patches':[{'file':path,'ops':[{'$put':{'path':parent,'key':field,'value':{'enabled':True,'online-mode':True,'secret':secret}}}]}]}
+    atomic(root+'/.justvoxel-network-patches.json',json.dumps(patches).encode(),uid,gid)
+    atomic(root+'/plugins/floodgate/key.pem',base64.b64decode(state['floodgate_key'],validate=True),uid,gid)
+    atomic(root+'/plugins/floodgate/config.yml',b'key-file-name: key.pem\nusername-prefix: "."\nreplace-spaces: true\nconfig-version: 3\n',uid,gid)
+    artifacts = private_json(ROOT+'/artifacts.json')
+    data = read(ROOT+'/artifacts/floodgate-spigot.jar',MAX_JAR)
+    if hashlib.sha256(data).hexdigest() != artifacts['floodgate-spigot.jar']:
+        raise ValueError('backend artifact changed')
+    atomic(root+'/plugins/floodgate-spigot.jar',data,uid,gid,0o644)
+
+
+def check():
+    if os.path.lexists(ROOT+'/pending.json'):
+        raise ValueError('network recovery required')
+    state = private_json(ROOT+'/state.json')
+    if state['schema'] != 1 or not state['config']['enabled']:
+        raise ValueError('network disabled')
+    # Container configuration loaders may normalize their files. The root-owned
+    # state is authoritative: each unit republishes only its own configuration
+    # before startup instead of trusting container-written bytes on the next boot.
+    if os.path.exists(ROOT+'/legacy-rollback.json'):
+        # Only a matching legacy generated set authorizes old evidence/startup.
+        legacy_rollback_generated()
+        validate_artifacts(allow_old=True)
+    else:
+        validate_artifacts()
+
+
+def main():
+    if os.geteuid() != 0:
+        raise ValueError('root required')
+    if sys.argv[1:] == ['prepare']:
+        prepare()
+    elif sys.argv[1:] == ['publish']:
+        publish()
+    elif sys.argv[1:] == ['check']:
+        check()
+    elif sys.argv[1:] == ['start-velocity']:
+        check()
+        publish(sys.argv[1].removeprefix('start-'))
+    elif len(sys.argv) == 3 and sys.argv[1] == 'backend-availability-key':
+        print(availability_key(sys.argv[2]))
+    elif len(sys.argv) == 3 and sys.argv[1] == 'backend-availability':
+        print(json.dumps({'status':backend_availability(sys.argv[2])}))
+    elif len(sys.argv) == 4 and sys.argv[1] == 'backend-preflight' and sys.argv[3] in ['member','standalone']:
+        backend_preflight(sys.argv[2],joining=sys.argv[3] == 'member')
+    elif len(sys.argv) == 3 and sys.argv[1] in ['backend','backend-publish']:
+        backend(sys.argv[2],publishing=sys.argv[1] == 'backend-publish')
+    else:
+        raise ValueError('invalid operation')
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except Exception:
+        # Never expose configuration, keys, URLs with player names or internals.
+        print('ERROR: Minecraft Network preparation failed; retry through Minecraft Network administration.',file=sys.stderr)
+        sys.exit(1)
+
+PYTHON

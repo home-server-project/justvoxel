@@ -1,0 +1,153 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/ui.sh
+source /usr/libexec/justvoxel/mjust/configuration-api.sh
+source /usr/libexec/justvoxel/mjust/instance-selection.sh
+
+if (( EUID != 0 )); then
+    echo 'ERROR: this operation must run as root.' >&2
+    exit 1
+fi
+
+instance_id=''
+action=menu
+while (( $# )); do
+    case "$1" in
+        --instance)
+            [[ $# -ge 2 && -z ${instance_id} ]] || { echo 'ERROR: --instance requires one immutable ID.' >&2; exit 2; }
+            instance_id="$2"; shift 2 ;;
+        backup) [[ ${action} == menu ]] || exit 2; action=backup; shift ;;
+        *) echo 'Usage: configure [--instance jv-...] [backup]' >&2; exit 2 ;;
+    esac
+done
+instance_id="$(jv_select_registered_instance "${instance_id}")" || exit 1
+readonly instance_id
+configuration=''
+
+refresh_configuration() {
+    configuration="$(jv_config_get "${instance_id}")"
+}
+
+base_payload() {
+    jv_config_payload <<<"${configuration}"
+}
+
+apply_and_refresh() {
+    local payload="$1"
+    jv_config_apply_payload "${instance_id}" "${payload}" || return 1
+    refresh_configuration
+}
+
+show_configuration() {
+    echo "Minecraft server: ${instance_id}"
+    echo "Container image tag: $(jq -r '.runtime.image_tag' <<<"${configuration}")"
+    echo "Minecraft version policy: $(jq -r '.runtime.version_policy' <<<"${configuration}") ($(jq -r '.runtime.version' <<<"${configuration}"))"
+    echo "Java heap / maximum total Minecraft memory: $(jq -r '.runtime.java_memory // "Unknown"' <<<"${configuration}") / $(jq -r '.runtime.container_memory // "Unknown"' <<<"${configuration}")"
+    echo "Java port: $(jq -r '.runtime.java_port // 0' <<<"${configuration}")/tcp"
+    echo "Bedrock: $(jq -r 'if .runtime.bedrock_enabled then "yes" else "no" end' <<<"${configuration}") ($(jq -r '.runtime.bedrock_port // 0' <<<"${configuration}")/tcp+udp)"
+    local backup
+    backup="$(jv_config_backup_get "${instance_id}")" || return 1
+    echo "Backup daily time: $(jq -r '.time' <<<"${backup}")"
+    echo "Backup enabled / retention: $(jq -r '.enabled, .retention' <<<"${backup}" | paste -sd ' ' -)"
+    echo "Maximum players: $(jq -r '.runtime.max_players // 0' <<<"${configuration}")"
+    echo "MOTD: $(jq -r '.runtime.motd // ""' <<<"${configuration}")"
+}
+
+configure_memory() {
+    local java_memory container_memory new_java new_container payload
+    java_memory="$(jq -r '.runtime.java_memory' <<<"${configuration}")"
+    container_memory="$(jq -r '.runtime.container_memory' <<<"${configuration}")"
+    new_java="$(jui_input 'Minecraft Java heap' "${java_memory}")" || return 0
+    new_container="$(jui_input 'Maximum total Minecraft memory' "${container_memory}")" || return 0
+    payload="$(base_payload | jq -c --arg java "${new_java}" --arg container "${new_container}" '.runtime.java_memory=$java | .runtime.container_memory=$container')"
+    apply_and_refresh "${payload}"
+}
+
+configure_ports() {
+    local bedrock_enabled java_port bedrock_port new_java new_bedrock payload
+    bedrock_enabled="$(jq -r '.runtime.bedrock_enabled' <<<"${configuration}")"
+    java_port="$(jq -r '.runtime.java_port' <<<"${configuration}")"
+    bedrock_port="$(jq -r '.runtime.bedrock_port' <<<"${configuration}")"
+    new_java="$(jui_input 'Java host TCP port' "${java_port}")" || return 0
+    [[ ${new_java} =~ ^[0-9]+$ ]] || { echo 'ERROR: Java port must be a number.' >&2; return 1; }
+    new_bedrock="${bedrock_port}"
+    if [[ ${bedrock_enabled} == true ]]; then
+        new_bedrock="$(jui_input 'Bedrock host TCP/UDP port' "${bedrock_port}")" || return 0
+        [[ ${new_bedrock} =~ ^[0-9]+$ ]] || { echo 'ERROR: Bedrock port must be a number.' >&2; return 1; }
+    fi
+    payload="$(base_payload | jq -c --argjson java "${new_java}" --argjson bedrock "${new_bedrock}" '.runtime.java_port=$java | .runtime.bedrock_port=$bedrock')"
+    apply_and_refresh "${payload}"
+}
+
+configure_bedrock() {
+    local enabled state choice port new_port payload
+    enabled="$(jq -r '.runtime.bedrock_enabled' <<<"${configuration}")"
+    port="$(jq -r '.runtime.bedrock_port' <<<"${configuration}")"
+    if [[ ${enabled} == true ]]; then state='enabled'; else state='disabled'; fi
+    choice="$(jui_choose "Bedrock cross-play - currently ${state}"         "$([[ ${enabled} == true ]] && printf 'Disable Bedrock cross-play' || printf 'Enable Bedrock cross-play')"         'Back')" || return 0
+    [[ ${choice} != Back ]] || return 0
+
+    if [[ ${enabled} == true ]]; then
+        payload="$(base_payload | jq -c '.runtime.bedrock_enabled=false')"
+    else
+        new_port="$(jui_input 'Bedrock host TCP/UDP port' "${port}")" || return 0
+        [[ ${new_port} =~ ^[0-9]+$ ]] || { echo 'ERROR: Bedrock port must be a number.' >&2; return 1; }
+        payload="$(base_payload | jq -c --argjson port "${new_port}" '.runtime.bedrock_enabled=true | .runtime.bedrock_port=$port')"
+    fi
+    apply_and_refresh "${payload}"
+}
+
+configure_motd() {
+    local current new_motd payload
+    current="$(jq -r '.runtime.motd' <<<"${configuration}")"
+    new_motd="$(jui_input 'Server welcome message (MOTD)' "${current}")" || return 0
+    payload="$(base_payload | jq -c --arg motd "${new_motd}" '.runtime.motd=$motd')"
+    apply_and_refresh "${payload}"
+}
+
+configure_backup_schedule() {
+    local backup time retention enabled choice payload
+    backup="$(jv_config_backup_get "${instance_id}")" || return 1
+    time="$(jui_input 'Daily backup time (HH:MM)' "$(jq -r '.time' <<<"${backup}")")" || return 0
+    retention="$(jui_input 'Backups to keep (1-365)' "$(jq -r '.retention' <<<"${backup}")")" || return 0
+    [[ ${retention} =~ ^[1-9][0-9]*$ ]] || { echo 'ERROR: retention must be a positive integer.' >&2; return 1; }
+    enabled="$(jq -r '.enabled' <<<"${backup}")"
+    choice="$(jui_choose 'Scheduled backups' "Keep current: ${enabled}" 'Enable scheduled backups' 'Disable scheduled backups' 'Back')" || return 0
+    case "${choice}" in
+        Back) return 0 ;;
+        'Enable scheduled backups') enabled=true ;;
+        'Disable scheduled backups') enabled=false ;;
+    esac
+    payload="$(jq -nc --arg time "${time}" --argjson retention "${retention}" --argjson enabled "${enabled}" '{enabled:$enabled,time:$time,retention:$retention}')"
+    jv_config_backup_put "${instance_id}" "${payload}"
+}
+
+configure_image_version() {
+    /usr/libexec/justvoxel/mjust/update-minecraft --instance "${instance_id}"
+    refresh_configuration
+}
+
+refresh_configuration
+
+if [[ ${action} == backup ]]; then
+    configure_backup_schedule
+    exit $?
+fi
+
+while true; do
+    refresh_configuration
+    choice="$(jui_choose 'Configure Minecraft'         'Show current configuration'         'Maximum players'         'Change memory limits'         'Change Java/Bedrock host ports'         'Enable / disable Bedrock cross-play'         'Change server welcome message (MOTD)'         'Change automatic backup settings'         'Change storage / migrate Minecraft data'         'Minecraft Version / image updates'         'Back')" || exit 0
+
+    case "${choice}" in
+        'Show current configuration') show_configuration ;;
+        'Maximum players') /usr/libexec/justvoxel/mjust/configure-max-players --instance "${instance_id}" || true; refresh_configuration ;;
+        'Change memory limits') configure_memory || true ;;
+        'Change Java/Bedrock host ports') configure_ports || true ;;
+        'Enable / disable Bedrock cross-play') configure_bedrock || true ;;
+        'Change server welcome message (MOTD)') configure_motd || true ;;
+        'Change automatic backup settings') configure_backup_schedule || true ;;
+        'Change storage / migrate Minecraft data') /usr/libexec/justvoxel/mjust/data-migration || true ;;
+        'Minecraft Version / image updates') configure_image_version || true ;;
+        'Back') exit 0 ;;
+    esac
+done

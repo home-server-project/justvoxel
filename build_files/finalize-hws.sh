@@ -1,7 +1,7 @@
 #!/usr/bin/bash
 set -ouex pipefail
 
-: "${JUSTVOXEL_BASE_REPOSITORY:?JUSTVOXEL_BASE_REPOSITORY must be set}"
+: "${JUSTVOXEL_DEV_REPOSITORY:?JUSTVOXEL_DEV_REPOSITORY must be set}"
 : "${JUSTVOXEL_HWS_REPOSITORY:?JUSTVOXEL_HWS_REPOSITORY must be set}"
 
 OS_RELEASE_USR=/usr/lib/os-release
@@ -11,16 +11,16 @@ OS_RELEASE_ETC=/etc/os-release
 source "${OS_RELEASE_USR}"
 
 [[ "${ID:-}" == "justvoxel" ]] || {
-    echo "ERROR: expected JustVoxel Base parent ID, got '${ID:-}'." >&2
+    echo "ERROR: expected JustVoxel development image parent ID, got '${ID:-}'." >&2
     exit 1
 }
 [[ "${VARIANT_ID:-}" == "justvoxel-vm" ]] || {
-    echo "ERROR: expected VM-ready JustVoxel Base parent, got VARIANT_ID='${VARIANT_ID:-}'." >&2
+    echo "ERROR: expected VM-ready JustVoxel development image parent, got VARIANT_ID='${VARIANT_ID:-}'." >&2
     exit 1
 }
 [[ -r /usr/lib/justvoxel/variant ]]
 [[ "$(cat /usr/lib/justvoxel/variant)" == "justvoxel-vm" ]] || {
-    echo "ERROR: JustVoxel Base runtime variant marker is not justvoxel-vm." >&2
+    echo "ERROR: JustVoxel development image runtime variant marker is not justvoxel-vm." >&2
     exit 1
 }
 [[ "${VERSION_ID%%.*}" == "10" ]] || {
@@ -31,15 +31,15 @@ source "${OS_RELEASE_USR}"
 # HWS is a separate final product. Replace inherited JustVoxel product trust
 # with the exact repositories this image is allowed to consume.
 /ctx/build_files/install-image-trust.sh \
-    "${JUSTVOXEL_BASE_REPOSITORY}" \
+    "${JUSTVOXEL_DEV_REPOSITORY}" \
     "${JUSTVOXEL_HWS_REPOSITORY}"
 
 POLICY=/etc/containers/policy.json
-justvoxel_repository_prefix="${JUSTVOXEL_BASE_REPOSITORY%/justvoxel-base}/justvoxel-"
+justvoxel_repository_prefix="${JUSTVOXEL_DEV_REPOSITORY%/justvoxel-dev}/justvoxel-"
 policy_tmp="$(mktemp)"
 jq \
     --arg prefix "${justvoxel_repository_prefix}" \
-    --arg base "${JUSTVOXEL_BASE_REPOSITORY}" \
+    --arg base "${JUSTVOXEL_DEV_REPOSITORY}" \
     --arg hws "${JUSTVOXEL_HWS_REPOSITORY}" \
     '.transports.docker |= ((. // {}) | with_entries(
         . as $entry |

@@ -1,62 +1,44 @@
----
-name: JustVoxel testing
-
+name: Development testing
 on:
-  push:
+  pull_request:
     branches: [testing]
-    paths-ignore:
-      - '**/README.md'
-      - 'docs/**'
-      - '.github/ISSUE_TEMPLATE/**'
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-testing
-  cancel-in-progress: true
+  group: development-testing-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  VM_IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/justvoxel-vm
-  HWS_IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/justvoxel-hws
-  CURRENT_TAG: testing
-  JUSTVOXEL_BASE_IMAGE: ghcr.io/home-server-project/justvoxel-base:testing
+  IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/justvoxel-dev
+  CURRENT_TAG: 'testing'
   RECHUNK_MAX_LAYERS: '127'
   OCI_LAYER_LIMIT: '128'
+  HOME_SERVER_BASE_IMAGE: ghcr.io/home-server-project/home-server-base-10:stable
+  MANAGEMENT_PACKAGE: ghcr.io/home-server-project/justvoxel-management-agent:testing
 
 jobs:
   source-tests:
-    name: Product source checks
+    permissions:
+      contents: read
+    uses: ./.github/workflows/source-checks.yml
+
+  validate-image:
+    if: github.event_name == 'pull_request'
+    needs: source-tests
     runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
-      - name: Checkout testing branch
+      - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: testing
+          persist-credentials: false
 
-      - name: Validate product build scripts
-        shell: bash
-        run: |
-          set -euo pipefail
-          for script in build_files/*.sh build_files/validate/*.sh; do
-            [[ -f "${script}" ]] || continue
-            bash -n "${script}"
-          done
-
-  build:
-    name: Build JustVoxel VM + HWS testing
-    needs: [source-tests]
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-      packages: write
-      id-token: write
-
-    steps:
-      - name: Checkout testing branch
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Set up Go for local WebUI build
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          ref: testing
+          go-version-file: ".go-version"
+          cache: false
 
       - name: Install build dependencies
         shell: bash
@@ -68,72 +50,56 @@ jobs:
       - name: Install Cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
-          cosign-release: 'v3.1.2'
+          cosign-release: 'v3.1.3'
 
-      - name: Verify JustVoxel Base testing signature
+      - name: Verify Home Server Base stable signature
         shell: bash
         run: |
           set -euo pipefail
           cosign verify \
             --new-bundle-format=false \
             --key cosign.pub \
-            "${JUSTVOXEL_BASE_IMAGE}" >/dev/null
+            "${HOME_SERVER_BASE_IMAGE}" >/dev/null
 
-      - name: Build JustVoxel VM
+      - name: Build Management Agent from source
+        uses: ./.github/actions/build-management
+
+      - name: Build and validate common image
+        uses: ./.github/actions/build-dev
+
+  build:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/testing'
+    name: Build JustVoxel development image testing
+    needs: [source-tests]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Go for local WebUI build
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: ".go-version"
+          cache: false
+
+      - name: Install build dependencies
         shell: bash
         run: |
           set -euo pipefail
-          sudo podman build \
-            --pull=always \
-            --security-opt=label=disable \
-            --build-arg "JUSTVOXEL_BASE_IMAGE=${JUSTVOXEL_BASE_IMAGE}" \
-            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
-            --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --target justvoxel-vm \
-            --tag justvoxel-vm:test \
-            --file Containerfile \
-            .
+          sudo apt-get update
+          sudo apt-get install -y podman skopeo jq
 
-      - name: Build JustVoxel HWS
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo podman build \
-            --pull=always \
-            --security-opt=label=disable \
-            --cap-add=all \
-            --device /dev/fuse \
-            --build-arg "JUSTVOXEL_BASE_IMAGE=${JUSTVOXEL_BASE_IMAGE}" \
-            --build-arg "JUSTVOXEL_BASE_REPOSITORY=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/justvoxel-base" \
-            --build-arg "JUSTVOXEL_HWS_REPOSITORY=${HWS_IMAGE_REPOSITORY}" \
-            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
-            --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --target justvoxel-hws \
-            --tag justvoxel-hws:unrechunked \
-            --file Containerfile \
-            .
-
-      - name: Rechunk JustVoxel HWS
-        id: rechunk
-        shell: bash
-        run: |
-          set -euo pipefail
-          rechunk_tmp="${RUNNER_TEMP}/justvoxel-hws-rechunk"
-          sudo mkdir -p "${rechunk_tmp}"
-          sudo chmod 1777 "${rechunk_tmp}"
-          sudo podman run --rm --privileged \
-            -v /var/lib/containers:/var/lib/containers \
-            -v "${rechunk_tmp}:/var/tmp" \
-            --entrypoint /usr/libexec/bootc-base-imagectl \
-            localhost/justvoxel-hws:unrechunked \
-            rechunk \
-            --max-layers "${RECHUNK_MAX_LAYERS}" \
-            localhost/justvoxel-hws:unrechunked \
-            localhost/justvoxel-hws:test
-          layer_count="$(sudo skopeo inspect --raw containers-storage:localhost/justvoxel-hws:test | jq -r '.layers | length')"
-          [[ "${layer_count}" =~ ^[0-9]+$ ]]
-          (( layer_count <= OCI_LAYER_LIMIT ))
-          echo "layers=${layer_count}" >> "${GITHUB_OUTPUT}"
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: 'v3.1.3'
 
       - name: Login to GHCR
         shell: bash
@@ -147,109 +113,218 @@ jobs:
             ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
           chmod 600 "${HOME}/.docker/config.json"
 
-      - name: Push VM testing image
-        id: push-vm
+      - name: Verify Home Server Base stable signature
         shell: bash
-        run: |
-          set -euo pipefail
-          build_tag="testing-$(date -u +%Y%m%d)-${GITHUB_SHA:0:7}"
-          echo "VM_BUILD_TAG=${build_tag}" >> "${GITHUB_ENV}"
-
-          sudo podman tag justvoxel-vm:test "${VM_IMAGE_REPOSITORY}:${build_tag}"
-          sudo podman tag justvoxel-vm:test "${VM_IMAGE_REPOSITORY}:${CURRENT_TAG}"
-
-          sudo podman push \
-            --authfile "${HOME}/.docker/config.json" \
-            --digestfile /tmp/vm-digest \
-            "${VM_IMAGE_REPOSITORY}:${build_tag}"
-          sudo podman push \
-            --authfile "${HOME}/.docker/config.json" \
-            "${VM_IMAGE_REPOSITORY}:${CURRENT_TAG}"
-
-          digest="$(cat /tmp/vm-digest)"
-          [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
-          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
-
-      - name: Push HWS testing image
-        id: push-hws
-        shell: bash
-        run: |
-          set -euo pipefail
-          build_tag="testing-$(date -u +%Y%m%d)-${GITHUB_SHA:0:7}"
-          echo "HWS_BUILD_TAG=${build_tag}" >> "${GITHUB_ENV}"
-
-          sudo podman tag justvoxel-hws:test "${HWS_IMAGE_REPOSITORY}:${build_tag}"
-          sudo podman tag justvoxel-hws:test "${HWS_IMAGE_REPOSITORY}:${CURRENT_TAG}"
-
-          sudo podman push \
-            --authfile "${HOME}/.docker/config.json" \
-            --digestfile /tmp/hws-digest \
-            "${HWS_IMAGE_REPOSITORY}:${build_tag}"
-          sudo podman push \
-            --authfile "${HOME}/.docker/config.json" \
-            "${HWS_IMAGE_REPOSITORY}:${CURRENT_TAG}"
-
-          digest="$(cat /tmp/hws-digest)"
-          [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
-          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
-
-      - name: Sign VM testing image
-        shell: bash
-        env:
-          COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
-          DIGEST: ${{ steps.push-vm.outputs.digest }}
-        run: |
-          set -euo pipefail
-          cosign sign -y \
-            --new-bundle-format=false \
-            --use-signing-config=false \
-            --key env://COSIGN_PRIVATE_KEY \
-            "${VM_IMAGE_REPOSITORY}@${DIGEST}"
-
-      - name: Sign HWS testing image
-        shell: bash
-        env:
-          COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
-          DIGEST: ${{ steps.push-hws.outputs.digest }}
-        run: |
-          set -euo pipefail
-          cosign sign -y \
-            --new-bundle-format=false \
-            --use-signing-config=false \
-            --key env://COSIGN_PRIVATE_KEY \
-            "${HWS_IMAGE_REPOSITORY}@${DIGEST}"
-
-      - name: Verify HWS testing signature
-        shell: bash
-        env:
-          DIGEST: ${{ steps.push-hws.outputs.digest }}
         run: |
           set -euo pipefail
           cosign verify \
             --new-bundle-format=false \
             --key cosign.pub \
-            "${HWS_IMAGE_REPOSITORY}@${DIGEST}"
+            "${HOME_SERVER_BASE_IMAGE}" >/dev/null
 
-      - name: Build summary
-        if: always()
+      - name: Resolve Management package inputs
+        id: management-inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          base_digest="$(skopeo inspect --authfile "${HOME}/.docker/config.json" --raw "docker://${HOME_SERVER_BASE_IMAGE}" | sha256sum | cut -d ' ' -f 1)"
+          [[ "${base_digest}" =~ ^[0-9a-f]{64}$ ]]
+          base_identity="${HOME_SERVER_BASE_IMAGE}@sha256:${base_digest}"
+          # Git tree entries include paths, modes and blob IDs, never timestamps.
+          input_identity="$({
+            git ls-tree -r -z HEAD -- .go-version management templates mjust system_files \
+              runtime/system-update-reboot-worker \
+              build_files/build-common.sh \
+              build_files/build-management-agent.sh \
+              build_files/management-agent-package.Containerfile \
+              tests/run-pam-integration-alma.sh
+            printf '%s\0' "${base_identity}" 'management-api=v1'
+          } | sha256sum | cut -d ' ' -f 1)"
+          echo "identity=${input_identity}" >> "${GITHUB_OUTPUT}"
+          echo "base=${base_identity}" >> "${GITHUB_OUTPUT}"
+
+      - name: Inspect internal Management package
+        id: management-package
         shell: bash
         env:
-          HWS_LAYERS: ${{ steps.rechunk.outputs.layers }}
-          VM_DIGEST: ${{ steps.push-vm.outputs.digest }}
-          HWS_DIGEST: ${{ steps.push-hws.outputs.digest }}
+          INPUT_IDENTITY: ${{ steps.management-inputs.outputs.identity }}
+          BASE_IDENTITY: ${{ steps.management-inputs.outputs.base }}
         run: |
-          {
-            echo "## JustVoxel testing"
-            echo
-            echo "- Base input: ${JUSTVOXEL_BASE_IMAGE}"
-            echo "- VM: ${VM_IMAGE_REPOSITORY}:${CURRENT_TAG}"
-            echo "- VM immutable tag: ${VM_IMAGE_REPOSITORY}:${VM_BUILD_TAG:-n/a}"
-            echo "- VM digest: ${VM_DIGEST:-not-published}"
-            echo "- HWS: ${HWS_IMAGE_REPOSITORY}:${CURRENT_TAG}"
-            echo "- HWS immutable tag: ${HWS_IMAGE_REPOSITORY}:${HWS_BUILD_TAG:-n/a}"
-            echo "- HWS digest: ${HWS_DIGEST:-not-published}"
-            echo "- HWS rechunked layers: ${HWS_LAYERS:-unknown} / ${OCI_LAYER_LIMIT}"
-          } >> "${GITHUB_STEP_SUMMARY}"
+          set -euo pipefail
+          metadata="${RUNNER_TEMP}/management-package.json"
+          inspect_log="${RUNNER_TEMP}/management-package-inspect.log"
+          echo 'rebuild=true' >> "${GITHUB_OUTPUT}"
+          if skopeo inspect --authfile "${HOME}/.docker/config.json" \
+            "docker://${MANAGEMENT_PACKAGE}" >"${metadata}" 2>"${inspect_log}"; then
+            if jq -e --arg input "${INPUT_IDENTITY}" --arg base "${BASE_IDENTITY}" '
+              .Labels["io.home-server-project.justvoxel.management-input"] == $input and
+              .Labels["io.home-server-project.justvoxel.management-base"] == $base and
+              .Labels["io.home-server-project.justvoxel.management-api"] == "v1"
+            ' "${metadata}" >/dev/null; then
+              digest="$(jq -r '.Digest' "${metadata}")"
+              [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
+              package_ref="${MANAGEMENT_PACKAGE%:*}@${digest}"
+              if cosign verify --new-bundle-format=false --key cosign.pub "${package_ref}" >/dev/null; then
+                echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+                echo 'rebuild=false' >> "${GITHUB_OUTPUT}"
+              else
+                echo 'Management package signature verification failed; package is not reusable and will be rebuilt from source.'
+              fi
+            fi
+          else
+            # GHCR can deny inspection before the package has been created.
+            # Rebuild from source; any authentication/publish failure remains fatal.
+            echo 'No readable Management package metadata; rebuilding.'
+          fi
+
+      - name: Verify and extract reusable Management Agent
+        if: steps.management-package.outputs.rebuild == 'false'
+        shell: bash
+        env:
+          DIGEST: ${{ steps.management-package.outputs.digest }}
+        run: |
+          set -euo pipefail
+          package_ref="${MANAGEMENT_PACKAGE%:*}@${DIGEST}"
+          cosign verify --new-bundle-format=false --key cosign.pub "${package_ref}" >/dev/null
+          sudo podman pull --authfile "${HOME}/.docker/config.json" "${package_ref}"
+          container="$(sudo podman create "${package_ref}" /unused)"
+          trap 'sudo podman rm "${container}" >/dev/null' EXIT
+          mkdir -p build_artifacts/management
+          sudo podman cp "${container}:/artifacts/management-agent" build_artifacts/management/management-agent
+          sudo chmod 0755 build_artifacts/management/management-agent
+          test -f build_artifacts/management/management-agent
+          test -x build_artifacts/management/management-agent
+
+      - name: Rebuild and validate Management Agent on Home Server Base 10
+        if: steps.management-package.outputs.rebuild == 'true'
+        shell: bash
+        env:
+          BASE_IDENTITY: ${{ steps.management-inputs.outputs.base }}
+        run: |
+          set -euo pipefail
+          mkdir -p build_artifacts/management
+          sudo podman run --rm \
+            --pull=always \
+            --authfile "${HOME}/.docker/config.json" \
+            --security-opt=label=disable \
+            -v "${PWD}:/repo:ro" \
+            -v "${PWD}/system_files/usr/libexec/justvoxel:/system_files/usr/libexec/justvoxel:ro" \
+            -v "${PWD}/system_files/etc/pam.d/justvoxel:/etc/pam.d/justvoxel:ro" \
+            -v "${PWD}/tests/run-pam-integration-alma.sh:/run-pam-integration-alma.sh:ro" \
+            -v "${PWD}/build_artifacts/management:/out" \
+            "${HOME_SERVER_BASE_IMAGE}" \
+            /bin/bash /repo/build_files/build-management-agent.sh
+          # Fail if the stable channel moved while validation was running.
+          base_digest="$(skopeo inspect --authfile "${HOME}/.docker/config.json" --raw "docker://${HOME_SERVER_BASE_IMAGE}" | sha256sum | cut -d ' ' -f 1)"
+          [[ "${BASE_IDENTITY}" == "${HOME_SERVER_BASE_IMAGE}@sha256:${base_digest}" ]]
+          sudo chmod 0755 build_artifacts/management/management-agent
+          test -f build_artifacts/management/management-agent
+          test -x build_artifacts/management/management-agent
+
+      - name: Publish internal Management package
+        id: management-push
+        if: steps.management-package.outputs.rebuild == 'true'
+        shell: bash
+        env:
+          INPUT_IDENTITY: ${{ steps.management-inputs.outputs.identity }}
+          BASE_IDENTITY: ${{ steps.management-inputs.outputs.base }}
+        run: |
+          set -euo pipefail
+          sudo podman build --format oci \
+            --build-arg "MANAGEMENT_INPUT_IDENTITY=${INPUT_IDENTITY}" \
+            --build-arg "HOME_SERVER_BASE_IDENTITY=${BASE_IDENTITY}" \
+            --build-arg "SOURCE_COMMIT=${GITHUB_SHA}" \
+            --tag "${MANAGEMENT_PACKAGE}" \
+            --file "${GITHUB_WORKSPACE}/build_files/management-agent-package.Containerfile" \
+            build_artifacts/management
+          sudo podman push --authfile "${HOME}/.docker/config.json" \
+            --digestfile "${RUNNER_TEMP}/management-package.digest" "${MANAGEMENT_PACKAGE}"
+          digest="$(cat "${RUNNER_TEMP}/management-package.digest")"
+          [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+
+      - name: Sign and verify internal Management package digest
+        if: steps.management-package.outputs.rebuild == 'true'
+        shell: bash
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
+          DIGEST: ${{ steps.management-push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          package_ref="${MANAGEMENT_PACKAGE%:*}@${DIGEST}"
+          cosign sign -y \
+            --new-bundle-format=false \
+            --use-signing-config=false \
+            --key env://COSIGN_PRIVATE_KEY "${package_ref}"
+          cosign verify --new-bundle-format=false --key cosign.pub "${package_ref}" >/dev/null
+
+      - name: Build and validate common image
+        uses: ./.github/actions/build-dev
+
+      - name: Push testing development image
+        id: push
+        shell: bash
+        run: |
+          set -euo pipefail
+          build_tag="testing-$(date -u +%Y%m%d)-${GITHUB_SHA:0:7}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "BUILD_TAG=${build_tag}" >> "${GITHUB_ENV}"
+
+          sudo podman tag justvoxel-dev:build "${IMAGE_REPOSITORY}:${build_tag}"
+          sudo podman tag justvoxel-dev:build "${IMAGE_REPOSITORY}:${CURRENT_TAG}"
+
+          sudo podman push \
+            --authfile "${HOME}/.docker/config.json" \
+            --digestfile /tmp/digest \
+            "${IMAGE_REPOSITORY}:${build_tag}"
+          sudo podman push \
+            --authfile "${HOME}/.docker/config.json" \
+            "${IMAGE_REPOSITORY}:${CURRENT_TAG}"
+
+          digest="$(cat /tmp/digest)"
+          [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+
+      - name: Sign testing development image digest
+        shell: bash
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          signing_log="$(mktemp "${RUNNER_TEMP}/cosign-sign.XXXXXX")"
+          trap 'rm -f "${signing_log}"' EXIT
+          if cosign sign -y \
+            --new-bundle-format=false \
+            --use-signing-config=false \
+            --key env://COSIGN_PRIVATE_KEY \
+            "${IMAGE_REPOSITORY}@${DIGEST}" >"${signing_log}" 2>&1; then
+            cat "${signing_log}"
+          else
+            signing_status=$?
+            cat "${signing_log}"
+            if grep -Fq '[409]' "${signing_log}" && \
+               grep -Fq 'an equivalent entry already exists in the transparency log' "${signing_log}"; then
+              echo 'Rekor reports an equivalent entry already exists (409); verifying the exact pushed digest.'
+              cosign verify \
+                --new-bundle-format=false \
+                --key cosign.pub \
+                "${IMAGE_REPOSITORY}@${DIGEST}"
+              echo "Existing signature for the exact digest ${IMAGE_REPOSITORY}@${DIGEST} was verified."
+            else
+              exit "${signing_status}"
+            fi
+          fi
+
+      - name: Verify testing development signature
+        shell: bash
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cosign verify \
+            --new-bundle-format=false \
+            --key cosign.pub \
+            "${IMAGE_REPOSITORY}@${DIGEST}"
 
   cleanup:
     name: cleanup
@@ -257,23 +332,13 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       packages: write
-    steps:
-      - name: Remove expired VM testing images
-        uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          packages: justvoxel-vm
-          delete-tags: 'testing-*'
-          exclude-tags: 'testing,stable,stable-*'
-          older-than: 45 days
-          keep-n-tagged: 7
-          validate: true
 
-      - name: Remove expired HWS testing images
+    steps:
+      - name: Remove expired testing development images
         uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          packages: justvoxel-hws
+          packages: justvoxel-dev
           delete-tags: 'testing-*'
           exclude-tags: 'testing,stable,stable-*'
           older-than: 45 days

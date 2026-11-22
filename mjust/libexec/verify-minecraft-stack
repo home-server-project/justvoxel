@@ -1,0 +1,176 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/common.sh
+require_root
+if [[ ${1:-} == --instance ]]; then
+    [[ $# -ge 2 ]] || exit 1
+    source /usr/libexec/justvoxel/mjust/instance-context.sh
+    jv_load_instance "$2" || exit 1
+    shift 2
+else
+    require_config
+    JV_INSTANCE_CONTAINER=minecraft
+    JV_INSTANCE_UNIT=minecraft.service
+fi
+content_install=no
+if [[ ${1:-} == --content-install ]]; then
+    content_install=yes
+    shift
+fi
+if [[ ${JUSTVOXEL_MAINTENANCE_LOCK_HELD:-0} != 1 ]]; then
+    exec 9>"${JV_MAINTENANCE_LOCK}"
+    flock -n 9 || { echo 'ERROR: another Minecraft maintenance operation is running.' >&2; exit 1; }
+fi
+systemctl is-active --quiet "${JV_INSTANCE_UNIT}" || { echo 'ERROR: Minecraft service is not active.' >&2; exit 1; }
+rcon_timeout=60
+case "${MINECRAFT_SERVER_TYPE-paper}" in spigot|forge|neoforge|fabric|quilt) rcon_timeout=900 ;; esac
+wait_for_rcon "${rcon_timeout}" || { echo 'ERROR: Minecraft RCON is not ready.' >&2; exit 1; }
+expected_version="${1:-${MINECRAFT_VERSION}}"
+if [[ ${MINECRAFT_SERVER_TYPE-paper} == vanilla ]]; then
+    status="$(podman exec "${JV_INSTANCE_CONTAINER}" mc-monitor status --json)" || { echo 'ERROR: Minecraft status probe failed.' >&2; exit 1; }
+    actual="$(jq -er '.server_info.version.name | select(type == "string" and length > 0)' <<< "${status}")" || { echo 'ERROR: Minecraft status version is invalid.' >&2; exit 1; }
+    [[ ${expected_version} == LATEST || ${actual} == "${expected_version}" ]] || { echo 'ERROR: Minecraft is not running the selected game version.' >&2; exit 1; }
+    podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli list >/dev/null || { echo 'ERROR: Minecraft RCON check failed.' >&2; exit 1; }
+    printf 'Minecraft version: %s\n' "${actual}"
+    exit 0
+fi
+# New Java types have no managed-plugin verification. Verify the selected game
+# and the native implementation before accepting readiness; never probe Bukkit
+# commands on a mod loader or silently accept another loader.
+case "${MINECRAFT_SERVER_TYPE-paper}" in
+    spigot)
+        version="$(podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli version)" || exit 1
+        [[ ${version} == *'Spigot-'* && ${version} == *"(MC: ${expected_version})"* ]] || {
+            echo 'ERROR: the selected Spigot game version could not be verified.' >&2; exit 1;
+        }
+        podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli list >/dev/null || exit 1
+        printf 'Minecraft version: %s\n' "${version}"
+        if [[ ${BEDROCK_ENABLED} != yes ]]; then exit 0; fi
+        ;;
+    forge|neoforge|fabric|quilt)
+        [[ ${expected_version} != LATEST && -n ${MINECRAFT_LOADER_VERSION:-} ]] || {
+            echo 'ERROR: the configured mod loader version could not be verified.' >&2; exit 1;
+        }
+        # RCON can be ready before a restarted mod loader serves status. At most
+        # eight five-second probes and seven two-second sleeps (54 seconds).
+        status_ready=no
+        for ((status_attempt=1; status_attempt<=8; status_attempt++)); do
+            if status="$(podman exec "${JV_INSTANCE_CONTAINER}" mc-monitor status --timeout 5s --json 2>/dev/null)"; then
+                status_ready=yes
+                break
+            fi
+            if (( status_attempt < 8 )); then sleep 2; fi
+        done
+        [[ ${status_ready} == yes ]] || {
+            echo 'ERROR: Minecraft status probe did not become ready after RCON.' >&2; exit 1;
+        }
+        actual="$(jq -er '.server_info.version.name | select(type == "string" and length > 0)' <<< "${status}" 2>/dev/null)" || {
+            echo 'ERROR: Minecraft status version is invalid or missing.' >&2; exit 1;
+        }
+        case "${actual}" in
+            "${expected_version}"|"${expected_version} "*|*" ${expected_version}") ;;
+            *) echo 'ERROR: the selected Minecraft game version could not be verified.' >&2; exit 1 ;;
+        esac
+        case "${MINECRAFT_SERVER_TYPE-paper}" in
+            fabric) marker="Loading Minecraft ${expected_version} with Fabric Loader ${MINECRAFT_LOADER_VERSION}" ;;
+            quilt) marker="Loading Minecraft ${expected_version} with Quilt Loader ${MINECRAFT_LOADER_VERSION}" ;;
+            forge) marker="Forge mod loading, version ${MINECRAFT_LOADER_VERSION}, for MC ${expected_version}" ;;
+            neoforge) marker="NeoForge mod loading, version ${MINECRAFT_LOADER_VERSION}, for MC ${expected_version}" ;;
+        esac
+        # Compare complete version tokens, not prefixes (e.g. 0.16.1 vs 0.16.10).
+        awk -v marker="${marker}" '
+            index($0, marker) {
+                tail = substr($0, index($0, marker) + length(marker))
+                if (tail == "" || tail ~ /^[[:space:],]/) found = 1
+            }
+            END { exit !found }
+        ' "${DATA_PATH}/logs/latest.log" || {
+            echo 'ERROR: the selected mod loader could not be verified in the current server log.' >&2; exit 1;
+        }
+        podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli list >/dev/null || {
+            echo 'ERROR: Minecraft final RCON check failed.' >&2; exit 1;
+        }
+        if [[ ${BEDROCK_ENABLED} == yes ]]; then
+            [[ ${MINECRAFT_SERVER_TYPE} == fabric || ${MINECRAFT_SERVER_TYPE} == neoforge ]] || {
+                echo 'ERROR: managed cross-play mod ownership could not be verified.' >&2; exit 1;
+            }
+            [[ -n ${JV_INSTANCE_ID:-} ]] || {
+                echo 'ERROR: managed cross-play mod ownership could not be verified.' >&2; exit 1;
+            }
+            /usr/libexec/justvoxel/mjust/managed-crossplay-mod-ownership verify "${MINECRAFT_SERVER_TYPE}" "${DATA_PATH}" "/etc/justvoxel/instances/${JV_INSTANCE_ID}/crossplay-mods.json" '' || {
+                echo 'ERROR: managed cross-play mod ownership could not be verified.' >&2; exit 1;
+            }
+            # Geyser's mod command source logs responses for non-player senders.
+            podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli 'geyser version' >/dev/null || {
+                echo 'ERROR: Geyser version query failed.' >&2; exit 1;
+            }
+            platform_name=Geyser-Fabric
+            [[ ${MINECRAFT_SERVER_TYPE} != neoforge ]] || platform_name=Geyser-NeoForge
+            grep -Eq '^[[:space:]]*auth-type:[[:space:]]*floodgate[[:space:]]*(#.*)?$' "${DATA_PATH}/config/${platform_name}/config.yml" || {
+                echo 'ERROR: Geyser Floodgate authentication could not be verified.' >&2; exit 1;
+            }
+        fi
+        printf 'Minecraft version: %s (%s %s)\n' "${expected_version}" "${MINECRAFT_SERVER_TYPE}" "${MINECRAFT_LOADER_VERSION}"
+        exit 0
+        ;;
+esac
+if [[ ${MINECRAFT_SERVER_TYPE-paper} != spigot ]]; then
+# Paper/Purpur can expose RCON before their asynchronous version check completes.
+# Retry only that exact readiness response; completed software/version checks stay strict.
+# After the same bounded wait, local status can verify the running software and game version.
+version_wait=0
+while :; do
+    version="$(podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli version)"
+    # Normalize terminal presentation only; keep the raw completed response for validation.
+    comparison_version="$(printf '%s' "${version}" | sed $'s/\033\\[[0-9;]*m//g')"
+    comparison_version="${comparison_version//$'\r'/}"
+    comparison_version="${comparison_version#"${comparison_version%%[![:space:]]*}"}"
+    comparison_version="${comparison_version%"${comparison_version##*[![:space:]]}"}"
+    [[ ${comparison_version} == 'Checking version, please wait...' ]] || break
+    if (( version_wait >= 60 )); then
+        [[ ${MINECRAFT_SERVER_TYPE-paper} == paper || ${MINECRAFT_SERVER_TYPE-paper} == purpur || ${MINECRAFT_SERVER_TYPE-paper} == pufferfish || ${MINECRAFT_SERVER_TYPE-paper} == leaf ]] || { echo 'ERROR: Minecraft server software cannot use the local version fallback.' >&2; exit 1; }
+        status="$(podman exec "${JV_INSTANCE_CONTAINER}" mc-monitor status --json)" || { echo 'ERROR: Minecraft status probe failed.' >&2; exit 1; }
+        actual="$(jq -er '.server_info.version.name | select(type == "string" and length > 0) | select(contains("\n") | not)' <<< "${status}")" || { echo 'ERROR: Minecraft status version is invalid.' >&2; exit 1; }
+        [[ ${actual} =~ ^(Paper|Purpur|Pufferfish|Leaf)\ ([0-9A-Za-z._-]+)$ ]] || { echo 'ERROR: Minecraft status version is invalid.' >&2; exit 1; }
+        actual_software="${BASH_REMATCH[1]}"
+        actual_version="${BASH_REMATCH[2]}"
+        [[ ${actual_software,,} == "${MINECRAFT_SERVER_TYPE-paper}" ]] || { echo 'ERROR: Minecraft is not running the selected server software.' >&2; exit 1; }
+        [[ ${expected_version} == LATEST || ${actual_version} == "${expected_version}" ]] || { echo 'ERROR: Minecraft is not running the selected game version.' >&2; exit 1; }
+        printf 'Minecraft version (local status): %s\n' "${actual}"
+        break
+    fi
+    sleep 3
+    version_wait=$((version_wait + 3))
+done
+# Only the exact transient response may use the local status fallback above.
+if [[ ${comparison_version} != 'Checking version, please wait...' ]]; then
+    printf 'Minecraft version: %s\n' "${version}"
+    [[ ${version,,} == *"${MINECRAFT_SERVER_TYPE-paper}"* ]] || { echo 'ERROR: Minecraft is not running the selected server software.' >&2; exit 1; }
+    [[ ${version} == *'MC: '* || ${version} == *'Minecraft version '* || ${version} == *'Paper version '* || ${version} == *'Purpur version '* || ${version} == *'Pufferfish version '* || ${version} == *'Leaf version '* ]] || { echo 'ERROR: Minecraft version response could not be verified.' >&2; exit 1; }
+    expected_version="${1:-${MINECRAFT_VERSION}}"
+    if [[ ${expected_version} != LATEST ]]; then
+        [[ ${expected_version} =~ ^[0-9A-Za-z._-]+$ ]] || exit 1
+        [[ ${version} == *"MC: ${expected_version})"* || ${version} == *"Minecraft version ${expected_version} "* ||
+           ${version} == *"Paper version ${expected_version}-"* || ${version} == *"Paper version ${expected_version} "* || ${version} == *"Purpur version ${expected_version}-"* || ${version} == *"Purpur version ${expected_version} "* ]] || {
+            echo 'ERROR: Minecraft is not running the selected game version.' >&2; exit 1;
+        }
+    fi
+fi
+fi
+plugins="$(podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli plugins)"
+printf 'Plugins: %s\n' "${plugins}"
+[[ ${plugins} == *ViaVersion* && ${plugins} != *§cViaVersion* ]] || { echo 'ERROR: ViaVersion could not be verified.' >&2; exit 1; }
+if [[ ${JV_NETWORK_MEMBER:-no} == yes && ( ${MINECRAFT_SERVER_TYPE-paper} == paper || ${MINECRAFT_SERVER_TYPE-paper} == purpur ) ]]; then
+    [[ ${plugins,,} == *floodgate* && ${plugins,,} != *§cfloodgate* ]] || { echo 'ERROR: Network Floodgate could not be verified.' >&2; exit 1; }
+    [[ ${plugins,,} != *geyser* ]] || { echo 'ERROR: Backend Geyser must be absent while enrolled in Minecraft Network.' >&2; exit 1; }
+elif [[ ${BEDROCK_ENABLED} == yes ]]; then
+    [[ ${plugins} == *Geyser* && ${plugins,,} == *floodgate* && ${plugins} != *§cGeyser* && ${plugins,,} != *§cfloodgate* ]] || { echo 'ERROR: Cross-play plugins could not be verified.' >&2; exit 1; }
+    geyser="$(podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli 'geyser version')"
+    printf 'Geyser: %s\n' "${geyser}"
+    [[ ${content_install} == yes || ( ${geyser} == *Geyser* && ${geyser,,} == *version* && ${geyser,,} != *'unknown command'* ) ]] || {
+        echo 'ERROR: Geyser version response could not be verified.' >&2; exit 1;
+    }
+    grep -Eq '^[[:space:]]*auth-type:[[:space:]]*floodgate[[:space:]]*(#.*)?$' "${DATA_PATH}/plugins/Geyser-Spigot/config.yml" || {
+        echo 'ERROR: Geyser Floodgate authentication could not be verified.' >&2; exit 1;
+    }
+fi

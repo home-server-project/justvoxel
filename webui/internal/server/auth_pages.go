@@ -1,0 +1,147 @@
+package server
+
+import (
+	"context"
+	"errors"
+	"net/http"
+
+	"github.com/home-server-project/justvoxel-webui/internal/api"
+)
+
+type authenticationAPI interface {
+	AuthStatus(ctx context.Context, session string) (api.AuthStatus, error)
+	ChangeAuthMode(ctx context.Context, session string, change api.AuthModeChange) (api.AuthModeChangeResponse, error)
+}
+
+type passwordPageData struct {
+	OAuthRequest       string
+	Title              string
+	Version            string
+	ManagementAPI      string
+	Error              string
+	Message            string
+	CSRF               string
+	MinimumPasswordLen int
+	SystemMode         bool
+}
+
+func (a *App) authAPI() (authenticationAPI, bool) {
+	client, ok := a.api.(authenticationAPI)
+	return client, ok
+}
+
+func (a *App) providerPasswordPage(w http.ResponseWriter, r *http.Request) {
+	session, ok := sessionFromRequest(r)
+	if !ok {
+		http.Redirect(w, r, oauthContinuePath("/login", oauthContinuation(r)), http.StatusSeeOther)
+		return
+	}
+	client, ok := a.authAPI()
+	if !ok {
+		http.Error(w, ui(w, "ui.28fba7410d7d"), http.StatusServiceUnavailable)
+		return
+	}
+	status, err := client.AuthStatus(r.Context(), session)
+	if errors.Is(err, api.ErrUnauthorized) {
+		a.clearSessionCookies(w)
+		http.Redirect(w, r, oauthContinuePath("/login", oauthContinuation(r)), http.StatusSeeOther)
+		return
+	}
+	if err != nil {
+		http.Error(w, ui(w, "ui.28fba7410d7d"), http.StatusBadGateway)
+		return
+	}
+	a.renderPassword(w, passwordPageData{
+		Title:              ui(w, "ui.b6a5c36e81de"),
+		Version:            a.config.Version,
+		ManagementAPI:      a.config.ManagementAPI,
+		CSRF:               csrfFromRequest(r),
+		OAuthRequest:       oauthContinuation(r),
+		MinimumPasswordLen: status.MinimumPasswordLen,
+		SystemMode:         status.Mode == "system",
+	})
+}
+
+func (a *App) providerPasswordChange(w http.ResponseWriter, r *http.Request) {
+	validCSRF := a.validCSRF(r)
+	if oauthContinuation(r) != "" {
+		validCSRF = a.oauthValidCSRF(r)
+	}
+	if !validCSRF {
+		http.Error(w, "invalid CSRF token", http.StatusForbidden)
+		return
+	}
+	session, ok := sessionFromRequest(r)
+	if !ok {
+		http.Redirect(w, r, oauthContinuePath("/login", oauthContinuation(r)), http.StatusSeeOther)
+		return
+	}
+	client, ok := a.authAPI()
+	if !ok {
+		http.Error(w, ui(w, "ui.28fba7410d7d"), http.StatusServiceUnavailable)
+		return
+	}
+	status, err := client.AuthStatus(r.Context(), session)
+	if errors.Is(err, api.ErrUnauthorized) {
+		a.clearSessionCookies(w)
+		http.Redirect(w, r, oauthContinuePath("/login", oauthContinuation(r)), http.StatusSeeOther)
+		return
+	}
+	if err != nil {
+		http.Error(w, ui(w, "ui.28fba7410d7d"), http.StatusBadGateway)
+		return
+	}
+
+	currentPassword := r.FormValue("current_password")
+	newPassword := r.FormValue("new_password")
+	confirmPassword := r.FormValue("confirm_password")
+	if newPassword != confirmPassword || len(newPassword) < status.MinimumPasswordLen {
+		w.WriteHeader(http.StatusBadRequest)
+		a.renderPassword(w, passwordPageData{
+			Title:              ui(w, "ui.b6a5c36e81de"),
+			Version:            a.config.Version,
+			ManagementAPI:      a.config.ManagementAPI,
+			CSRF:               csrfFromRequest(r),
+			OAuthRequest:       oauthContinuation(r),
+			MinimumPasswordLen: status.MinimumPasswordLen,
+			SystemMode:         status.Mode == "system",
+			Error:              ui(w, "ui.bc857e7fc12d"),
+		})
+		return
+	}
+
+	if err := a.api.ChangePassword(r.Context(), session, currentPassword, newPassword); err != nil {
+		if errors.Is(err, api.ErrUnauthorized) {
+			a.clearSessionCookies(w)
+			http.Redirect(w, r, oauthContinuePath("/login", oauthContinuation(r)), http.StatusSeeOther)
+			return
+		}
+		message := ui(w, "ui.8f9cdd4f0888")
+		if reason, ok := api.ErrorMessage(err); ok {
+			message = reason
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		a.renderPassword(w, passwordPageData{
+			Title:              ui(w, "ui.b6a5c36e81de"),
+			Version:            a.config.Version,
+			ManagementAPI:      a.config.ManagementAPI,
+			CSRF:               csrfFromRequest(r),
+			OAuthRequest:       oauthContinuation(r),
+			MinimumPasswordLen: status.MinimumPasswordLen,
+			SystemMode:         status.Mode == "system",
+			Error:              message,
+		})
+		return
+	}
+
+	a.clearSessionCookies(w)
+	http.Redirect(w, r, oauthContinuePath("/login?message=password-changed", oauthContinuation(r)), http.StatusSeeOther)
+}
+
+func (a *App) renderPassword(w http.ResponseWriter, data passwordPageData) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	if err := a.executeTemplate(w, "password.html", data); err != nil {
+		http.Error(w, ui(w, "ui.4a9d9119358b"), http.StatusInternalServerError)
+	}
+}

@@ -1,0 +1,11 @@
+#!/usr/bin/bash
+# Fixed local Linux virtual-console actions. No browser-supplied paths or shell.
+set -euo pipefail
+[[ ${EUID} -eq 0 && $# -eq 1 ]] || exit 2
+[[ $(cat /usr/lib/justvoxel/variant) == justvoxel-hws ]] || exit 2
+[[ -c /dev/tty0 && -d /sys/class/tty/tty0 ]] || exit 2
+case "$1" in
+    off) /usr/bin/setterm --term linux --blank force --powersave powerdown < /dev/tty0 > /dev/tty0 ;;
+    on) /usr/bin/setterm --term linux --blank poke < /dev/tty0 > /dev/tty0 ;;
+    *) exit 2 ;;
+esac

@@ -1,0 +1,45 @@
+{{define "migration_workspace_recovery_review.html"}}<div class="migration-workspace-content" data-migration-workspace-root data-server-id="{{.ServerID}}">
+{{if .Error}}<div class="notice error"><strong>{{t "ui.0d34d4f6f902"}}</strong><br>{{ts .Error}}</div>{{end}}
+{{if .Plan.OK}}
+<section class="panel">
+  <p class="eyebrow">{{t "ui.cc1007b54500"}}</p>
+  {{if and .Plan.Normalized (eq .Plan.Normalized.Phase "rolled-back")}}
+  <h2>{{t "ui.563fa253be37"}}</h2>
+  <p>{{t "ui.d22cf05cd2e2"}}<br>{{t "ui.fa7f9728567a"}}<br>{{t "ui.ef2e74964ad4"}}</p>
+  <p>{{t "ui.36b7400d438a"}}</p>
+  {{else if and .Plan.Normalized (eq .Plan.Normalized.Phase "rolled-back-fresh") (eq .Plan.Normalized.Mode "fresh-unconfigured")}}
+  <h2>{{t "ui.3ca9e4c56252"}}</h2>
+  <p>{{t "ui.d22cf05cd2e2"}}<br>{{t "ui.991d8d32649f"}}<br>{{t "ui.c4536375042d"}}</p>
+  <p>{{t "ui.7f69e42812bd"}}</p>
+  {{else}}
+  <h2>{{t "ui.a2bdd92df4cc"}}</h2>
+  <div class="notice warning">{{t "ui.b07c6b34d635"}}</div>
+  <p>{{t "ui.559a6d49a355"}}</p>
+  {{end}}
+</section>
+{{if .Plan.Warnings}}<section class="panel">{{range .Plan.Warnings}}<div class="notice warning">{{ts .Message}}</div>{{end}}</section>{{end}}
+<form method="post" action="/workspace/migration/recovery/apply?server={{.ServerID}}" data-recovery-cleanup-form>
+  <input type="hidden" name="csrf" value="{{.CSRF}}">
+  <input type="hidden" name="transaction" value="{{.Request.Transaction}}">
+  <input type="hidden" name="plan_fingerprint" value="{{.Plan.PlanFingerprint}}">
+  <input type="hidden" name="cleanup_confirmed" value="" data-recovery-confirmed>
+  <div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;tab=recovery&amp;server={{.ServerID}}">{{t "ui.19766ed6ccb2"}}</a><button type="button" data-recovery-open-confirmation>{{t "ui.81a20d94aa1d"}}</button></div>
+  <dialog class="system-action-dialog" aria-labelledby="recovery-cleanup-title" data-recovery-confirmation-dialog>
+    <div class="system-action-dialog-content">
+      <h2 id="recovery-cleanup-title">{{t "ui.b71e11d45265"}}</h2>
+      {{if and .Plan.Normalized (eq .Plan.Normalized.Phase "rolled-back-fresh") (eq .Plan.Normalized.Mode "fresh-unconfigured")}}
+      <p>{{t "ui.c4a1915d3c8a"}}</p>
+      <p>{{t "ui.1b74fe01ae5b"}}</p>
+      {{else}}
+      <p>{{t "ui.b547e2ae5de9"}}</p>
+      <p>{{t "ui.5c8493d5d566"}}</p>
+      {{end}}
+      <div class="action-row"><button type="button" class="secondary" data-recovery-cancel>{{t "ui.19766ed6ccb2"}}</button><button type="button" data-recovery-confirm>{{t "ui.650917c85ce8"}}</button></div>
+    </div>
+  </dialog>
+</form>
+{{else}}
+<section class="panel"><div class="notice error">{{if .Plan.Error}}{{ts .Plan.Error}}{{else}}{{t "ui.97df7d85b495"}}{{end}}</div></section>
+<div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;tab=recovery&amp;server={{.ServerID}}">{{t "ui.7ad7366bf52c"}}</a></div>
+{{end}}
+</div>{{end}}

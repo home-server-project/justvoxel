@@ -1,0 +1,98 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+source "$(dirname "${BASH_SOURCE[0]}")/helpers/webui-i18n.sh"
+
+header=webui/internal/server/templates/header.html
+script=webui/internal/server/static/app.js
+styles=webui/internal/server/static/app.css
+server=webui/internal/server/system_workspace.go
+client=webui/internal/api/reset.go
+operations=webui/internal/api/persistent_operations.go
+
+for path in "${header}" "${script}" "${styles}" "${server}" "${client}" "${operations}"; do
+    [[ -f "${path}" ]] || {
+        echo "ERROR: missing System reset workspace source: ${path}" >&2
+        exit 1
+    }
+done
+
+reset_line="$(grep -n 'data-system-tab="reset"' "${header}" | head -n1 | cut -d: -f1)"
+about_line="$(grep -n 'data-system-tab="about"' "${header}" | head -n1 | cut -d: -f1)"
+[[ -n "${reset_line}" && -n "${about_line}" && ${reset_line} -lt ${about_line} ]] || {
+    echo 'ERROR: Factory Reset tab must appear before About.' >&2
+    exit 1
+}
+
+grep -Fq 'const administratorTabs = new Set(["health", "logs", "date-time", "reset"]);' "${script}"
+grep -Fq 'currentTab === "reset"' "${script}"
+grep -Fq '/api/system/workspace/reset/minecraft/plan' "${script}"
+grep -Fq '/api/system/workspace/reset/factory/plan' "${script}"
+grep -Fq '/api/system/workspace/reset/minecraft/apply' "${script}"
+grep -Fq '/api/system/workspace/reset/factory/apply' "${script}"
+grep -Fq '/api/system/workspace/reset/factory/resolve' "${script}"
+grep -Fq 'workspaceRestoreAllowed() ? saved : { ...saved, open: false }' "${script}"
+catalog_text_used "${script}" 'Keep current server'
+catalog_text_used "${script}" 'Review and retry Factory Reset'
+grep -Fq 'retry.addEventListener("click", () => planReset("factory"));' "${script}"
+grep -Fq 'if (operation.operation_type !== "factory_reset") built.panel.appendChild(liveConsole);' "${script}"
+# Keep the Factory Reset console after the yellow warning and before recovery actions.
+factory_console_prefix='    if (operation.operation_type === "factory_reset") {
+      const note = document.createElement("div");
+      note.className = "notice warning";
+      note.textContent = jvT("'
+factory_console_suffix='");
+      built.panel.appendChild(note);
+      const consoleActions = document.createElement("div");
+      consoleActions.className = "action-row";
+      consoleActions.appendChild(liveConsole);
+      built.panel.appendChild(consoleActions);
+      if (operation.state === "needs_attention") {'
+catalog_text_used "${script}" 'When Full Factory Reset completes, this WebUI session will be signed out. Sign in with voxel / voxel, then choose a new administrator password before normal administration is available.' "${factory_console_prefix}" "${factory_console_suffix}" || {
+    echo 'ERROR: Factory Reset Live Console must follow the yellow sign-out warning in an action row before recovery content.' >&2
+    exit 1
+}
+grep -Fq '.action-row,.form-actions{justify-content:flex-end}' "${styles}"
+catalog_text_used "${script}" 'Retry Reset Minecraft'
+grep -Fq 'retry.addEventListener("click", () => planReset("minecraft", true));' "${script}"
+grep -Fq '/api/system/workspace/reset/factory/current' "${script}"
+grep -Fq '/api/system/workspace/reset/minecraft/current' "${script}"
+grep -Fq '/api/system/workspace/reset/operations/' "${script}"
+grep -Fq 'slider.type = "range"' "${script}"
+grep -Fq 'slider.max = "100"' "${script}"
+grep -Fq 'finalConfirm.disabled = true' "${script}"
+catalog_text_used "${script}" 'Current password'
+catalog_text_used "${script}" 'Choose how much JustVoxel should reset. External, USB, NFS, and SMB storage are never erased by Full Factory Reset.'
+grep -Fq 'backup_action === "preserve"' "${script}"
+grep -Fq 'plan_fingerprint: plan.plan_fingerprint' "${script}"
+
+grep -Fq 'POST /api/system/workspace/reset/minecraft/plan' "${server}"
+grep -Fq 'POST /api/system/workspace/reset/factory/plan' "${server}"
+grep -Fq 'POST /api/system/workspace/reset/factory/resolve' "${server}"
+grep -Fq 'GET /api/system/workspace/reset/operations/{id}' "${server}"
+grep -Fq 'type systemWorkspaceResetAPI interface' "${server}"
+grep -Fq 'SystemPassword:  password' "${server}"
+
+grep -Fq 'adminFactoryResetPlanPath' "${client}"
+grep -Fq 'adminFactoryResetResolvePath' "${client}"
+grep -Fq 'adminMinecraftResetApplyPath' "${client}"
+grep -Fq 'AdminCurrentFactoryResetOperation' "${operations}"
+grep -Fq 'AdminCurrentMinecraftResetOperation' "${operations}"
+
+grep -Fq '.system-reset-choices' "${styles}"
+grep -Fq '.system-reset-impact-grid' "${styles}"
+grep -Fq '.system-reset-arm.is-armed' "${styles}"
+grep -Fq '.app-header.topbar{height:32px;min-height:32px;margin:4px 8px;padding:0 .5rem;position:sticky;top:4px;z-index:1000;border:1px solid #303942;border-radius:12px;' "${styles}"
+grep -Fq 'const workspaceWindowZMax = 900;' "${script}"
+grep -Fq 'if (workspaceWindowZ >= workspaceWindowZMax)' "${script}"
+
+if ! awk '/z-index:[0-9]+/ && ! /^\.app-header\.topbar\{/ {line=$0; while (match(line, /z-index:[0-9]+/)) {level=substr(line, RSTART+8, RLENGTH-8)+0; if (level >= 1000) exit 1; line=substr(line, RSTART+RLENGTH)}}' "${styles}"; then
+    echo 'ERROR: normal WebUI CSS entered the reserved Control Center layer.' >&2
+    exit 1
+fi
+if ! awk '/^\.app-header\.topbar\{.*z-index:1000;/{topbar=1000} /\.first-run-choice\{/{if (match($0, /z-index:[0-9]+/)) {level=substr($0, RSTART+8, RLENGTH-8)+0; if (level > overlay) overlay=level}} END {if (!topbar || overlay >= topbar) exit 1}' "${styles}"; then
+    echo 'ERROR: first-run overlay must stay below Control Center.' >&2
+    exit 1
+fi
+
+echo 'System Factory Reset workspace source contract OK'

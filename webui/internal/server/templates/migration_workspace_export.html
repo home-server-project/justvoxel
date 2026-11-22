@@ -1,0 +1,64 @@
+{{define "migration_workspace_export.html"}}<div class="migration-workspace-content" data-migration-workspace-root data-server-id="{{.ServerID}}">
+<p class="muted migration-workspace-helper">{{t "ui.b834eeadb788"}}</p>
+  {{if .Error}}<div class="notice error"><strong>{{t "ui.b178c9a91b73"}}</strong><br>{{ts .Error}}</div>{{end}}
+
+  <form method="post" action="/workspace/migration/export/review?server={{.ServerID}}" data-server-export-form>
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <section class="panel">
+      <p class="eyebrow">{{t "ui.293d404a500f"}}</p>
+      <label for="server-export-kind"><strong>{{t "ui.02dc3e9eb9e9"}}</strong></label>
+      <select id="server-export-kind" name="kind" data-server-export-kind required>
+        <option value="">{{t "ui.ee63978fc3b6"}}</option>
+        {{if .LocalAvailable}}<option value="local">{{t "ui.261438ebbbc6"}}</option>{{end}}
+        {{if .BackupAvailable}}<option value="backup">{{t "ui.077b1c5d13f7"}}</option>{{end}}
+        {{if .DeviceAvailable}}<option value="device">{{t "ui.7828115c04c4"}}</option>{{end}}
+        {{if .NFSAvailable}}<option value="nfs">{{t "ui.0941a3da80c1"}}</option>{{end}}
+        {{if .SMBAvailable}}<option value="smb">{{t "ui.890fac976cd4"}}</option>{{end}}
+      </select>
+
+      <div data-server-export-fields="local" hidden>
+        <label for="server-export-path"><strong>{{t "ui.654b0e6036f9"}}</strong></label>
+        <input id="server-export-path" name="path" placeholder="/var/mnt/storage/migrations" autocomplete="off">
+        <p class="muted">{{t "ui.973c06703396"}}</p>
+      </div>
+
+      <div data-server-export-fields="backup" hidden>
+        <div class="notice">{{t "ui.214a88fc39a2"}}</div>
+      </div>
+
+      <div data-server-export-fields="device" hidden>
+        <label for="server-export-device"><strong>{{t "ui.606abb0217bb"}}</strong></label>
+        <select id="server-export-device" name="device">
+          <option value="">{{t "ui.b2862489fe12"}}</option>
+          {{if .AttachedDevices}}<optgroup label="Attached disks and partitions">{{range .AttachedDevices}}<option value="{{.Device.Path}}">{{.Device.Path}} · {{.Size}}{{if .Device.Model}} · {{.Device.Model}}{{end}}{{if .Device.Filesystem}} · {{.Device.Filesystem}}{{end}}</option>{{end}}</optgroup>{{end}}
+          {{if .RemovableDevices}}<optgroup label="USB / removable media">{{range .RemovableDevices}}<option value="{{.Device.Path}}">{{.Device.Path}} · {{.Size}}{{if .Device.Model}} · {{.Device.Model}}{{end}}{{if .Device.Filesystem}} · {{.Device.Filesystem}}{{end}}</option>{{end}}</optgroup>{{end}}
+        </select>
+        <p class="muted">{{t "ui.3407312f5beb"}}</p>
+      </div>
+
+      <div data-server-export-fields="nfs" hidden>
+        <label for="server-export-nfs-source"><strong>{{t "ui.081a907435d1"}}</strong></label>
+        <input id="server-export-nfs-source" name="source" placeholder="nas:/exports/migrations" autocomplete="off">
+        <p class="muted">{{t "ui.928f13796aab"}}</p>
+      </div>
+
+      <div data-server-export-fields="smb" hidden>
+        <label for="server-export-smb-source"><strong>{{t "ui.5b9469b3c984"}}</strong></label>
+        <input id="server-export-smb-source" name="source" placeholder="//server/share or //server/share/folder" autocomplete="off">
+        <p class="muted">{{t "ui.d3410eec920e"}}</p>
+        <div class="migration-smb-fields"><div><label for="server-export-smb-user"><strong>{{t "ui.060a1c1c03cc"}}</strong></label><input id="server-export-smb-user" name="username" autocomplete="off"></div>
+        <div><label for="server-export-smb-domain">{{t "ui.d04285ab70e2"}} <span class="muted">{{t "ui.ec91fdd9256c"}}</span></label><input id="server-export-smb-domain" name="domain" autocomplete="off"></div></div>
+        <div class="notice migration-workspace-helper">{{t "ui.772d745d7694"}}</div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <p class="eyebrow">{{t "ui.1ed757646080"}}</p>
+      <label for="server-export-filename"><strong>{{t "ui.1b14f2f42967"}}</strong></label>
+      <input id="server-export-filename" name="filename" value="{{.Discovery.SuggestedFilename}}" autocomplete="off" required>
+      <p class="muted">{{t "ui.f5934d2aa091"}}</p>
+    </section>
+
+    <div class="action-row"><a class="button-link secondary" href="/?workspace=migration&amp;server={{.ServerID}}">{{t "ui.19766ed6ccb2"}}</a><button type="submit">{{t "ui.805afef53d4c"}}</button></div>
+  </form>
+</div>{{end}}

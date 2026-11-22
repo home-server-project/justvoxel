@@ -56,7 +56,7 @@ HWS adds physical-machine support such as UPS/NUT integration, SMART and NVMe to
 
 Both editions use the same JustVoxel Control Center, Management API, Minecraft workflows, storage model, backups, networking, and update experience.
 
-[Learn about the VM/HWS capability model](https://github.com/home-server-project/justvoxel-base/blob/testing/docs/VARIANTS.md)
+[Learn about the VM/HWS capability model](docs/VARIANTS.md)
 
 ## 🏠 Minecraft-first, not locked to Minecraft
 
@@ -108,7 +108,7 @@ Choose **Simple Setup** for a guided first server, or **Advanced Setup** when yo
 
 JustVoxel checks capability against the selected server software instead of pretending every feature works everywhere.
 
-[See the server software and compatibility details](https://github.com/home-server-project/justvoxel-base/blob/testing/docs/server-software.md)
+[See the server software and compatibility details](docs/server-software.md)
 
 ## 🧩 Plugins & Mods
 
@@ -124,7 +124,7 @@ Supported installations use compatibility checks, verified downloads, cold backu
 
 Paper-family servers can use plugin catalogs. Fabric, Forge, NeoForge, and Quilt use mod catalogs with exact loader and Minecraft-version checks. Vanilla Java and native Bedrock intentionally do not expose a plugin/mod catalog.
 
-[Learn about Plugins & Mods](https://github.com/home-server-project/justvoxel-base/blob/testing/docs/plugin-workspace.md)
+[Learn about Plugins & Mods](docs/plugin-workspace.md)
 
 ## 🌐 Optional Minecraft Network
 
@@ -136,7 +136,7 @@ From the Control Center you can select supported backend servers, configure publ
 
 Paper, Purpur, Pufferfish and Leaf are supported Network backends. Compatible Fabric/Quilt and Forge/NeoForge servers can also participate when JustVoxel proves the required proxy compatibility. Spigot, Vanilla and native Bedrock remain standalone.
 
-[Learn about Minecraft Network](https://github.com/home-server-project/justvoxel-base/blob/testing/docs/minecraft-network.md)
+[Learn about Minecraft Network](docs/minecraft-network.md)
 
 ## 🖥️ Meet the Control Center
 
@@ -168,7 +168,7 @@ Connect supported AI applications, MCP clients, REST automation, Telegram, and D
 
 Prefer a terminal? JustVoxel also includes **mjust**, an interactive terminal administration interface using the same appliance safety model.
 
-[WebUI documentation](https://github.com/home-server-project/justvoxel-base/blob/testing/docs/WEBUI.md) · [mjust guide](https://github.com/home-server-project/justvoxel-base/blob/testing/docs/MJUST.md)
+[WebUI documentation](docs/WEBUI.md) · [mjust guide](docs/MJUST.md)
 
 ## 🌐 Let friends connect — your way
 
@@ -198,7 +198,7 @@ Provider accounts, cloud-side policies, and tunnel configuration still belong to
 
 Using several VPN/mesh products at the same time is possible, but routing, DNS, or firewall rules can conflict.
 
-[Read the networking and Remote Access guide](https://github.com/home-server-project/justvoxel-base/blob/testing/docs/NETWORKING.md)
+[Read the networking and Remote Access guide](docs/NETWORKING.md)
 
 ## 🤖 AI, MCP, REST & Automation
 
@@ -224,7 +224,7 @@ JustVoxel does not need an AI model API key merely to expose its MCP or REST int
 
 The AI/API gateway starts disabled until you enable it.
 
-[Learn about AI & API Connections](https://github.com/home-server-project/justvoxel-base/blob/testing/docs/AI-API-CONNECTIONS.md)
+[Learn about AI & API Connections](docs/AI-API-CONNECTIONS.md)
 
 ## 💬 Telegram & Discord
 
@@ -245,7 +245,7 @@ A dedicated Telegram bot can provide:
 
 Telegram uses its own **Read Only** and **Server Management** permissions and does not require an AI model.
 
-[Telegram setup and permissions](https://github.com/home-server-project/justvoxel-base/blob/testing/docs/TELEGRAM.md)
+[Telegram setup and permissions](docs/TELEGRAM.md)
 
 ### Discord
 
@@ -257,7 +257,7 @@ Approved JustVoxel Discord administrators can manage supported server actions su
 
 Discord membership, Minecraft whitelist access, and JustVoxel administration remain separate permissions.
 
-[Discord setup, community access, and administration](https://github.com/home-server-project/justvoxel-base/blob/testing/docs/DISCORD.md)
+[Discord setup, community access, and administration](docs/DISCORD.md)
 
 ## 💾 Backups, Restore, Storage & Migration
 
@@ -279,7 +279,7 @@ Each server can use automatic and manual backups. Restore replaces the complete 
 
 For moving servers between machines or reinstallations, JustVoxel also provides reviewed **Export / Import / Recovery** workflows.
 
-[Storage](https://github.com/home-server-project/justvoxel-base/blob/testing/docs/STORAGE.md) · [Restore](https://github.com/home-server-project/justvoxel-base/blob/testing/docs/RESTORE.md) · [Migration](https://github.com/home-server-project/justvoxel-base/blob/testing/docs/MIGRATION.md)
+[Storage](docs/STORAGE.md) · [Restore](docs/RESTORE.md) · [Migration](docs/MIGRATION.md)
 
 ## 🛡️ Built for safer changes
 
@@ -307,7 +307,7 @@ Operating-system updates are handled separately from Minecraft versions, server 
 
 That means updating the appliance does not silently mean changing your Minecraft version, and changing a Minecraft server does not mean rebuilding the host operating system.
 
-[System management documentation](https://github.com/home-server-project/justvoxel-base/blob/testing/docs/SYSTEM.md)
+[System management documentation](docs/SYSTEM.md)
 
 ## 📊 How does JustVoxel compare?
 
@@ -355,26 +355,26 @@ Final stable installation instructions and release artifacts will be published w
 
 ## 📚 Documentation
 
-The detailed appliance documentation lives in **[JustVoxel Base](https://github.com/home-server-project/justvoxel-base)**.
+The detailed appliance guides live in the [documentation directory](docs/).
 
 Useful starting points:
 
-- [WebUI](https://github.com/home-server-project/justvoxel-base/blob/testing/docs/WEBUI.md)
-- [Minecraft runtime](https://github.com/home-server-project/justvoxel-base/blob/testing/docs/MINECRAFT_RUNTIME.md)
-- [Server software](https://github.com/home-server-project/justvoxel-base/blob/testing/docs/server-software.md)
-- [Plugins & Mods](https://github.com/home-server-project/justvoxel-base/blob/testing/docs/plugin-workspace.md)
-- [Minecraft Network](https://github.com/home-server-project/justvoxel-base/blob/testing/docs/minecraft-network.md)
-- [Networking & Remote Access](https://github.com/home-server-project/justvoxel-base/blob/testing/docs/NETWORKING.md)
-- [AI & API Connections](https://github.com/home-server-project/justvoxel-base/blob/testing/docs/AI-API-CONNECTIONS.md)
-- [Telegram](https://github.com/home-server-project/justvoxel-base/blob/testing/docs/TELEGRAM.md)
-- [Discord](https://github.com/home-server-project/justvoxel-base/blob/testing/docs/DISCORD.md)
-- [Storage](https://github.com/home-server-project/justvoxel-base/blob/testing/docs/STORAGE.md)
-- [Restore](https://github.com/home-server-project/justvoxel-base/blob/testing/docs/RESTORE.md)
-- [Migration](https://github.com/home-server-project/justvoxel-base/blob/testing/docs/MIGRATION.md)
-- [System management](https://github.com/home-server-project/justvoxel-base/blob/testing/docs/SYSTEM.md)
-- [mjust](https://github.com/home-server-project/justvoxel-base/blob/testing/docs/MJUST.md)
+- [WebUI](docs/WEBUI.md)
+- [Minecraft runtime](docs/MINECRAFT_RUNTIME.md)
+- [Server software](docs/server-software.md)
+- [Plugins & Mods](docs/plugin-workspace.md)
+- [Minecraft Network](docs/minecraft-network.md)
+- [Networking & Remote Access](docs/NETWORKING.md)
+- [AI & API Connections](docs/AI-API-CONNECTIONS.md)
+- [Telegram](docs/TELEGRAM.md)
+- [Discord](docs/DISCORD.md)
+- [Storage](docs/STORAGE.md)
+- [Restore](docs/RESTORE.md)
+- [Migration](docs/MIGRATION.md)
+- [System management](docs/SYSTEM.md)
+- [mjust](docs/MJUST.md)
 
-The **JustVoxel product repository** contains the release-facing product layer. **JustVoxel Base** remains the development repository for the common appliance implementation and its technical documentation.
+For image development, testing, and releases, see the [developer guide](README-DEV.md).
 
 ## ⛏️ Minecraft software and EULA
 

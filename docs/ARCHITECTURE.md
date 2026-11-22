@@ -1,0 +1,265 @@
+# JustVoxel architecture
+
+JustVoxel is a purpose-built immutable server appliance for deploying and operating
+multiple independent Minecraft server workloads without requiring the user to
+assemble and maintain the underlying Linux stack by hand.
+
+The project deliberately separates the appliance operating system from the Minecraft workload itself.
+
+JustVoxel does **not** ship Mojang server software, a pre-created world, or
+pre-accepted Minecraft EULA state inside the bootc image. The image provides the
+operating system, management logic, runtime templates, safety mechanisms, and
+container-management environment. After EULA acceptance, JustVoxel creates the
+first independently identified containerized Minecraft instance. Additional
+instances can be created and run concurrently when their ports and host resources
+do not conflict.
+
+## Why an appliance instead of a setup script
+
+A conventional setup script or package can install software onto an existing Linux distribution, but the result still depends heavily on the host that was already there: distribution version, package state, firewall configuration, SELinux state, container runtime, system services, storage layout, and previous manual changes.
+
+JustVoxel takes a different approach.
+
+The operating system and the JustVoxel management layer are built, tested, versioned, and updated together. That gives the project a known starting point and allows the normal user experience to focus on appliance tasks such as first setup, Minecraft configuration, backups, storage, updates, and recovery instead of requiring the user to assemble a server from individual Linux components.
+
+This does not make JustVoxel a closed platform. Advanced administrators still have normal access to the underlying Home Server Base 10 / AlmaLinux 10 host and its standard administration tools.
+
+## Why Home Server Base 10 and AlmaLinux 10
+
+JustVoxel consumes Home Server Base 10 as its direct operating-system parent. Home Server Base 10 provides the Home Server Project's shared AlmaLinux 10 Minimal Plus bootc foundation, while AlmaLinux 10 remains the upstream Enterprise Linux source for the kernel and core packages.
+
+The project needs a conservative server-oriented base with systemd, NetworkManager, firewalld, SELinux, Podman, and the normal Linux administration model expected on a long-lived home server. Home Server Base 10 centralizes that generic EL10 foundation so JustVoxel can focus on the Minecraft-appliance layer instead of maintaining its own duplicate rootfs composition.
+
+The common development image adds the complete shared appliance layer and remains VM-ready. Appliance behavior, management logic, WebUI/API functionality, and capability gating are owned here.
+
+For exact image composition and build details, see [BUILD.md](BUILD.md).
+
+## Why bootc and an immutable system image
+
+JustVoxel uses bootc so the operating system is delivered as a versioned container image.
+
+The important user-facing result is predictability: the operating-system content is produced together rather than being gradually changed through an arbitrary history of package installs and removals on each individual machine.
+
+A normal JustVoxel OS update stages a new bootc deployment. The currently running system continues operating until the next reboot. The previous deployment can remain available at the bootc level, while JustVoxel keeps appliance configuration and persistent data outside the immutable system content where appropriate.
+
+The supported host-management model is bootc. JustVoxel does not use host-side rpm-ostree package layering as its normal administration model.
+
+## Immutable system, persistent configuration, persistent data
+
+JustVoxel separates three kinds of state.
+
+The immutable image owns implementation and templates under locations such as:
+
+- `/usr/share/justvoxel/`
+- `/usr/libexec/justvoxel/`
+- `/usr/lib/justvoxel/`
+
+Administrator-owned active configuration lives under `/etc`, including JustVoxel configuration and generated runtime/service files.
+
+Persistent application and management state lives under `/var`, including container state and Minecraft persistent data when that data is stored on the system filesystem.
+
+A bootc image update can replace the immutable implementation without silently replacing the administrator's active `/etc` configuration.
+
+## Minecraft is a separate workload
+
+Minecraft is not baked into the JustVoxel operating-system image.
+
+The JustVoxel image contains the management logic and templates needed to create
+and operate independently identified containerized server workloads. During first
+setup, the administrator chooses supported Minecraft settings and explicitly
+accepts the Minecraft EULA. JustVoxel then creates the first immutable `jv-*`
+identity, renders its private runtime configuration, and manages its container
+through Podman and a per-instance systemd Quadlet. Add Server uses the same
+creation and safety model for later instances.
+
+This separation is intentional for both maintenance and licensing clarity:
+
+- JustVoxel OS images do not contain Minecraft server binaries or Mojang server software.
+- Minecraft runtime updates are separate from JustVoxel operating-system updates.
+- Minecraft persistent data remains outside the immutable OS deployment.
+- The administrator retains control of the runtime policy and data location.
+
+Current setup supports Paper, Purpur, Spigot, Fabric, NeoForge, Forge, Quilt,
+Vanilla Java, and native Bedrock. Features remain capability-based rather than
+pretending every server type supports the same plugins, mods, cross-play, version,
+or conversion behavior. See [server-software.md](server-software.md) and
+[MINECRAFT_RUNTIME.md](MINECRAFT_RUNTIME.md).
+
+## Podman and Quadlets
+
+Podman runs each Minecraft server workload as its own container.
+
+Per-instance systemd Quadlets describe the containers as normal systemd-managed
+services. This lets JustVoxel use standard service ordering, restart behavior,
+logging, and host integration without introducing a separate proprietary daemon
+for Minecraft processes.
+
+Active rendered Quadlets are administrator-visible under `/etc`. Advanced users
+can inspect them directly, while normal users operate the appliance through the
+WebUI or `mjust`.
+
+## Multi-instance identity and isolation
+
+Every managed server has an immutable ID such as `jv-a1b2c3`. Friendly names are
+labels and never privileged lookup keys. The immutable ID binds the server's
+configuration, generated environment and Quadlet, container and systemd unit,
+data directory, firewall ownership, backups, operations, and recovery evidence.
+
+Configured instances reserve their ports and memory even while stopped. Creation
+fails before publication when a port conflicts, the requested memory would exceed
+the appliance policy, storage identity cannot be proved, or another incomplete
+operation owns the required state. One server's lifecycle and maintenance actions
+must not silently target a sibling.
+
+The optional Minecraft Network is separate infrastructure. It can place eligible
+Paper or Purpur instances behind a Velocity entrance and lightweight virtual
+lobby. Standalone instances remain independent unless an administrator explicitly
+adds them to the network.
+
+## mjust is the normal appliance interface
+
+The normal user should not need to know which `podman`, `systemctl`, `bootc`, `firewall-cmd`, storage, or SELinux command is required for a common JustVoxel task.
+
+`mjust` provides the user-facing administration layer for first setup, Minecraft service control, players, whitelist management, backups, restore, storage, updates, status, validation, operating-system maintenance, and power controls.
+
+The safety checks live below the interactive menu, so direct `mjust` commands retain the same safeguards.
+
+Advanced administrators can still use the normal Linux tools directly when deeper control or troubleshooting is required.
+
+See [MJUST.md](MJUST.md) and [MANAGEMENT.md](MANAGEMENT.md).
+
+## Security model
+
+The WebUI source and Management Agent source are maintained together in this repository so they can be built and tested from the same appliance commit. This repository consolidation does not collapse their runtime privilege boundary.
+
+The browser-facing WebUI remains unprivileged. It communicates through Management API v1 over the local Unix socket with the privileged JustVoxel Management Agent, which exposes only approved host operations and authentication paths.
+
+JustVoxel also uses the normal Linux security boundaries rather than replacing them with a custom all-powerful management process.
+
+The appliance relies on:
+
+- SELinux enforcing mode
+- firewalld
+- least-necessary service exposure
+- internal-only RCON access
+- explicit storage identity validation
+- exact confirmations for destructive storage actions
+- player-aware interruption handling
+- verified backup and restore workflows
+- fail-closed behavior when critical state cannot be confirmed
+
+The goal is for the convenient interface to preserve the same safety expectations as the underlying system operations.
+
+## Stability and recovery invariants
+
+JustVoxel is intended for normal appliance users without Linux system administration knowledge. Known-working user-facing behavior is preserved unless there is a demonstrated defect or an approved product change.
+
+Supported appliance failures must remain recoverable through JustVoxel interfaces whenever sufficient safe recovery evidence exists. Internal implementation changes must not unnecessarily turn a previously recoverable state into one requiring terminal repair, Factory Reset, or appliance reinstall.
+
+Persistent workflow changes must consider compatibility with state written by deployed versions. Safety checks remain fail-closed when safety cannot be established, but safety and recoverability must be designed together: safely recoverable state must not become a permanent dead end after an update.
+
+## Separate update paths
+
+JustVoxel has two important update layers.
+
+### Operating-system updates
+
+The JustVoxel OS is updated through bootc. `mjust os-status` and `mjust os-update` provide the appliance-facing workflow for checking and staging operating-system updates.
+
+### Minecraft workload updates
+
+Minecraft container workloads are maintained separately. Supported per-instance
+maintenance handles container-image and Minecraft version policy without treating
+a Minecraft update as an operating-system update.
+
+Keeping these paths separate reduces unnecessary coupling between the appliance OS and the server workload.
+
+## Capability model
+
+JustVoxel maintains one common appliance implementation.
+
+The common image is VM-ready, but the same management layer may also contain hardware-aware functionality. Hardware-dependent controls are exposed only when the running system provides the required capability and platform support.
+
+This avoids separate WebUI, Management API, or mjust implementations for different deployment types. The browser interface, privileged Management Agent, command workflows, validation model, and documentation remain common; only capability availability changes at runtime.
+
+
+## Storage is independent from the immutable image
+
+Minecraft persistent data and backup storage are not part of the immutable bootc deployment.
+
+JustVoxel can keep Minecraft data on the system filesystem or migrate it to supported local storage. Backup storage is selected independently and can use local disks, supported existing filesystems, or network storage.
+
+This allows the operating system to be replaced or updated without treating the Minecraft world and backup strategy as part of the image itself.
+
+See [STORAGE.md](STORAGE.md) and [RESTORE.md](RESTORE.md).
+
+## Documentation boundaries
+
+The documentation is intentionally split by purpose:
+
+- [README](../README.md) — project overview and the normal starting point
+- [MJUST.md](MJUST.md) — operating the appliance
+- [MINECRAFT_RUNTIME.md](MINECRAFT_RUNTIME.md) — multi-instance runtime and safety boundaries
+- [server-software.md](server-software.md) — software-specific capabilities
+- [plugin-workspace.md](plugin-workspace.md) — Bukkit plugin management
+- [minecraft-network.md](minecraft-network.md) — optional Velocity network
+- [MANAGEMENT.md](MANAGEMENT.md) — management layers and native Linux access
+- [STATUS.md](STATUS.md) — appliance health/status model
+- [SYSTEM.md](SYSTEM.md) — OS maintenance and power controls
+- [STORAGE.md](STORAGE.md) — storage and migration
+- [RESTORE.md](RESTORE.md) — Minecraft-data recovery
+- [BUILD.md](BUILD.md) — image composition, CI, signing, and release mechanics
+- [JustVoxel ISO Builder](https://github.com/home-server-project/justvoxel-iso) — fresh installation, hardware/disk guidance, installation access, and installer-media creation
+
+The design goal is straightforward: a normal user should be able to install and operate JustVoxel without deep Linux administration knowledge, while the full underlying system remains available to administrators who want it.
+
+## AI agent and automation gateway
+
+External MCP/REST traffic terminates in the existing unprivileged WebUI process:
+
+```text
+External MCP/REST -> unprivileged WebUI Gateway -> existing Unix-socket Management API -> privileged Management Agent -> system
+```
+
+Keeping MCP Streamable HTTP and explicit `/api/v1` REST routes in that process
+preserves the single network-facing management listener. No extra daemon, proxy,
+container, database engine or privileged listener is introduced. The official Go
+MCP SDK owns protocol negotiation/transport; stateless requests avoid persistent
+external sessions. Its RFC 9728 resource-metadata handler supports discovery.
+
+The Agent remains authoritative for the migrated SQLite connection registry,
+SHA-256 token digests, enabled/expiration state, externally issued OAuth identity
+bindings, live Levels 1–4, immutable instance scopes, separate Operator-style
+usage and audit. Each execution authenticates again. One explicit Agent catalog
+feeds REST routing, MCP visibility, OpenAPI minimum-level annotations and
+execution policy, then dispatches existing typed appliance operations. Private
+paths are represented externally by connection-bound opaque selectors; existing
+ownership and operation-plan checks still apply after resolution.
+
+Human browser identity and external identity have separate trust boundaries.
+Neither transport is an arbitrary Unix API proxy. No level exposes user/password
+administration, gateway security, self-escalation, raw shell or Full Factory Reset.
+Level 4 systemd operations use strictly validated verbs/units and direct argv.
+Full Factory Reset commits independent gateway revocation before destructive
+cleanup so later failure or retry cannot restore credentials. Its public review
+fields extend the plan without changing persistent reset fingerprints, preserving
+deployed recovery compatibility. See [AI-API-CONNECTIONS.md](AI-API-CONNECTIONS.md).
+
+## Native Telegram
+
+The existing Management Agent optionally runs one outbound Telegram Bot API
+long-polling loop. It exposes no new network listener and uses no AI model,
+container or separate daemon. The authenticated primary-administrator WebUI
+configures it through the existing Unix socket. Credentials, numeric-ID approvals,
+one-time pairing evidence, expiring single-use callback bindings, update cursor,
+notification observations and pending reboot evidence use an additive singleton
+record in the existing protected SQLite database.
+
+Telegram's explicit operation allowlist and two permissions are independent of
+the AI/API gateway catalog and Levels 1–4. It calls existing authoritative
+operations. Its only narrow configuration adapters change Start on Boot or
+Network enabled/membership fields while retaining existing locks, publication and
+recovery. Reset revokes Telegram credentials before destructive work. Post-reboot
+notifications verify the new boot identity, actual deployment and appliance health;
+they do not infer success from request acceptance. See [TELEGRAM.md](TELEGRAM.md)
+for setup, security, operation limits and recovery.

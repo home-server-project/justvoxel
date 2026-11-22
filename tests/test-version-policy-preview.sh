@@ -1,0 +1,320 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "${repo_root}/tests/helpers/webui-i18n.sh"
+fixture_dir="$(mktemp -d)"
+trap 'rm -rf "${fixture_dir}"' EXIT
+
+cat > "${fixture_dir}/common.sh" <<'EOF'
+require_root() { :; }
+require_config() { :; }
+resolve_latest_stable_paper_version() { printf '%s' "${STABLE_VERSION}"; }
+resolve_latest_available_paper_version() { printf '%s' "${NEWEST_VERSION}"; }
+resolve_geyser_supported_java_version() { printf '%s' "${GEYSER_VERSION-${STABLE_VERSION}}"; }
+paper_version_has_stable_build() { [[ $1 == "${STABLE_VERSION}" ]]; }
+paper_version_build_channel() {
+    case "$1" in
+        "${STABLE_VERSION}") printf STABLE ;;
+        "${NEWEST_VERSION}") printf ALPHA ;;
+        *) return 1 ;;
+    esac
+}
+bedrock_crossplay_supports_version() { [[ $1 == "$2" ]]; }
+systemctl() { echo runtime-check >> "${DATA_PATH}.checks"; return 1; }
+minecraft_image_ref() { echo runtime-check >> "${DATA_PATH}.checks"; printf 'docker.io/itzg/minecraft-server:stable'; }
+jv_remote_platform_digest() { return 1; }
+podman() { echo runtime-check >> "${DATA_PATH}.checks"; return 1; }
+jv_crossplay_metadata() { echo runtime-check >> "${DATA_PATH}.checks"; return 1; }
+jv_crossplay_artifact_state() { printf unavailable; }
+EOF
+# Copy the real compatibility wrapper; its Paper metadata dependency is stubbed above.
+sed -n '/^server_crossplay_version_compatible() {/,/^}/p' "${repo_root}/mjust/libexec/common.sh" >> "${fixture_dir}/common.sh"
+sed -n '/^validate_server_type() {/,/^render_runtime_files() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/common.sh"
+sed -e "s|^source /usr/libexec/justvoxel/mjust/common.sh$|source ${fixture_dir}/common.sh|" \
+    -e '\|^source /usr/libexec/justvoxel/mjust/managed-crossplay.sh$|d' \
+    -e '\|^source /usr/libexec/justvoxel/mjust/update-policy.sh$|d' \
+    "${repo_root}/mjust/libexec/admin-version-status-json" > "${fixture_dir}/status"
+export STABLE_VERSION=26.2 NEWEST_VERSION=26.3 DATA_PATH="${fixture_dir}/data"
+export MINECRAFT_VERSION_MODE=recommended MINECRAFT_VERSION="${STABLE_VERSION}" MINECRAFT_IMAGE_TAG=stable
+
+recommended="$(bash "${fixture_dir}/status" recommended '' no)"
+jq -e --arg stable "${STABLE_VERSION}" --arg newest "${NEWEST_VERSION}" \
+    '.selected_candidate == $stable and .available == $newest and .available_channel == "ALPHA"' <<< "${recommended}" >/dev/null
+
+bedrock="$(bash "${fixture_dir}/status" recommended '' yes)"
+jq -e --arg stable "${STABLE_VERSION}" '.selected_candidate == $stable and .crossplay_compatible == true' <<< "${bedrock}" >/dev/null
+
+latest="$(bash "${fixture_dir}/status" latest '' no)"
+jq -e --arg newest "${NEWEST_VERSION}" '.selected_candidate == $newest and .candidate_channel == "ALPHA"' <<< "${latest}" >/dev/null
+
+latest_bedrock="$(bash "${fixture_dir}/status" latest '' yes)"
+jq -e --arg newest "${NEWEST_VERSION}" --arg stable "${STABLE_VERSION}" \
+    '.selected_candidate == $newest and .geyser_supported_version == $stable and .crossplay_enabled == true and .crossplay_compatible == false' <<< "${latest_bedrock}" >/dev/null
+
+specific_bedrock="$(bash "${fixture_dir}/status" pinned "${NEWEST_VERSION}" yes)"
+jq -e --arg newest "${NEWEST_VERSION}" --arg stable "${STABLE_VERSION}" \
+    '.selected_candidate == $newest and .geyser_supported_version == $stable and .crossplay_enabled == true and .crossplay_compatible == false' <<< "${specific_bedrock}" >/dev/null
+
+stable="$(bash "${fixture_dir}/status" pinned "${STABLE_VERSION}" no)"
+jq -e --arg stable "${STABLE_VERSION}" '.selected_candidate == $stable and .paper_supported == true' <<< "${stable}" >/dev/null
+
+alpha="$(bash "${fixture_dir}/status" pinned "${NEWEST_VERSION}" no)"
+jq -e --arg newest "${NEWEST_VERSION}" '.selected_candidate == $newest and .candidate_channel == "ALPHA" and .paper_supported == true' <<< "${alpha}" >/dev/null
+
+missing="$(bash "${fixture_dir}/status" pinned 9.9 no)"
+jq -e '.selected_candidate == "" and .paper_supported == false' <<< "${missing}" >/dev/null
+
+# Setup compatibility never depends on a local appliance runtime or JARs.
+[[ ! -e ${DATA_PATH} && ! -e ${DATA_PATH}.checks ]]
+for preview in "${recommended}" "${bedrock}" "${latest}" "${latest_bedrock}" "${specific_bedrock}"; do
+    jq -e '.stack_state == "not_applicable" and .image_state == "not_applicable" and .installed == "" and .plan_fingerprint == "" and (.update_available | not) and (.reason | contains("Server update information could not be verified") | not)' <<< "${preview}" >/dev/null
+done
+jq -e '.recommended == "26.2" and .crossplay_compatible and .paper_supported' <<< "${bedrock}" >/dev/null
+jq -e '.reason | contains("selected Minecraft 26.3 is not compatible")' <<< "${specific_bedrock}" >/dev/null
+
+# Exercise the shared Paper metadata resolver with stable, pre-release, and
+# unusable build records. A build without a server download is not installable.
+source "${repo_root}/mjust/libexec/common.sh"
+curl() {
+    case "${*: -1}" in
+        */versions/26.2/builds) printf '[{"channel":"ALPHA","downloads":{"server:default":{"url":"https://example.invalid/alpha.jar"}}},{"channel":"STABLE","downloads":{"server:default":{"url":"https://example.invalid/stable.jar"}}},{"channel":"BETA","downloads":{"server:default":{"url":"https://example.invalid/beta.jar"}}}]' ;;
+        */versions/26.3/builds) printf '[{"channel":"ALPHA","downloads":{}},{"channel":"ALPHA","downloads":{"server:default":{"url":"https://example.invalid/alpha.jar"}}},{"channel":"BETA","downloads":{"server:default":{"url":"https://example.invalid/beta.jar"}}}]' ;;
+        */versions/26.3-rc-3/builds) printf '[{"channel":"ALPHA","downloads":{"server:default":{"url":"https://example.invalid/rc.jar"}}}]' ;;
+        */versions/26.1/builds) printf '[{"channel":"RECOMMENDED","downloads":{"server:default":{"url":"https://example.invalid/recommended.jar"}}}]' ;;
+        */versions/9.9/builds) printf '[{"channel":"ALPHA","downloads":{}}]' ;;
+        */projects/paper) printf '{"versions":{"26":["26.3","26.3-rc-3","26.2"]}}' ;;
+        *) return 1 ;;
+    esac
+}
+[[ $(resolve_latest_stable_paper_version) == "${STABLE_VERSION}" ]]
+[[ $(resolve_latest_available_paper_version) == "${NEWEST_VERSION}" ]]
+[[ $(paper_version_build_channel "${NEWEST_VERSION}") == ALPHA ]]
+[[ $(paper_version_build_channel "${STABLE_VERSION}") == STABLE ]]
+if paper_version_has_stable_build 26.1; then exit 1; fi
+if paper_version_build_channel 9.9 >/dev/null; then exit 1; fi
+
+grep -Fq 'resolve_latest_server_version' "${repo_root}/mjust/libexec/admin-setup-plan-json"
+grep -Fq 'server_version_available "${version}"' "${repo_root}/mjust/libexec/admin-setup-plan-json"
+grep -Fq 'AdminSetupVersionPreview' "${repo_root}/webui/internal/server/setup_wizard.go"
+grep -Fq 'form?.dataset.versionPreviewUrl || "/setup/version-preview"' "${repo_root}/webui/internal/server/static/settings.js"
+grep -Fq 'new URLSearchParams({ policy, version, bedrock_enabled:' "${repo_root}/webui/internal/server/static/settings.js"
+grep -Fq 'data-version-preview-url="{{$wizard.BasePath}}/version-preview"' "${repo_root}/webui/internal/server/templates/setup_wizard.html"
+grep -Fq '"GET /setup/version-preview", a.setupWizardVersionPreview' "${repo_root}/webui/internal/server/setup_wizard.go"
+grep -Eq '"GET /version-preview":[[:space:]]+a.setupWizardVersionPreview' "${repo_root}/webui/internal/server/add_server_wizard.go"
+grep -Fq 'bedrock, draft.Minecraft.ServerType)' "${repo_root}/webui/internal/server/setup_wizard.go"
+grep -Fq 'status.selected_candidate' "${repo_root}/webui/internal/server/static/settings.js"
+grep -Fq 'next.disabled = !status.selected_candidate || (crossplayEnabled && !status.crossplay_compatible)' "${repo_root}/webui/internal/server/static/settings.js"
+catalog_text_used "${repo_root}/webui/internal/server/templates/setup_review.html" 'Minecraft version' '<dt>{{t "' '"}}</dt><dd>{{.Plan.Normalized.Minecraft.Version}}</dd>'
+catalog_text_used "${repo_root}/webui/internal/server/templates/setup_review.html" 'Version policy' '<dt>{{t "' '"}}</dt><dd>{{ts .VersionPolicyLabel}}</dd>'
+if grep -Fq 'Version: LATEST' "${repo_root}/webui/internal/server/templates/setup_review.html"; then exit 1; fi
+
+# Exercise the planner separately from the browser preview. The selected policy
+# and Bedrock choice must survive a compatible plan; mismatches must be errors.
+cat > "${fixture_dir}/planner-common.sh" <<'EOF'
+require_root() { :; }
+resolve_minecraft_ids() { printf '1000 1000 fixture\n'; }
+validate_nonroot_id() { [[ $1 -ge 1000 ]]; }
+validate_simple_text() { [[ $1 != *$'\n'* ]]; }
+validate_positive_int() { [[ $1 =~ ^[1-9][0-9]*$ ]]; }
+validate_game_mode() { [[ $1 == survival ]]; }
+validate_memory() { [[ $1 =~ ^[1-9][0-9]*G$ ]]; }
+memory_to_mib() { printf '%s' "$((${1%G} * 1024))"; }
+validate_port() { [[ $1 -ge 1 && $1 -le 65535 ]]; }
+validate_minecraft_image_tag() { :; }
+resolve_geyser_supported_java_version() { printf '%s' "${GEYSER_VERSION:-26.2}"; }
+resolve_latest_stable_paper_version() { printf '26.2'; }
+resolve_latest_available_paper_version() { printf '%s' "${PLANNER_LATEST_VERSION:-26.3}"; }
+paper_version_has_stable_build() { [[ $1 == 26.2 ]]; }
+paper_version_build_channel() { [[ $1 == 26.2 || $1 == 26.3 ]] && printf STABLE; }
+bedrock_crossplay_supports_version() { [[ $1 == "$2" ]]; }
+normalize_daily_backup_time() { printf '%s' "$1"; }
+daily_backup_schedule_from_time() { printf '*-*-* %s:00' "$1"; }
+EOF
+sed -n '/^server_crossplay_version_compatible() {/,/^}/p' "${repo_root}/mjust/libexec/common.sh" >> "${fixture_dir}/planner-common.sh"
+sed -n '/^validate_server_type() {/,/^render_runtime_files() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/planner-common.sh"
+touch "${fixture_dir}/planner-storage.sh"
+cat > "${fixture_dir}/planner-crossplay.sh" <<'STUB'
+jv_crossplay_mod_compatible() {
+    printf '%s\n' "$*" >> "${DATA_PATH}.planner-crossplay-checks"
+    [[ ${CROSSPLAY_VERIFIED:-no} == yes ]]
+}
+STUB
+sed -e "s|^source /usr/libexec/justvoxel/mjust/common.sh$|source ${fixture_dir}/planner-common.sh|" \
+    -e "s|^source /usr/libexec/justvoxel/mjust/storage-common-base.sh$|source ${fixture_dir}/planner-storage.sh|" \
+    -e "s|source /usr/libexec/justvoxel/mjust/managed-crossplay.sh|source ${fixture_dir}/planner-crossplay.sh|" \
+    -e '/^request="$(cat)"$/i system_memory_mib() { printf 8192; }\nport_in_use() { return 1; }' \
+    "${repo_root}/mjust/libexec/admin-setup-plan-json" > "${fixture_dir}/planner"
+planner_request='{"server":{"motd":"Family","max_players":10,"bedrock_enabled":true,"timezone":"America/Toronto"},"minecraft":{"java_memory":"2G","container_memory":"3G","java_port":49165,"bedrock_port":49166,"image_tag":"stable","version_policy":"recommended","version":"","game_mode":"survival"},"storage":{"type":"system","path":"/var/lib/justvoxel/minecraft","device":"","mount_point":""},"backups":{"automatic":true,"daily_time":"04:30","keep":7,"type":"system","path":"/var/lib/justvoxel/backups","device":"","mount_point":"","source":"","username":"","domain":""}}'
+recommended_plan="$(env JV_CONFIG="${fixture_dir}/absent-config" JV_QUADLET="${fixture_dir}/absent-quadlet" bash "${fixture_dir}/planner" <<< "${planner_request}")"
+jq -e '.ok == true and .normalized.server.bedrock_enabled == true and .normalized.minecraft.version_policy == "recommended" and .normalized.minecraft.version == "26.2"' <<< "${recommended_plan}" >/dev/null
+compatible_latest_request="$(jq -c '.minecraft.version_policy="latest"' <<< "${planner_request}")"
+compatible_latest_plan="$(env JV_CONFIG="${fixture_dir}/absent-config" JV_QUADLET="${fixture_dir}/absent-quadlet" PLANNER_LATEST_VERSION=26.2 bash "${fixture_dir}/planner" <<< "${compatible_latest_request}")"
+jq -e '.ok == true and .normalized.server.bedrock_enabled == true and .normalized.minecraft.version_policy == "latest" and .normalized.minecraft.version == "26.2" and ([.warnings[].code] | index("bedrock_moving_version") == null)' <<< "${compatible_latest_plan}" >/dev/null
+for policy in latest pinned; do
+    incompatible_request="$(jq -c --arg policy "${policy}" '.minecraft.version_policy=$policy | .minecraft.version="26.3"' <<< "${planner_request}")"
+    incompatible_plan="$(env JV_CONFIG="${fixture_dir}/absent-config" JV_QUADLET="${fixture_dir}/absent-quadlet" bash "${fixture_dir}/planner" <<< "${incompatible_request}")"
+    jq -e '.ok == false and .code == "bedrock_version_unsupported" and (.error | contains("26.3") and contains("26.2"))' <<< "${incompatible_plan}" >/dev/null
+done
+
+cat >> "${fixture_dir}/planner-common.sh" <<'STUB'
+curl() {
+    case "${*: -1}" in
+        */v2/purpur) printf '{"metadata":{"current":"26.2"},"versions":["26.2","26.3"]}' ;;
+        */version_manifest_v2.json) printf '{"latest":{"release":"26.2"},"versions":[{"id":"26.2","type":"release"}]}' ;;
+        *) return 1 ;;
+    esac
+}
+STUB
+for software in paper purpur vanilla; do
+    for bedrock in true false; do
+        request="$(jq -c --arg software "${software}" --argjson bedrock "${bedrock}" '.minecraft.server_type=$software | .server.bedrock_enabled=$bedrock' <<< "${planner_request}")"
+        result="$(env JV_CONFIG="${fixture_dir}/absent-config" JV_QUADLET="${fixture_dir}/absent-quadlet" bash "${fixture_dir}/planner" <<< "${request}")"
+        if [[ ${software} == vanilla && ${bedrock} == true ]]; then jq -e '.ok == false and .code == "invalid_minecraft"' <<< "${result}" >/dev/null
+        else jq -e --arg software "${software}" '.ok and .normalized.minecraft.server_type == $software' <<< "${result}" >/dev/null
+        fi
+    done
+done
+for software in fabric neoforge; do
+    request="$(jq -c --arg software "${software}" '.minecraft.server_type=$software' <<< "${planner_request}")"
+    result="$(env JV_CONFIG="${fixture_dir}/absent-config" JV_QUADLET="${fixture_dir}/absent-quadlet" bash "${fixture_dir}/planner" <<< "${request}")"
+    jq -e '.ok == false and .code == "invalid_minecraft"' <<< "${result}" >/dev/null
+done
+for invalid in false null '""' '"PAPER"'; do
+    request="$(jq -c --argjson invalid "${invalid}" '.minecraft.server_type=$invalid' <<< "${planner_request}")"
+    result="$(env JV_CONFIG="${fixture_dir}/absent-config" JV_QUADLET="${fixture_dir}/absent-quadlet" bash "${fixture_dir}/planner" <<< "${request}")"
+    jq -e '.ok == false and .code == "schema_error"' <<< "${result}" >/dev/null
+done
+
+# The WebUI sends a pinned resolved game, loader, and image. Keep the real
+# selection validators and exact publisher metadata checks; stub only responses.
+cat >> "${fixture_dir}/planner-common.sh" <<'STUB'
+curl() {
+    case "${*: -1}" in
+        */version_manifest_v2.json) printf '{"versions":[{"id":"26.3","type":"release"}]}' ;;
+        https://meta.fabricmc.net/v2/versions/loader/26.3/0.19.5/server/json)
+            printf '{"inheritsFrom":"26.3","mainClass":"net.fabricmc.loader.impl.launch.knot.KnotServer","libraries":[{"name":"net.fabricmc:fabric-loader:0.19.5"}]}' ;;
+        https://maven.neoforged.net/releases/net/neoforged/neoforge/26.3.0.99/neoforge-26.3.0.99-installer.jar.sha1)
+            printf '%040d' 1 ;;
+        *) echo 'Unexpected planner metadata request' >&2; return 1 ;;
+    esac
+}
+STUB
+for software in fabric neoforge; do
+    case "${software}" in fabric) loader=0.19.5 ;; neoforge) loader=26.3.0.99 ;; esac
+    resolved_request="$(jq -c --arg software "${software}" --arg loader "${loader}" '.minecraft += {server_type:$software,version_policy:"pinned",version:"26.3",loader_version:$loader,image_tag:"java25"}' <<< "${planner_request}")"
+    for proof in yes no; do
+        rm -f "${DATA_PATH}.planner-crossplay-checks"
+        result="$(env JV_CONFIG="${fixture_dir}/absent-config" JV_QUADLET="${fixture_dir}/absent-quadlet" GEYSER_VERSION=26.3 CROSSPLAY_VERIFIED="${proof}" bash "${fixture_dir}/planner" <<< "${resolved_request}")"
+        if [[ ${proof} == yes ]]; then
+            jq -e --arg software "${software}" --arg loader "${loader}" '.ok and .normalized.server.bedrock_enabled and .normalized.minecraft.server_type == $software and .normalized.minecraft.version_policy == "pinned" and .normalized.minecraft.version == "26.3" and .normalized.minecraft.loader_version == $loader and .normalized.minecraft.image_tag == "java25"' <<< "${result}" >/dev/null
+        else
+            jq -e '.ok == false and .code == "bedrock_version_unsupported"' <<< "${result}" >/dev/null
+        fi
+        [[ $(cat "${DATA_PATH}.planner-crossplay-checks") == "${software} 26.3 ${loader}" ]]
+    done
+    rm "${DATA_PATH}.planner-crossplay-checks"
+    java_request="$(jq -c '.server.bedrock_enabled=false' <<< "${resolved_request}")"
+    result="$(env JV_CONFIG="${fixture_dir}/absent-config" JV_QUADLET="${fixture_dir}/absent-quadlet" GEYSER_VERSION=26.3 CROSSPLAY_VERIFIED=no bash "${fixture_dir}/planner" <<< "${java_request}")"
+    jq -e --arg software "${software}" --arg loader "${loader}" '.ok and (.normalized.server.bedrock_enabled | not) and .normalized.minecraft.server_type == $software and .normalized.minecraft.version_policy == "pinned" and .normalized.minecraft.version == "26.3" and .normalized.minecraft.loader_version == $loader and .normalized.minecraft.image_tag == "java25"' <<< "${result}" >/dev/null
+    [[ ! -e ${DATA_PATH}.planner-crossplay-checks ]]
+done
+
+# New-software Java previews resolve independently of managed cross-play JARs.
+# Discovery/exact runtime metadata is exercised in test-setup-runtime-resolution.sh
+# and test-paper-fork-versions.sh; this fixture isolates the preview boundary.
+cat >> "${fixture_dir}/common.sh" <<'STUB'
+resolve_setup_java_runtime() {
+    [[ $2 == recommended || ( $2 == pinned && ( $3 == 26.3 || $3 == 26.4 ) ) ]] || return 1
+    local game="${FIXTURE_GAME:-26.3}"
+    [[ $2 != pinned ]] || game=$3
+    case "$1" in
+        fabric) jq -cn --arg game "${game}" '{game:$game,loader:"0.19.5",image:"java25"}' ;;
+        neoforge) jq -cn --arg game "${game}" --arg loader "${game}.0.99" '{game:$game,loader:$loader,image:"java25"}' ;;
+        spigot|pufferfish) jq -cn --arg game "${game}" '{game:$game,loader:"",image:"java25"}' ;;
+        leaf) jq -cn --arg game "${game}" '{game:$game,loader:"",image:"java25",reason:"Leaf labels this build Experimental. It is available for setup."}' ;;
+        *) return 1 ;;
+    esac
+}
+jv_crossplay_mod_compatible() {
+    printf '%s\n' "$*" >> "${DATA_PATH}.crossplay-checks"
+    [[ ${CROSSPLAY_VERIFIED:-no} == yes ]]
+}
+curl() { echo 'Unexpected network request in preview fixture' >&2; return 1; }
+STUB
+for software in fabric neoforge; do
+    case "${software}" in fabric) loader=0.19.5 ;; neoforge) loader=26.3.0.99 ;; esac
+    for policy in recommended pinned; do
+        preview="$(bash "${fixture_dir}/status" --server-type "${software}" "${policy}" 26.3 no)"
+        jq -e --arg loader "${loader}" '.selected_candidate == "26.3" and .loader_version == $loader and .image_tag == "java25" and .geyser_supported_version == "26.2" and .server_supported and (.crossplay_enabled | not) and (.crossplay_compatible | not)' <<< "${preview}" >/dev/null
+        [[ ! -e ${DATA_PATH}.crossplay-checks ]]
+    done
+done
+for software in fabric neoforge; do
+    preview="$(GEYSER_VERSION=26.3 bash "${fixture_dir}/status" --server-type "${software}" recommended '' no)"
+    jq -e '.server_supported and .selected_candidate == "26.3" and .geyser_supported_version == "26.3" and (.crossplay_enabled | not)' <<< "${preview}" >/dev/null
+    [[ ! -e ${DATA_PATH}.crossplay-checks ]]
+    preview="$(GEYSER_VERSION=26.3 bash "${fixture_dir}/status" --server-type "${software}" recommended '' yes)"
+    jq -e '.selected_candidate == "26.3" and .server_supported and .crossplay_enabled and (.crossplay_compatible | not) and (.managed_crossplay_available | not) and (.reason | contains("could not be proven"))' <<< "${preview}" >/dev/null
+    [[ -s ${DATA_PATH}.crossplay-checks ]]
+    preview="$(GEYSER_VERSION=26.3 CROSSPLAY_VERIFIED=yes bash "${fixture_dir}/status" --server-type "${software}" recommended '' yes)"
+    jq -e '.selected_candidate == "26.3" and .server_supported and .crossplay_enabled and .crossplay_compatible and .managed_crossplay_available' <<< "${preview}" >/dev/null
+    case "${software}" in fabric) loader=0.19.5 ;; neoforge) loader=26.3.0.99 ;; esac
+    [[ $(cat "${DATA_PATH}.crossplay-checks") == "${software} 26.3 ${loader}"$'\n'"${software} 26.3 ${loader}" ]]
+    rm "${DATA_PATH}.crossplay-checks"
+done
+# Specific retains a newer Java-valid release, with no artifact
+# proof attempted against artifacts for the publisher's older supported game.
+for software in fabric neoforge; do
+    preview="$(bash "${fixture_dir}/status" --server-type "${software}" latest '' no)"
+    jq -e '.selected_candidate == "" and (.server_supported | not)' <<< "${preview}" >/dev/null
+    for enabled in yes no; do
+        preview="$(GEYSER_VERSION=26.3 CROSSPLAY_VERIFIED=yes bash "${fixture_dir}/status" --server-type "${software}" pinned 26.4 "${enabled}")"
+        jq -e '.selected_candidate == "26.4" and .server_supported and .geyser_supported_version == "26.3" and (.crossplay_compatible | not) and (.managed_crossplay_available | not)' <<< "${preview}" >/dev/null
+        if [[ ${enabled} == yes ]]; then
+            jq -e '.reason | contains("Managed cross-play currently supports Minecraft 26.3.") and contains("Selected Minecraft 26.4 is available as Java-only.")' <<< "${preview}" >/dev/null
+        fi
+        [[ ! -e ${DATA_PATH}.crossplay-checks ]]
+    done
+done
+preview="$(bash "${fixture_dir}/status" --server-type leaf recommended '' no)"
+jq -e '.selected_candidate == "26.3" and .candidate_channel == "RELEASE" and .server_supported and (.reason | contains("Experimental"))' <<< "${preview}" >/dev/null
+
+for software in pufferfish leaf; do
+    for game in "${STABLE_VERSION}" "${NEWEST_VERSION}"; do
+        preview="$(FIXTURE_GAME="${game}" bash "${fixture_dir}/status" --server-type "${software}" latest '' no)"
+        jq -e --arg game "${game}" '.selected_candidate == $game and .server_supported and .candidate_channel == "RELEASE" and .image_tag == "java25" and .loader_version == ""' <<< "${preview}" >/dev/null
+        if [[ ${software} == leaf ]]; then jq -e '.reason | contains("Experimental")' <<< "${preview}" >/dev/null; fi
+    done
+done
+
+# Discovery never rewrites a selected runtime or invokes artifact proof for a
+# mismatch or missing Geyser metadata, even with cross-play explicitly requested.
+rm -f "${DATA_PATH}.crossplay-checks"
+for software in fabric neoforge spigot pufferfish leaf; do
+    for geyser in 26.2 ''; do
+        for enabled in no yes; do
+            preview="$(GEYSER_VERSION="${geyser}" bash "${fixture_dir}/status" --server-type "${software}" pinned 26.3 "${enabled}")"
+            jq -e --arg geyser "${geyser}" '.selected_candidate == "26.3" and .server_supported and .geyser_supported_version == $geyser and (.crossplay_compatible | not)' <<< "${preview}" >/dev/null
+            [[ ! -e ${DATA_PATH}.crossplay-checks ]]
+        done
+    done
+done
+# Reuse the policy wrappers and stub only Purpur publisher discovery.
+cat >> "${fixture_dir}/common.sh" <<'STUB'
+purpur_metadata() { printf '%s' '{"metadata":{"current":"26.2"},"versions":["26.2","26.3"]}'; }
+STUB
+for software in paper purpur; do
+    preview="$(bash "${fixture_dir}/status" --server-type "${software}" recommended '' yes)"
+    jq -e '.selected_candidate == "26.2" and .crossplay_compatible' <<< "${preview}" >/dev/null
+    for policy in latest pinned; do
+        preview="$(bash "${fixture_dir}/status" --server-type "${software}" "${policy}" 26.3 no)"
+        jq -e '.selected_candidate == "26.3" and .geyser_supported_version == "26.2" and .server_supported' <<< "${preview}" >/dev/null
+    done
+    preview="$(GEYSER_VERSION='' bash "${fixture_dir}/status" --server-type "${software}" pinned 26.3 no)"
+    jq -e '.selected_candidate == "26.3" and .geyser_supported_version == "" and .server_supported' <<< "${preview}" >/dev/null
+done
+
+# Spigot continues supporting older Java releases through managed ViaVersion.
+preview="$(GEYSER_VERSION=26.4 bash "${fixture_dir}/status" --server-type spigot pinned 26.3 yes)"
+jq -e '.selected_candidate == "26.3" and .geyser_supported_version == "26.4" and .crossplay_compatible' <<< "${preview}" >/dev/null

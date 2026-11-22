@@ -1,0 +1,503 @@
+# Web management
+
+The WebUI source and the privileged JustVoxel Management Agent source are maintained together in this repository and are built/tested from the same appliance source commit.
+
+This source consolidation does not change the runtime security model. The browser-facing WebUI remains unprivileged and communicates through Management API v1 over the local Unix socket with the privileged Management Agent.
+
+JustVoxel WebUI is designed for simple administration from a trusted local home network.
+
+By default, Web management uses plain HTTP on TCP port `8099`. This is intentional: the appliance can show both a friendly local address such as `http://justvoxel.local:8099` and a direct address such as `http://192.168.1.50:8099` without requiring a private certificate or a self-signed certificate exception.
+
+Because default local WebUI traffic is not protected by TLS, administrator credentials and sessions should only be used on a network you trust. Do not forward TCP port `8099` directly to the public Internet.
+
+If remote access is required, place JustVoxel behind a properly secured solution that provides trusted HTTPS or private-network access, such as an appropriately configured reverse proxy, VPN, Tailscale, or similar protected access. Those advanced access methods are separate from the default JustVoxel local WebUI.
+
+In the Minecraft Servers dashboard workspace, **Add Minecraft Server** opens the maintained first-run Setup flow (`/setup`) until appliance configuration is complete. After configuration it opens Add Server (`/minecraft/servers/add`). A bookmarked Add Server GET also redirects to Setup on an unconfigured appliance; stale Add Server POST requests are refused without starting first-run mutations.
+
+## Administrator account
+
+The default authentication mode is **System account**.
+
+The administrator username is:
+
+`voxel`
+
+In System account mode, the WebUI authenticates the real local `voxel` account through the AlmaLinux/RHEL PAM stack. JustVoxel does not copy `/etc/shadow`, expose password hashes to the WebUI, or maintain a synchronized second password database.
+
+The same `voxel` password is therefore used for:
+
+- JustVoxel WebUI
+- local console login
+- SSH password login when SSH password authentication is enabled
+
+The browser-facing WebUI remains unprivileged. It sends the submitted login credential over the local Unix socket to the privileged JustVoxel Management Agent. The agent performs PAM authentication and returns a WebUI session token. The browser does not repeatedly send the Linux password for normal management operations.
+
+## First login from the JustVoxel ISO
+
+The JustVoxel ISO may install the initial development/bootstrap account as `voxel` with the known bootstrap password. The ISO installer expires that password before first boot.
+
+On first use:
+
+1. Sign in as `voxel` with the bootstrap password.
+2. JustVoxel reports that the administrator password must be changed.
+3. The WebUI allows only the password-change flow.
+4. PAM changes the real Linux `voxel` password using the host's normal password policy.
+5. Existing WebUI sessions are invalidated and the user signs in again with the new password.
+
+This expiration is performed by the JustVoxel ISO installation path only. A bootc update/rebase or custom installation does not blindly expire or replace an existing `voxel` password.
+
+## First-run setup
+
+The Storage and Backups setup steps open the same disk and partition browser as Control Center Storage. Partition details offer the existing eligible format, delete, temporary mount, and permanent mount actions. Unallocated-space details offer partition creation with a chosen size. Destructive changes require a reviewed target, the confirmation slider, and the final confirmation switch; choosing a setup destination alone performs no disk operation. After changes, discovery refreshes without leaving the wizard or clearing entered values. Use **Choose for setup** on an eligible filesystem, or select it in the refreshed wizard list. Existing setup validation and the final setup transaction still apply. Live Minecraft migration and backup destination configuration remain Control Center operations; the wizard records those destinations in its setup draft.
+
+The dashboard shows live Minecraft controls and players after configuration. Before configuration, it presents a centered setup invitation. Quick Look in the header holds compact status values. Control Center launches the Minecraft, System, Network, System Monitor, System Update, Storage, Backups, Migration, and Files workspaces. Older page URLs with workspace replacements open the matching dashboard workspace. In-progress operation and recovery pages remain available, and Operators can still start a manual backup from Quick Look.
+
+The floating top panel shows date and time in the appliance timezone. Timezone, automatic time (NTP), and manual Date/Time are host system settings. The 12-hour or 24-hour time format and Day first or Month first date order are appliance-wide JustVoxel WebUI settings, persisted by the Management Agent and shared by all WebUI clients across logins and reboots. Topbar dates use abbreviated text months. Display formats do not change the host clock, schedules, or stored timestamps. System contains Health, History, Users, Logs, Date & Time, Wallpaper, Factory Reset, and About. UPS appears when available. Only Administrators can change Date & Time settings; every authenticated role receives the saved display format. Wallpaper settings remain local to this browser, and the footer Wallpaper link opens the same System tab.
+
+Network keeps loading and errors below its navigation. Troubleshoot groups each interface with its connection, gateway, DNS, and reconnect action. Tailscale and NetBird activation shows service progress and opens their dashboard after the service is running; use the dashboard link if the browser blocks opening. Account setup remains separate from service activation. Playit retains its dark waiting page and validated claim-link flow. Storage refresh keeps the selected physical drive when it is still available.
+
+
+The Advanced wizard uses six equal Server, Cross-play, Memory, Storage, Backups and Review navigation cards in one row below its title on desktop. Storage and local backups share the Control Center disk and partition browser and reviewed management actions: choose a physical drive to show only its partitions. Preparation opens a focused dialog with the existing destructive slider and confirmation switch, then refreshes the inventory and returns to that drive when available. Server software cards share local artwork from `webui/internal/server/static/server-software/`; its README records sources and licenses.
+
+First Setup (`/setup`) and Add Server (`/minecraft/servers/add`) use one setup wizard with Simple setup and Advanced setup. Simple setup chooses a family (Plugins, Mods, or Vanilla Java · Bedrock), then software, then a server name and game mode before Review. Advanced setup follows six steps: Server, Cross-play (including version and updates), Memory, Storage, Backups and Review. Progress cards only navigate backward, even after a later step has been visited; Continue validates each form before advancing. Drafts retain their choices when navigating back. Storage and local backup selection reuse the maintained Control Center Storage presentation, dialogs and reviewed actions. Storage and local backup destinations require an explicit partition selection; disk preparation remains a separate reviewed action. When data and backups use the same filesystem, JustVoxel mounts it once and uses separate directories. Review shows the four configuration summary cards and authoritative warnings. The Download configuration action provides a technical snapshot.
+
+First-run WebUI setup generates the welcome message as
+`JustVoxel <software> Minecraft <resolved-version> Server` from the validated
+software plan. Advanced
+setup allows a custom message; entering one disables the automatic default and
+preserves the message through software and version changes. Review shows the final
+message. After setup, Minecraft settings can still edit it; updates and software
+changes do not regenerate it, and existing servers are unchanged.
+
+Both Simple and Advanced setup let the Administrator choose Survival, Creative, Adventure, or Spectator as the game mode (native Bedrock omits Spectator). Survival is the default. The choice appears in Review and the downloadable configuration. After setup, the Administrator can change Game mode in Minecraft settings through the normal review and apply flow. Minecraft must be restarted for the change to take effect; changes other than memory settings are saved for a later restart.
+
+In Advanced setup, Step 2 Cross-play includes applicable version and update
+controls. An administrator sees the exact server version selected before
+continuing. Paper Recommended selects the newest stable Paper build, or the stable
+version supported by Geyser/Floodgate when cross-play is enabled. Purpur uses its
+current API version, or the exact Geyser-supported version when available. Vanilla
+uses Mojang releases and has no managed cross-play. Newly added Java software and
+native Bedrock use the exact pinned runtime described in
+[server-software.md](server-software.md). When an enabled cross-play choice is not
+compatible, Continue and setup planning are blocked without discarding the
+administrator's selections. Review shows the resolved version and policy.
+
+Selecting **Configure JustVoxel** requests an SMB password in a modal when the backup destination requires one, then opens the Minecraft EULA dialog if acceptance has not yet been recorded for the exact validated plan. **Accept and continue** records acceptance for that plan and starts the existing setup operation. **Decline** and **Cancel** return to Review without starting setup. A changed plan requires fresh acceptance. The SMB password remains outside the draft and operation journal.
+
+The progress page follows the persistent setup operation through Storage, Configuration, Minecraft, Verification, and Complete. During Minecraft startup it explains that downloads and initialization can take several minutes. Refreshing or reopening the page reconnects to the same operation.
+
+First-run startup keeps its 15-minute allowance for downloads and initialization, but three automatic Minecraft restarts during that start fail verification and enter rollback. Paper/Purpur version checks retry the temporary “Checking version, please wait...” response every three seconds for up to one minute; software, game version, and plugin verification remain required before backup timer activation.
+
+A failed first-run rollback uses the Reset Minecraft cleanup helpers to remove generated data only when the transaction recorded an empty appliance-owned internal data directory before runtime configuration. It rechecks directory and mount identity before cleanup. Pre-existing data, external/network/unknown storage, and backups are preserved. Symlinks, nested mounts, unsafe paths, or changed storage identity prevent deletion; an eligible cleanup that cannot complete safely requires attention.
+
+If setup needs attention during storage rollback, the Administrator can select **Retry recovery** on that operation's progress page. The Management Agent checks the preserved storage transaction before restoring any remaining changes. **Start setup over** stays disabled until recovery succeeds and the operation reaches **Rolled back**. Other attention stages do not offer this retry.
+
+## Server software and container updates
+
+Minecraft Update contains **Container** and **Version** only. Software switching
+is under **Server Migration → Switch**, beside Export and Import. It uses the
+existing selected server and the same catalogue/artwork as Setup: Paper, Purpur,
+Spigot, Pufferfish, Leaf, Fabric, NeoForge, Forge, Quilt, Vanilla Java and native
+Bedrock. All eleven cards remain visible and reflow with the workspace width. Switch cards
+stay 104px tall, with a permanent status slot beside the software name, including
+while verification is pending.
+**Current** marks the selected server's software in yellow and is not selectable.
+**Available** means at least one verified structural action can be reviewed.
+**Not Supported** cards are dimmed and disabled, with an incompatibility explanation.
+Migration Recovery remains contextual through existing failed Export/Import links;
+it is not a normal workspace tab.
+
+Switch fixes the exact installed Minecraft version; a missing exact target build
+never selects another game version. Review shows current/target software, that
+version, Convert and Clone availability, and named compatibility blockers.
+**Convert existing server** retains its immutable ID, placement, ports and backup
+destination and uses the existing cold-backup maintenance/rollback transaction.
+**Clone and convert** creates a new immutable ID, separate data directory under the
+same storage root, the same backup destination and automatically allocated ports.
+It briefly stops a running original for a consistent backup/copy, then restores
+its previous state. A verified clone is left stopped, with normal rename available.
+Failed clones are never reported as successful; existing creation, restore and
+runtime recovery mechanisms clean up or retain a contextual Switch recovery action.
+No conversion is automatically retried.
+
+Switch supports Paper/Purpur/Pufferfish/Leaf in every direction with an exact
+available runtime, Vanilla to that family or a supported Java mod loader, and
+verified Paper-to-Vanilla layout conversion (also used before Paper-to-loader).
+The configured `level-name` is used. Paper 26.1+ relocates the documented
+Overworld data files; supported older versions relocate Nether and End directories.
+Missing, conflicting or unverified layouts block those actions.
+
+Fabric, Quilt, Forge and NeoForge transitions require exact installed mod hashes,
+target-loader/game metadata and verified required dependencies for Convert.
+Incompatible or unknown evidence blocks Convert but can leave a protected
+experimental Clone available. Removing current mods does not prove a modded world
+safe for Vanilla or Paper: that direction offers only Clone and warns about lost
+mod-added world content. Every clone must pass target runtime verification.
+Review links to the selected server's **Plugins & Mods** workspace; Switch never
+removes, replaces, disables or downloads executable content. Returning to Switch
+or refreshing rechecks inventory. Across the new conversion directions, automatic
+startup content downloads stay suppressed. Supported target cross-play settings are preserved; review warns when the
+target requires Java connections. Same-family Switch retains
+its established cross-play handling.
+
+Convert keeps a cold archive before world changes. Failure and interrupted recovery
+restore through the existing backup/restore and runtime recovery paths, with no
+automatic retry of conversion. Switch keeps the exact game pin; Version remains
+the separate place to change release policy. Spigot stays unsupported, including
+direct Spigot-to-Paper from 26.1. Java and native Bedrock remain separate. See
+[server-software.md](server-software.md) and the
+[Paper world-layout guidance](https://docs.papermc.io/paper/migration/).
+
+The Minecraft Update workspace's Container tab shows the selected server, image,
+and status together. Previous container images use single selection; **Restore
+selected** restores the chosen retained image. Once a restarted server passes
+RCON readiness, image identity, and stack verification, its container update is
+successful. A later previous-image history problem appears as a warning on that
+successful result; it does not roll back the verified runtime or report that the
+current version was kept. The operation output includes the final history stage
+and command result.
+
+The Minecraft Version tab shows the installed and available versions, configured
+policy, server software, container channel, and applicable managed component
+status. **Review changes** resolves the proposed version/channel without saving
+configuration. Applying a supported change starts one persistent update bound to
+the reviewed selections and image identity. Runtime changes use cold backup,
+player-aware shutdown, pull and digest checks, runtime verification, and rollback
+on failure. A channel-only change using the verified identical image preserves the
+server's running or stopped state without downtime. Incomplete recovery requires
+attention; failed updates are never automatically retried. Availability remains
+software-specific, and newly added pinned runtimes do not gain an unsupported
+ongoing game-update path merely because they appear in Setup.
+
+Minecraft memory settings retain a hard minimum of 1 GiB (1024 MiB) outside Minecraft. The recommended headroom warning appears from 1024 through 1535 MiB; at least 1.5 GiB (1536 MiB) clears that warning.
+
+## Selected-server console
+
+For a running Java instance, Minecraft Settings provides an internal RCON view
+with **Console** and **Commands** tabs. Commands are discovered from that selected
+server, then cleaned and grouped into Players & permissions, World & gameplay,
+Server & performance, Plugins, and Advanced Minecraft. Search filters the catalog;
+choosing a command places only its name in the input lane. There is no separate
+static Help pane.
+
+Discovery reads at most 64 server help pages and 64 KiB within one 20-second
+deadline. Partial results stay usable. Command history, output, and the catalog
+exist only in page memory and reset when server selection changes. RCON remains
+inside the selected container, and stop commands are refused. Native Bedrock uses
+its own managed console path and does not expose this Java RCON view.
+
+## Password policy
+
+JustVoxel does not impose its own uppercase/lowercase/digit/symbol formula or a separate hard-coded password length.
+
+The Management Agent reads the host's current libpwquality/PAM policy and the WebUI displays the effective minimum length. PAM remains authoritative when the password is actually changed.
+
+The privileged Management Agent intentionally uses systemd `ProtectSystem=true` rather than `full` or `strict`. System-account password changes are handled by PAM/pam_unix, which must create lock and temporary files and atomically update `/etc/shadow`. Making `/etc` read-only prevents that normal password-update transaction. The other management-service hardening controls remain enabled.
+
+## Optional Separate WebUI password
+
+In **System → Users**, the permanent administrator `voxel` appears alongside the other accounts. Open **Manage → Change password** on the `voxel` row to open **Account Security**. Use **Authentication** to choose the sign-in mode or **Password** to change the password for the current mode.
+
+With **Separate WebUI password** enabled:
+
+- the username remains `voxel`;
+- browser authentication uses a WebUI-local Argon2 credential;
+- the Linux `voxel` password is unchanged;
+- console and SSH continue using the Linux password;
+- the system password no longer authenticates the WebUI while Separate mode is active.
+
+Switching from System account to Separate WebUI password requires confirmation with the current real system password and a new WebUI password entered twice. Switching back to System account requires the real system password. Both transitions invalidate existing WebUI sessions and require sign-in again.
+
+**Administrator** is reserved for `voxel`, the protected primary system administrator. **WebUI Admin** grants full JustVoxel WebUI administration, including Users and Factory Reset. WebUI Admin, Operator, and Viewer accounts live in the WebUI user store. Creating one grants no Linux account, SSH login, sudo rights, or local-console access. System authentication settings and primary-only tools remain under `voxel`’s control. Privileged password confirmations use the signed-in administrator’s own password. For WebUI Admin this is always their WebUI password. In **System → Users**, either administrator can open a WebUI account’s actions menu to change its role or password, reset its restart or backup allowance, enable or disable it, or delete it. Each dialog names the selected account. Disabling or deleting an account requires sliding to the end and enabling the red confirmation toggle.
+
+## WebUI two-factor authentication
+
+JustVoxel supports standard time-based one-time passwords (RFC 6238, six digits every 30 seconds, SHA-1). Scan the setup QR code or enter the setup key in Google Authenticator, Microsoft Authenticator, Bitwarden, 1Password, Aegis, or another standard TOTP app. The account appears under **JustVoxel** with its actual username. Setup takes effect after you confirm an authenticator code.
+
+Administrators can use **System → Users → Manage** to enable or disable 2FA. Operators and Viewers can enable 2FA on their own account in **System → Users**. A user can turn off self-managed 2FA with their current password and an authenticator or recovery code. When an administrator enrolls another WebUI user, only an administrator managing that user can turn off 2FA. Both administrator roles can recover other WebUI accounts, including WebUI Admin accounts, using their own current password. Only `voxel` can manage its own primary account.
+
+Enrollment shows ten one-time recovery codes once. Save them when prompted. Each can replace an authenticator code at sign-in once. Two-factor authentication protects WebUI sign-in only and leaves SSH and local-console authentication unchanged.
+
+## Recovery
+
+`mjust web password-reset` is mode-aware.
+
+In **System account** mode, recovery changes the real local `voxel` password using the normal system `passwd` mechanism and then invalidates WebUI sessions.
+
+In **Separate WebUI password** mode, recovery resets only the WebUI-local credential. The Linux `voxel` password is not modified.
+
+## System validation
+
+Administrator users can open **System -> Validation** to run the same authoritative appliance validation used by `mjust validate`.
+
+The WebUI calls `GET /v1/admin/validation` through the local Management API. It does not run systemd, Podman, RCON, firewall, storage, or other validation checks directly. The Management Agent checks the host once and every modern immutable Minecraft instance independently. Zero servers is valid if host checks pass. Stopped servers receive structural validation without being started; running servers also receive live instance-aware stack verification. The report includes each server’s display name and immutable ID. The operation has a ten-minute appliance-wide deadline, with a slightly longer WebUI API timeout.
+
+The default host helper does not inspect fixed Minecraft runtime files. `validate-backend --first-run` remains only for historical fixed-runtime Setup recovery, outside normal validation.
+
+The page deliberately distinguishes three outcomes:
+
+- validation passed;
+- validation completed and the backend detected one or more problems;
+- the validation service/API was unavailable and no validation result was produced.
+
+For troubleshooting, the backend validation output is displayed without the WebUI independently reclassifying individual checks. The Validation page remains Administrator-only.
+
+## Minecraft data storage migration
+
+Administrator users can open **Storage & Backups -> Minecraft data storage** to
+move the appliance-wide Minecraft storage root, including every managed instance,
+to another supported local disk or partition. This is not a selected-server
+operation.
+
+The WebUI is a thin frontend over the same persistent Minecraft data migration Management API used by `mjust storage-migrate`. Candidate discovery, target safety, authoritative planning, plan fingerprinting, destructive confirmation requirements, player state, pre-migration cold backup, copy and verification, configuration switching, SELinux/runtime regeneration, validation, rollback, and recovery state remain owned by the Management Agent/shared backend.
+
+The browser shows Agent-discovered choices for a dedicated disk/USB device, an existing XFS/ext4/Btrfs filesystem, a blank partition, or already-unallocated disk space. Review displays the Agent warnings and requirements. A migration requires the explicit `MIGRATE` frontend confirmation; destructive target preparation additionally requires the exact phrase supplied by the Agent, and online-player interruption requires a separate confirmation when the Agent says it is needed.
+
+Migration runs as a persistent operation bound to the reviewed complete instance
+set. Refreshing or reopening the migration entry point reconnects to the same
+operation. Successful migration retains the old Minecraft data for administrator
+verification; a validated rollback keeps the original configuration/runtime
+active; `needs_attention` preserves recovery state and prevents treating the
+migration as safely complete.
+
+## Minecraft Restore
+
+Administrator users can open **Storage & Backups -> Restore** to replace the
+complete persistent data of one selected instance. Legacy world-only Restore is
+not a current instance Restore mode; `mjust restore-full` is an alias for the same
+full-data operation.
+
+The WebUI uses the existing Management API for completed-backup discovery, authoritative Restore planning, plan-fingerprint revalidation, apply, persistent operation tracking, runtime validation, and rollback. Compatibility and safety policy remain in the Management Agent/shared backend.
+
+The browser presents Agent warnings and confirmation requirements, requires the explicit destructive confirmation `RESTORE`, and requires a separate online-player interruption confirmation when the Agent says it is needed. Browser refresh or reconnect resumes the same persistent Restore operation.
+
+## System power controls
+
+Administrator users have a power control in the top-right WebUI header. It opens appliance-level actions for **Restart** and **Power off**. On supported physical HWS systems, the same menu also exposes **Restart to UEFI/BIOS**. VM deployments do not show that action.
+
+Selecting a power action first opens a centered confirmation dialog. The WebUI
+then submits the action through the existing System Actions API; it does not call
+systemd or firmware tools directly. If players are online on any running instance,
+the Management Agent returns its player-confirmation requirement and the dialog
+asks again before the existing graceful shutdown path is allowed to continue.
+
+The Agent remains authoritative for HWS/VM capability detection, per-instance
+player state, graceful shutdown of all running instances, firmware/UEFI
+availability, and final host action acceptance.
+
+## Workspace controls
+
+Desktop workspaces can be dragged by their headers and resized from the browser’s bottom corner. Window geometry is saved separately for each signed-in user. In **System → History**, drag the divider between Open notifications and Detailed history to adjust their widths. **System → Logs** has a horizontal category selector above Files and Viewer. Its divider adjusts those two columns. Both dividers can also be focused with Tab and moved with the Left and Right arrow keys.
+
+## Plugins & Mods lifecycle and diagnostics
+
+**Minecraft → Plugins & Mods → Installed** shows Enabled or Disabled for verified
+plugin entries. Mod-loader servers show active mod inventory with ownership and
+attention status. Verified Plugins-managed mods offer **Remove** only;
+Enable/Disable remain plugin-only. Manual/unmanaged and JustVoxel runtime-managed
+mods remain read only. Discover uses
+Modrinth and configured CurseForge for mods, and adds Hangar for eligible plugin
+servers. Exact server and loader compatibility is required. See
+[Plugins & Mods](plugin-workspace.md) for installation and recovery behavior.
+Plugin information overlays offer one yellow state
+action (**Disable** when enabled, **Enable** when disabled) and red **Remove**.
+Manual/unmanaged plugins and JustVoxel-managed Geyser, Floodgate and ViaVersion
+remain read only. Enable/Disable review has Cancel and one yellow final action.
+Remove requires the destructive slider fully armed and the final confirmation
+switch, with Cancel and red Remove. Cancel returns to Installed. Configuration
+and data folders are preserved; dependencies are not removed automatically.
+Enabled managed plugin parents can block disabling/removing a required dependency.
+Installed verified managed mod parents block removal of their required mods, with
+the dependent mod named. Mod removal preserves configuration/data directories,
+uses the same cold backup, strict restart verification and durable rollback, and
+restores the original running/stopped state.
+Actions use cold backup and verified Minecraft restart, with no hot toggling.
+Successful operations refresh Installed; Done is green and View in Installed is
+dark secondary. Failures point to **System → Logs → Plugins**, with an in-workspace
+shortcut where available. Re-check recovery retains maintenance exclusion until
+an exact target or restored original state can be verified.
+
+System Logs categories appear exactly in this order: **Setup, Migration,
+Restore, Plugins, Reset, Network, Update, Support, Failed units**. Plugins supports the same
+list/select/read/download flow as other operation groups. Deep links accept
+`workspace=system&tab=logs&log_group=plugins&log_id=<operation UUID>` with existing
+identifier validation. Plugin startup failure evidence is bounded and sanitized;
+it does not expose the full Minecraft server log.
+
+In **System -> Logs -> Network**, **Generate network report** creates a private, bounded and sanitized local report of NetworkManager, interfaces, routes, DNS, failed units and the four Remote Access providers. Reports open in the same Viewer and download through **Download log**. There is no automatic upload, arbitrary command/unit selection or credential/configuration dump.
+
+Network -> Remote Access includes **NordVPN Meshnet** as its fourth provider. Its native RPM/daemon controls are Meshnet-only. **Activate** first offers **Use current login** or **Update Token**, with **Cancel** making no request. Use current login starts/enables NordVPN and checks the saved account before enabling Meshnet. A missing or Unknown account opens **NordVPN access token** for credential attention. The administrator **Token** button beside Activate is available whenever NordVPN is installed and no operation is in progress, including while inactive, after Deactivate or a failed Activate, and when Account is Unknown. It opens explicit credential replacement directly, so revoked, expired or stale saved logins can be repaired without CLI work. Select **Open NordVPN dashboard** to open [NordVPN dashboard](https://my.nordaccount.com/dashboard/nordvpn/) and sign in. Select **NordVPN** from the left menu, scroll down to **Advanced settings**, then select **Access token -> Get Access token -> Generate new token**. NordVPN may ask you to verify your email. Copy the token and paste it into JustVoxel's **Access token** field, then select **Reconnect with new token**. The same dialog offers **Create NordVPN account** through the fixed [JustVoxel creator’s referral link](https://refer-nordvpn.com/pZGMpGTrBrO). Links open only when selected; JustVoxel does not automatically open a tab.
+
+Explicit token replacement checks the account and attempts the official local `nordvpn logout --persist-token` for an existing or Unknown login to reset saved login state without intentionally expiring a still-valid old access token, then performs the official headless `nordvpn login --token <token>` through direct execution. A failed logout does not block the new login attempt. The new login command must succeed, the account must verify as Logged in, and Meshnet must verify as Enabled before success. Normal Activate never logs out. NordVPN access tokens may expire or be revoked externally; JustVoxel does not predict their lifetime or know their expiration date. JustVoxel never persists or logs the token, includes it in audit records, or returns raw CLI output. The token is transiently passed as one process argument required by NordVPN. Optional analytics consent is declined during login. Deactivate disables/verifies Meshnet and stops/disables NordVPN without logging out or removing Nord account state. **Open NordVPN account** on the provider card remains available independently. Unknown account/Meshnet output stays Unknown; local Nord name/IP rows require CLI evidence.
+
+The Playit.gg Remote Access card keeps its dashboard above **Deactivate** and the compact **Account / Activate** action group. Account stays available while installed and idle, including after Deactivate; it is disabled during remote operations or pending Playit setup. Configured Account opens **Playit.gg account** before any mutation. **Cancel** makes no request; **Relink account** explicitly resets the local agent connection and reuses the existing bounded setup state, polling and validated **Open Playit setup** link, which opens only when selected. Existing tunnels are not migrated to another account automatically. Account without configuration starts normal setup without reset. Normal Activate and Deactivate preserve the account identity.
+
+Playit's **Service** and **Tunnels** rows describe separate evidence. A running configured service with all tunnels disabled shows **Tunnels: No tunnels**, retaining **Disabled tunnel** and **Local destination** details. Failed live IPC shows **Tunnels: Unavailable**; service state never supplies **Tunnels: Running**. Inactive configured Playit shows **Tunnels: Stopped**.
+
+
+Provider cards reflow with container width from one to two (580px), three (860px), and four (1140px) columns, preserving workspace geometry and card appearance. The multiple-VPN message is informational: concurrent use is possible but routing, DNS or firewall rules may conflict. It neither blocks activation nor deactivates other providers; Playit remains independent.
+
+In **System -> Logs -> Support**, administrators can select **Generate support report** to create a bounded, redacted local appliance snapshot. The new report opens in the existing Viewer; **Download log** saves it locally. Reports remain in private appliance storage until normal log/state cleanup removes them. There is no external transmission or automatic upload.
+
+**System → Factory Reset → Reset Minecraft** review states that Plugins-managed
+JARs installed through JustVoxel will be removed. When Minecraft data outside
+internal storage is preserved, manual plugins and plugin configuration/data
+folders are preserved too. Managed mod JARs installed through Plugins & Mods are
+also removed from preserved data; unmanaged mods and the `mods` directory remain.
+Reset stages exact verified managed plugin and mod JARs before its
+helper and retains recovery evidence through failure/retry. Internal-data reset
+continues to delete the whole Minecraft data tree. Full Factory Reset policy is
+unchanged.
+
+## Local behavior
+
+When Web management is enabled and healthy, the console/SSH welcome message reports `Web interface: Ready` and shows the friendly `hostname.local:8099` address plus the direct IPv4 address. The live health check takes precedence over bootstrap marker timing so a healthy listener is not reported as merely starting.
+
+When Web management is disabled, the WebUI service is stopped and its firewalld service is removed, so the management port is no longer exposed.
+
+The WebUI keeps session expiration, login throttling, logout, CSRF protection, the Unix-socket trust boundary, and the unprivileged browser-facing service regardless of authentication provider.
+
+
+## Files
+
+Only the primary `voxel` account with the `administrator` role can open **Control Center → Storage & Data → Files** to manage files on actual mounted non-system local filesystems and mounted NFS/SMB filesystems, alongside configured Minecraft data and available backups. Files does not guess mount locations or expose system disk filesystems as general sources. Minecraft and Backup folders remain dedicated sources only when they are not already reachable through an exposed filesystem. Mount/unmount and filesystem capacity/usage remain Storage’s responsibility. FileBrowser is embedded at `/files/` through the authenticated JustVoxel proxy, with no second login or FileBrowser administration screen. Sources are private, exclude symlink traversal, and permit file operations within those sources. Read-only filesystems permit viewing and downloading only. Source usage bars are hidden; use Storage for filesystem usage.
+
+**Settings → File Browser → Availability** selects one mode. **On demand** is the fresh-install default: opening Files starts FileBrowser, waits for `/files/health`, and offers Retry if startup fails; closing the window stops it. **Always available** enables boot startup and starts it immediately; closing Files leaves it running. Switching to On demand leaves an open Files window running until it closes. Refresh rescans current mounts by restarting the managed FileBrowser service, then reconnects when it is ready. This works in both modes.
+
+
+## Terminal
+
+The primary `voxel` administrator opens **Control Center → System → Terminal**. Other accounts, including other administrators, cannot see or access Terminal or Files. Terminal opens the real `voxel` login shell, with no second login. Opening the standalone workspace starts the native ttyd service on demand and waits for readiness; startup errors offer Retry.
+
+Terminal Refresh reconnects Terminal by closing the current shell and stopping its service before starting it again. Closing the Terminal workspace ends the on-demand Terminal session, closes the connection and requests a managed stop. If the browser disappears, ttyd exits after its last WebSocket client disconnects. Terminal has no availability setting or boot startup.
+
+Terminal Settings stores font-size and background preferences in the current browser. Apply reconnects the Terminal.
+
+Terminal HTTP and WebSocket traffic passes through the existing authenticated Management Agent Unix socket. Both WebUI and Agent enforce the primary `voxel` administrator requirement; the JustVoxel session remains the real authentication boundary. The Management Agent is the only ttyd proxy and alone injects `X-JustVoxel-Terminal: 1`. ttyd exposes no TCP listener: it uses `/run/justvoxel-terminal/ttyd.sock` inside a private `0700` runtime directory, which the WebUI cannot access directly.
+
+## AI & API Connections workspace
+
+The primary `voxel` administrator can open **AI & API Connections** from its own
+Control Center tile. It uses the existing movable/resizable workspace model and
+visual components. Viewer, Operator and other Administrator users cannot manage
+connections. External bearer credentials cannot authenticate this human workspace.
+
+The default view is a card-first overview using the Minecraft Servers card layout.
+A compact gateway switch shows Enabled/Disabled and connection counts. Each card
+shows name, provider logo and identity, readable access level, Minecraft server
+scope, Last activity and Settings. Technical identifiers and addresses stay off
+the overview. Terminal remains bottom-left in the System Control Center grid;
+AI & API Connections occupies bottom-right.
+
+The compact top lane contains **Add Connection**, then **Connection help**.
+Add Connection replaces the overview with **Name**, recognizable provider cards,
+access level, Minecraft server scope and Enabled. **OpenAI** is one card for
+**ChatGPT & Codex**; the other choices are Claude, Grok, Gemini, GitHub Copilot,
+Other AI / MCP app and Automation / REST API. Defaults are OpenAI, Level 1,
+all servers and Enabled. Branded providers use JustVoxel OAuth login, with no
+authentication-method selector. Select Create, then copy the connection-specific
+`https://<host>/mcp/<ConnectionID>` address from Settings into the provider/app.
+It opens normal JustVoxel sign-in and consent; sign in as the primary `voxel`
+administrator, review the configured permissions and select Allow. Tokens reach
+the client automatically and are never shown to the user. Other AI / MCP app and
+Automation / REST API retain one-time manual token creation and copying.
+
+Settings opens the selected connection with primary controls, status and
+allowance actions. Branded local OAuth settings show **Ready to connect**, their
+MCP address with Copy, and **Sign in with JustVoxel**; token records keep rotation
+and revocation actions. **Advanced details** contains identifiers, fingerprint,
+timestamps and optional expiration. Existing OAuth connections retain editable
+technical fields under **Developer integration** inside Advanced details as
+compatibility/admin functionality; they are not migrated. Local OAuth and token
+connections show no OAuth fields. Unknown existing provider labels display safely
+with the generic local icon. Back or Cancel returns to the overview.
+
+Connection help starts with **Choose your app** and provider guidance: AI choices
+use the MCP address; automation uses the REST address and connection token. MCP
+and REST addresses retain Copy controls. Provider, application, account,
+subscription and network access determine availability. The collapsed
+**Developer integration** section at the bottom contains OAuth technical details,
+metadata and OpenAPI. Enabled and Last activity describe evidence accurately;
+there is no generic Connected claim for stateless clients.
+
+Apply saves live permission/scope changes without token replacement. Every entry
+to Level 4 from a lower level opens the existing destructive-confirmation style:
+a connection-specific warning, confirmation slider, explicit acknowledgement
+switch, **Enable Level 4**, and Cancel. The final button stays unavailable until
+both acknowledgements are satisfied. Downgrades use normal Apply.
+
+Token creation/rotation opens a focused one-time modal with Copy. A full token is
+never redisplayed in settings or stored in browser storage; closing clears the
+presentation. Disabling the gateway preserves settings, while Full Factory Reset
+revokes/deletes every connection and returns the gateway to disabled before
+cleanup. The reset review includes this consequence even if cleanup later fails.
+
+The local HTTP default remains unencrypted. Keep port 8099 off the public Internet
+and arrange trusted HTTPS/VPN access for remote clients. Local OAuth uses OAuth
+2.1 authorization code with PKCE S256 and requires HTTPS presentation. Remote AI
+providers require a reachable HTTPS MCP address; a private LAN address is not
+reachable by cloud providers. No AI provider model API key is required. No tunnel
+or Internet exposure is configured automatically. Provider/application and
+package/subscription support determine actual connectivity; JustVoxel does not
+need a provider model API key to expose MCP/REST. See
+[AI-API-CONNECTIONS.md](AI-API-CONNECTIONS.md) for the full guide.
+
+## System Update activation recovery
+
+Updates normally follow **Download & stage → Reboot into update** and activate
+automatically when the new image boots. JustVoxel keeps the existing Minecraft
+player warning and shutdown checks, including the 60-second warning or 10-second
+**Quick reboot** warning.
+
+If a reboot leaves the old image running with the expected update still staged,
+JustVoxel records the failure under **System Settings → Logs → Update**. When it
+can verify that recovery is available, System Update shows a yellow **Force
+update** action. This prepares the staged image, turns Quick reboot on, and does
+not reboot. After recovery is verified, press **Reboot into update** explicitly.
+Normal users should not need CLI OSTree commands. If recovery cannot be verified,
+retain the Update logs for support; the action is offered only while the backend
+can prove the staged deployment is recoverable.
+
+Successful Update logs are short. Failure and recovery logs retain deployment
+comparisons and redacted recovery output for support or a future issue report.
+
+## Interface languages
+
+The WebUI ships embedded catalogs in `webui/internal/server/locales/`. English
+is the canonical source for templates, WebUI messages and browser scripts.
+The language selector shows each language in its native form under a heading
+translated into the current interface language.
+
+- Latin — English (`en`), Français (Canada) (`fr-CA`), Deutsch (`de`),
+  Polski (`pl`), Português (Brasil) (`pt-BR`), Español (Latinoamérica) (`es-419`)
+- Cyrillic — Українська (`uk`), Русский (`ru`)
+- East Asian — 简体中文 (`zh-Hans`)
+
+Japanese, Korean and Traditional Chinese are not currently supported.
+
+The first page uses the browser's `Accept-Language` preferences. A valid manual
+choice is saved in the non-secret `jv_lang` cookie and takes precedence on
+future requests. English is the fallback when no supported preference can be
+used. The Globe beside Sign in or immediately before Logout opens the selector
+for every role. Missing or incompatible translations fall back to the English
+message.
+
+Only JustVoxel interface text is translated. User-selected names, filenames,
+paths, commands, versions, raw logs and Minecraft console output retain their
+original values. Plugin/mod names, authors, descriptions and other provider
+content remain as supplied; provider requests do not negotiate a language.
+Machine-facing OpenAPI, MCP, OAuth protocol messages and protected-resource
+metadata remain stable English regardless of the browser locale. Browser
+administration and OAuth consent HTML use the selected interface language.
+The CLI remains English.
+
+When changing interface copy, edit the English catalog and the corresponding
+entry in every supported catalog using the existing key. Preserve named
+interpolation placeholders and printf arguments. New browser text uses `jvT` for
+text and `jvH` in existing HTML templates. Placeholder values retain the
+original HTML escaping contract.
+`uiText` provides canonical English for presentation helpers whose values also
+serve as internal state labels. Translate those labels only at their explicit
+presentation slot (`ts` / `jvS`); never apply source lookup to provider metadata,
+user data, logs or raw command output. Catalog compatibility and locale selection
+are covered by focused WebUI source tests.

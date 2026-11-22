@@ -1,0 +1,81 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/ui.sh
+source /usr/libexec/justvoxel/mjust/instance-selection.sh
+(( EUID == 0 )) || { echo 'ERROR: this operation must run as root.' >&2; exit 1; }
+instance_id=""
+if [[ ${1:-} == --instance ]]; then
+    [[ $# -ge 2 ]] || exit 2
+    instance_id=$2
+    shift 2
+fi
+[[ $# -le 1 && ${1:-full} == full ]] || { echo 'Usage: restore [--instance jv-...] [full]' >&2; exit 2; }
+jui_has_tty || { echo 'ERROR: Restore requires a controlling terminal. For SSH, allocate a terminal with ssh -t.' >&2; exit 1; }
+instance_id="$(jv_select_registered_instance "${instance_id}")" || exit 1
+readonly api_client=/usr/libexec/justvoxel/mjust/api-client
+base="/v1/minecraft/instances/${instance_id}/backups"
+request() {
+    local method=$1 path=$2 body=${3:-} response
+    if [[ ${method} == GET ]]; then
+        response="$("${api_client}" GET "${base}/${path}")" || { echo 'ERROR: Restore information is unavailable.' >&2; return 1; }
+    else
+        response="$(printf '%s' "${body}" | "${api_client}" POST "${base}/${path}" --data)" || {
+            jq -r '.error // "Restore could not proceed. Review this server and retry the same action."' <<<"${response}" >&2
+            return 1
+        }
+    fi
+    printf '%s' "${response}"
+}
+monitor() {
+    local status state
+    while :; do
+        status="$(request GET restore/status)" || return 1
+        jq -e --arg id "${instance_id}" '.id == $id' <<<"${status}" >/dev/null || return 1
+        state="$(jq -r '.state' <<<"${status}")"
+        printf 'Restore: %s %s\n' "${state}" "$(jq -r '.stage // ""' <<<"${status}")"
+        case ${state} in
+            succeeded|completed|finished) echo 'Restore completed.'; return 0 ;;
+            rolled_back) echo 'Restore was rolled back safely. The previous server was kept.'; return 1 ;;
+            recovery_required|needs_attention|failed|interrupted)
+                echo 'Restore needs recovery. Run Restore for this same server again to retry recovery.' >&2
+                return 1 ;;
+            idle) echo 'Restore has not started.' >&2; return 1 ;;
+        esac
+        sleep 2
+    done
+}
+status="$(request GET restore/status)" || exit 1
+jq -e --arg id "${instance_id}" '.id == $id' <<<"${status}" >/dev/null || exit 1
+if [[ $(jq -r '.recovery_required // false' <<<"${status}") == true ]]; then
+    echo 'The selected server has an interrupted Restore.'
+    read -r -p 'Type RECOVER to allow safe recovery interruption: ' confirmation
+    [[ ${confirmation} == RECOVER ]] || { echo 'Recovery cancelled.'; exit 0; }
+    request POST restore/recover '{"confirm_players":true}' >/dev/null || exit 1
+    monitor
+    exit $?
+fi
+case "$(jq -r '.state' <<<"${status}")" in
+    idle|succeeded|completed|finished|rolled_back|failed|interrupted) ;;
+    *) monitor; exit $? ;;
+esac
+backups="$(request GET inventory)" || exit 1
+jq -e --arg id "${instance_id}" '.id == $id and (.backups | type == "array" and all(.[]; .id == $id))' <<<"${backups}" >/dev/null || exit 1
+mapfile -t archives < <(jq -r '.backups[].archive' <<<"${backups}")
+(( ${#archives[@]} > 0 )) || { echo 'No completed backups exist for this server. Nothing was changed.'; exit 0; }
+archive="$(jui_choose 'Restore full Minecraft data from backup' "${archives[@]}")" || { echo 'Restore cancelled.'; exit 0; }
+jq -e --arg archive "${archive}" 'any(.backups[]; .archive == $archive)' <<<"${backups}" >/dev/null || exit 1
+plan="$(request POST restore/plan "$(jq -cn --arg archive "${archive}" '{archive:$archive}')")" || exit 1
+jq -e --arg id "${instance_id}" --arg archive "${archive}" '.metadata.id == $id and .metadata.archive == $archive and .integrity == "verified" and (.plan_id | type == "string")' <<<"${plan}" >/dev/null || exit 1
+printf 'Selected backup: %s\nBackup version: %s\nCurrent version: %s\n' "${archive}" "$(jq -r '.metadata.version' <<<"${plan}")" "$(jq -r '.current_version' <<<"${plan}")"
+echo 'Restore replaces the complete persistent data of this selected server only. Current data remains protected until runtime verification succeeds.'
+players=false
+if [[ $(jq -r '.players_confirmation_required' <<<"${plan}") == true ]]; then
+    read -r -p 'Type YES to allow interruption of online players with the safe shutdown countdown: ' confirmation
+    [[ ${confirmation} == YES ]] || { echo 'Restore cancelled.'; exit 0; }
+    players=true
+fi
+read -r -p 'Type RESTORE to replace this server data: ' confirmation
+[[ ${confirmation} == RESTORE ]] || { echo 'Restore cancelled.'; exit 0; }
+payload="$(jq -cn --arg archive "${archive}" --arg plan "$(jq -r '.plan_id' <<<"${plan}")" --argjson players "${players}" '{archive:$archive,plan_id:$plan,confirm_destructive:true,confirm_players:$players}')"
+request POST restore/apply "${payload}" >/dev/null || exit 1
+monitor

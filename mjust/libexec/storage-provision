@@ -1,0 +1,190 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/storage-common.sh
+require_root
+
+have_config=no
+[[ -r ${JV_CONFIG} ]] && have_config=yes
+
+apply_backup_to_existing_config() {
+    require_config
+    storage_apply_backup_globals
+    if [[ ${BACKUP_PATH} == "${DATA_PATH}" || ${BACKUP_PATH} == "${DATA_PATH}/"* ]]; then
+        echo 'ERROR: backup path cannot be the Minecraft data directory or a child of it.' >&2
+        return 1
+    fi
+    if [[ ${BACKUP_TYPE} == nfs || ${BACKUP_TYPE} == smb ]]; then
+        mkdir -p -- "${BACKUP_PATH}"
+    else
+        install -d -m0700 -o root -g root "${BACKUP_PATH}"
+    fi
+    [[ -w ${BACKUP_PATH} ]] || { echo "ERROR: backup path is not writable: ${BACKUP_PATH}" >&2; return 1; }
+    write_main_config
+    render_runtime
+    echo "Backup storage updated: ${BACKUP_PATH}"
+}
+
+finish_pre_setup_storage() {
+    echo
+    echo 'Storage is provisioned and mounted.'
+    echo "Mount point: ${STORAGE_MOUNT_POINT}"
+    echo "Suggested path: ${STORAGE_PATH}"
+    echo 'Run mjust setup and choose the matching storage option; the target is now ready.'
+}
+
+finish_backup_selection() {
+    if [[ ${have_config} == yes ]]; then
+        apply_backup_to_existing_config
+    else
+        finish_pre_setup_storage
+    fi
+}
+
+provision_backup_mode() {
+    local rc
+    if [[ ${have_config} == yes ]]; then
+        /usr/libexec/justvoxel/mjust/backup-storage backup
+        return $?
+    fi
+    if storage_prepare_backup_interactive yes; then
+        :
+    else
+        rc=$?
+        (( rc == 2 )) && return 2
+        return "${rc}"
+    fi
+    finish_backup_selection
+}
+
+provision_system_backup() {
+    if [[ ${have_config} == yes ]]; then
+        /usr/libexec/justvoxel/mjust/backup-storage system
+        return $?
+    fi
+    STORAGE_TYPE=system
+    STORAGE_MOUNT_POINT=''
+    STORAGE_EXPECTED_UUID=''
+    STORAGE_EXPECTED_SOURCE=''
+    STORAGE_PATH="$(prompt_default 'Backup directory' '/var/lib/justvoxel/backups')"
+    STORAGE_PATH="$(realpath -m -- "${STORAGE_PATH}")"
+    validate_storage_path "${STORAGE_PATH}" || {
+        echo 'ERROR: invalid backup directory.' >&2
+        return 1
+    }
+    storage_apply_backup_globals
+    finish_backup_selection
+}
+
+provision_specific() {
+    local mode="$1"
+    if [[ ${have_config} == yes ]]; then
+        /usr/libexec/justvoxel/mjust/backup-storage "${mode}"
+        return $?
+    fi
+    case "${mode}" in
+        disk) storage_prepare_whole_disk backup ;;
+        partition) storage_prepare_existing_partition backup ;;
+        free) storage_prepare_free_partition backup ;;
+    esac
+    finish_backup_selection
+}
+
+provision_network() {
+    local network_choice
+    if [[ ${have_config} == yes ]]; then
+        /usr/libexec/justvoxel/mjust/backup-storage network
+        return $?
+    fi
+    network_choice="$(jui_choose 'Network backup type' 'NFS' 'SMB/CIFS' 'Back')" || return 2
+    case "${network_choice}" in
+        'NFS') storage_prepare_nfs ;;
+        'SMB/CIFS') storage_prepare_smb ;;
+        'Back') return 2 ;;
+        *) return 2 ;;
+    esac
+    finish_backup_selection
+}
+
+storage_menu() {
+    local choice rc
+    local -a options=(
+        'Dedicated disk / USB backup storage'
+        'Existing partition / filesystem backup storage'
+        'Use unallocated disk space for backup storage'
+        'Network backup storage (NFS / SMB)'
+        'Directory on the system filesystem'
+    )
+    if [[ ${have_config} == yes ]]; then
+        options+=(
+            'Migrate Minecraft data to local storage'
+            'Show storage plan / devices'
+            'Back'
+        )
+    else
+        options+=(
+            'Show storage plan / devices'
+            'Back'
+        )
+    fi
+
+    while true; do
+        choice="$(jui_choose 'Storage management' "${options[@]}")" || return 0
+        case "${choice}" in
+            'Dedicated disk / USB backup storage') provision_specific disk ;;
+            'Existing partition / filesystem backup storage') provision_specific partition ;;
+            'Use unallocated disk space for backup storage') provision_specific free ;;
+            'Network backup storage (NFS / SMB)')
+                if provision_network; then :; else rc=$?; (( rc == 2 )) || return "${rc}"; fi
+                ;;
+            'Directory on the system filesystem') provision_system_backup ;;
+            'Migrate Minecraft data to local storage') /usr/libexec/justvoxel/mjust/data-migration ;;
+            'Show storage plan / devices') /usr/libexec/justvoxel/mjust/storage-plan ;;
+            'Back') return 0 ;;
+        esac
+    done
+}
+
+action="${1:-menu}"
+case "${action}" in
+    menu)
+        storage_menu
+        ;;
+    backup)
+        if provision_backup_mode; then
+            :
+        else
+            rc=$?
+            (( rc == 2 )) && exit 0
+            exit "${rc}"
+        fi
+        ;;
+    disk)
+        provision_specific disk
+        ;;
+    partition)
+        provision_specific partition
+        ;;
+    free)
+        provision_specific free
+        ;;
+    network)
+        if provision_network; then
+            :
+        else
+            rc=$?
+            (( rc == 2 )) && exit 0
+            exit "${rc}"
+        fi
+        ;;
+    system)
+        provision_system_backup
+        ;;
+    migrate)
+        /usr/libexec/justvoxel/mjust/data-migration
+        ;;
+    *)
+        echo 'Usage: storage-provision {menu|backup|disk|partition|free|network|system|migrate}' >&2
+        exit 2
+        ;;
+esac

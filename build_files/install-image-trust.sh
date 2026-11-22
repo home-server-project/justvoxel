@@ -7,11 +7,16 @@ if [[ "$#" -lt 1 ]]; then
 fi
 
 POLICY="/etc/containers/policy.json"
+VENDOR_POLICY="/usr/share/containers/policy.json"
 KEY="/usr/lib/pki/containers/home-server-project.pub"
 SIGSTORE_REGISTRIES="/etc/containers/registries.d/ghcr.io-home-server-project.yaml"
 
 [[ -f /ctx/cosign.pub ]] || { echo "ERROR: /ctx/cosign.pub is missing."; exit 1; }
-[[ -f "${POLICY}" ]] || { echo "ERROR: ${POLICY} is missing."; exit 1; }
+policy_source="${POLICY}"
+if [[ ! -f "${policy_source}" ]]; then
+    policy_source="${VENDOR_POLICY}"
+    [[ -f "${policy_source}" ]] || { echo "ERROR: Neither ${POLICY} nor ${VENDOR_POLICY} exists."; exit 1; }
+fi
 command -v jq >/dev/null 2>&1
 
 install -Dm0644 /ctx/cosign.pub "${KEY}"
@@ -19,7 +24,7 @@ install -Dm0644 /ctx/cosign.pub "${KEY}"
 working_policy="$(mktemp)"
 next_policy="$(mktemp)"
 trap 'rm -f "${working_policy}" "${next_policy}"' EXIT
-cp "${POLICY}" "${working_policy}"
+cp "${policy_source}" "${working_policy}"
 
 for image_repo in "$@"; do
     jq \
@@ -40,7 +45,7 @@ for image_repo in "$@"; do
     next_policy="$(mktemp)"
 done
 
-install -m0644 "${working_policy}" "${POLICY}"
+install -Dm0644 "${working_policy}" "${POLICY}"
 install -d -m0755 "$(dirname "${SIGSTORE_REGISTRIES}")"
 {
     echo "docker:"

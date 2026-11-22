@@ -1,0 +1,616 @@
+package main
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"os/exec"
+	"os/signal"
+	"os/user"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+)
+
+const (
+	managementAPI = "v1"
+	stateDir      = "/var/lib/justvoxel/webui"
+	metadataPath  = "/usr/lib/justvoxel/webui-release.json"
+	statusHelper  = "/usr/libexec/justvoxel/mjust/web-status-json"
+	passwordChars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
+)
+
+const (
+	argonMemory      = 64 * 1024
+	argonIterations  = 3
+	argonParallelism = 2
+	argonKeyLength   = 32
+)
+
+type releaseMetadata struct {
+	Version       string `json:"version"`
+	SourceCommit  string `json:"source_commit"`
+	ManagementAPI string `json:"management_api"`
+	BuildDate     string `json:"build_date"`
+}
+
+type session struct {
+	Username        string
+	Role            principalRole
+	AuthSource      authSource
+	WebUserID       int64
+	ConnectionID    string
+	ConnectionLevel int
+
+	Created    time.Time
+	LastSeen   time.Time
+	MustChange bool
+	Challenge  *twoFactorChallenge
+	Enrollment *twoFactorEnrollment
+}
+
+type server struct {
+	webUID     uint32
+	store      *webUIStore
+	operations *operationStore
+
+	telegramMu          sync.Mutex
+	discordMu           sync.Mutex
+	discordRuntime      *discordRuntime
+	discordWake         chan struct{}
+	discordUnavailable  bool
+	discordNewGateway   discordGatewayFactory
+	discordNewREST      func(string) discordREST
+	telegramExecutionMu sync.RWMutex
+	telegramPollCancel  context.CancelFunc
+	gatewayMu           sync.RWMutex
+	systemUpdateMu      sync.Mutex
+	fileBrowserMu       sync.Mutex
+	terminalMu          sync.Mutex
+
+	discordRebootReconciling bool
+	discordRebootAfter       time.Time
+
+	routerOSMu          sync.Mutex
+	networkMu           sync.Mutex
+	networkTransactions map[string]networkCheckpointTransaction
+
+	twoFactorMu          sync.Mutex
+	adminFactorPath      string
+	secondFactorAttempts loginAttempts
+	mu                   sync.Mutex
+	sessions             map[string]session
+	failures             []time.Time
+	lockTill             time.Time
+}
+
+type peerUIDKey struct{}
+
+func main() {
+	log.SetFlags(log.LstdFlags | log.LUTC)
+	flag.Parse()
+	args := flag.Args()
+	if len(args) == 0 {
+		fatal("usage: justvoxel-management-agent <serve|bootstrap|password-reset|version>")
+	}
+
+	switch args[0] {
+	case "filebrowser-run":
+		if len(args) != 1 {
+			fatal("usage: justvoxel-management-agent filebrowser-run")
+		}
+		if err := runFileBrowserContainer(); err != nil {
+			fatal("File Browser could not start: %v", err)
+		}
+	case "bootstrap":
+		password, created, err := bootstrap()
+		if err != nil {
+			fatal("bootstrap: %v", err)
+		}
+		if created {
+			fmt.Println(password)
+		}
+	case "password-reset":
+		password, err := resetPassword()
+		if err != nil {
+			fatal("password reset: %v", err)
+		}
+		fmt.Println(password)
+	case "serve":
+		socket := "/run/justvoxel/management.sock"
+		if len(args) > 2 || (len(args) == 2 && args[1] == "") {
+			fatal("usage: justvoxel-management-agent serve [socket]")
+		}
+		if len(args) == 2 {
+			socket = args[1]
+		}
+		if err := serve(socket); err != nil {
+			fatal("serve: %v", err)
+		}
+	case "factory-reset-runtime-empty":
+		if os.Geteuid() != 0 || len(args) != 1 {
+			fatal("factory reset runtime: invalid command")
+		}
+		if err := instanceRuntimes.factoryResetEmpty(context.Background()); err != nil {
+			fatal("factory reset runtime: managed runtime remains or cannot be inspected")
+		}
+	case "data-migration-runtime":
+		if err := dataMigrationRuntimeCommand(context.Background(), args[1:]); err != nil {
+			fatal("data migration runtime: %v", err)
+		}
+	case "instance-container-history":
+		if err := containerHistoryCommand(context.Background(), args[1:]); err != nil {
+			fatal("container image history: %v", err)
+		}
+	case "system-update-expect":
+		if os.Geteuid() != 0 || len(args) != 2 {
+			fatal("invalid system update expectation")
+		}
+		if err := prepareSystemUpdateExpectation(context.Background(), args[1]); err != nil {
+			fatal("Update reboot evidence could not be saved: %v", err)
+		}
+	case "system-update-activate":
+		if os.Geteuid() != 0 || len(args) != 2 {
+			fatal("invalid system update activation")
+		}
+		if err := activateDownloadedSystemUpdate(context.Background(), args[1]); err != nil {
+			fatal("The staged update could not be prepared. Reboot was cancelled: %v", err)
+		}
+
+	case "instance-version-publish", "instance-version-backup", "instance-container-publish", "instance-switch-content-verify":
+		if err := instanceVersionCommand(context.Background(), args); err != nil {
+			fatal("instance version operation: %v", err)
+		}
+	case "version":
+		meta, _ := readReleaseMetadata()
+		fmt.Printf("JustVoxel Management API %s\nWebUI %s\n", managementAPI, valueOr(meta.Version, "unknown"))
+	default:
+		fatal("unknown command %q", args[0])
+	}
+}
+
+func fatal(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, "ERROR: "+format+"\n", args...)
+	os.Exit(1)
+}
+
+func bootstrap() (string, bool, error) {
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		return "", false, err
+	}
+	if _, err := currentAuthMode(); err != nil {
+		return "", false, err
+	}
+	return "", false, nil
+}
+
+func resetPassword() (string, error) {
+	mode, err := currentAuthMode()
+	if err != nil {
+		return "", err
+	}
+	if mode != authModeSeparate {
+		return "", errors.New("System account mode uses the Linux voxel password; use passwd voxel")
+	}
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		return "", err
+	}
+	password, err := randomPassword(14)
+	if err != nil {
+		return "", err
+	}
+	if err := writeLocalAdministrator(password); err != nil {
+		return "", err
+	}
+	return password, nil
+}
+
+func serve(socket string) error {
+	reconcileConfiguredStorageAtStartup()
+	if err := minecraftInstances.reconcileNamesAtStartup(); err != nil {
+		log.Printf("instance name directory reconciliation: %v", err)
+	}
+	if _, _, err := bootstrap(); err != nil {
+		return err
+	}
+	store, err := openWebUIStore(webUIDatabasePath)
+	if err != nil {
+		return fmt.Errorf("open WebUI identity database: %w", err)
+	}
+	defer store.close()
+
+	operations, err := openOperationStore(operationStateDir)
+	if err != nil {
+		return fmt.Errorf("open operation journal: %w", err)
+	}
+	defer operations.close()
+	if err := reconcileMinecraftUpdateFailureAtStartup(operations); err != nil {
+		log.Printf("Minecraft update startup reconciliation: %v; startup continues", err)
+	}
+
+	webAccount, err := user.Lookup("justvoxel-web")
+	if err != nil {
+		return fmt.Errorf("lookup justvoxel-web: %w", err)
+	}
+	uid64, err := strconv.ParseUint(webAccount.Uid, 10, 32)
+	if err != nil {
+		return fmt.Errorf("parse justvoxel-web uid: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(socket), 0o750); err != nil {
+		return err
+	}
+	_ = os.Remove(socket)
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
+	if err := os.Chmod(socket, 0o660); err != nil {
+		return err
+	}
+
+	s := &server{
+		webUID:              uint32(uid64),
+		store:               store,
+		operations:          operations,
+		networkTransactions: make(map[string]networkCheckpointTransaction),
+		sessions:            make(map[string]session),
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/auth/login", s.providerLogin)
+	registerTwoFactorRoutes(mux, s)
+	mux.HandleFunc("POST /v1/auth/logout", s.logout)
+	mux.HandleFunc("POST /v1/auth/password", s.providerChangePassword)
+	mux.HandleFunc("GET /v1/auth", s.authStatus)
+	mux.HandleFunc("POST /v1/auth/mode", s.changeAuthMode)
+	mux.HandleFunc("GET /v1/session", s.sessionStatus)
+	mux.HandleFunc("GET /v1/info", s.info)
+	mux.HandleFunc("GET /v1/status", s.status)
+	registerGatewayRoutes(mux, s)
+	registerTelegramRoutes(mux, s)
+	registerDiscordRoutes(mux, s)
+	registerAdminUserRoutes(mux, s)
+	registerAdminActivityRoutes(mux, s)
+	registerAdminDiscoveryRoutes(mux, s)
+	registerAdminDateTimeRoutes(mux, s)
+	registerAdminVersionStatusRoutes(mux, s)
+	registerAdminPluginRoutes(mux, s)
+	registerAdminValidationRoutes(mux, s)
+	registerAdminBackupDeleteRoutes(mux, s)
+	registerAdminMigrationExportRoutes(mux, s)
+	registerAdminMigrationRecoveryRoutes(mux, s)
+	registerAdminMigrationImportRoutes(mux, s)
+	registerOperationalRoutes(mux, s)
+	registerAdminMinecraftResetRoutes(mux, s)
+	registerAdminMinecraftResetAllRoutes(mux, s)
+	registerAdminStartOverRoutes(mux, s)
+	registerAdminFactoryResetRoutes(mux, s)
+	registerMinecraftRoutes(mux, s)
+	registerAdminSystemActionRoutes(mux, s)
+	registerAdminSystemUpdateRoutes(mux, s)
+	registerAdminSystemUpdateRebootRoutes(mux, s)
+	registerSystemMonitorProfileRoutes(mux, s)
+	registerFileBrowserRoutes(mux, s)
+	registerTerminalRoutes(mux, s)
+	registerUPSRoutes(mux, s)
+	registerNetworkRoutes(mux, s)
+
+	httpServer := &http.Server{
+		Handler:           s.requirePeer(mux),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      20 * time.Minute,
+		IdleTimeout:       60 * time.Second,
+		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
+			uid, err := peerUID(c)
+			if err != nil {
+				uid = ^uint32(0)
+			}
+			return context.WithValue(ctx, peerUIDKey{}, uid)
+		},
+	}
+	telegramContext, stopTelegram := context.WithCancel(context.Background())
+	telegramDone := s.startTelegram(telegramContext)
+	defer func() { stopTelegram(); <-telegramDone }()
+	discordContext, stopDiscord := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	discordDone := s.startDiscord(discordContext)
+	defer func() { stopDiscord(); <-discordDone }()
+	log.Printf("JustVoxel Management API %s listening on %s", managementAPI, socket)
+	serveDone := make(chan struct{})
+	defer close(serveDone)
+	go func() {
+		select {
+		case <-discordContext.Done():
+			_ = listener.Close()
+		case <-serveDone:
+		}
+	}()
+	err = httpServer.Serve(listener)
+	if discordContext.Err() != nil && errors.Is(err, net.ErrClosed) {
+		return nil
+	}
+	return err
+}
+
+func (s *server) requirePeer(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		uid, ok := r.Context().Value(peerUIDKey{}).(uint32)
+		if !ok || (uid != 0 && uid != s.webUID) {
+			writeError(w, http.StatusForbidden, "peer not permitted")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func peerUID(conn net.Conn) (uint32, error) {
+	unixConn, ok := conn.(*net.UnixConn)
+	if !ok {
+		return 0, errors.New("not a Unix connection")
+	}
+	raw, err := unixConn.SyscallConn()
+	if err != nil {
+		return 0, err
+	}
+	var cred *syscall.Ucred
+	var sockErr error
+	if err := raw.Control(func(fd uintptr) {
+		cred, sockErr = syscall.GetsockoptUcred(int(fd), syscall.SOL_SOCKET, syscall.SO_PEERCRED)
+	}); err != nil {
+		return 0, err
+	}
+	if sockErr != nil {
+		return 0, sockErr
+	}
+	return cred.Uid, nil
+}
+
+func (s *server) logout(w http.ResponseWriter, r *http.Request) {
+	token, _, ok := s.authorize(r, true)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "invalid session")
+		return
+	}
+	s.mu.Lock()
+	delete(s.sessions, token)
+	s.mu.Unlock()
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *server) info(w http.ResponseWriter, _ *http.Request) {
+	meta, _ := readReleaseMetadata()
+	variant, _ := os.ReadFile("/usr/lib/justvoxel/variant")
+	writeJSON(w, http.StatusOK, map[string]string{
+		"management_api": managementAPI,
+		"webui_version":  valueOr(meta.Version, "unknown"),
+		"variant":        strings.TrimSpace(string(variant)),
+	})
+}
+
+func (s *server) status(w http.ResponseWriter, r *http.Request) {
+	_, sess, ok := s.authorize(r, false)
+	if !ok {
+		if sess.MustChange {
+			writeError(w, http.StatusForbidden, "password change required")
+		} else {
+			writeError(w, http.StatusUnauthorized, "invalid session")
+		}
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	args := []string{"status"}
+	if r.URL.Query().Get("details") == "1" {
+		args = append(args, "--details")
+	}
+	cmd := exec.CommandContext(ctx, statusHelper, args...)
+	output, err := cmd.Output()
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "status collection failed")
+		return
+	}
+	if !json.Valid(output) {
+		writeError(w, http.StatusInternalServerError, "status collector returned invalid data")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(output)
+}
+
+func (s *server) authorize(r *http.Request, allowMustChange bool) (string, session, bool) {
+	if sess, ok := r.Context().Value(gatewayPrincipalKey{}).(session); ok {
+		return "", sess, true
+	}
+	if sess, ok := localRootAdministrator(r); ok {
+		return "", sess, true
+	}
+	header := r.Header.Get("Authorization")
+	if !strings.HasPrefix(header, "Bearer ") {
+		return "", session{}, false
+	}
+	token := strings.TrimSpace(strings.TrimPrefix(header, "Bearer "))
+	if token == "" {
+		return token, session{}, false
+	}
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.sessions[token]
+	if !ok || sess.Challenge != nil {
+		return token, session{}, false
+	}
+	if now.Sub(sess.Created) > 12*time.Hour || now.Sub(sess.LastSeen) > 30*time.Minute {
+		delete(s.sessions, token)
+		return token, session{}, false
+	}
+	if sess.MustChange && !allowMustChange {
+		return token, sess, false
+	}
+	sess.LastSeen = now
+	s.sessions[token] = sess
+	return token, sess, true
+}
+
+type loginAttempts struct {
+	failures []time.Time
+	lockTill time.Time
+}
+
+func (s *server) loginDelay() time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	attempts := loginAttempts{s.failures, s.lockTill}
+	delay := attempts.delay()
+	s.failures = attempts.failures
+	return delay
+}
+
+func (a *loginAttempts) delay() time.Duration {
+	now := time.Now()
+	if now.Before(a.lockTill) {
+		return time.Until(a.lockTill)
+	}
+	cutoff := now.Add(-5 * time.Minute)
+	kept := a.failures[:0]
+	for _, failure := range a.failures {
+		if failure.After(cutoff) {
+			kept = append(kept, failure)
+		}
+	}
+	a.failures = kept
+	return 0
+}
+
+func (s *server) recordFailure() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	attempts := loginAttempts{s.failures, s.lockTill}
+	attempts.recordFailure()
+	s.failures, s.lockTill = attempts.failures, attempts.lockTill
+}
+
+func (a *loginAttempts) recordFailure() {
+	now := time.Now()
+	a.failures = append(a.failures, now)
+	cutoff := now.Add(-5 * time.Minute)
+	count := 0
+	for _, failure := range a.failures {
+		if failure.After(cutoff) {
+			count++
+		}
+	}
+	if count >= 5 {
+		a.lockTill = now.Add(30 * time.Second)
+	}
+}
+
+func (s *server) clearFailures() {
+	s.mu.Lock()
+	s.failures = nil
+	s.lockTill = time.Time{}
+	s.mu.Unlock()
+}
+
+func atomicWrite(path string, data []byte, mode os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err := tmp.Chmod(mode); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
+}
+
+func randomPassword(length int) (string, error) {
+	out := make([]byte, length)
+	limit := byte(256 - (256 % len(passwordChars)))
+	for i := range out {
+		for {
+			var b [1]byte
+			if _, err := rand.Read(b[:]); err != nil {
+				return "", err
+			}
+			if b[0] < limit {
+				out[i] = passwordChars[int(b[0])%len(passwordChars)]
+				break
+			}
+		}
+	}
+	return string(out), nil
+}
+
+func randomToken(bytes int) (string, error) {
+	buf := make([]byte, bytes)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+func readReleaseMetadata() (releaseMetadata, error) {
+	data, err := os.ReadFile(metadataPath)
+	if err != nil {
+		return releaseMetadata{}, err
+	}
+	var meta releaseMetadata
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return releaseMetadata{}, err
+	}
+	return meta, nil
+}
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, target any) bool {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16*1024))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON request")
+		return false
+	}
+	return true
+}
+
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
+}
+
+func writeError(w http.ResponseWriter, status int, message string) {
+	writeJSON(w, status, map[string]string{"error": message})
+}
+
+func valueOr(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
+}

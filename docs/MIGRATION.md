@@ -1,0 +1,494 @@
+# JustVoxel server migration
+
+## Shared Management API status
+
+Server migration **Export, Import, and Recovery** now share the authoritative Management API/backend. The Agent owns reviewed planning and fingerprints, the exclusive server-migration operation family, persistent operation tracking, player interruption requirements, source and destination revalidation, temporary local/configured-backup/device/NFS/SMB transport handling, transactional execution, verification, rollback state, and conservative restart/interruption recovery.
+
+`mjust export`, `mjust import`, `mjust migration-recover`, and the Administrator
+WebUI Server Migration workflows are thin frontends over the same shared
+Management API. Every workflow first binds one existing immutable `jv-…`
+instance. Import preserves the supported source choices without returning mount,
+storage, rollback, or Minecraft lifecycle authority to either frontend. Export,
+Import, Recovery, persistent operation state, reconnect behavior, and recovery
+handoff are shared through the Management Agent.
+
+### WebUI Server Migration
+
+Administrators can open **Storage & Backups → Server Migration** in the WebUI. Its normal tabs are **Export**, **Import**, and **Switch**. Recovery is contextual through existing operation links when Export or Import needs attention. Export, Import, and Recovery use the same Agent discovery, reviewed planning, fingerprints, Apply endpoints, persistent operation journal, rollback semantics, and needs-attention state used by `mjust`.
+
+The WebUI does not mount filesystems, manipulate Minecraft data, execute migration
+helpers, or implement storage policy directly. Temporary SMB credentials are
+supplied only for the current planning or Apply request. Export and source SMB
+passwords are Apply-only. They are not stored in reviewed plans, URLs, hidden
+persistent state, or the operation journal.
+
+After a successful Export, **Done** returns to a fresh Export screen and clears the completed operation from the workspace URL. It keeps the operation journal and diagnostic log. Export success and failure views offer **Logs**, opening System → Logs → Migration and selecting that operation's log when it exists. The log records the reviewed normalized bundle filename, destination, and destination type, and repeats them after successful completion; existing secret and host-identity redaction still applies.
+
+Refreshing or reopening a migration reconnects to the selected instance's current
+persistent Agent operation. If Import reaches `needs_attention`, the WebUI exposes
+the Agent-owned Recovery handoff for that same instance. Browser file upload is
+intentionally outside migration v1; imported data must already be reachable
+through a supported local, configured-backup, device/USB, NFS, or SMB source.
+
+JustVoxel migration moves the **complete persistent Minecraft server state** to another JustVoxel installation. It is separate from normal JustVoxel Backup/Restore.
+
+- **Backup / Restore** protects the current appliance and uses its configured backup destination.
+- **Export / Import** is for reinstall, VM-to-VM, VM-to-physical-hardware, physical-hardware-to-VM, another machine, or an existing external Paper server.
+
+The normal commands are:
+
+```text
+mjust export
+mjust import
+```
+
+A native JustVoxel export is one portable `justvoxel-migration-*.tar.gz` file. It contains the full persistent Minecraft data tree, a versioned source manifest, and a SHA-256 integrity index. SHA-256 detects corruption; it does **not** prove who created the file or make an untrusted bundle trusted.
+
+## Supported sources in migration v1
+
+Supported:
+
+- JustVoxel native migration bundle from Paper or Purpur
+- existing JustVoxel `minecraft-*.tar.gz` backup
+- Paper server directory/archive
+- `itzg/minecraft-server` using `TYPE=PAPER`
+- vanilla server -> Paper/Purpur, with an explicit conversion warning
+
+Generic import formats:
+
+- directory
+- `.tar.gz` / `.tgz`
+- normal `.tar`
+- `.zip`
+
+ZIP uses Python's built-in ZIP support already present in JustVoxel; no additional archive package is installed. 7z and RAR are not supported.
+
+Not supported automatically in v1:
+
+- Spigot
+- Fabric
+- Forge
+- NeoForge
+- Quilt
+- native Bedrock
+- modpacks and arbitrary modded launchers
+- arbitrary custom Minecraft launchers
+
+If one of those is detected, JustVoxel stops before live data is changed.
+
+## What migration preserves
+
+Migration copies the complete persistent server directory rather than rebuilding a world from selected pieces. That includes, when present:
+
+- Overworld, Nether and End
+- player data, inventories and positions
+- advancements and statistics
+- whitelist, bans and ops
+- plugins and plugin configuration
+- Geyser/Floodgate configuration
+- Floodgate keys
+- `server.properties`
+- other persistent Minecraft/Paper data
+
+Destination-machine state is deliberately recreated rather than blindly copied. Disk UUIDs, old mount paths, old backup paths, system accounts, SSH configuration, WebUI credentials, host identity, bootc state, firewall machine state and the old RCON password are not imported as destination configuration.
+
+The source Java/Bedrock ports are hints. Destination ports are checked locally. Memory and UID/GID belong to the destination machine. RCON credentials are regenerated.
+
+## Minecraft version safety
+
+Migration is **not** a Minecraft upgrade.
+
+JustVoxel determines the exact source Minecraft version from native metadata or recognizable Paper/itzg server evidence. The first imported start is pinned to that version. It never switches an imported world to `LATEST` automatically.
+
+If the source version cannot be determined, the administrator must provide the
+exact source version. If JustVoxel cannot confirm that exact version for the
+selected Paper or Purpur destination, import stops before activation.
+
+After a migration succeeds and gameplay has been checked, a later version change is a separate operation:
+
+```text
+mjust update-minecraft
+```
+
+Opening a world with a newer Minecraft version can modify it irreversibly, which is why migration and upgrade remain separate.
+
+## Java online-mode / player identity safety
+
+Complete migration v1 requires Java `online-mode=true`.
+
+If the source reports `online-mode=false`, automatic complete migration is refused. Online-mode and offline-mode can assign different UUID identities, which can disconnect the correct player from inventory, position, advancement, whitelist, ops and plugin data.
+
+If source identity mode cannot be determined, JustVoxel requires the administrator to explicitly confirm that the source used `online-mode=true` before activation. If a native manifest and `server.properties` disagree, the import is refused.
+
+Geyser/Floodgate Bedrock identity is handled separately and does not make an offline-mode Java migration safe.
+
+## Imported plugins are executable code
+
+For an external Paper/itzg import, JustVoxel warns when plugin JARs are present. Minecraft plugins are executable server code and will run inside the Minecraft container.
+
+JustVoxel preserves them; it does not silently remove or disable them. Only import plugins from a source you trust.
+
+Native JustVoxel-to-JustVoxel migration does not repeat the external-code warning as an alarm on every move.
+
+## EULA
+
+A source server may contain `eula.txt`. That file is server data, not destination
+administrator consent. Import targets an already-created instance whose reviewed
+setup recorded its own EULA acceptance; JustVoxel never infers destination
+acceptance from an imported `eula.txt`.
+
+## Transport choices
+
+`mjust import` and `mjust export` can use:
+
+- a local path
+- an already-mounted filesystem
+- an attached disk/partition
+- USB/removable media
+- the currently configured JustVoxel backup location
+- a one-time NFS share
+- a one-time SMB/CIFS share
+
+Temporary NFS/SMB migration mounts do not add `/etc/fstab` entries. Temporary SMB credentials are created only below `/run/justvoxel-migration`, mode `0600`, and are deleted during cleanup.
+
+### Temporary removable-media filesystems
+
+Migration v1 allows temporary mounts of these existing filesystems:
+
+- ext4
+- XFS
+- Btrfs
+- exFAT
+- FAT32/vfat
+
+The actual mount is attempted by the running JustVoxel kernel. If a filesystem is recognized on the media but is not mountable by the running image/kernel, migration fails clearly without formatting or modifying the media. This is important for Btrfs/exFAT because kernel capability can vary by appliance/kernel build.
+
+NTFS is intentionally unsupported in migration v1. JustVoxel does not add an NTFS package or use a fallback userspace driver automatically.
+
+Normal migration **never formats removable media**.
+
+For media JustVoxel mounts itself:
+
+- import uses read-only mounting where possible, with `nodev,nosuid,noexec`;
+- export uses a writable mount with `nodev,nosuid,noexec`;
+- the media is unmounted after completion;
+- JustVoxel reports when it is safe to remove a USB device.
+
+If the administrator mounted the filesystem before starting migration, JustVoxel uses that existing mount and does **not** unmount it afterward.
+
+FAT32/vfat has a single-file size limit of 4 GiB minus 1 byte. Export performs a conservative preflight and refuses a migration that cannot safely be guaranteed to fit as one file.
+
+## JustVoxel -> JustVoxel
+
+On the source JustVoxel, select the instance to export:
+
+```text
+mjust export
+```
+
+Choose a destination such as local storage, USB, configured backup storage, temporary NFS or temporary SMB. Export acquires the normal Minecraft maintenance lock, checks players, gracefully stops a running server, captures the full persistent data tree, creates the manifest/integrity index, verifies the completed `.partial` archive, atomically renames it to the final `.tar.gz`, then restarts Minecraft only if export stopped it.
+
+Move the resulting file to the destination JustVoxel.
+
+On the destination, first create and select the destination instance:
+
+```text
+mjust import
+```
+
+Select the bundle. JustVoxel verifies SHA-256 integrity, source compatibility and
+exact Minecraft version before replacing that instance's data. Migration never
+selects a destination by archive name or friendly server name.
+
+## Existing JustVoxel backup
+
+An existing completed JustVoxel backup such as:
+
+```text
+minecraft-2026-09-15-043000.tar.gz
+```
+
+or a current backup named `minecraft-paper-2026-10-09-1506.tar.gz` can also be selected by `mjust import`. Current native exports use names like `justvoxel-migration-minecraft-paper-2026-10-09-1506.tar.gz`. Naming does not change archive contents or import compatibility.
+
+If its `.meta.json` sidecar is present, migration uses useful metadata. Older valid JustVoxel backups without the sidecar remain usable when the Minecraft data itself can be identified safely.
+
+This does not rename Backup/Restore into Migration. Normal `mjust restore` and `mjust restore-full` remain same-appliance recovery operations.
+
+## Existing itzg Docker Paper server
+
+These instructions assume `TYPE=PAPER` and persistent `/data`.
+
+1. Find the container and confirm that the persistent server data is mounted at `/data`:
+
+```text
+docker inspect <container-name>
+```
+
+Look in `Mounts` for the entry whose destination is `/data`. Identify its bind-mount source or Docker volume.
+
+2. Stop the Minecraft container cleanly:
+
+```text
+docker stop <container-name>
+```
+
+3. Archive the **complete `/data` contents**, not only the world directory. If `/srv/minecraft/data` is the host bind mount, for example:
+
+```text
+tar -C /srv/minecraft/data -czf paper-server.tar.gz .
+```
+
+A normal ZIP archive of the same complete server directory is also accepted.
+
+4. Move the archive to JustVoxel by local copy, attached disk, USB, NFS or SMB.
+
+5. Run:
+
+```text
+mjust import
+```
+
+JustVoxel should identify the server as `itzg/minecraft-server + Paper` when its Paper data markers are present. It does not require a JustVoxel manifest.
+
+Do not restart the original server and continue playing after taking the migration archive unless you intentionally plan to discard those later changes.
+
+## Existing itzg Podman Paper server
+
+The process is the same, using Podman:
+
+```text
+podman inspect <container-name>
+podman stop <container-name>
+```
+
+Find the persistent mount whose container destination is `/data`. Archive the complete host bind-mount directory or volume contents:
+
+```text
+tar -C /path/to/persistent/data -czf paper-server.tar.gz .
+```
+
+Then transfer the archive and run `mjust import` on JustVoxel.
+
+For a Quadlet deployment, the persistent host path is also normally visible in the Quadlet `Volume=...:/data...` entry.
+
+## Native / normal Paper server
+
+Stop Paper cleanly using the normal console/service method for that server.
+
+Archive the **server working directory** containing `server.properties`, the world directories, `plugins/`, whitelist/ops/bans and Paper configuration. Example:
+
+```text
+tar -C /srv/paper -czf paper-server.tar.gz .
+```
+
+Move that archive to JustVoxel and select it with `mjust import`.
+
+Do not archive only `world/`; that would not be a complete server migration.
+
+## Crafty Controller
+
+Stop the individual Minecraft server in Crafty before exporting it.
+
+Use the server's normal Crafty export/download when it contains the complete Minecraft server working directory. If Crafty provides a normal `.zip`, JustVoxel can import that ZIP directly; no ZIP -> tar.gz conversion is required.
+
+The selected archive/directory must ultimately contain the server's `server.properties`, world data and other persistent Minecraft files. Do not export Crafty's entire application/database and assume that is a Minecraft server directory.
+
+## PufferPanel
+
+Stop the Minecraft instance in PufferPanel.
+
+Identify that instance's Minecraft server data/working directory—the directory containing `server.properties`, worlds and plugins—and archive or copy that directory. Transfer it to JustVoxel and run `mjust import`.
+
+PufferPanel application configuration itself is not the migration source; the Minecraft instance data is.
+
+## AMP
+
+Stop the Minecraft instance in AMP.
+
+Export/copy the instance's Minecraft working directory containing `server.properties`, worlds and plugins. Transfer that directory/archive to JustVoxel and run `mjust import`.
+
+AMP host identity, users and AMP service configuration are not imported into JustVoxel.
+
+## VM migration examples
+
+Useful transfer choices for a JustVoxel VM include:
+
+- attach a second temporary virtual disk containing the migration archive;
+- copy the archive to the VM and choose Local file;
+- temporary NFS;
+- temporary SMB/CIFS.
+
+A disk used once as a migration source is mounted temporarily; selecting it for migration does not permanently adopt or reconfigure it as JustVoxel storage.
+
+## Physical-hardware migration examples
+
+Useful choices include:
+
+- USB drive/stick;
+- attached second disk/partition;
+- local copied archive;
+- temporary NFS;
+- temporary SMB/CIFS.
+
+For USB import, JustVoxel discovers devices, displays block-device details and requires an explicit selection. It does not pick a removable device automatically.
+
+## Temporary NFS
+
+Choose `Temporary NFS share` from Import or Export and enter a source such as:
+
+```text
+server:/srv/migration
+```
+
+The mount exists only for the operation. Import is mounted read-only; export is mounted writable. JustVoxel verifies the mounted source and unmounts it during cleanup. No permanent `/etc/fstab` entry is created.
+
+## Temporary SMB/CIFS
+
+Choose `Temporary SMB/CIFS share` and enter a source such as:
+
+```text
+//server/migration
+```
+
+Enter the temporary username/password when prompted. The password is not placed in `/etc/fstab` or on the command line. The temporary credential file lives below `/run/justvoxel-migration` with root-only permissions and is removed during success, cancellation or failure cleanup.
+
+This is a useful migration path between an existing Linux/Windows/NAS host and a disposable JustVoxel VM.
+
+## Import into a new JustVoxel appliance
+
+Complete First Setup, or use **Add Minecraft Server**, to create the destination
+instance before importing. Its setup establishes destination-owned storage,
+memory, ports, backup policy, runtime credentials, immutable identity, and EULA
+acceptance. Stop that instance, then open Server Migration and select it.
+
+Import means **replace the selected instance's persistent Minecraft server
+state**. It does not create an instance, adopt source disk paths or host identity,
+or silently target a first/default server. The imported source Minecraft version
+is pinned for its first start.
+
+JustVoxel stages and validates the candidate before asking for the final exact confirmation:
+
+```text
+Type IMPORT to continue:
+```
+
+The existing destination server is protected until the imported server passes runtime and full JustVoxel validation.
+
+## Transaction and automatic rollback
+
+Import never extracts directly over the live Minecraft data directory.
+
+The sequence is:
+
+1. identify and validate source;
+2. check archive/directory safety and available space;
+3. copy/extract to staging;
+4. identify server type, online-mode and exact Minecraft version;
+5. determine destination-specific configuration;
+6. acquire the shared Minecraft maintenance lock;
+7. perform a final player check;
+8. gracefully stop the selected Minecraft instance if required;
+9. preserve the old live data and destination runtime/firewall state;
+10. activate the staged server by same-filesystem rename;
+11. apply destination ownership and SELinux `container_file_t` labels;
+12. render destination runtime with a new RCON secret;
+13. start Minecraft;
+14. validate RCON, destination software/version, plugins, and Geyser/Floodgate when enabled;
+15. run appliance validation;
+16. remove transaction/safety data only after success.
+
+If imported runtime validation fails, JustVoxel attempts to restore the selected
+instance's old data, configuration, rendered environment, Quadlet/runtime files,
+backup unit/timer state, and Java/Bedrock firewall state.
+
+A successful rollback reports:
+
+```text
+Import failed.
+Original server restored and validated.
+```
+
+If rollback itself cannot be validated, JustVoxel reports a **CRITICAL** state and retains all recovery evidence under the `.justvoxel-import-*` transaction directory. Do not delete that recovery directory until the appliance is recovered.
+
+## Guided migration recovery
+
+Use `mjust migration-recover` when an Import leaves retained rollback/recovery evidence or an interrupted persistent migration operation requires administrator attention.
+
+Recovery is owned by the Management Agent and uses the same exclusive
+server-migration operation family as Export and Import. The Agent discovers
+retained Import recovery state for the selected instance, validates that exact
+configured destination, requires reviewed recovery confirmation, and removes
+transaction evidence only after the rollback state is safely finalized.
+
+If the Management Agent or appliance restarts during an active migration operation, the persistent operation journal is preserved conservatively as requiring attention rather than assuming success or silently restarting destructive work.
+
+## After migration
+
+After a successful import:
+
+```text
+mjust status
+mjust validate
+mjust backup
+```
+
+Also test the real clients you use, including Java and Bedrock when enabled, and reboot once to confirm normal persistence before decommissioning the source server.
+
+
+## Switch server software
+
+Software Switch moved from Minecraft Update into **Server Migration → Switch**.
+Minecraft Update now owns Container and Version only. Switch reuses the selected
+instance and Setup's eleven software cards and local artwork. It does not change
+Export/Import transports or archive formats. All cards remain visible:
+
+- **Current**: yellow, identifies current software, not selectable.
+- **Available**: at least one supported structural action can be reviewed.
+- **Not Supported**: dimmed and disabled; JustVoxel has no verified conversion path.
+
+Switch holds the exact installed Minecraft game version fixed. Runtime, image and
+managed cross-play evidence must be available for that exact version. Review
+binds Apply to selected-instance configuration, runtime evidence and current
+plugin/mod inventory and hashes. Changing Minecraft version is a separate
+Version operation. Target software remains pinned to the reviewed game version.
+
+The implemented structural path is the existing Paper, Purpur, Pufferfish and
+Leaf family. A fully verified target offers **Convert existing server** and
+**Clone and convert**. Incompatible or unknown/unverified plugin/mod releases
+block Convert and are listed by name when identified. Provider failures stay
+unverified. The Plugins & Mods link opens that existing workspace for the same
+server. Resolve content manually, then return or refresh to review again. Switch
+never deletes, disables, replaces, updates or downloads plugins or mods.
+
+Convert keeps the immutable instance ID, configured data location, ports, backup
+destination and ordinary settings, using reviewed maintenance, player-aware
+shutdown, a cold backup, exact-runtime verification and rollback. Clone creates
+a new ID through normal instance creation, uses a separate directory under the
+source's configured Minecraft root and the same backup destination, allocates
+new ports with existing reservation/binding checks, and derives its name from
+the source and target software. No path, backup destination or port choice is
+required. A running source stops only for a consistent backup/copy and resumes
+its previous state before clone conversion/verification. Original settings are
+restored after the copy. Verified clones are left stopped and support normal rename.
+
+A clone may be experimental when installed content cannot be proven compatible,
+but only inside the implemented structural family. Runtime failure never counts
+as success. Existing creation/runtime/restore cleanup and recovery preserve the
+original; retained Switch attention is handled in Switch, without routing an
+ordinary conversion through Export/Import Recovery. Recovery never retries the
+conversion automatically. Minecraft Network members must first leave Network
+before standalone conversion can be reviewed.
+
+Switch keeps the attempted software card selected while following an operation
+and showing its result. Opening Switch reconnects to work in progress or an
+operation that requires recovery. Administrators can find Switch progress,
+failure details and recovery results in **System Settings → Logs → Migration**.
+
+Spigot, Vanilla world transformations and mod-loader conversions currently remain
+Not Supported. In particular, Bukkit support does not make Spigot a safe member
+of the Paper family. Paper-to-Spigot is unsupported; direct Spigot-to-Paper
+migration is unsafe from 26.1 without the necessary verified world transformation.
+No automatic Vanilla intermediary is attempted. Fabric/Quilt and Forge/NeoForge
+names do not establish exact-version mod/dependency or historic world safety;
+removing installed mods does not establish it either. Java and native Bedrock
+world/runtime conversion is unsupported in both directions.

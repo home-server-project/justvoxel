@@ -1,0 +1,503 @@
+package server
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/home-server-project/justvoxel-webui/internal/api"
+)
+
+type fakeDiscoveryAPI struct {
+	fakeAPI
+	role             string
+	configuration    api.AdminConfigurationDiscovery
+	storage          api.AdminStorageDiscovery
+	defaults         api.AdminSetupDefaults
+	configurationHit int
+	storageHit       int
+	defaultsHit      int
+}
+
+type fakeStorageBrowserMigrationAPI struct {
+	fakeDiscoveryAPI
+	migration      api.AdminDataMigrationDiscoveryResponse
+	migrationCalls int
+}
+
+func (f *fakeDiscoveryAPI) Session(_ context.Context, session string) (api.SessionInfo, error) {
+	if session != "session-token" {
+		return api.SessionInfo{}, api.ErrUnauthorized
+	}
+	role := f.role
+	if role == "" {
+		role = "administrator"
+	}
+	return api.SessionInfo{Username: "voxel", Role: role, AuthSource: "system"}, nil
+}
+
+func (f *fakeDiscoveryAPI) AdminConfiguration(_ context.Context, session string) (api.AdminConfigurationDiscovery, error) {
+	if session != "session-token" {
+		return api.AdminConfigurationDiscovery{}, api.ErrUnauthorized
+	}
+	f.configurationHit++
+	return f.configuration, nil
+}
+
+func (f *fakeDiscoveryAPI) AdminStorage(_ context.Context, session string) (api.AdminStorageDiscovery, error) {
+	if session != "session-token" {
+		return api.AdminStorageDiscovery{}, api.ErrUnauthorized
+	}
+	f.storageHit++
+	return f.storage, nil
+}
+
+func (f *fakeDiscoveryAPI) AdminSetupDefaults(_ context.Context, session string) (api.AdminSetupDefaults, error) {
+	if session != "session-token" {
+		return api.AdminSetupDefaults{}, api.ErrUnauthorized
+	}
+	f.defaultsHit++
+	return f.defaults, nil
+}
+
+func (f *fakeStorageBrowserMigrationAPI) AdminDataMigrationDiscovery(_ context.Context, session string) (api.AdminDataMigrationDiscoveryResponse, error) {
+	if session != "session-token" {
+		return api.AdminDataMigrationDiscoveryResponse{}, api.ErrUnauthorized
+	}
+	f.migrationCalls++
+	return f.migration, nil
+}
+
+func TestDiscoveryPagesRejectOperatorBeforePrivilegedDiscovery(t *testing.T) {
+	client := &fakeDiscoveryAPI{role: "operator"}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/workspace/storage"} {
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example"+path, ""))
+		if rr.Code != http.StatusForbidden {
+			t.Fatalf("operator %s status = %d, want 403", path, rr.Code)
+		}
+	}
+	if client.configurationHit != 0 || client.storageHit != 0 || client.defaultsHit != 0 {
+		t.Fatalf("privileged discovery ran for operator: configuration=%d storage=%d defaults=%d", client.configurationHit, client.storageHit, client.defaultsHit)
+	}
+}
+
+func TestStorageWorkspaceBrowserGroupsDisksAndPartitions(t *testing.T) {
+	client := &fakeDiscoveryAPI{}
+	client.configuration.Configured = true
+	client.configuration.Minecraft.DataPath = "/var/mnt/data/minecraft"
+	client.configuration.Minecraft.DataMountPoint = "/var/mnt/data"
+	client.configuration.Minecraft.DataExpectedUUID = "minecraft-uuid"
+	client.configuration.Backup.Path = "/var/mnt/backups/justvoxel"
+	client.configuration.Backup.MountPoint = "/var/mnt/backups"
+	client.configuration.Backup.ExpectedUUID = "backup-uuid"
+	client.storage.SystemDisks = []string{"/dev/vda"}
+	client.storage.Devices = []api.AdminStorageDevice{
+		{Name: "zram0", Path: "/dev/zram0", Type: "disk", SizeBytes: 4 * 1024 * 1024 * 1024},
+		{Name: "vda", Path: "/dev/vda", Type: "disk", SizeBytes: 100 * 1024 * 1024 * 1024, Model: "System Disk", Transport: "virtio"},
+		{Name: "vda1", Path: "/dev/vda1", Parent: "vda", Type: "part", SizeBytes: 1024 * 1024 * 1024, Filesystem: "xfs", UUID: "system-uuid", Mountpoints: []string{"/var/lib/containers/storage/overlay", "/var", "/sysroot/ostree/deploy/default/var"}},
+		{Name: "vda2", Path: "/dev/vda2", Parent: "vda", Type: "part", SizeBytes: 8 * 1024 * 1024 * 1024, Filesystem: "swap", UUID: "swap-uuid"},
+		{Name: "vda3", Path: "/dev/vda3", Parent: "vda", Type: "part", SizeBytes: 20 * 1024 * 1024 * 1024, Filesystem: "xfs", UUID: "extra-uuid"},
+		{Name: "vdb", Path: "/dev/vdb", Type: "disk", SizeBytes: 500 * 1024 * 1024 * 1024, Model: "Data Disk", Transport: "virtio"},
+		{Name: "vdb1", Path: "/dev/vdb1", Parent: "vdb", Type: "part", SizeBytes: 300 * 1024 * 1024 * 1024, Filesystem: "xfs", UUID: "minecraft-uuid", Mountpoints: []string{"/var/mnt/data"}, FilesystemUsedBytes: 180 * 1024 * 1024 * 1024, FilesystemFreeBytes: 120 * 1024 * 1024 * 1024, FilesystemUsageKnown: true},
+		{Name: "vdb2", Path: "/dev/vdb2", Parent: "vdb", Type: "part", SizeBytes: 200 * 1024 * 1024 * 1024},
+		{Name: "sdc", Path: "/dev/sdc", Type: "disk", SizeBytes: 64 * 1024 * 1024 * 1024, Model: "USB Backup", Transport: "usb"},
+		{Name: "sdc1", Path: "/dev/sdc1", Parent: "sdc", Type: "part", SizeBytes: 64 * 1024 * 1024 * 1024, Filesystem: "exfat", UUID: "usb-uuid"},
+	}
+	client.storage.FreeSpaces = []api.AdminStorageFreeSpace{
+		{Device: "/dev/vda", Start: "29697MiB", End: "102400MiB", SizeBytes: 70 * 1024 * 1024 * 1024},
+		{Device: "/dev/vdb", Start: "512001MiB", End: "614400MiB", SizeBytes: 100 * 1024 * 1024 * 1024},
+	}
+
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/workspace/storage", ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("new storage returned %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{"Storage", "Internal drives", "USB drives", "System Disk", "Data Disk", "USB Backup", "data-storage-disk=\"vda\"", "data-storage-disk=\"sdc\"", "data-storage-partitions=\"vdb\"", "data-storage-partitions=\"sdc\"", "/dev/vdb1", "Minecraft", "/dev/vdb2", "Not formatted", "storage-partition-card storage-partition-swap", "data-storage-detail-dialog", "data-storage-detail-close", "data-storage-free-space", "data-storage-create-dialog", "data-filesystem-usage-known=\"Yes\"", "120.0 GiB", "data-storage-browser-root"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("new storage browser missing %q: %s", want, body)
+		}
+	}
+	if strings.Contains(body, "data-path=\"/dev/vda2\"") {
+		t.Fatal("swap partition is interactive")
+	}
+	if strings.Contains(body, "/dev/zram0") {
+		t.Fatal("zram was exposed as physical storage")
+	}
+	if strings.Contains(body, "/sysroot/ostree") || strings.Contains(body, "/var/lib/containers/storage/overlay") {
+		t.Fatal("system partition leaked internal bootc/OSTree mount paths")
+	}
+	start := strings.Index(body, `data-path="/dev/vda1"`)
+	if start < 0 {
+		t.Fatal("system partition /dev/vda1 missing")
+	}
+	end := strings.Index(body[start:], "</button>")
+	if end < 0 {
+		t.Fatal("system partition button is incomplete")
+	}
+	systemPartition := body[start : start+end]
+	if !strings.Contains(systemPartition, `data-system="Yes"`) || !strings.Contains(systemPartition, "System partition") {
+		t.Fatalf("active system partition was not protected: %s", systemPartition)
+	}
+	extraStart := strings.Index(body, `data-path="/dev/vda3"`)
+	if extraStart < 0 {
+		t.Fatal("non-system partition on system disk missing")
+	}
+	extraEnd := strings.Index(body[extraStart:], "</button>")
+	if extraEnd < 0 {
+		t.Fatal("non-system partition button is incomplete")
+	}
+	extraPartition := body[extraStart : extraStart+extraEnd]
+	if !strings.Contains(extraPartition, `data-system="No"`) {
+		t.Fatalf("non-system partition on the system disk was incorrectly protected: %s", extraPartition)
+	}
+}
+
+func TestStorageWorkspaceUsesAgentApprovedMinecraftMigrationCandidates(t *testing.T) {
+	client := &fakeStorageBrowserMigrationAPI{}
+	client.configuration.Configured = true
+	client.configuration.Minecraft.DataPath = "/var/mnt/minecraft/minecraft"
+	client.configuration.Minecraft.DataMountPoint = "/var/mnt/minecraft"
+	client.configuration.Minecraft.DataExpectedUUID = "minecraft-uuid"
+	client.configuration.Backup.Path = "/var/mnt/backups/justvoxel"
+	client.configuration.Backup.MountPoint = "/var/mnt/backups"
+	client.configuration.Backup.ExpectedUUID = "backup-uuid"
+	client.storage.Devices = []api.AdminStorageDevice{
+		{Name: "vdb", Path: "/dev/vdb", Type: "disk", SizeBytes: 800 * 1024 * 1024 * 1024, Model: "Data Disk", Transport: "virtio"},
+		{Name: "vdb1", Path: "/dev/vdb1", Parent: "vdb", Type: "part", SizeBytes: 200 * 1024 * 1024 * 1024, Filesystem: "xfs", UUID: "minecraft-uuid", Mountpoints: []string{"/var/mnt/minecraft"}},
+		{Name: "vdb2", Path: "/dev/vdb2", Parent: "vdb", Type: "part", SizeBytes: 200 * 1024 * 1024 * 1024, Filesystem: "xfs", UUID: "target-uuid"},
+		{Name: "vdb3", Path: "/dev/vdb3", Parent: "vdb", Type: "part", SizeBytes: 200 * 1024 * 1024 * 1024, Filesystem: "xfs", UUID: "backup-uuid", Mountpoints: []string{"/var/mnt/backups"}},
+		{Name: "vdb4", Path: "/dev/vdb4", Parent: "vdb", Type: "part", SizeBytes: 100 * 1024 * 1024 * 1024, Filesystem: "xfs", UUID: "not-approved"},
+		{Name: "vdb5", Path: "/dev/vdb5", Parent: "vdb", Type: "part", SizeBytes: 100 * 1024 * 1024 * 1024, Filesystem: "ext4", UUID: "mounted-target", Mountpoints: []string{"/var/mnt/fast"}},
+		{Name: "vdc", Path: "/dev/vdc", Type: "disk", SizeBytes: 10 * 1024 * 1024 * 1024, Model: "Empty Disk", Transport: "virtio"},
+	}
+	client.migration = api.AdminDataMigrationDiscoveryResponse{
+		OK: true, SchemaVersion: "v1",
+		WholeDisks: []api.AdminDataMigrationCandidate{
+			{Path: "/dev/vdc", SizeBytes: 10 * 1024 * 1024 * 1024, Model: "Empty Disk", Transport: "virtio"},
+		},
+		Partitions: []api.AdminDataMigrationCandidate{
+			{Path: "/dev/vdb1", Filesystem: "xfs", Mountpoint: "/var/mnt/minecraft", SizeBytes: 200 * 1024 * 1024 * 1024},
+			{Path: "/dev/vdb2", Filesystem: "xfs", SizeBytes: 200 * 1024 * 1024 * 1024},
+			{Path: "/dev/vdb3", Filesystem: "xfs", Mountpoint: "/var/mnt/backups", SizeBytes: 200 * 1024 * 1024 * 1024},
+			{Path: "/dev/vdb5", Filesystem: "ext4", Mountpoint: "/var/mnt/fast", SizeBytes: 100 * 1024 * 1024 * 1024},
+		},
+	}
+
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/workspace/storage", ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("new storage returned %d: %s", rr.Code, rr.Body.String())
+	}
+	if client.migrationCalls != 1 {
+		t.Fatalf("migration discovery calls = %d, want 1", client.migrationCalls)
+	}
+
+	body := rr.Body.String()
+	partitionMarkup := func(path string) string {
+		marker := `data-path="` + path + `"`
+		start := strings.Index(body, marker)
+		if start < 0 {
+			t.Fatalf("partition %s missing from New Storage: %s", path, body)
+		}
+		end := strings.Index(body[start:], "</button>")
+		if end < 0 {
+			t.Fatalf("partition %s button is incomplete", path)
+		}
+		return body[start : start+end]
+	}
+
+	if !strings.Contains(partitionMarkup("/dev/vdb2"), `data-minecraft-candidate="Yes"`) {
+		t.Fatal("Agent-approved unmounted filesystem was not offered for Minecraft migration")
+	}
+	mounted := partitionMarkup("/dev/vdb5")
+	if !strings.Contains(mounted, `data-minecraft-candidate="Yes"`) || !strings.Contains(mounted, `data-minecraft-mount-point="/var/mnt/fast"`) {
+		t.Fatalf("Agent-approved mounted filesystem lost migration mount identity: %s", mounted)
+	}
+	for _, path := range []string{"/dev/vdb1", "/dev/vdb3", "/dev/vdb4"} {
+		if !strings.Contains(partitionMarkup(path), `data-minecraft-candidate="No"`) {
+			t.Fatalf("%s should not be offered by the New Storage Minecraft shortcut", path)
+		}
+	}
+	for _, want := range []string{
+		"Use for Minecraft data",
+		`data-storage-minecraft-review`,
+		`data-storage-minecraft-apply`,
+		`data-storage-minecraft-progress`,
+		`data-storage-whole-purpose="minecraft"`,
+		`data-storage-whole-purpose="backups"`,
+		`data-storage-whole-device="/dev/vdc"`,
+		"Prepare for backups",
+		"Nothing is erased until Review and the exact confirmation step.",
+		"Review migration",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("New Storage Minecraft migration handoff missing %q: %s", want, body)
+		}
+	}
+
+}
+
+func TestStorageWorkspaceFragmentUsesSameBrowserAndUSBGrouping(t *testing.T) {
+	client := &fakeDiscoveryAPI{}
+	client.storage.Devices = []api.AdminStorageDevice{
+		{Name: "vda", Path: "/dev/vda", Type: "disk", SizeBytes: 100 * 1024 * 1024 * 1024, Model: "Internal", Transport: "virtio"},
+		{Name: "sdb", Path: "/dev/sdb", Type: "disk", SizeBytes: 32 * 1024 * 1024 * 1024, Model: "Thumb Drive", Transport: "usb"},
+		{Name: "sdb1", Path: "/dev/sdb1", Parent: "sdb", Type: "part", SizeBytes: 32 * 1024 * 1024 * 1024, Filesystem: "exfat", UUID: "thumb-uuid"},
+	}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rr, authenticatedAdminRequest(http.MethodGet, "http://example/workspace/storage", ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("storage workspace returned %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{"data-storage-browser-root", "Internal drives", "USB drives", "Thumb Drive", "data-storage-disk=\"sdb\"", "data-storage-partitions=\"sdb\""} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("storage workspace missing %q: %s", want, body)
+		}
+	}
+	if strings.Contains(body, "<html") || strings.Contains(body, "data-control-center") {
+		t.Fatal("storage workspace endpoint returned a full page instead of the reusable browser fragment")
+	}
+}
+
+func TestStorageBrowserRoleClassification(t *testing.T) {
+	configuration := api.AdminConfigurationDiscovery{Configured: true}
+	configuration.Minecraft.DataExpectedUUID = "minecraft-uuid"
+	configuration.Backup.ExpectedUUID = "backup-uuid"
+	cases := []struct {
+		name   string
+		device api.AdminStorageDevice
+		want   string
+	}{
+		{name: "swap", device: api.AdminStorageDevice{Filesystem: "swap"}, want: "Swap"},
+		{name: "system", device: api.AdminStorageDevice{System: true, Filesystem: "xfs"}, want: "System partition"},
+		{name: "minecraft", device: api.AdminStorageDevice{Filesystem: "xfs", UUID: "minecraft-uuid"}, want: "Minecraft"},
+		{name: "backup", device: api.AdminStorageDevice{Filesystem: "xfs", UUID: "backup-uuid"}, want: "Backups"},
+		{name: "blank", device: api.AdminStorageDevice{}, want: "Not formatted"},
+		{name: "mounted", device: api.AdminStorageDevice{Filesystem: "xfs", Mountpoints: []string{"/var/mnt/data"}}, want: "Mounted"},
+		{name: "available", device: api.AdminStorageDevice{Filesystem: "xfs"}, want: "Available"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := storageBrowserRole(tc.device, configuration); got != tc.want {
+				t.Fatalf("storageBrowserRole() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestStorageBrowserFilesystemDisplayNames(t *testing.T) {
+	cases := map[string]string{
+		"xfs":     "XFS",
+		"ext4":    "ext4",
+		"btrfs":   "Btrfs",
+		"ntfs":    "NTFS",
+		"ntfs-3g": "NTFS",
+		"vfat":    "FAT / FAT32",
+		"fat":     "FAT / FAT32",
+		"fat32":   "FAT / FAT32",
+		"exfat":   "exFAT",
+		"":        "Not formatted",
+	}
+	for filesystem, want := range cases {
+		if got := storageBrowserFilesystemDisplay(filesystem); got != want {
+			t.Fatalf("storageBrowserFilesystemDisplay(%q) = %q, want %q", filesystem, got, want)
+		}
+	}
+}
+
+func TestStorageBrowserExactSystemProtectionAndWholeDeviceFilesystem(t *testing.T) {
+	client := &fakeDiscoveryAPI{}
+	client.storage.SystemDisks = []string{"/dev/nvme0n1"}
+	client.storage.Devices = []api.AdminStorageDevice{
+		{Name: "nvme0n1", Path: "/dev/nvme0n1", Type: "disk", System: true},
+		{Name: "nvme0n1p1", Path: "/dev/nvme0n1p1", Parent: "nvme0n1", Type: "part", System: true, Filesystem: "vfat", Mountpoints: []string{"/boot/efi"}},
+		{Name: "nvme0n1p4", Path: "/dev/nvme0n1p4", Parent: "nvme0n1", Type: "part", Filesystem: "ntfs"},
+		{Name: "sda", Path: "/dev/sda", Type: "disk", Transport: "usb", Filesystem: "vfat", UUID: "0EF7-49C2"},
+		{Name: "sdb", Path: "/dev/sdb", Type: "disk", Transport: "usb", ReadOnly: true, Filesystem: "exfat"},
+	}
+	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := app.buildStorageBrowserPageData(context.Background(), "session-token", client, api.SessionInfo{Role: "administrator"}, "csrf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data.Disks) != 3 || len(data.Disks[0].Partitions) != 2 {
+		t.Fatalf("unexpected disk/partition discovery: %+v", data.Disks)
+	}
+	system := data.Disks[0]
+	if !system.Partitions[0].System || system.Partitions[1].System || system.CanInitialize {
+		t.Fatalf("system protection must apply to exact partitions: %+v", system)
+	}
+	usb := data.Disks[1]
+	if len(usb.Partitions) != 1 || usb.Partitions[0].Path != "/dev/sda" || usb.Partitions[0].Type != "disk" || usb.Partitions[0].Filesystem != "vfat" || usb.CanInitialize || !usb.BackupWholeDisk || usb.MinecraftWholeDisk {
+		t.Fatalf("whole-device FAT32 must be mountable with explicit backup preparation: %+v", usb)
+	}
+	if data.Disks[2].CanInitialize || !data.Disks[2].Partitions[0].ReadOnly {
+		t.Fatal("read-only whole-device storage must remain protected")
+	}
+}
+
+func TestStorageBrowserPhysicalDiskPartitionTableLabelsPreserveActionPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		table         string
+		label         string
+		transport     string
+		filesystem    string
+		canInitialize bool
+		minecraft     bool
+		backups       bool
+	}{
+		{name: "gpt", table: "gpt", label: "GPT"},
+		{name: "msdos", table: "msdos", label: "MBR"},
+		{name: "none", table: "none", label: "No partition table", canInitialize: true, minecraft: true, backups: true},
+		{name: "whole-device FAT32 USB", table: "none", label: "No partition table", transport: "usb", filesystem: "vfat", backups: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &fakeStorageBrowserMigrationAPI{}
+			client.storage.Devices = []api.AdminStorageDevice{
+				{Name: "sda", Path: "/dev/sda", Type: "disk", PartitionTable: tc.table, Transport: tc.transport, Filesystem: tc.filesystem},
+			}
+			client.migration.WholeDisks = []api.AdminDataMigrationCandidate{
+				{Path: "/dev/sda"},
+			}
+			app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, err := app.buildStorageBrowserPageData(context.Background(), "session-token", client, api.SessionInfo{Role: "administrator"}, "csrf")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(data.Disks) != 1 {
+				t.Fatalf("expected one physical disk: %+v", data.Disks)
+			}
+			disk := data.Disks[0]
+			if disk.PartitionTable != tc.table || disk.CanInitialize != tc.canInitialize || disk.MinecraftWholeDisk != tc.minecraft || disk.BackupWholeDisk != tc.backups {
+				t.Fatalf("partition table or existing action policy changed: %+v", disk)
+			}
+			rr := httptest.NewRecorder()
+			if err := app.templates.ExecuteTemplate(rr, "storage_browser_content", data); err != nil {
+				t.Fatal(err)
+			}
+			body := rr.Body.String()
+			want := "<small><code>/dev/sda</code> · " + tc.label + "</small>"
+			if !strings.Contains(body, want) {
+				t.Fatalf("physical disk card missing visible partition-table label %q", want)
+			}
+			if tc.filesystem != "" {
+				if len(disk.Partitions) != 1 || disk.Partitions[0].Type != "disk" || disk.Partitions[0].CanInitialize || disk.Partitions[0].MinecraftCandidate {
+					t.Fatalf("whole-device USB filesystem policy changed: %+v", disk.Partitions)
+				}
+				if !strings.Contains(body, `data-partition-table="none"`) || !strings.Contains(body, "FAT / FAT32") {
+					t.Fatal("whole-device FAT32 USB filesystem presentation changed")
+				}
+			}
+		})
+	}
+}
+
+func TestStandaloneMinecraftStorageSettingsUIRetired(t *testing.T) {
+	app, err := New(&fakeDiscoveryAPI{}, Config{Version: "test", ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		method string
+		paths  []string
+		status int
+	}{
+		{http.MethodGet, []string{
+			"/settings/server", "/settings/storage", "/settings/new-storage", "/settings/storage-provision",
+		}, http.StatusNotFound},
+		{http.MethodPost, []string{
+			"/settings/server/plan", "/settings/server/apply",
+			"/settings/storage-provision/plan", "/settings/storage-provision/apply",
+		}, http.StatusMethodNotAllowed},
+	} {
+		for _, path := range tc.paths {
+			t.Run(tc.method+" "+path, func(t *testing.T) {
+				rr := httptestResponse(app, authenticatedAdminRequest(tc.method, "http://example"+path, "csrf=csrf-token"))
+				if rr.Code != tc.status {
+					t.Fatalf("got %d, want %d: %s", rr.Code, tc.status, rr.Body.String())
+				}
+			})
+		}
+	}
+	for _, path := range []string{
+		"templates/server_settings.html", "templates/storage_settings.html", "templates/storage_provision.html",
+	} {
+		if _, err := englishPresentationAsset(path); err == nil {
+			t.Errorf("retired template %s remains embedded", path)
+		}
+	}
+	if _, err := englishPresentationAsset("templates/storage_browser.html"); err != nil {
+		t.Fatalf("current Storage browser template missing: %v", err)
+	}
+	for _, tc := range []struct {
+		file   string
+		routes []string
+	}{
+		{"minecraft_workspace.go", []string{
+			`"GET /api/minecraft/workspace/settings"`,
+			`"POST /api/minecraft/workspace/settings/plan"`,
+			`"POST /api/minecraft/workspace/settings/apply"`,
+		}},
+		{"admin_discovery_page.go", []string{
+			`"GET /workspace/storage"`,
+			`a.registerStorageBrowserActionRoutes(mux)`,
+			`a.registerSetupWizardRoutes(mux)`,
+			`a.registerSetupWizardReviewRoutes(mux)`,
+		}},
+		{"storage_browser_actions.go", []string{
+			`"POST /api/new-storage/backup-partition/plan"`,
+			`"POST /api/new-storage/backup-partition/apply"`,
+			`"POST /api/new-storage/actions/plan"`,
+			`"POST /api/new-storage/actions/apply"`,
+			`"GET /api/new-storage/mounts/status"`,
+			`"POST /api/new-storage/mounts/plan"`,
+			`"POST /api/new-storage/mounts/apply"`,
+			`"POST /api/new-storage/whole-disk/plan"`,
+			`"POST /api/new-storage/whole-disk/apply"`,
+			`"GET /api/new-storage/minecraft-data/current"`,
+			`"POST /api/new-storage/minecraft-data/plan"`,
+			`"POST /api/new-storage/minecraft-data/apply"`,
+			`"GET /api/new-storage/minecraft-data/progress/{id}"`,
+		}},
+	} {
+		source, err := os.ReadFile(tc.file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, route := range tc.routes {
+			if !strings.Contains(string(source), route) {
+				t.Errorf("%s missing current route registration %s", tc.file, route)
+			}
+		}
+	}
+}

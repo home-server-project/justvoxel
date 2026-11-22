@@ -1,0 +1,190 @@
+#!/usr/bin/bash
+set -Eeuo pipefail
+source /usr/libexec/justvoxel/mjust/backup-common.sh
+source /usr/libexec/justvoxel/mjust/backup-instance-storage.sh
+source /usr/libexec/justvoxel/mjust/interrupt-safety.sh
+
+readonly config_file="/etc/justvoxel/minecraft-backup.env"
+readonly restore_exclusion_lock="/run/justvoxel-minecraft-restore-exclusion.lock"
+readonly lock_file="/run/justvoxel-minecraft-maintenance.lock"
+readonly setup_marker="/var/lib/justvoxel/management/setup-in-progress"
+leave_stopped=0
+
+while (( $# > 0 )); do
+    case "$1" in
+        --leave-stopped) leave_stopped=1 ;;
+        *)
+            echo "ERROR: unknown minecraft-backup option: $1" >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
+
+if [[ ${EUID} -ne 0 ]]; then
+    echo 'ERROR: minecraft-backup must run as root.' >&2
+    exit 1
+fi
+
+# Scheduled backups must not touch Minecraft files while first-run setup or
+# its rollback owns the data. Check before loading possibly removed config.
+if [[ -e ${setup_marker} ]]; then
+    echo 'Skipping backup: first-run setup or rollback is in progress.'
+    exit 0
+fi
+
+# Always acquire exclusion, including callers that already own maintenance.
+# Both acquisitions are nonblocking: an existing backup is never interrupted.
+restore_exclusion_umask=$(umask)
+umask 0077
+exec 8>"${restore_exclusion_lock}"
+umask "${restore_exclusion_umask}"
+if ! flock -n 8; then
+    echo 'ERROR: an independent Minecraft Restore operation is in progress.' >&2
+    exit 1
+fi
+# Descriptor 8 stays open through backup, restart, and the EXIT cleanup.
+
+jv_backup_load_config "${config_file}"
+if [[ ! -d ${minecraft_data_path} ]]; then
+    echo "ERROR: Minecraft data directory does not exist: ${minecraft_data_path}" >&2
+    exit 1
+fi
+jv_backup_prepare_write_target
+
+if [[ ${JUSTVOXEL_MAINTENANCE_LOCK_HELD:-0} != 1 ]]; then
+    exec 9>"${lock_file}"
+    if ! flock -n 9; then
+        echo 'ERROR: another JustVoxel Minecraft maintenance operation is already running.' >&2
+        exit 1
+    fi
+fi
+
+# Setup might have started while the backup acquired its maintenance lock.
+if [[ -e ${setup_marker} ]]; then
+    echo 'Skipping backup: first-run setup or rollback is in progress.'
+    exit 0
+fi
+
+# Keep the administrator-configured backup root. The ID is only a subfolder.
+# Legacy installations without an identity continue using the backup root.
+if minecraft_instance_backup_path="$(jv_backup_prepare_instance_directory "${minecraft_backup_path}")"; then
+    :
+else
+    instance_storage_status=$?
+    if (( instance_storage_status == 2 )); then
+        minecraft_instance_backup_path="${minecraft_backup_path}"
+        echo 'WARNING: Instance ID not yet registered; backup stays at configured root.' >&2
+    else
+        echo 'ERROR: instance backup subfolder is unsafe or unavailable.' >&2
+        exit 1
+    fi
+fi
+
+minecraft_source_parent="$(dirname -- "${minecraft_data_path}")"
+minecraft_source_name="$(basename -- "${minecraft_data_path}")"
+minecraft_timestamp="$(date +%F-%H%M)"
+minecraft_basename="$(jv_archive_server_label)-${minecraft_timestamp}"
+minecraft_final_archive="${minecraft_instance_backup_path}/${minecraft_basename}.tar.gz"
+minecraft_partial_archive="${minecraft_final_archive}.partial"
+minecraft_collision=2
+while [[ -e ${minecraft_final_archive} || -L ${minecraft_final_archive} ||
+         -e ${minecraft_partial_archive} || -L ${minecraft_partial_archive} ||
+         -e ${minecraft_final_archive}.meta.json || -L ${minecraft_final_archive}.meta.json ]]; do
+    if (( minecraft_collision > 999 )); then
+        echo 'ERROR: too many backups with the same minute timestamp.' >&2
+        exit 1
+    fi
+    minecraft_final_archive="${minecraft_instance_backup_path}/${minecraft_basename}-${minecraft_collision}.tar.gz"
+    minecraft_partial_archive="${minecraft_final_archive}.partial"
+    minecraft_collision=$((minecraft_collision + 1))
+done
+minecraft_restart_required=0
+
+cleanup() {
+    local result=$?
+    trap - EXIT
+    if [[ -n ${minecraft_partial_archive:-} && -f ${minecraft_partial_archive} ]]; then
+        rm -f -- "${minecraft_partial_archive}"
+    fi
+    if (( minecraft_restart_required )); then
+        echo "Starting ${MINECRAFT_SERVICE} after backup interruption or failure"
+        if ! systemctl start "${MINECRAFT_SERVICE}"; then
+            echo "ERROR: ${MINECRAFT_SERVICE} did not restart." >&2
+            result=1
+        fi
+    fi
+    exit "${result}"
+}
+trap cleanup EXIT
+
+find "${minecraft_instance_backup_path}" -maxdepth 1 -type f -name 'minecraft-*.tar.gz.partial' -mmin +1440 -delete
+
+metadata_server_version=''
+metadata_geyser_version=''
+metadata_floodgate=false
+if systemctl is-active --quiet "${MINECRAFT_SERVICE}"; then
+    if server_supports_plugins; then
+        metadata_server_version="$(podman exec minecraft rcon-cli 'version' 2>/dev/null | head -n1 || true)"
+        metadata_geyser_version="$(podman exec minecraft rcon-cli 'geyser version' 2>/dev/null | head -n1 || true)"
+    else
+        metadata_server_version="$(podman exec minecraft mc-monitor status --json 2>/dev/null | jq -er '.server_info.version.name | select(type == "string")' || true)"
+    fi
+fi
+geyser_config="${minecraft_data_path}/plugins/Geyser-Spigot/config.yml"
+if server_supports_plugins && grep -Eq '^[[:space:]]*auth-type:[[:space:]]*floodgate[[:space:]]*$' "${geyser_config}" 2>/dev/null; then
+    metadata_floodgate=true
+fi
+
+if systemctl is-active --quiet "${MINECRAFT_SERVICE}"; then
+    echo 'Minecraft is running; stopping through the player-aware graceful shutdown path'
+    minecraft_restart_required=1
+    JV_INTERRUPT_CONFIRMATION_MODE=confirmed \
+        jv_stop_minecraft_adaptive 'Create Minecraft backup'
+else
+    echo 'Minecraft was already stopped; it will remain stopped after backup'
+fi
+
+if jv_minecraft_still_running; then
+    echo "ERROR: ${MINECRAFT_SERVICE} is still running after the backup shutdown path." >&2
+    exit 1
+fi
+
+echo "Creating ${minecraft_final_archive}"
+tar -C "${minecraft_source_parent}" -czf "${minecraft_partial_archive}" "${minecraft_source_name}"
+
+echo 'Verifying new archive'
+tar -tzf "${minecraft_partial_archive}" >/dev/null
+mv -- "${minecraft_partial_archive}" "${minecraft_final_archive}"
+minecraft_partial_archive=''
+
+if jv_backup_write_metadata "${minecraft_final_archive}" "${metadata_server_version}" "${metadata_geyser_version}" "${metadata_floodgate}"; then
+    echo "Restore metadata recorded: ${minecraft_final_archive}.meta.json"
+else
+    echo 'WARNING: backup archive is valid, but optional restore metadata could not be written.' >&2
+fi
+
+mapfile -t minecraft_archives < <(
+    find "${minecraft_instance_backup_path}" -maxdepth 1 -type f -name 'minecraft-*.tar.gz' -printf '%T@ %p\n' | sort -nr | cut -d' ' -f2-
+)
+if (( ${#minecraft_archives[@]} > BACKUP_KEEP )); then
+    for (( index=BACKUP_KEEP; index<${#minecraft_archives[@]}; index++ )); do
+        echo "Removing expired backup: ${minecraft_archives[index]}"
+        rm -f -- "${minecraft_archives[index]}"
+        rm -f -- "${minecraft_archives[index]}.meta.json"
+    done
+fi
+
+if (( minecraft_restart_required )); then
+    if (( leave_stopped )); then
+        echo "Backup completed; leaving ${MINECRAFT_SERVICE} stopped for the calling maintenance operation"
+        minecraft_restart_required=0
+    else
+        echo "Starting ${MINECRAFT_SERVICE}"
+        systemctl start "${MINECRAFT_SERVICE}"
+        minecraft_restart_required=0
+    fi
+fi
+
+echo 'Backup completed successfully'
+du -h "${minecraft_final_archive}"

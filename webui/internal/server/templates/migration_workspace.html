@@ -1,0 +1,37 @@
+{{define "migration_workspace.html"}}<div class="migration-workspace-content" data-migration-workspace-root data-server-id="{{.ServerID}}" data-migration-recovery-available="{{if .Recovery.Transactions}}true{{else}}false{{end}}">
+<p class="muted">{{t "ui.780b9f21eb3d"}}</p>
+
+  <section class="panel">
+    <div class="section-heading"><div><p class="eyebrow">{{t "ui.3664895579f0"}}</p><h2>{{t "ui.bc3cb5621e27"}}</h2></div><span class="badge">{{t "ui.e674447337e8"}}</span></div>
+    <p>{{t "ui.7f5893a4fe23"}}</p>
+    <div class="details"><strong>{{t "ui.d96f1516a32e"}}</strong><br><span class="muted">{{if .ExportTargets}}{{.ExportTargets}}{{else}}{{t "ui.ffcae7fc6190"}}{{end}}</span></div>
+    <div class="details"><strong>{{t "ui.a1edf1d6be7a"}}</strong><br><span class="muted">{{.Export.SuggestedFilename}}</span></div>
+    {{if .Export.ConfiguredBackupAvailable}}<div class="notice">{{t "ui.ca237367f58e"}}</div>{{end}}
+    <div class="action-row"><a class="button-link" href="/?workspace=migration&amp;tab=export&amp;server={{.ServerID}}">{{t "ui.9485d62dd85e"}}</a></div>
+  </section>
+
+  <section class="panel">
+    <div class="section-heading"><div><p class="eyebrow">{{t "ui.2cff9baabf56"}}</p><h2>{{t "ui.739fa45e8eb3"}}</h2></div><span class="badge">{{t "ui.e674447337e8"}}</span></div>
+    <p>{{t "ui.7e6947eaa854"}}</p>
+    <div class="details"><strong>{{t "ui.1e626370bc8d"}}</strong><br><span class="muted">{{if .ImportSources}}{{.ImportSources}}{{else}}{{t "ui.ffcae7fc6190"}}{{end}}</span></div>
+    <div class="details"><strong>{{t "ui.368916c172fb"}}</strong><br><span class="muted">{{if .Import.Configured}}{{t "ui.099b50d2c44d"}}{{else}}{{t "ui.e21d1220cb69"}}{{end}}</span></div>
+    <div class="action-row"><a class="button-link" href="/?workspace=migration&amp;tab=import&amp;server={{.ServerID}}">{{t "ui.e81befaa72ae"}}</a></div>
+  </section>
+
+  {{if .Recovery.Transactions}}<section class="panel">
+    <div class="section-heading"><div><p class="eyebrow">{{t "ui.48f6a8d5688b"}}</p><h2>{{t "ui.504ca73ba883"}}</h2></div>{{if .Recovery.Transactions}}<span class="badge">{{t "ui.848682924b45"}}</span>{{else}}<span class="badge">{{t "ui.7bc934db5292"}}</span>{{end}}</div>
+    <p>{{t "ui.20805241a7bf"}}</p>
+    {{if .Recovery.Transactions}}
+      {{range .Recovery.Transactions}}
+      <div class="details"><strong>{{.Mode}}</strong> · {{.Phase}}<br><span class="muted">{{t "ui.3a5ecca188c0"}} {{.UpdatedAt}}{{if .Finalizable}} {{t "ui.bc236876533c"}}{{end}}</span></div>
+      {{end}}
+    {{else}}
+      <div class="notice">{{t "ui.fce5d3a29e21"}}</div>
+    {{end}}
+    <div class="action-row"><a class="button-link" href="/?workspace=migration&amp;tab=recovery&amp;server={{.ServerID}}">{{t "ui.91c1f155b968"}}</a></div>
+  </section>{{end}}
+
+  <section class="panel"><h2>{{t "ui.ffb2291a0d62"}}</h2><p>{{t "ui.539373ce03cc"}}</p><a class="button-link" href="/?workspace=migration&amp;tab=switch&amp;server={{.ServerID}}">{{t "ui.a496fd158f0e"}}</a></section>
+
+  <div class="notice">{{t "ui.b25d5e609885"}}</div>
+</div>{{end}}

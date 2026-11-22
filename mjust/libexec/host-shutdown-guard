@@ -1,0 +1,11 @@
+#!/usr/bin/bash
+set -u
+
+state="$(systemctl is-system-running 2>/dev/null || true)"
+if [[ ${state} != stopping ]]; then
+    exit 0
+fi
+
+# The instance helper retains its bounded warning/fallback behavior.
+/usr/libexec/justvoxel/mjust/instance-host-shutdown-prepare
+exit 0

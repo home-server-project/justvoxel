@@ -1,0 +1,72 @@
+{{define "setup_progress.html"}}<!doctype html>
+<html lang="{{locale}}">
+<head><script src="/i18n.js"></script><script src="/static/i18n.js"></script>
+  <link rel="icon" type="image/png" href="/static/justvoxel-favicon.png">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{t "ui.ccf82bd2343f"}}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/setup.css">
+  <link rel="stylesheet" href="/static/setup-review.css">
+  <script src="/static/app.js" defer></script>
+  <script src="/static/setup-operation.js" defer></script>
+</head>
+<body class="role-administrator setup-body">
+<header class="setup-header topbar setup-topbar">
+  <a class="brand-link brand-mark" href="/setup/progress/{{.Operation.OperationID}}" aria-current="page" aria-label="{{t "ui.125723ae7f2a"}}"><img class="brand-logo" src="/static/justvoxel-logo.png" alt="JustVoxel"></a>
+  <div class="topbar-clock" data-topbar-clock aria-label="{{t "ui.2397ec601845"}}">--:--</div>
+  <form class="nav-logout setup-topbar-logout" method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="secondary" type="submit">{{t "ui.49616145514e"}}</button></form>
+</header>
+<main class="setup-shell">
+  <div class="title-row setup-title-row"><div><h1>{{t "ui.34fa7ac3627f"}}</h1></div><span class="badge" id="setup-operation-state">{{ts .StateLabel}}</span></div>
+
+  <section class="panel setup-step-panel setup-operation-panel"
+    data-setup-operation
+    data-status-url="/api/setup/progress/{{.Operation.OperationID}}"
+    data-operation-id="{{.Operation.OperationID}}"
+    data-initial-state="{{.Operation.State}}" data-initial-stage="{{.Operation.Stage}}" data-started-at="{{.Operation.StartedAt}}" data-finished-at="{{.Operation.FinishedAt}}">
+    <div class="setup-operation-icon" aria-hidden="true"></div>
+    <ol class="setup-operation-stages" aria-label="{{t "ui.17db16dba032"}}">
+      <li data-setup-stage>{{t "ui.a69c4dece144"}}</li><li data-setup-stage>{{t "ui.b332c3492d5e"}}</li><li data-setup-stage>Minecraft</li><li data-setup-stage>{{t "ui.7140f4f19dec"}}</li><li data-setup-stage>{{t "ui.143b270a3260"}}</li>
+    </ol>
+    <p class="setup-lead" id="setup-operation-status">{{ts .Operation.Status}}</p>
+    <p class="muted compact" id="setup-operation-elapsed" hidden></p>
+    <div class="notice setup-verify-note" id="setup-minecraft-verify-note" {{if ne .Operation.Stage "minecraft_verify"}}hidden{{end}}><strong>{{t "ui.eb7466fbf37e"}}</strong><br>{{t "ui.f3661dbf8412"}}</div>
+    <div class="setup-operation-details">
+      <div><span>{{t "ui.de838855e4a6"}}</span><strong id="setup-operation-stage">{{ts .StageLabel}}</strong></div>
+      <div><span>{{t "ui.0f044feb6ca7"}}</span><code>{{.Operation.OperationID}}</code></div>
+    </div>
+
+    <div class="notice setup-reconnect-note" id="setup-reconnect-note" hidden>
+      <strong>{{t "ui.2f7a8aae9569"}}</strong><br>
+      {{t "ui.9c89cf025036"}}
+    </div>
+
+    <div class="notice success" id="setup-operation-success" {{if ne .Operation.State "succeeded"}}hidden{{end}}>
+      <strong>{{t "ui.d2406425bd25"}}</strong><br>{{t "ui.88b6fa432755"}}
+    </div>
+
+    <div class="notice warning" id="setup-operation-rollback" {{if ne .Operation.State "rolled_back"}}hidden{{end}}>
+      <strong>{{t "ui.8da1270efb7b"}}</strong><br>{{t "ui.4a7377980c1b"}}
+    </div>
+
+    <div class="notice error" id="setup-operation-attention" {{if ne .Operation.State "needs_attention"}}hidden{{end}}>
+      <strong>{{t "ui.b0884dd87e98"}}</strong><br>{{t "ui.b749f4576c6b"}}
+    </div>
+
+    <div class="action-row setup-operation-actions">
+      <button class="button-link secondary" id="setup-diagnostic-log-view" type="button">{{t "ui.7cac54a8cfc3"}}</button>
+      <a class="button-link setup-log-download" id="setup-diagnostic-log-link" href="/setup/progress/{{.Operation.OperationID}}/log" {{if and (ne .Operation.State "succeeded") (ne .Operation.State "rolled_back") (ne .Operation.State "needs_attention")}}hidden{{end}}>{{t "ui.2b46a2147a3d"}}</a>
+      <a class="button-link" id="setup-dashboard-link" href="/" {{if and (ne .Operation.State "succeeded") (ne .Operation.State "rolled_back") (ne .Operation.State "needs_attention")}}hidden{{end}}>{{t "ui.f6a3dab2fa61"}}</a>
+      <a class="button-link secondary" id="setup-review-link" href="/setup/review" {{if ne .Operation.State "rolled_back"}}hidden{{end}}>{{t "ui.52f71303dd7e"}}</a>
+      <form method="post" action="/setup/recover" id="setup-recover-form" {{if not (and (eq .Operation.State "needs_attention") (or (eq .Operation.Stage "storage_rollback") (eq .Operation.Stage "runtime_rollback")))}}hidden{{end}}><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="operation_id" value="{{.Operation.OperationID}}"><button class="setup-recovery-action" type="submit">{{t "ui.f37b055f32a8"}}</button></form>
+      <form method="post" action="/setup/start" id="setup-start-over-form" {{if ne .Operation.State "rolled_back"}}hidden{{end}}><input type="hidden" name="csrf" value="{{.CSRF}}"><button type="submit">{{t "ui.656642dd6d3f"}}</button></form>
+      <span class="setup-configure-disabled" id="setup-start-over-disabled" role="group" aria-disabled="true" tabindex="0" aria-describedby="setup-start-over-help" {{if ne .Operation.State "needs_attention"}}hidden{{end}}><button type="button" disabled aria-describedby="setup-start-over-help">{{t "ui.656642dd6d3f"}}</button><span class="setup-configure-tooltip" id="setup-start-over-help" role="tooltip">{{t "ui.e72baaff71e5"}}</span></span>
+    </div>
+  </section>
+
+  <p class="muted compact">{{t "ui.5027fc0816a6"}}</p>
+</main>
+{{template "project-footer" .}}
+{{template "language-dialog" .}}</body>
+</html>{{end}}

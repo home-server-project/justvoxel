@@ -1,0 +1,320 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/managed-crossplay.sh
+source /usr/libexec/justvoxel/mjust/update-policy.sh
+require_root
+instance_args=()
+if [[ ${1:-} == --instance ]]; then
+    [[ $# -ge 2 ]] || exit 1
+    source /usr/libexec/justvoxel/mjust/instance-context.sh
+    jv_load_instance "$2" || exit 1
+    instance_args=(--instance "$2")
+    shift 2
+fi
+
+switch_preview=no
+configured_type="${MINECRAFT_SERVER_TYPE-paper}"
+target_type="${configured_type}"
+configured_image_tag="${MINECRAFT_IMAGE_TAG:-stable}"
+target_image_tag="${configured_image_tag}"
+while [[ ${1:-} == --* ]]; do
+    (( $# >= 2 )) || exit 1
+    case "$1" in
+        --switch-preview) [[ $2 == yes && ${#instance_args[@]} != 0 ]] || exit 1; switch_preview=yes ;;
+        --server-type) target_type="$2" ;;
+        --image-tag) target_image_tag="$2" ;;
+        *) exit 1 ;;
+    esac
+    shift 2
+done
+(( $# <= 3 )) || exit 1
+# Only the exact three-positional-argument setup preview is ID-less.
+if (( $# != 3 && ${#instance_args[@]} == 0 )); then
+    echo 'ERROR: --instance jv-... is required.' >&2
+    exit 2
+fi
+[[ ${target_image_tag} =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || exit 1
+# Preserve setup preview: registry validation is only for an explicit new tag.
+if [[ ${target_image_tag} != "${configured_image_tag}" ]]; then
+    (( $# != 3 )) || exit 1
+    validate_minecraft_image_tag "${target_image_tag}" || { echo 'ERROR: container image tag could not be verified or is deprecated.' >&2; exit 1; }
+fi
+if (( $# != 3 )); then
+    current_image="${JV_INSTANCE_IMAGE_REF:-$(minecraft_image_ref)}"
+fi
+MINECRAFT_IMAGE_TAG="${target_image_tag}"
+validate_server_type "${target_type}" || exit 1
+if (( $# != 3 )) && [[ ${switch_preview} != yes ]]; then server_allows_in_place_switch "${configured_type}" "${target_type}" || exit 1; fi
+MINECRAFT_SERVER_TYPE="${target_type}"
+if (( $# == 3 )); then BEDROCK_ENABLED="$3"; fi
+if [[ ${switch_preview} == yes ]]; then
+    # Preserve a supported source cross-play choice; target software without
+    # that capability uses Java, without touching any installed executable.
+    case "${target_type}" in paper|purpur|pufferfish|leaf|fabric|neoforge) ;; *) BEDROCK_ENABLED=no ;; esac
+fi
+validate_server_capabilities || exit 1
+software_changed=false
+[[ ${configured_type} == "${target_type}" ]] || software_changed=true
+channel_changed=false
+[[ ${configured_image_tag} == "${target_image_tag}" ]] || channel_changed=true
+installed=''
+if (( $# != 3 )); then
+    latest_log="${DATA_PATH}/logs/latest.log"
+    if [[ -r ${latest_log} ]]; then
+        installed="$(grep -Eo 'Starting minecraft server version [0-9A-Za-z._-]+' "${latest_log}" 2>/dev/null | tail -n1 | awk '{print $5}' || true)"
+    fi
+fi
+# Read-only Switch resolution uses the normal exact setup resolver, including
+# loader pins. It does not relax the ordinary Version update software gate.
+if [[ ${switch_preview} == yes ]]; then
+    [[ $# == 2 && $1 == pinned && $2 == "${installed}" && ${target_type} != bedrock && ${target_type} != spigot ]] || exit 1
+    resolved="$(resolve_setup_java_runtime "${target_type}" pinned "$2")" || exit 1
+    candidate="$(jq -er .game <<< "${resolved}")"
+    [[ ${candidate} == "$2" ]] || exit 1
+    image="$(jq -er .image <<< "${resolved}")"
+    digest="$(jv_remote_platform_digest "${JV_MINECRAFT_IMAGE_REPO}:${image}")" || exit 1
+    crossplay_compatible=true
+    if [[ ${BEDROCK_ENABLED} == yes ]]; then
+        geyser="$(resolve_geyser_supported_java_version || true)"
+        if [[ -z ${geyser} ]] || ! server_crossplay_version_compatible "${candidate}" "${geyser}"; then crossplay_compatible=false; fi
+    fi
+    fingerprint="sha256:$(printf '%s' "${target_type}:${resolved}:${digest}:${BEDROCK_ENABLED}:${crossplay_compatible}" | sha256sum | cut -d ' ' -f1)"
+    jq -n --arg type "${target_type}" --arg game "${candidate}" --arg image "${image}" \
+        --arg loader "$(jq -r '.loader // empty' <<< "${resolved}")" --arg digest "${digest}" --arg fingerprint "${fingerprint}" \
+        --argjson enabled "$([[ ${BEDROCK_ENABLED} == yes ]] && printf true || printf false)" --argjson compatible "${crossplay_compatible}" \
+        '{server_type:$type,installed:$game,selected_candidate:$game,image_tag:$image,loader_version:$loader,server_supported:true,stack_state:"updates_available",update_available:true,plan_fingerprint:$fingerprint,managed_image_digest:$digest,crossplay_enabled:$enabled,crossplay_compatible:$compatible}'
+    exit 0
+fi
+if (( $# == 3 )) && [[ ${target_type} == bedrock ]]; then
+    candidate="$(resolve_bedrock_release || true)"
+    [[ $1 != pinned || $2 == "${candidate}" ]] || candidate=''
+    [[ $1 == recommended || $1 == pinned ]] || candidate=''
+    jq -n --arg candidate "${candidate}" '{server_type:"bedrock",selected_candidate:$candidate,candidate_channel:"RELEASE",image_tag:"stable",server_supported:($candidate != ""),crossplay_enabled:false,managed_crossplay_available:false}'
+    exit 0
+fi
+# New Java types have setup-time exact resolution, never a moving update policy.
+if (( $# == 3 )) && [[ ${target_type} != paper && ${target_type} != purpur && ${target_type} != vanilla ]]; then
+    runtime_policy="$1"
+    # Latest uses the same verified upstream selection as Recommended for these forks.
+    case "${target_type}:${runtime_policy}" in
+        pufferfish:latest|leaf:latest) runtime_policy=recommended ;;
+    esac
+    resolved="$(resolve_setup_java_runtime "${target_type}" "${runtime_policy}" "$2" || true)"
+    [[ -n ${resolved} ]] || resolved='{}'
+    candidate="$(jq -r '.game // empty' <<< "${resolved}")"
+    loader="$(jq -r '.loader // empty' <<< "${resolved}")"
+    image="$(jq -r '.image // empty' <<< "${resolved}")"
+    compatible=false
+    available=false
+    geyser=''
+    case "${target_type}" in
+        spigot|pufferfish|leaf|fabric|neoforge) geyser="$(resolve_geyser_supported_java_version || true)" ;;
+    esac
+    reason="$(jq -r '.reason // empty' <<< "${resolved}")"
+    if [[ -n ${candidate} ]]; then
+        if [[ ${target_type} == spigot || ${target_type} == pufferfish || ${target_type} == leaf ]]; then
+            available=true
+            if [[ -n ${geyser} ]] && server_crossplay_version_compatible "${candidate}" "${geyser}"; then compatible=true; fi
+        elif [[ ${target_type} == fabric || ${target_type} == neoforge ]]; then
+            # A Java preview must never download managed cross-play artifacts.
+            # Only an explicit cross-play request proves that independent capability.
+            if [[ $3 == yes ]]; then
+                if [[ -z ${geyser} ]]; then
+                    reason='Current managed cross-play Minecraft version could not be verified. Java setup is available.'
+                elif [[ ${candidate} != "${geyser}" ]]; then
+                    reason="Managed cross-play currently supports Minecraft ${geyser}. Selected Minecraft ${candidate} is available as Java-only."
+                elif jv_crossplay_mod_compatible "${target_type}" "${candidate}" "${loader}"; then
+                    available=true
+                    compatible=true
+                else reason='Managed cross-play compatibility could not be proven for this exact Minecraft and loader version. Java setup is available.'; fi
+            fi
+        fi
+    else reason='An exact stable Minecraft release and compatible runtime could not be verified. Try again or choose a supported Specific version.'; fi
+    jq -n --arg server_type "${target_type}" --arg candidate "${candidate}" --arg loader "${loader}" --arg image "${image}" --arg geyser "${geyser}" --arg reason "${reason}" \
+        --argjson compatible "${compatible}" --argjson available "${available}" --argjson enabled "$([[ $3 == yes ]] && printf true || printf false)" \
+        '{server_type:$server_type,selected_candidate:$candidate,candidate_channel:"RELEASE",loader_version:$loader,image_tag:$image,geyser_supported_version:$geyser,reason:$reason,server_supported:($candidate != ""),managed_crossplay_available:$available,crossplay_compatible:$compatible,crossplay_enabled:$enabled}'
+    exit 0
+fi
+available="$(resolve_latest_server_version || true)"
+available_channel=''
+[[ -z ${available} ]] || available_channel="$(server_version_channel "${available}" || true)"
+recommended="$(resolve_recommended_server_version || true)"
+candidate=''
+policy="${1:-${MINECRAFT_VERSION_MODE:-recommended}}"
+specific="${2:-${MINECRAFT_VERSION:-}}"
+bedrock="${3:-${BEDROCK_ENABLED:-no}}"
+candidate_channel=''
+server_supported=false
+geyser_version=''
+# Setup discovery is informational even when cross-play is off.
+if (( $# == 3 )) && [[ ${target_type} == paper || ${target_type} == purpur ]]; then
+    geyser_version="$(resolve_geyser_supported_java_version || true)"
+fi
+crossplay_compatible=false
+reason=''
+if [[ ${bedrock} == yes ]]; then
+    if (( $# != 3 )); then geyser_version="$(resolve_geyser_supported_java_version || true)"; fi
+    if [[ -n ${geyser_version} ]] && server_version_recommended_available "${geyser_version}"; then
+        recommended="${geyser_version}"
+    else
+        recommended=''
+    fi
+fi
+case "${policy}" in
+    recommended) candidate="${recommended}" ;;
+    latest) candidate="${available}" ;;
+    pinned)
+        if [[ ${specific} != LATEST ]]; then
+            candidate="${specific}"
+        fi
+        ;;
+esac
+[[ -z ${candidate} ]] || candidate_channel="$(server_version_channel "${candidate}" || true)"
+if [[ -n ${candidate_channel} && ( ${policy} != recommended || ${bedrock} != yes || ${candidate_channel} == STABLE || ${target_type} != paper ) ]]; then
+    server_supported=true
+else
+    candidate=''
+    reason='A usable server build for the selected version could not be confirmed.'
+fi
+if [[ ${bedrock} == yes ]]; then
+    if [[ -z ${geyser_version} ]]; then
+        reason='Geyser/Floodgate compatibility could not be confirmed.'
+    elif [[ -n ${candidate} ]] && server_crossplay_version_compatible "${candidate}" "${geyser_version}"; then
+        crossplay_compatible=true
+        if [[ -n ${available} && ${available} != "${recommended}" ]]; then
+            reason="Minecraft ${available} is available, but released cross-play support is not ready yet. No action is needed."
+        fi
+    elif [[ -n ${candidate} ]]; then
+        reason="Released cross-play supports Minecraft ${geyser_version}. The selected Minecraft ${candidate} is not compatible."
+    fi
+fi
+managed_crossplay_available=false
+case "${target_type}" in
+    paper|purpur|pufferfish|leaf|spigot) managed_crossplay_available=true ;;
+    fabric|neoforge)
+        if [[ -n ${candidate} && -n ${MINECRAFT_LOADER_VERSION:-} ]] && jv_crossplay_mod_compatible "${target_type}" "${candidate}" "${MINECRAFT_LOADER_VERSION}"; then
+            managed_crossplay_available=true
+        else
+            crossplay_compatible=false
+            reason='Current platform cross-play compatibility could not be proven for the exact Minecraft and loader versions.'
+        fi ;;
+esac
+geyser_state=disabled
+floodgate_state=disabled
+geyser_metadata='{}'
+floodgate_metadata='{}'
+if [[ ${bedrock} == yes ]]; then
+    geyser_state=unavailable
+    floodgate_state=unavailable
+fi
+if [[ ${bedrock} == yes && $# -ne 3 && ( ${target_type} == paper || ${target_type} == purpur || ${target_type} == pufferfish || ${target_type} == leaf || ${target_type} == spigot ) ]]; then
+    geyser_metadata="$(jv_crossplay_metadata geyser || printf '{}')"
+    floodgate_metadata="$(jv_crossplay_metadata floodgate || printf '{}')"
+    geyser_state="$(jv_crossplay_artifact_state geyser "${geyser_metadata}")"
+    floodgate_state="$(jv_crossplay_artifact_state floodgate "${floodgate_metadata}")"
+fi
+image_state=unavailable
+remote_digest=''
+local_digest=''
+local_id=''
+running_id=''
+service_state=stopped
+if (( $# != 3 )); then
+    remote_digest="$(jv_remote_platform_digest "$(minecraft_image_ref)" || true)"
+    local_id="$(podman image inspect "${current_image}" --format '{{.Id}}' 2>/dev/null || true)"
+    if systemctl is-active --quiet "${JV_INSTANCE_UNIT}"; then
+        service_state=running
+        running_id="$(podman inspect "${JV_INSTANCE_CONTAINER}" --format '{{.Image}}' 2>/dev/null || true)"
+    fi
+    # Compare the proposed digest to the actual runtime, not a cached proposed tag.
+    identity="${local_id}"
+    [[ ${service_state} != running ]] || identity="${running_id}"
+    if [[ -n ${identity} ]]; then
+        local_digest="$(podman image inspect "${identity}" --format '{{.Digest}}' 2>/dev/null || true)"
+    fi
+    if [[ ${remote_digest} =~ ^sha256:[0-9a-f]{64}$ ]]; then
+        image_state=updates_available
+        if [[ -n ${identity} && ${local_digest} =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            [[ ${remote_digest} != "${local_digest}" ]] || image_state=up_to_date
+        elif [[ -n ${identity} || ${service_state} == running ]]; then
+            image_state=unavailable
+        fi
+    fi
+fi
+if (( $# == 3 )); then
+    stack_state=not_applicable
+    minecraft_state=not_applicable
+    image_state=not_applicable
+    geyser_state=not_applicable
+    floodgate_state=not_applicable
+else
+    minecraft_state=up_to_date
+    stack_state=up_to_date
+    if [[ -z ${installed} || -z ${candidate} || -z ${available} || ${image_state} == unavailable ||
+          ${geyser_state} == unavailable || ${floodgate_state} == unavailable ||
+          ( ${bedrock} == yes && ${crossplay_compatible} != true ) ]]; then
+        stack_state=unavailable
+        minecraft_state=unavailable
+    elif [[ ${channel_changed} == true || ${software_changed} == true || ${installed} != "${candidate}" || ${geyser_state} == updates_available ||
+            ${floodgate_state} == updates_available || ${image_state} == updates_available ]]; then
+        stack_state=updates_available
+        [[ ${installed} == "${candidate}" ]] || minecraft_state=updates_available
+    elif [[ ${bedrock} == yes && ${available} != "${recommended}" && ${policy} == recommended ]]; then
+        stack_state=waiting_for_compatibility
+    fi
+    if [[ ${stack_state} == updates_available && ${reason} == *'No action is needed.' ]]; then
+        reason="Minecraft ${available} is waiting for released cross-play support. Compatible server updates are ready to review."
+    fi
+    if [[ ${stack_state} == unavailable && ( -z ${reason} || ${reason} == *'No action is needed.' ) ]]; then
+        reason='Server update information could not be verified. Try again later.'
+    fi
+fi
+if (( $# != 3 )) && [[ ${stack_state} == up_to_date ]] &&
+    [[ ${policy} != "${MINECRAFT_VERSION_MODE:-pinned}" || ( ${policy} == pinned && ${candidate} != "${MINECRAFT_VERSION:-}" ) ]]; then
+    stack_state=updates_available
+fi
+runtime_update_required=false
+if [[ ${stack_state} == updates_available && ( ${software_changed} == true || ${installed} != "${candidate}" ||
+      ${image_state} == updates_available || ${geyser_state} == updates_available || ${floodgate_state} == updates_available ) ]]; then
+    runtime_update_required=true
+fi
+# An explicit same-version policy edit must not install unrelated stack updates.
+if (( $# != 3 )) && [[ -n ${1:-} && ${policy} != "${MINECRAFT_VERSION_MODE:-pinned}" &&
+    ${installed} == "${candidate}" && ${software_changed} == false && ${channel_changed} == false ]]; then
+    runtime_update_required=false
+fi
+# Bind review to resolved artifacts and appliance configuration; no browser URLs.
+fingerprint=''
+if (( $# != 3 )); then
+    fingerprint="sha256:$(jq -cn --arg server_type "${target_type}" --arg configured_type "${configured_type}" --arg candidate "${candidate}" --arg policy "${policy}" \
+        --arg configured "${MINECRAFT_VERSION:-}" --arg bedrock "${bedrock}" \
+        --arg configured_tag "${configured_image_tag}" --arg proposed_tag "${target_image_tag}" \
+        --arg current_image "${current_image}" --arg local_digest "${local_digest}" --arg local_id "${local_id}" \
+        --arg running_id "${running_id}" --arg service_state "${service_state}" \
+        --arg config_identity "$(sha256sum "/etc/justvoxel/instances/${JV_INSTANCE_ID}/config.json" | cut -d ' ' -f1)" \
+        --arg data_path "${DATA_PATH:-}" --arg image "$(minecraft_image_ref)" --arg digest "${remote_digest}" \
+        --arg installed "${installed}" --argjson geyser "${geyser_metadata}" --argjson floodgate "${floodgate_metadata}" \
+        '[$server_type,$configured_type,$candidate,$policy,$configured,$bedrock,$data_path,$image,$digest,$installed,$geyser,$floodgate,$configured_tag,$proposed_tag,$current_image,$local_digest,$local_id,$running_id,$service_state,$config_identity]' | sha256sum | cut -d ' ' -f1)"
+fi
+jq -n --arg server_type "${target_type}" --arg server_software "$(server_software_display_name)" \
+    --arg viaversion_state "$(server_supports_viaversion && printf managed_automatically || printf not_applicable)" \
+    --arg installed "${installed}" --arg available "${available}" \
+    --arg recommended "${recommended}" --arg candidate "${candidate}" \
+    --arg available_channel "${available_channel}" --arg candidate_channel "${candidate_channel}" \
+    --arg configured_image_tag "${configured_image_tag}" --arg configured_server_type "${configured_type}" \
+    --argjson runtime_update_required "${runtime_update_required}" \
+    --arg image_tag "${MINECRAFT_IMAGE_TAG:-stable}" --arg policy "${policy}" \
+    --arg configured_version "${MINECRAFT_VERSION:-}" --arg geyser_version "${geyser_version}" \
+    --arg reason "${reason}" --argjson server_supported "${server_supported}" \
+    --argjson managed_crossplay_available "${managed_crossplay_available}" \
+    --argjson crossplay_compatible "${crossplay_compatible}" \
+    --arg stack_state "${stack_state}" --arg minecraft_state "${minecraft_state}" \
+    --arg geyser_state "${geyser_state}" --arg floodgate_state "${floodgate_state}" \
+    --argjson geyser_artifact "${geyser_metadata}" --argjson floodgate_artifact "${floodgate_metadata}" \
+    --arg managed_image_digest "${remote_digest}" --arg image_state "${image_state}" --arg fingerprint "${fingerprint}" \
+    --argjson crossplay_enabled "$([[ ${bedrock} == yes ]] && printf true || printf false)" \
+    '{configured_server_type:$configured_server_type,configured_image_tag:$configured_image_tag,runtime_update_required:$runtime_update_required,server_type:$server_type,server_software:$server_software,installed:$installed,available:$available,available_channel:$available_channel,recommended:$recommended,selected_candidate:$candidate,candidate_channel:$candidate_channel,image_tag:$image_tag,policy:$policy,configured_version:$configured_version,
+      managed_image_digest:$managed_image_digest,managed_artifacts:{geyser:$geyser_artifact,floodgate:$floodgate_artifact},update_available:($stack_state == "updates_available"),stack_state:$stack_state,minecraft_state:$minecraft_state,
+      geyser_state:$geyser_state,floodgate_state:$floodgate_state,viaversion_state:$viaversion_state,image_state:$image_state,plan_fingerprint:$fingerprint,server_supported:$server_supported,paper_supported:($server_supported and $server_type == "paper"),
+      managed_crossplay_available:$managed_crossplay_available,crossplay_enabled:$crossplay_enabled,geyser_supported_version:$geyser_version,crossplay_compatible:$crossplay_compatible,reason:$reason}'

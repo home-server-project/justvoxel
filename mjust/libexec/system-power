@@ -1,0 +1,71 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/system-actions-api.sh
+
+if (( EUID != 0 )); then
+    echo 'ERROR: this operation must run as root.' >&2
+    exit 1
+fi
+
+action="${1:-}"
+case "${action}" in
+    reboot|poweroff) ;;
+    *)
+        echo 'Usage: system-power {reboot|poweroff}' >&2
+        exit 2
+        ;;
+esac
+
+status="$(jv_system_actions_get)" || exit 1
+if ! jq -e '.ok == true and (.minecraft_state | type == "string") and (.staged_update | type == "boolean")' <<<"${status}" >/dev/null 2>&1; then
+    echo 'ERROR: JustVoxel Management API returned invalid system action status.' >&2
+    exit 1
+fi
+
+if [[ ${action} == reboot ]]; then
+    title='Reboot JustVoxel'
+    prompt='Continue with reboot?'
+    label='Reboot JustVoxel'
+else
+    title='Power off JustVoxel'
+    prompt='Continue with power off?'
+    label='Power off JustVoxel'
+fi
+
+echo "${title}"
+echo
+printf 'Minecraft: %s\n' "$(jq -r '.minecraft_state' <<<"${status}" | sed 's/^./\U&/')"
+if [[ $(jq -r '.staged_update' <<<"${status}") == true ]]; then
+    if [[ ${action} == reboot ]]; then
+        echo 'OS update: Staged - the staged deployment will be used after this reboot.'
+    else
+        echo 'OS update: Staged - the staged deployment will be used on the next boot.'
+    fi
+else
+    echo 'OS update: No staged deployment detected.'
+fi
+
+echo
+read -r -p "${prompt} [y/N]: " answer
+if [[ ${answer,,} != y && ${answer,,} != yes ]]; then
+    echo 'Cancelled.'
+    exit 0
+fi
+
+response="$(jv_system_actions_apply "${action}" false)" || exit 1
+set +e
+response="$(jv_system_actions_handle_players "${action}" "${response}" "${label}")"
+rc=$?
+set -e
+if (( rc == 20 )); then
+    exit 0
+elif (( rc != 0 )); then
+    exit "${rc}"
+fi
+
+if [[ $(jq -r '.ok // false' <<<"${response}") != true || $(jq -r '.accepted // false' <<<"${response}") != true ]]; then
+    jv_system_actions_api_error "${response}" 'System action was not accepted.'
+    exit 1
+fi
+message="$(jq -r '.message // empty' <<<"${response}")"
+[[ -n ${message} ]] && echo "${message}"

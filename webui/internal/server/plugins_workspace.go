@@ -1,0 +1,580 @@
+package server
+
+import (
+	"context"
+	"errors"
+	"io"
+	"mime"
+	"net/http"
+	"net/url"
+	"regexp"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/home-server-project/justvoxel-webui/internal/api"
+)
+
+type pluginsWorkspaceAPI interface {
+	AdminPluginInventory(context.Context, string, bool) (api.PluginInventory, error)
+	AdminPluginDiscover(context.Context, string, url.Values) (api.PluginCatalog, error)
+}
+
+func (a *App) registerPluginsWorkspaceRoutes(mux *http.ServeMux) {
+	for _, method := range []string{"GET", "PUT", "DELETE"} {
+		mux.HandleFunc(method+" /api/plugins/workspace/curseforge-api", a.pluginsCurseForgeAPI)
+	}
+	mux.HandleFunc("GET /api/plugins/workspace/addons", a.selectedPluginRequest(a.pluginsAddonInventory))
+	mux.HandleFunc("POST /api/plugins/workspace/addons/plan", a.selectedPluginRequest(a.pluginsAddonPlan))
+	mux.HandleFunc("POST /api/plugins/workspace/addons/install", a.selectedPluginRequest(a.pluginsAddonInstall))
+	mux.HandleFunc("POST /api/plugins/workspace/addons/recover", a.selectedPluginRequest(a.pluginsAddonRecover))
+	mux.HandleFunc("GET /api/plugins/workspace/installed", a.selectedPluginRequest(a.pluginsWorkspaceInventory))
+	mux.HandleFunc("GET /api/plugins/workspace/updates", a.selectedPluginRequest(a.pluginsWorkspaceInventory))
+	mux.HandleFunc("GET /api/plugins/workspace/discover", a.selectedPluginRequest(a.pluginsWorkspaceDiscover))
+	mux.HandleFunc("GET /api/plugins/workspace/icon", a.pluginsWorkspaceIcon)
+	mux.HandleFunc("POST /api/plugins/workspace/install/plan", a.selectedPluginRequest(a.pluginsWorkspaceInstallPlan))
+	mux.HandleFunc("POST /api/plugins/workspace/install", a.selectedPluginRequest(a.pluginsWorkspaceInstall))
+	mux.HandleFunc("POST /api/plugins/workspace/install/acknowledge", a.selectedPluginRequest(a.pluginsWorkspaceInstallAcknowledge))
+	mux.HandleFunc("POST /api/plugins/workspace/install/restore-runtime", a.selectedPluginRequest(a.pluginsWorkspaceInstallRestoreRuntime))
+	mux.HandleFunc("GET /api/plugins/workspace/install-operation", a.selectedPluginRequest(a.pluginsWorkspaceInstallOperation))
+	mux.HandleFunc("GET /api/plugins/workspace/operation", a.selectedPluginRequest(a.pluginsWorkspaceInstallOperation))
+	mux.HandleFunc("POST /api/plugins/workspace/manage/plan", a.selectedPluginRequest(a.pluginsWorkspaceManagePlan))
+	mux.HandleFunc("POST /api/plugins/workspace/manage", a.selectedPluginRequest(a.pluginsWorkspaceManage))
+	mux.HandleFunc("POST /api/plugins/workspace/manage/acknowledge", a.selectedPluginRequest(a.pluginsWorkspaceManageAcknowledge))
+}
+func (a *App) pluginsWorkspaceInventory(w http.ResponseWriter, r *http.Request) {
+	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator")
+	if !ok {
+		return
+	}
+	client, ok := a.api.(pluginsWorkspaceAPI)
+	if !ok {
+		writeMinecraftWorkspaceError(w, http.StatusServiceUnavailable, ui(w, "ui.193ac632781e"))
+		return
+	}
+	out, err := client.AdminPluginInventory(r.Context(), session, r.URL.Path == "/api/plugins/workspace/updates")
+	if err != nil {
+		a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.193ac632781e"))
+		return
+	}
+	writeMinecraftWorkspaceJSON(w, http.StatusOK, out)
+}
+func (a *App) pluginsWorkspaceDiscover(w http.ResponseWriter, r *http.Request) {
+	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator")
+	if !ok {
+		return
+	}
+	client, ok := a.api.(pluginsWorkspaceAPI)
+	if !ok {
+		writeMinecraftWorkspaceError(w, http.StatusServiceUnavailable, ui(w, "ui.dfcc1c887cc8"))
+		return
+	}
+	query, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil || api.ValidatePluginDiscoverQuery(query) != nil {
+		writeMinecraftWorkspaceError(w, http.StatusBadRequest, ui(w, "ui.3e9c76e932e3"))
+		return
+	}
+	out, err := client.AdminPluginDiscover(r.Context(), session, query)
+	if err != nil {
+		a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.dfcc1c887cc8"))
+		return
+	}
+	writeMinecraftWorkspaceJSON(w, http.StatusOK, out)
+}
+
+type pluginsInstallAPI interface {
+	AdminPluginInstallPlan(context.Context, string, api.PluginInstallRequest) (api.PluginInstallPlan, error)
+	AdminPluginInstall(context.Context, string, api.PluginInstallApplyRequest) (api.PersistentOperationResponse, error)
+	AdminCurrentPluginInstall(context.Context, string) (api.PersistentOperationResponse, error)
+	AdminOperation(context.Context, string, string) (api.PersistentOperationResponse, error)
+}
+
+// The WebUI uses existing form CSRF; only bounded, explicit request fields are
+// translated into the strict Management API JSON contract.
+func (a *App) pluginInstallForm(w http.ResponseWriter, r *http.Request, apply bool) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	if r.ParseForm() != nil {
+		writeMinecraftWorkspaceError(w, 400, ui(w, "ui.499aebcf56bd"))
+		return false
+	}
+	if !a.validCSRF(r) {
+		writeMinecraftWorkspaceError(w, 403, ui(w, "ui.74bccc44f472"))
+		return false
+	}
+	allowed := []string{"csrf", "source", "project_id", "version_id"}
+	if apply {
+		allowed = append(allowed, "plan_fingerprint", "confirm_players")
+	}
+	if len(r.URL.Query()) > 0 {
+		writeMinecraftWorkspaceError(w, 400, ui(w, "ui.499aebcf56bd"))
+		return false
+	}
+	for key, values := range r.PostForm {
+		if !slices.Contains(allowed, key) || len(values) != 1 {
+			writeMinecraftWorkspaceError(w, 400, ui(w, "ui.499aebcf56bd"))
+			return false
+		}
+	}
+	if apply && r.FormValue("confirm_players") != "true" && r.FormValue("confirm_players") != "false" {
+		writeMinecraftWorkspaceError(w, 400, ui(w, "ui.6ac89936dabd"))
+		return false
+	}
+	return true
+}
+func (a *App) pluginsWorkspaceInstallPlan(w http.ResponseWriter, r *http.Request) {
+	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator")
+	if !ok {
+		return
+	}
+	if !a.pluginInstallForm(w, r, false) {
+		return
+	}
+	client, ok := a.api.(pluginsInstallAPI)
+	if !ok {
+		writeMinecraftWorkspaceError(w, 503, ui(w, "ui.9eaa6a2311c2"))
+		return
+	}
+	out, err := client.AdminPluginInstallPlan(r.Context(), session, api.PluginInstallRequest{Source: r.FormValue("source"), ProjectID: r.FormValue("project_id"), VersionID: r.FormValue("version_id")})
+	if err != nil {
+		a.writePluginWorkspaceAPIError(w, err, ui(w, "ui.0b16ea85d68a"))
+		return
+	}
+	writeMinecraftWorkspaceJSON(w, 200, out)
+}
+func (a *App) pluginsWorkspaceInstall(w http.ResponseWriter, r *http.Request) {
+	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator")
+	if !ok {
+		return
+	}
+	media, params, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if media == "multipart/form-data" {
+		a.pluginsWorkspaceInstallUpload(w, r, session, params["boundary"])
+		return
+	}
+	if !a.pluginInstallForm(w, r, true) {
+		return
+	}
+	client, ok := a.api.(pluginsInstallAPI)
+	if !ok {
+		writeMinecraftWorkspaceError(w, 503, ui(w, "ui.9eaa6a2311c2"))
+		return
+	}
+	out, err := client.AdminPluginInstall(r.Context(), session, api.PluginInstallApplyRequest{Source: r.FormValue("source"), ProjectID: r.FormValue("project_id"), VersionID: r.FormValue("version_id"), PlanFingerprint: r.FormValue("plan_fingerprint"), ConfirmPlayers: r.FormValue("confirm_players") == "true"})
+	if err != nil {
+		a.writePluginWorkspaceAPIError(w, err, ui(w, "ui.a63a8596fa9b"))
+		return
+	}
+	writeMinecraftWorkspaceJSON(w, http.StatusAccepted, out)
+}
+func (a *App) pluginsWorkspaceInstallUpload(w http.ResponseWriter, r *http.Request, session, boundary string) {
+	r.Form = url.Values{"csrf": {r.Header.Get("X-CSRF-Token")}}
+	if !a.validCSRF(r) {
+		writeMinecraftWorkspaceError(w, 403, ui(w, "ui.74bccc44f472"))
+		return
+	}
+	if boundary == "" || r.URL.RawQuery != "" || r.ContentLength > api.PluginInstallUploadLimit {
+		writeMinecraftWorkspaceError(w, 400, "Invalid or oversized JAR upload request")
+		return
+	}
+	client, ok := a.api.(interface {
+		AdminPluginInstallUpload(context.Context, string, string, io.Reader) (api.PersistentOperationResponse, error)
+	})
+	if !ok {
+		writeMinecraftWorkspaceError(w, 503, ui(w, "ui.9eaa6a2311c2"))
+		return
+	}
+	if err := http.NewResponseController(w).SetReadDeadline(time.Now().Add(5 * time.Minute)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		writeMinecraftWorkspaceError(w, 503, "JAR upload is unavailable")
+		return
+	}
+	// The Agent owns multipart validation and private staging at the trust boundary.
+	body := http.MaxBytesReader(w, r.Body, api.PluginInstallUploadLimit)
+	defer body.Close()
+	out, err := client.AdminPluginInstallUpload(r.Context(), session, r.Header.Get("Content-Type"), body)
+	if err != nil {
+		a.writePluginWorkspaceAPIError(w, err, ui(w, "ui.a63a8596fa9b"))
+		return
+	}
+	writeMinecraftWorkspaceJSON(w, http.StatusAccepted, out)
+}
+
+func (a *App) pluginsWorkspaceInstallOperation(w http.ResponseWriter, r *http.Request) {
+
+	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator")
+	if !ok {
+		return
+	}
+	if r.URL.Path == "/api/plugins/workspace/operation" {
+		query, err := url.ParseQuery(r.URL.RawQuery)
+		if err != nil {
+			writeMinecraftWorkspaceError(w, 400, ui(w, "ui.d24691bc5824"))
+			return
+		}
+		for key, values := range query {
+			if key != "id" || len(values) != 1 || !validWorkspaceLogID("plugins", values[0]) {
+				writeMinecraftWorkspaceError(w, 400, ui(w, "ui.3ab1c0839573"))
+				return
+			}
+		}
+	}
+	client, ok := a.api.(pluginsInstallAPI)
+	if !ok {
+		writeMinecraftWorkspaceError(w, 503, ui(w, "ui.729215ea003e"))
+		return
+	}
+	var out api.PersistentOperationResponse
+	var err error
+	if id := r.URL.Query().Get("id"); id != "" {
+		out, err = client.AdminOperation(r.Context(), session, id)
+	} else {
+		if generic, ok := a.api.(interface {
+			AdminCurrentPluginOperation(context.Context, string) (api.PersistentOperationResponse, error)
+		}); ok && r.URL.Path == "/api/plugins/workspace/operation" {
+			out, err = generic.AdminCurrentPluginOperation(r.Context(), session)
+		} else {
+			out, err = client.AdminCurrentPluginInstall(r.Context(), session)
+		}
+	}
+	if err != nil {
+		a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.729215ea003e"))
+		return
+	}
+	if out.Operation != nil && (out.Operation.InstanceID != api.MinecraftMaintenanceInstance(r.Context()) || !isWorkspacePluginOperation(out.Operation.OperationType) || (r.URL.Path == "/api/plugins/workspace/install-operation" && out.Operation.OperationType != "plugin_install")) {
+		writeMinecraftWorkspaceError(w, 404, ui(w, "ui.7b989f05f80b"))
+		return
+	}
+	writeMinecraftWorkspaceJSON(w, 200, out)
+}
+
+func (a *App) pluginsWorkspaceInstallAcknowledge(w http.ResponseWriter, r *http.Request) {
+	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator")
+	if !ok {
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	if r.ParseForm() != nil {
+		writeMinecraftWorkspaceError(w, 400, ui(w, "ui.c9b9443a6857"))
+		return
+	}
+	if !a.validCSRF(r) {
+		writeMinecraftWorkspaceError(w, 403, ui(w, "ui.74bccc44f472"))
+		return
+	}
+	if len(r.URL.Query()) > 0 || r.FormValue("operation_id") == "" {
+		writeMinecraftWorkspaceError(w, 400, ui(w, "ui.c9b9443a6857"))
+		return
+	}
+	for key, values := range r.PostForm {
+		if (key != "csrf" && key != "operation_id") || len(values) != 1 {
+			writeMinecraftWorkspaceError(w, 400, ui(w, "ui.c9b9443a6857"))
+			return
+		}
+	}
+	client, ok := a.api.(interface {
+		AdminPluginInstallAcknowledge(context.Context, string, api.PluginInstallAcknowledgeRequest) (api.PersistentOperationResponse, error)
+	})
+	if !ok {
+		writeMinecraftWorkspaceError(w, 503, ui(w, "ui.ae6ccf7368dd"))
+		return
+	}
+	out, err := client.AdminPluginInstallAcknowledge(r.Context(), session, api.PluginInstallAcknowledgeRequest{OperationID: r.FormValue("operation_id")})
+	if err != nil {
+		if writePluginRuntimeRecovery(w, err, api.MinecraftMaintenanceInstance(r.Context()), r.FormValue("operation_id")) {
+			return
+		}
+		a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.465e29f52b69"))
+		return
+	}
+	writeMinecraftWorkspaceJSON(w, 200, out)
+}
+
+func (a *App) pluginsWorkspaceInstallRestoreRuntime(w http.ResponseWriter, r *http.Request) {
+	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator")
+	if !ok {
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	if r.ParseForm() != nil {
+		writeMinecraftWorkspaceError(w, 400, ui(w, "ui.c9b9443a6857"))
+		return
+	}
+	if !a.validCSRF(r) {
+		writeMinecraftWorkspaceError(w, 403, ui(w, "ui.74bccc44f472"))
+		return
+	}
+	operationID, confirm := r.PostForm.Get("operation_id"), r.PostForm.Get("confirm_players")
+	if len(r.URL.Query()) != 0 || operationID == "" || r.PostForm.Get("restore_runtime") != "true" ||
+		(r.PostForm.Has("confirm_players") && confirm != "true" && confirm != "false") {
+		writeMinecraftWorkspaceError(w, 400, ui(w, "ui.c9b9443a6857"))
+		return
+	}
+	for key, values := range r.PostForm {
+		if (key != "csrf" && key != "operation_id" && key != "restore_runtime" && key != "confirm_players") || len(values) != 1 {
+			writeMinecraftWorkspaceError(w, 400, ui(w, "ui.c9b9443a6857"))
+			return
+		}
+	}
+	client, ok := a.api.(interface {
+		AdminPluginInstallRestoreRuntime(context.Context, string, api.PluginInstallRestoreRuntimeRequest) (api.PersistentOperationResponse, error)
+	})
+	if !ok {
+		writeMinecraftWorkspaceError(w, 503, ui(w, "ui.ae6ccf7368dd"))
+		return
+	}
+	out, err := client.AdminPluginInstallRestoreRuntime(r.Context(), session, api.PluginInstallRestoreRuntimeRequest{
+		OperationID: operationID, RestoreRuntime: true, ConfirmPlayers: confirm == "true",
+	})
+	if err != nil {
+		if writePluginRuntimeRecovery(w, err, api.MinecraftMaintenanceInstance(r.Context()), operationID) {
+			return
+		}
+		a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.465e29f52b69"))
+		return
+	}
+	writeMinecraftWorkspaceJSON(w, 200, out)
+}
+
+func writePluginRuntimeRecovery(w http.ResponseWriter, err error, instanceID, operationID string) bool {
+	var response *api.ResponseError
+	if !errors.As(err, &response) || response.StatusCode != http.StatusConflict || response.PluginRecovery == nil {
+		return false
+	}
+	recovery := response.PluginRecovery
+	if recovery.ID != instanceID || (operationID != "" && recovery.RecoveryOperationID != operationID) {
+		writeMinecraftWorkspaceError(w, http.StatusConflict, ui(w, "ui.fc9a2971e8de"))
+		return true
+	}
+	writeMinecraftWorkspaceJSON(w, http.StatusConflict, recovery)
+	return true
+}
+
+var pluginIconProjectID = regexp.MustCompile(`^[A-Za-z0-9]{1,64}$`)
+
+// Match the Agent's strict project-bound CDN URL rules before forwarding.
+func pluginIconURL(raw, projectID string) (*url.URL, error) {
+	u, err := url.Parse(raw)
+	if err != nil || len(raw) > 2048 || u.Scheme != "https" || u.Host != "cdn.modrinth.com" || u.User != nil || u.RawQuery != "" || u.ForceQuery || strings.Contains(raw, "#") || u.Fragment != "" || u.RawPath != "" {
+		return nil, errors.New("invalid plugin icon URL")
+	}
+	parts := strings.Split(u.Path, "/")
+	if len(parts) != 4 || parts[0] != "" || parts[1] != "data" || parts[2] != projectID || !pluginIconFilename.MatchString(parts[3]) {
+		return nil, errors.New("invalid plugin icon path")
+	}
+	return u, nil
+}
+
+var pluginIconFilename = regexp.MustCompile(`^[A-Za-z0-9_-]+\.(png|jpg|jpeg|bmp|gif|webp|svg|svgz|rgb)$`)
+
+func (a *App) pluginsWorkspaceIcon(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator")
+	if !ok {
+		return
+	}
+	query, err := url.ParseQuery(r.URL.RawQuery)
+	projectID := query.Get("project_id")
+	if err != nil || api.ValidatePluginIconQuery(query) != nil {
+		http.Error(w, ui(w, "ui.0f8f6a45f3ce"), http.StatusBadRequest)
+		return
+	}
+	iconURL := query["icon_url"]
+	if len(iconURL) == 1 {
+		if _, err := pluginIconURL(iconURL[0], projectID); err != nil {
+			http.Error(w, ui(w, "ui.0f8f6a45f3ce"), http.StatusBadRequest)
+			return
+		}
+	}
+	var icon api.PluginIcon
+	if query.Get("source") == "Hangar" || query.Get("source") == "CurseForge" {
+		sourceClient, ok := a.api.(interface {
+			AdminPluginSourceIcon(context.Context, string, string, string) (api.PluginIcon, error)
+		})
+		if !ok {
+			http.Error(w, ui(w, "ui.996d92f251f8"), 503)
+			return
+		}
+		icon, err = sourceClient.AdminPluginSourceIcon(r.Context(), session, query.Get("source"), projectID)
+	} else {
+		client, ok := a.api.(interface {
+			AdminPluginIcon(context.Context, string, string, ...string) (api.PluginIcon, error)
+		})
+		if !ok {
+			http.Error(w, ui(w, "ui.996d92f251f8"), http.StatusServiceUnavailable)
+			return
+		}
+		icon, err = client.AdminPluginIcon(r.Context(), session, projectID, iconURL...)
+	}
+	if err != nil {
+		status := http.StatusBadGateway
+		var response *api.ResponseError
+		if errors.As(err, &response) && (response.StatusCode == http.StatusNotFound || response.StatusCode == http.StatusServiceUnavailable) {
+			status = response.StatusCode
+		}
+		if errors.Is(err, api.ErrUnauthorized) {
+			status = http.StatusUnauthorized
+		}
+		if errors.Is(err, api.ErrPasswordChangeRequired) {
+			status = http.StatusForbidden
+		}
+		http.Error(w, ui(w, "ui.996d92f251f8"), status)
+		return
+	}
+	if len(icon.Data) > 512<<10 || (icon.ContentType != "image/png" && icon.ContentType != "image/jpeg" && icon.ContentType != "image/webp" && icon.ContentType != "image/bmp" && icon.ContentType != "image/gif") || http.DetectContentType(icon.Data) != icon.ContentType {
+		http.Error(w, ui(w, "ui.996d92f251f8"), http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", icon.ContentType)
+	w.Header().Set("Cache-Control", "private, max-age=300")
+	w.Write(icon.Data)
+}
+
+func isWorkspacePluginOperation(kind string) bool {
+	return kind == "plugin_addon_install" || kind == "plugin_install" || kind == "plugin_enable" || kind == "plugin_disable" || kind == "plugin_remove"
+}
+
+type pluginsManageAPI interface {
+	AdminPluginManagePlan(context.Context, string, api.PluginManageRequest) (api.PluginManagePlan, error)
+	AdminPluginManage(context.Context, string, api.PluginManageApplyRequest) (api.PersistentOperationResponse, error)
+	AdminPluginManageAcknowledge(context.Context, string, api.PluginInstallAcknowledgeRequest) (api.PersistentOperationResponse, error)
+}
+
+func (a *App) pluginManageForm(w http.ResponseWriter, r *http.Request, apply, ack bool) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	if r.ParseForm() != nil || len(r.URL.Query()) > 0 {
+		writeMinecraftWorkspaceError(w, 400, ui(w, "ui.499aebcf56bd"))
+		return false
+	}
+	if !a.validCSRF(r) {
+		writeMinecraftWorkspaceError(w, 403, ui(w, "ui.74bccc44f472"))
+		return false
+	}
+	allowed := []string{"csrf", "source", "action", "project_id"}
+	if apply {
+		allowed = append(allowed, "plan_fingerprint", "confirm_players")
+	}
+	if ack {
+		allowed = []string{"csrf", "operation_id"}
+	}
+	for key, values := range r.PostForm {
+		if !slices.Contains(allowed, key) || len(values) != 1 {
+			writeMinecraftWorkspaceError(w, 400, ui(w, "ui.499aebcf56bd"))
+			return false
+		}
+	}
+	if apply && r.FormValue("confirm_players") != "true" && r.FormValue("confirm_players") != "false" {
+		writeMinecraftWorkspaceError(w, 400, ui(w, "ui.6ac89936dabd"))
+		return false
+	}
+	if ack {
+		if !validWorkspaceLogID("plugins", r.FormValue("operation_id")) {
+			writeMinecraftWorkspaceError(w, 400, ui(w, "ui.3ab1c0839573"))
+			return false
+		}
+	} else if !slices.Contains([]string{"enable", "disable", "remove"}, r.FormValue("action")) || !api.ValidPluginIdentity(r.FormValue("source"), r.FormValue("project_id")) {
+		writeMinecraftWorkspaceError(w, 400, ui(w, "ui.32f30bb89f94"))
+		return false
+	}
+	if apply && !pluginManageFingerprintPattern.MatchString(r.FormValue("plan_fingerprint")) {
+		writeMinecraftWorkspaceError(w, 400, ui(w, "ui.2ddd7f04c347"))
+		return false
+	}
+	return true
+}
+
+var pluginManageFingerprintPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+
+func (a *App) pluginsWorkspaceManagePlan(w http.ResponseWriter, r *http.Request) {
+	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator")
+	if !ok {
+		return
+	}
+	if !a.pluginManageForm(w, r, false, false) {
+		return
+	}
+	client, ok := a.api.(pluginsManageAPI)
+	if !ok {
+		writeMinecraftWorkspaceError(w, 503, ui(w, "ui.58539a1b35d4"))
+		return
+	}
+	out, err := client.AdminPluginManagePlan(r.Context(), session, api.PluginManageRequest{Source: r.FormValue("source"), Action: r.FormValue("action"), ProjectID: r.FormValue("project_id")})
+	if err != nil {
+		a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.ac313cd16f12"))
+		return
+	}
+	writeMinecraftWorkspaceJSON(w, 200, out)
+}
+func (a *App) pluginsWorkspaceManage(w http.ResponseWriter, r *http.Request) {
+	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator")
+	if !ok {
+		return
+	}
+	if !a.pluginManageForm(w, r, true, false) {
+		return
+	}
+	client, ok := a.api.(pluginsManageAPI)
+	if !ok {
+		writeMinecraftWorkspaceError(w, 503, ui(w, "ui.58539a1b35d4"))
+		return
+	}
+	out, err := client.AdminPluginManage(r.Context(), session, api.PluginManageApplyRequest{Source: r.FormValue("source"), Action: r.FormValue("action"), ProjectID: r.FormValue("project_id"), PlanFingerprint: r.FormValue("plan_fingerprint"), ConfirmPlayers: r.FormValue("confirm_players") == "true"})
+	if err != nil {
+		a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.3226a55cc4b5"))
+		return
+	}
+	writeMinecraftWorkspaceJSON(w, 202, out)
+}
+func (a *App) pluginsWorkspaceManageAcknowledge(w http.ResponseWriter, r *http.Request) {
+	session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator")
+	if !ok {
+		return
+	}
+	if !a.pluginManageForm(w, r, false, true) {
+		return
+	}
+	client, ok := a.api.(pluginsManageAPI)
+	if !ok {
+		writeMinecraftWorkspaceError(w, 503, ui(w, "ui.d8ab2367fbd2"))
+		return
+	}
+	out, err := client.AdminPluginManageAcknowledge(r.Context(), session, api.PluginInstallAcknowledgeRequest{OperationID: r.FormValue("operation_id")})
+	if err != nil {
+		a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.20f86fc6ba09"))
+		return
+	}
+	writeMinecraftWorkspaceJSON(w, 200, out)
+}
+
+func (a *App) selectedPluginRequest(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		session, _, ok := a.minecraftWorkspaceIdentity(w, r, "administrator")
+		if !ok {
+			return
+		}
+		query, err := url.ParseQuery(r.URL.RawQuery)
+		if err != nil {
+			writeMinecraftWorkspaceError(w, http.StatusBadRequest, uiText("ui.499aebcf56bd"))
+			return
+		}
+		selected, ok := a.selectedMinecraft(w, r, session)
+		if !ok {
+			return
+		}
+		query.Del("server")
+		copy := r.Clone(api.WithMinecraftMaintenanceInstance(r.Context(), selected.ID, "plugins"))
+		copy.URL.RawQuery = query.Encode()
+		next(w, copy)
+	}
+}
+
+func (a *App) writePluginWorkspaceAPIError(w http.ResponseWriter, err error, fallback string) {
+	var response *api.ResponseError
+	if !errors.Is(err, api.ErrUnauthorized) && !errors.Is(err, api.ErrPasswordChangeRequired) && errors.As(err, &response) && response.StatusCode >= 400 && response.StatusCode <= 599 && validWorkspaceLogID("plugins", response.DiagnosticID) {
+		message := response.Message
+		if message == "" {
+			message = fallback
+		}
+		writeMinecraftWorkspaceJSON(w, response.StatusCode, map[string]any{"ok": false, "error": message, "diagnostic_id": response.DiagnosticID})
+		return
+	}
+	a.writeMinecraftWorkspaceAPIError(w, err, fallback)
+}

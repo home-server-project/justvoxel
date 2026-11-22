@@ -1,0 +1,421 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+)
+
+type instancePlayers struct {
+	ID      string `json:"id"`
+	State   string `json:"state"`
+	Online  int    `json:"online"`
+	Maximum int    `json:"maximum"`
+}
+
+// Successful but oversized console output is invalid evidence, not a readiness failure.
+var errInstanceConsoleResponseTooLarge = instanceRuntimeFailure("Instance console is unavailable.")
+
+var instanceJavaPlayerListSGR = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// Remove only SGR decoration, then trim whitespace exposed by a trailing reset.
+// Any remaining escape invalidates the whole response; empty text cannot match.
+func normalizeInstanceJavaPlayerList(raw []byte) string {
+	text := strings.TrimSpace(instanceJavaPlayerListSGR.ReplaceAllString(string(raw), ""))
+	if strings.ContainsRune(text, '\x1b') {
+		return ""
+	}
+	return text
+}
+
+// A failed or truncated response is never interpreted as an empty server.
+func parseInstancePlayers(id string, raw []byte) (instancePlayers, error) {
+	p := instancePlayers{ID: id, State: "unknown"}
+	if len(raw) > 8192 {
+		return p, instanceRuntimeFailure("Player status is unavailable.")
+	}
+	parts := instancePlayerListPattern.FindStringSubmatch(normalizeInstanceJavaPlayerList(raw))
+	if parts != nil {
+		online, e1 := strconv.Atoi(parts[1])
+		maximum, e2 := strconv.Atoi(parts[2])
+		names := strings.TrimSpace(parts[3])
+		if e1 == nil && e2 == nil && maximum > 0 && maximum <= 1000 && online <= maximum && ((online == 0 && names == "") || (online > 0 && len(strings.Split(names, ", ")) == online && names != "")) {
+			p.State = "online"
+			p.Online = online
+			p.Maximum = maximum
+			return p, nil
+		}
+	}
+	return p, instanceRuntimeFailure("Player presence cannot be verified; the instance was not interrupted.")
+}
+func (b *instanceRuntimeBackend) rcon(ctx context.Context, id, command string) ([]byte, error) {
+	if !instanceIDPattern.MatchString(id) {
+		return nil, errInstanceID
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	tool := "rcon-cli"
+	record, readErr := b.readRuntimeConfig(id)
+	if readErr != nil {
+		return nil, readErr
+	}
+	if record.Runtime.Software == "bedrock" {
+		tool = "send-command"
+	}
+	out, err := b.command(ctx, "podman", "exec", "minecraft-"+id, tool, command)
+	if err != nil {
+		return nil, instanceRuntimeFailure("Instance console is unavailable.")
+	}
+	if len(out) > 8192 {
+		return nil, errInstanceConsoleResponseTooLarge
+	}
+	return out, nil
+}
+func (b *instanceRuntimeBackend) players(ctx context.Context, id string) (instancePlayers, error) {
+	record, err := b.readRuntimeConfig(id)
+	if err != nil {
+		return instancePlayers{ID: id, State: "unknown"}, err
+	}
+	if record.Runtime.Software == "bedrock" {
+		return b.bedrockPlayers(ctx, id)
+	}
+	out, err := b.rcon(ctx, id, "list")
+	if err != nil {
+		return instancePlayers{ID: id, State: "unknown"}, instanceRuntimeFailure("Player presence cannot be verified; the instance was not interrupted.")
+	}
+	return parseInstancePlayers(id, out)
+}
+func instancePause(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+func (b *instanceRuntimeBackend) waitMaintenance(ctx context.Context, d time.Duration) error {
+	if b.pause != nil {
+		return b.pause(ctx, d)
+	}
+	return instancePause(ctx, d)
+}
+
+// Only internally generated Forge/NeoForge shutdown warnings tolerate a response
+// timeout: these servers deliver say before their RCON response hangs. The
+// command remains synchronous and context-bound; ordinary RCON is unchanged.
+const instanceShutdownAnnouncementWindow = time.Second
+
+func (b *instanceRuntimeBackend) shutdownAnnouncement(ctx context.Context, id string, seconds int) error {
+	record, err := b.readRuntimeConfig(id)
+	if err != nil {
+		return err
+	}
+	unit := "seconds"
+	if seconds == 1 {
+		unit = "second"
+	}
+	command := "say Server shutting down in " + strconv.Itoa(seconds) + " " + unit
+	if record.Runtime.Software != "forge" && record.Runtime.Software != "neoforge" {
+		_, err = b.rcon(ctx, id, command)
+		return err
+	}
+	warningCtx, cancel := context.WithTimeout(ctx, instanceShutdownAnnouncementWindow)
+	defer cancel()
+	// Bound rcon-cli inside the container too: canceling podman exec alone
+	// can leave the exec process alive. TERM is followed by bounded cleanup.
+	_, err = b.command(warningCtx, "podman", "exec", "minecraft-"+id,
+		"timeout", "--kill-after=0.1s", "0.25s", "rcon-cli", command)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	var exit interface{ ExitCode() int }
+	responseTimeout := errors.As(err, &exit) && (exit.ExitCode() == 124 || exit.ExitCode() == 137)
+	if err != nil && !responseTimeout && warningCtx.Err() != context.DeadlineExceeded {
+		return instanceRuntimeFailure("Instance shutdown announcement is unavailable.")
+	}
+	return nil
+}
+
+// NeoForge needs the systemd stop job queued before the graceful signal.
+func (b *instanceRuntimeBackend) stopGracefully(ctx context.Context, id string) error {
+	if !instanceIDPattern.MatchString(id) {
+		return errInstanceID
+	}
+	record, err := b.readRuntimeConfig(id)
+	if err != nil {
+		return err
+	}
+	neoForge := record.Runtime.Software == "neoforge"
+	signal := func() error {
+		_, err := b.command(ctx, "podman", "kill", "--signal", "SIGUSR1", "minecraft-"+id)
+		return err
+	}
+	signalFailure := instanceRuntimeFailure("Instance graceful stop signal failed.")
+	switch {
+	case record.Runtime.Software == "bedrock":
+		if _, err = b.rcon(ctx, id, "stop"); err != nil {
+			return err
+		}
+	case !neoForge:
+		if err = signal(); err != nil {
+			return signalFailure
+		}
+	}
+	unit := "minecraft-" + id + ".service"
+	if _, err = b.command(ctx, "systemctl", "--no-block", "stop", "--", unit); err != nil {
+		return instanceRuntimeFailure("Instance graceful stop request failed.")
+	}
+	if neoForge && signal() != nil {
+		// The stop job may have finished before the signal could be delivered.
+		state, err := b.observeRaw(ctx, id)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		if err != nil {
+			return signalFailure
+		}
+		if state.State == "stopped" {
+			return nil
+		}
+		if state.resettableFailure {
+			return b.normalizeStoppedFailure(ctx, state)
+		}
+		return signalFailure
+	}
+	for {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		state, err := b.observeRaw(ctx, id)
+		if err != nil {
+			return instanceRuntimeFailure("Graceful shutdown state is unavailable.")
+		}
+		if state.State == "stopped" {
+			return nil
+		}
+		if state.State == "failed" {
+			return b.normalizeStoppedFailure(ctx, state)
+		}
+		if err = b.waitMaintenance(ctx, time.Second); err != nil {
+			return err
+		}
+	}
+}
+
+func (b *instanceRuntimeBackend) normalizeStoppedFailure(ctx context.Context, observed instanceRuntimeStatus) error {
+	unconfirmed := instanceRuntimeFailure("Instance graceful shutdown could not be confirmed.")
+	if !observed.resettableFailure {
+		return unconfirmed
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	id := observed.ID
+	_, err := b.command(ctx, "systemctl", "reset-failed", "--", "minecraft-"+id+".service")
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	if err != nil {
+		return instanceRuntimeFailure("Failed instance unit could not be stopped.")
+	}
+	state, err := b.observeRaw(ctx, id)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	if err != nil || state.State != "stopped" {
+		return unconfirmed
+	}
+	return nil
+}
+
+func (b *instanceRuntimeBackend) stopWithWarnings(ctx context.Context, id string) error {
+	previous := 60
+	for _, seconds := range []int{60, 30, 15, 10, 5, 4, 3, 2, 1, 0} {
+		if previous != seconds {
+			if err := b.waitMaintenance(ctx, time.Duration(previous-seconds)*time.Second); err != nil {
+				return instanceRuntimeFailure("Safe shutdown countdown could not complete; the instance was not interrupted.")
+			}
+		}
+		state, err := b.observeRaw(ctx, id)
+		if err != nil || state.State != "running" {
+			return instanceRuntimeFailure("Shutdown countdown state is unavailable; the instance was not interrupted.")
+		}
+		if seconds > 0 {
+			if err = b.shutdownAnnouncement(ctx, id, seconds); err != nil {
+				return instanceRuntimeFailure("Shutdown countdown announcement failed; the instance was not interrupted.")
+			}
+		}
+		previous = seconds
+	}
+	return b.stopGracefully(ctx, id)
+}
+
+func registerInstanceMaintenanceRoutes(mux *http.ServeMux, s *server) {
+	mux.HandleFunc("GET /v1/minecraft/instances/{id}/players", s.instanceMaintenanceRead)
+	mux.HandleFunc("GET /v1/minecraft/instances/{id}/logs", s.minecraftLogs)
+	mux.HandleFunc("GET /v1/minecraft/instances/{id}/version", s.instanceMaintenanceRead)
+	mux.HandleFunc("POST /v1/minecraft/instances/{id}/console", s.instanceConsole)
+	mux.HandleFunc("POST /v1/minecraft/instances/{id}/version/verify", s.instanceVersionVerify)
+}
+func (s *server) instanceMaintenanceRead(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireReadAccess(w, r); !ok {
+		return
+	}
+	id, ok := instanceRequestID(w, r)
+	if !ok {
+		return
+	}
+	record, err := instanceRuntimes.readRecord(id)
+	if err != nil {
+		instanceRuntimeError(w, err, id)
+		return
+	}
+	if strings.HasSuffix(r.URL.Path, "/version") {
+		writeJSON(w, http.StatusOK, map[string]any{"id": id, "software": record.Runtime.Software, "version": record.Runtime.Version, "backup_available": true})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	state, err := instanceRuntimes.observe(ctx, id)
+	if err != nil || (state.State != "running" && state.State != "stopped" && state.State != "configured" && state.State != "failed") {
+		writeError(w, http.StatusConflict, "Instance runtime is unavailable.")
+		return
+	}
+	if strings.HasSuffix(r.URL.Path, "/players") {
+		p := instancePlayers{ID: id, State: "offline"}
+		if state.State == "running" {
+			p, _ = instanceRuntimes.players(ctx, id)
+		}
+		writeJSON(w, http.StatusOK, p)
+		return
+	}
+}
+func instanceDiagnosticText(out []byte, secret string) string {
+	text := strings.ToValidUTF8(string(out), "?")
+	text = strings.Map(func(r rune) rune {
+		if (r < 32 && r != '\t' && r != '\n') || r == 127 {
+			return -1
+		}
+		return r
+	}, text)
+	if secret != "" {
+		text = strings.ReplaceAll(text, secret, "[redacted]")
+	}
+	lines := []string{}
+	for _, line := range strings.Split(text, "\n") {
+		lower := strings.ToLower(line)
+		if strings.Contains(lower, "password") || strings.Contains(lower, "secret") || strings.Contains(lower, "token") || strings.Contains(lower, "environment") || strings.Contains(line, "=") {
+			line = "[private diagnostic line omitted]"
+		}
+		lines = append(lines, line)
+	}
+	text = strings.Join(lines, "\n")
+	if len(text) > 16384 {
+		text = strings.ToValidUTF8(text[:16384], "") + "\n[truncated]"
+	}
+	return text
+}
+func (s *server) instanceConsole(w http.ResponseWriter, r *http.Request) {
+	actor, ok := s.requireAdministrator(w, r)
+	if !ok {
+		return
+	}
+	id, ok := instanceRequestID(w, r)
+	if !ok {
+		return
+	}
+	var request struct {
+		Command  string `json:"command"`
+		Discover bool   `json:"discover,omitempty"`
+	}
+	if !decodeJSON(w, r, &request) {
+		return
+	}
+	command, err := normalizeInstanceConsoleCommand(request.Command)
+	if (request.Discover && request.Command != "") || (!request.Discover && err != nil) {
+		writeError(w, http.StatusBadRequest, "Enter a single Minecraft command. Use the normal server controls to stop the server.")
+		return
+	}
+	release, err := s.lockInstanceRuntime()
+	if err != nil {
+		instanceRuntimeError(w, err, id)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	result := instanceConsoleResponse{OK: true, ID: id}
+	run := func() error {
+		state, err := instanceRuntimes.observe(ctx, id)
+		if err != nil {
+			return err
+		}
+		if state.State != "running" {
+			return instanceRuntimeFailure("Server is stopped. Start it before using RCON.")
+		}
+		record, err := instanceRuntimes.readRuntimeConfig(id)
+		if err != nil {
+			return err
+		}
+		if request.Discover {
+			result.Commands, result.Partial, err = instanceRuntimes.discoverCommands(ctx, id, record.Runtime.RCONPassword)
+		} else {
+			var out []byte
+			out, err = instanceRuntimes.rcon(ctx, id, command)
+			if err == nil {
+				result.Output = instanceRCONText(out, record.Runtime.RCONPassword)
+			}
+		}
+		if err != nil {
+			return err
+		}
+		if s.store != nil {
+			return s.store.recordAuditEvent(actor, "minecraft_console", "minecraft-"+id+".service", true, "Instance console request completed")
+		}
+		return nil
+	}
+	err = errors.Join(run(), release())
+	if err != nil {
+		instanceRuntimeError(w, err, id)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *server) instanceVersionVerify(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireAdministrator(w, r); !ok {
+		return
+	}
+	id, ok := instanceRequestID(w, r)
+	if !ok {
+		return
+	}
+	var request struct {
+		Version string `json:"version"`
+	}
+	if !decodeJSON(w, r, &request) {
+		return
+	}
+	if !instanceRuntimeVersionPattern.MatchString(request.Version) {
+		writeError(w, http.StatusBadRequest, "Invalid Minecraft version.")
+		return
+	}
+	record, err := instanceRuntimes.readRecord(id)
+	if err != nil {
+		instanceRuntimeError(w, err, id)
+		return
+	}
+	record.Runtime.Version = request.Version
+	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+	defer cancel()
+	if err = instanceRuntimes.validateSoftware(ctx, record.Runtime); err != nil {
+		instanceRuntimeError(w, err, id)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"id": id, "version": request.Version, "available": true, "backup_available": true})
+}

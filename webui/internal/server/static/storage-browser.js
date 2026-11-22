@@ -1,0 +1,1584 @@
+(() => {
+  function initStorageBrowser(root = document, options = {}) {
+    if (!root) return;
+    if (root.dataset?.storageBrowserInitialized === "true") return;
+    if (root.dataset) root.dataset.storageBrowserInitialized = "true";
+    function showDetails(panel) {
+      if (options.inlineDetails) panel.hidden = false;
+      else panel.showModal();
+    }
+    function hideDetails(panel) {
+      if (!panel) return;
+      if (options.inlineDetails) panel.hidden = true;
+      else panel.close();
+    }
+    function refreshStorageWorkspace(message = jvT("ui.019bd0148d26")) {
+      const workspace = root.closest("[data-storage-workspace-dialog]");
+      if (options.onChanged) options.onChanged(message);
+      else workspace?.querySelector("[data-storage-refresh]")?.click();
+    }
+  const diskButtons = [...root.querySelectorAll("[data-storage-disk]")];
+  const diskPanels = [...root.querySelectorAll("[data-storage-partitions]")];
+  const partitionButtons = [...root.querySelectorAll("[data-storage-partition]")];
+  const freeSpaceButtons = [...root.querySelectorAll("[data-storage-free-space]")];
+  const detailDialog = root.querySelector("[data-storage-detail-dialog]");
+  const detailClose = detailDialog?.querySelector("[data-storage-detail-close]");
+  const detailActions = detailDialog?.querySelector("[data-storage-detail-actions]");
+  const protectedNote = detailDialog?.querySelector("[data-storage-protected-note]");
+  const actionMenu = detailDialog?.querySelector("[data-storage-action-menu]");
+  const actionButtons = [...root.querySelectorAll("[data-storage-action]")];
+  const migrateButton = detailDialog?.querySelector("[data-storage-minecraft-migrate]");
+  let setupChoice = null;
+  if (options.onSelect && actionMenu) {
+    setupChoice = document.createElement("button");
+    setupChoice.type = "button";
+    setupChoice.textContent = jvT("ui.56ad50b0dae1");
+    setupChoice.dataset.setupPartitionSelect = "";
+    setupChoice.hidden = true;
+    setupChoice.addEventListener("click", () => {
+      if (!selectedPartition || !options.canSelect?.(selectedPartition.path, selectedMountStatus)) return;
+      options.onSelect(selectedPartition.path, selectedMountStatus);
+      closeDetailDialog();
+    });
+    detailActions?.append(setupChoice);
+  }
+
+  const selectionStatus = options.onSelect && detailDialog ? document.createElement("div") : null;
+  if (selectionStatus) {
+    selectionStatus.className = "notice compact";
+    selectionStatus.dataset.setupMountStatus = "";
+    selectionStatus.setAttribute("role", "status");
+    detailDialog.append(selectionStatus);
+  }
+  function selectionFeedback(message, failed = false) {
+    if (!selectionStatus) return;
+    selectionStatus.textContent = message;
+    selectionStatus.hidden = !message;
+    selectionStatus.className = failed ? "notice error compact" : "notice compact";
+    selectionStatus.setAttribute("role", failed ? "alert" : "status");
+  }
+  function setupMountError(message) {
+    if (/conflict|inconsistent|different filesystem|another filesystem|other filesystem/i.test(message)) {
+      return jvT("ui.74c01fdd91bd");
+    }
+    if (/protected|unavailable|UUID|verify|unsupported/i.test(message)) {
+      return jvT("ui.a555068b260d");
+    }
+    return jvT("ui.d994f9e17843") + message + jvT("ui.ef9f8a990400");
+  }
+
+  if (options.onSelect || options.inlineDetails) root.addEventListener("submit", event => {
+    if (root.querySelector("dialog[open]")) event.preventDefault();
+  });
+
+  const csrf = root.querySelector("[data-storage-action-csrf]")?.value || "";
+
+  const wholeDiskButtons = [...root.querySelectorAll("[data-storage-whole-disk]")];
+  if (options.onSelect) wholeDiskButtons.forEach((button) => {
+    button.hidden = true;
+    const purposePanel = button.closest(".storage-empty-disk");
+    if (purposePanel) purposePanel.hidden = true;
+  });
+  const wholeDiskDialog = root.querySelector("[data-storage-whole-disk-dialog]");
+  const wholeDiskClose = wholeDiskDialog?.querySelector("[data-storage-whole-close]");
+  const wholeDiskCancel = wholeDiskDialog?.querySelector("[data-storage-whole-cancel]");
+  const wholeDiskTitle = wholeDiskDialog?.querySelector("[data-storage-whole-title]");
+  const wholeDiskDescription = wholeDiskDialog?.querySelector("[data-storage-whole-description]");
+  const wholeDiskDevice = wholeDiskDialog?.querySelector("[data-storage-whole-device-label]");
+  const wholeDiskSize = wholeDiskDialog?.querySelector("[data-storage-whole-size-label]");
+  const wholeDiskPlanRow = wholeDiskDialog?.querySelector("[data-storage-whole-plan-row]");
+  const wholeDiskAfter = wholeDiskDialog?.querySelector("[data-storage-whole-after]");
+  const wholeDiskMountRow = wholeDiskDialog?.querySelector("[data-storage-whole-mount-row]");
+  const wholeDiskMount = wholeDiskDialog?.querySelector("[data-storage-whole-mount]");
+  const wholeDiskWarnings = wholeDiskDialog?.querySelector("[data-storage-whole-warnings]");
+  const wholeDiskPlayersField = wholeDiskDialog?.querySelector("[data-storage-whole-players-field]");
+  const wholeDiskPlayers = wholeDiskDialog?.querySelector("[data-storage-whole-players]");
+  const wholeDiskPlayersNote = wholeDiskDialog?.querySelector("[data-storage-whole-players-note]");
+  const wholeDiskConfirmationField = wholeDiskDialog?.querySelector("[data-storage-whole-confirmation-field]");
+  const wholeDiskConfirmationSummary = wholeDiskDialog?.querySelector("[data-storage-whole-confirmation-summary]");
+  const wholeDiskConfirmSliderShell = wholeDiskDialog?.querySelector("[data-storage-whole-confirm-slider-shell]");
+  const wholeDiskConfirmSliderText = wholeDiskDialog?.querySelector("[data-storage-whole-confirm-slider-text]");
+  const wholeDiskConfirmSlider = wholeDiskDialog?.querySelector("[data-storage-whole-confirm-slider]");
+  const wholeDiskConfirmToggleRow = wholeDiskDialog?.querySelector("[data-storage-whole-confirm-toggle-row]");
+  const wholeDiskConfirmToggle = wholeDiskDialog?.querySelector("[data-storage-whole-confirm-toggle]");
+  const wholeDiskError = wholeDiskDialog?.querySelector("[data-storage-whole-error]");
+  const wholeDiskReview = wholeDiskDialog?.querySelector("[data-storage-whole-review]");
+  const wholeDiskApply = wholeDiskDialog?.querySelector("[data-storage-whole-apply]");
+
+  const migrationDialog = root.querySelector("[data-storage-minecraft-dialog]");
+  const migrationClose = migrationDialog?.querySelector("[data-storage-minecraft-close]");
+  const migrationTitle = migrationDialog?.querySelector("[data-storage-minecraft-title]");
+  const migrationSetup = migrationDialog?.querySelector("[data-storage-minecraft-setup]");
+  const migrationCancel = migrationDialog?.querySelector("[data-storage-minecraft-cancel]");
+  const migrationReview = migrationDialog?.querySelector("[data-storage-minecraft-review]");
+  const migrationDevice = migrationDialog?.querySelector("[data-storage-minecraft-device]");
+  const migrationSelected = migrationDialog?.querySelector("[data-storage-minecraft-selected]");
+  const migrationMount = migrationDialog?.querySelector("[data-storage-minecraft-mount]");
+  const migrationMountNote = migrationDialog?.querySelector("[data-storage-minecraft-mount-note]");
+  const migrationPath = migrationDialog?.querySelector("[data-storage-minecraft-path]");
+  const migrationError = migrationDialog?.querySelector("[data-storage-minecraft-error]");
+  const migrationReviewPanel = migrationDialog?.querySelector("[data-storage-minecraft-review-panel]");
+  const migrationCurrentPath = migrationDialog?.querySelector("[data-storage-minecraft-current-path]");
+  const migrationReviewDevice = migrationDialog?.querySelector("[data-storage-minecraft-review-device]");
+  const migrationReviewFilesystem = migrationDialog?.querySelector("[data-storage-minecraft-review-filesystem]");
+  const migrationReviewMount = migrationDialog?.querySelector("[data-storage-minecraft-review-mount]");
+  const migrationReviewPath = migrationDialog?.querySelector("[data-storage-minecraft-review-path]");
+  const migrationReviewCapacity = migrationDialog?.querySelector("[data-storage-minecraft-review-capacity]");
+  const migrationWarnings = migrationDialog?.querySelector("[data-storage-minecraft-warnings]");
+  const migrationPlayersField = migrationDialog?.querySelector("[data-storage-minecraft-players-field]");
+  const migrationPlayers = migrationDialog?.querySelector("[data-storage-minecraft-players]");
+  const migrationPlayersNote = migrationDialog?.querySelector("[data-storage-minecraft-players-note]");
+  const migrationDestructiveField = migrationDialog?.querySelector("[data-storage-minecraft-destructive-field]");
+  const migrationDestructivePhrase = migrationDialog?.querySelector("[data-storage-minecraft-destructive-phrase]");
+  const migrationDestructive = migrationDialog?.querySelector("[data-storage-minecraft-destructive]");
+  const migrationConfirmation = migrationDialog?.querySelector("[data-storage-minecraft-confirmation]");
+  const migrationReviewError = migrationDialog?.querySelector("[data-storage-minecraft-review-error]");
+  const migrationBack = migrationDialog?.querySelector("[data-storage-minecraft-back]");
+  const migrationApply = migrationDialog?.querySelector("[data-storage-minecraft-apply]");
+  const migrationProgress = migrationDialog?.querySelector("[data-storage-minecraft-progress]");
+  const migrationProgressState = migrationDialog?.querySelector("[data-storage-minecraft-progress-state]");
+  const migrationProgressStage = migrationDialog?.querySelector("[data-storage-minecraft-progress-stage]");
+  const migrationProgressStatus = migrationDialog?.querySelector("[data-storage-minecraft-progress-status]");
+  const migrationProgressID = migrationDialog?.querySelector("[data-storage-minecraft-progress-id]");
+  const migrationReconnect = migrationDialog?.querySelector("[data-storage-minecraft-reconnect]");
+  const migrationSuccess = migrationDialog?.querySelector("[data-storage-minecraft-success]");
+  const migrationRollback = migrationDialog?.querySelector("[data-storage-minecraft-rollback]");
+  const migrationAttention = migrationDialog?.querySelector("[data-storage-minecraft-attention]");
+  const migrationProgressClose = migrationDialog?.querySelector("[data-storage-minecraft-progress-close]");
+  const migrationRefresh = migrationDialog?.querySelector("[data-storage-minecraft-refresh]");
+
+  const actionDialog = root.querySelector("[data-storage-action-dialog]");
+  const actionClose = actionDialog?.querySelector("[data-storage-action-close]");
+  const actionCancel = actionDialog?.querySelector("[data-storage-action-cancel]");
+  const actionTitle = actionDialog?.querySelector("[data-storage-action-title]");
+  const actionDescription = actionDialog?.querySelector("[data-storage-action-description]");
+  const mountField = actionDialog?.querySelector("[data-storage-mount-field]");
+  const mountInput = actionDialog?.querySelector("[data-storage-mount-input]");
+  const reviewPanel = actionDialog?.querySelector("[data-storage-action-review]");
+  const reviewDevice = actionDialog?.querySelector("[data-storage-review-device]");
+  const reviewRole = actionDialog?.querySelector("[data-storage-review-role]");
+  const reviewFilesystem = actionDialog?.querySelector("[data-storage-review-filesystem]");
+  const reviewTargetRow = actionDialog?.querySelector("[data-storage-review-target-row]");
+  const reviewTarget = actionDialog?.querySelector("[data-storage-review-target]");
+  const warningBox = actionDialog?.querySelector("[data-storage-action-warnings]");
+  const confirmationField = actionDialog?.querySelector("[data-storage-confirmation-field]");
+  const confirmationSummary = actionDialog?.querySelector("[data-storage-confirmation-summary]");
+  const confirmSliderShell = actionDialog?.querySelector("[data-storage-confirm-slider-shell]");
+  const confirmSliderText = actionDialog?.querySelector("[data-storage-confirm-slider-text]");
+  const confirmSlider = actionDialog?.querySelector("[data-storage-confirm-slider]");
+  const confirmToggleRow = actionDialog?.querySelector("[data-storage-confirm-toggle-row]");
+  const confirmToggle = actionDialog?.querySelector("[data-storage-confirm-toggle]");
+  const actionError = actionDialog?.querySelector("[data-storage-action-error]");
+  const reviewButton = actionDialog?.querySelector("[data-storage-action-review-button]");
+  const applyButton = actionDialog?.querySelector("[data-storage-action-apply-button]");
+
+  const freeDetailDialog = root.querySelector("[data-storage-free-detail-dialog]");
+  const freeDetailClose = freeDetailDialog?.querySelector("[data-storage-free-detail-close]");
+  const freeDetailDevice = freeDetailDialog?.querySelector("[data-storage-free-device]");
+  const freeDetailSize = freeDetailDialog?.querySelector("[data-storage-free-size]");
+  const freeActionMenu = freeDetailDialog?.querySelector("[data-storage-free-action-menu]");
+  const createPartitionButton = freeDetailDialog?.querySelector("[data-storage-create-partition]");
+
+  const createDialog = root.querySelector("[data-storage-create-dialog]");
+  const createClose = createDialog?.querySelector("[data-storage-create-close]");
+  const createCancel = createDialog?.querySelector("[data-storage-create-cancel]");
+  const createDevice = createDialog?.querySelector("[data-storage-create-device]");
+  const createAvailable = createDialog?.querySelector("[data-storage-create-available]");
+  const createUseAll = createDialog?.querySelector("[data-storage-create-all]");
+  const createSize = createDialog?.querySelector("[data-storage-create-size]");
+  const createReviewPanel = createDialog?.querySelector("[data-storage-create-review-panel]");
+  const createAfter = createDialog?.querySelector("[data-storage-create-after]");
+  const createWarnings = createDialog?.querySelector("[data-storage-create-warnings]");
+  const createConfirmationField = createDialog?.querySelector("[data-storage-create-confirmation-field]");
+  const createConfirmationSummary = createDialog?.querySelector("[data-storage-create-confirmation-summary]");
+  const createConfirmSliderShell = createDialog?.querySelector("[data-storage-create-confirm-slider-shell]");
+  const createConfirmSliderText = createDialog?.querySelector("[data-storage-create-confirm-slider-text]");
+  const createConfirmSlider = createDialog?.querySelector("[data-storage-create-confirm-slider]");
+  const createConfirmToggleRow = createDialog?.querySelector("[data-storage-create-confirm-toggle-row]");
+  const createConfirmToggle = createDialog?.querySelector("[data-storage-create-confirm-toggle]");
+  const createError = createDialog?.querySelector("[data-storage-create-error]");
+  const createReview = createDialog?.querySelector("[data-storage-create-review]");
+  const createApply = createDialog?.querySelector("[data-storage-create-apply]");
+
+  const detail = {
+    title: detailDialog?.querySelector("[data-detail-title]"),
+    role: detailDialog?.querySelector("[data-detail-role]"),
+    path: detailDialog?.querySelector("[data-detail-path]"),
+    size: detailDialog?.querySelector("[data-detail-size]"),
+    used: detailDialog?.querySelector("[data-detail-used]"),
+    usedRow: detailDialog?.querySelector("[data-detail-used-row]"),
+    free: detailDialog?.querySelector("[data-detail-free]"),
+    freeRow: detailDialog?.querySelector("[data-detail-free-row]"),
+    usageUnavailableRow: detailDialog?.querySelector("[data-detail-usage-unavailable-row]"),
+    filesystem: detailDialog?.querySelector("[data-detail-filesystem]"),
+    label: detailDialog?.querySelector("[data-detail-label]"),
+    labelRow: detailDialog?.querySelector("[data-detail-label-row]"),
+    uuid: detailDialog?.querySelector("[data-detail-uuid]"),
+    uuidRow: detailDialog?.querySelector("[data-detail-uuid-row]"),
+    mount: detailDialog?.querySelector("[data-detail-mount]"),
+    mountRow: detailDialog?.querySelector("[data-detail-mount-row]"),
+    mountLabel: detailDialog?.querySelector("[data-detail-mount-label]"),
+    mounted: detailDialog?.querySelector("[data-detail-mounted]"),
+    mountType: detailDialog?.querySelector("[data-detail-mount-type]"),
+    mountTypeRow: detailDialog?.querySelector("[data-detail-mount-type-row]"),
+    system: detailDialog?.querySelector("[data-detail-system]"),
+    readonly: detailDialog?.querySelector("[data-detail-readonly]"),
+  };
+
+  let selectedPartition = null;
+  let selectedMountStatus = null;
+  let selectedAction = "";
+  let reviewedPlan = null;
+  let selectedWholeDisk = null;
+  let reviewedWholeDisk = null;
+  let selectedFreeSpace = null;
+  let reviewedCreatePartition = null;
+  let wholeDiskApplying = false;
+  let actionApplying = false;
+  let createApplying = false;
+  let reviewedMigrationPlan = null;
+  let migrationApplying = false;
+  let migrationPollTimer = null;
+  let migrationPollFailures = 0;
+
+  function closeActionMenu() {
+    if (actionMenu) actionMenu.open = false;
+  }
+
+  function closeFreeActionMenu() {
+    if (freeActionMenu) freeActionMenu.open = false;
+  }
+
+  function selectDisk(name) {
+    closeActionMenu();
+    closeFreeActionMenu();
+    if (options.inlineDetails) {
+      hideDetails(detailDialog);
+      hideDetails(freeDetailDialog);
+    }
+    const workspace = root.closest("[data-storage-workspace-dialog]");
+    if (workspace) workspace.dataset.storageSelectedDisk = name;
+    diskButtons.forEach((button) => {
+      const selected = button.dataset.storageDisk === name;
+      button.classList.toggle("is-selected", selected);
+      button.setAttribute("aria-pressed", selected ? "true" : "false");
+    });
+    diskPanels.forEach((panel) => {
+      panel.hidden = panel.dataset.storagePartitions !== name;
+    });
+  }
+
+  diskButtons.forEach((button) => {
+    button.addEventListener("click", () => selectDisk(button.dataset.storageDisk));
+  });
+  const rememberedDisk = root.closest("[data-storage-workspace-dialog]")?.dataset.storageSelectedDisk;
+  const initialDisk = diskButtons.find((button) => button.dataset.storageDisk === rememberedDisk)
+    || diskButtons.find((button) => button.getAttribute("aria-pressed") === "true") || diskButtons[0];
+  if (initialDisk) selectDisk(initialDisk.dataset.storageDisk);
+
+  function setOptional(row, node, value) {
+    if (!row || !node) return;
+    const visible = Boolean(value);
+    row.hidden = !visible;
+    node.textContent = value || "";
+  }
+
+  function normalizedFilesystem(data) {
+    return (data.filesystem || "").trim();
+  }
+
+  function filesystemDisplay(filesystem) {
+    const value = (filesystem || "").toLowerCase();
+    if (value === "xfs") return "XFS";
+    if (value === "ext4") return "ext4";
+    if (value === "btrfs") return "Btrfs";
+    if (value === "ntfs" || value === "ntfs-3g") return "NTFS";
+    if (value === "vfat" || value === "fat" || value === "fat32") return "FAT / FAT32";
+    if (value === "exfat") return "exFAT";
+    if (!value) return jvT("ui.af9d8f12b31f");
+    return filesystem || jvT("ui.b764cdc0eab7");
+  }
+
+  function showStorageAction(action, visible) {
+    const button = actionButtons.find((candidate) => candidate.dataset.storageAction === action);
+    if (button) button.hidden = !visible;
+  }
+
+  function configurePartitionActions(data, status) {
+    const protectedPartition = data.system === "Yes" || data.readonly === "Yes";
+    if (setupChoice) setupChoice.hidden = !options.canSelect?.(data.path, status);
+
+    if (detailActions) detailActions.hidden = protectedPartition && !(options.inlineDetails && setupChoice && !setupChoice.hidden);
+    if (protectedNote) protectedNote.hidden = !protectedPartition;
+    actionButtons.forEach((button) => { button.hidden = true; });
+    setOptional(detail.mountTypeRow, detail.mountType, "");
+
+    if (protectedPartition) {
+      closeActionMenu();
+      if (migrateButton) migrateButton.hidden = true;
+      return;
+    }
+
+    if (migrateButton) migrateButton.hidden = Boolean(options.onSelect) || data.minecraftCandidate !== "Yes" || (data.transport || "").trim().toLowerCase() === "usb";
+
+    const filesystem = normalizedFilesystem(data);
+    const filesystemKey = filesystem.toLowerCase();
+    const mountable = ["xfs", "ext4", "btrfs", "ntfs", "vfat", "exfat"].includes(filesystemKey);
+    const wholeDevice = data.type === "disk";
+    showStorageAction("delete_partition", !wholeDevice);
+    showStorageAction("initialize_disk", wholeDevice && data.canInitialize === "Yes" && !mountable);
+    showStorageAction("format", !wholeDevice && (!filesystem || mountable));
+    if (!filesystem) {
+      return;
+    }
+    if (!mountable) return;
+
+    const mounted = status ? Boolean(status.mounted) : data.mounted === "Yes";
+    const persistence = status?.persistence || "";
+    showStorageAction("use-for-backups", !options.onSelect && data.type === "part" &&
+      ["xfs", "ext4", "btrfs"].includes(filesystemKey) && mounted &&
+      ["justvoxel", "external"].includes(persistence) && Boolean(status?.current_mount_point) &&
+      status.current_mount_point === status.mount_point);
+
+    if (!status) {
+      if (mounted) showStorageAction("unmount-for-now", true);
+      return;
+    }
+
+    if (persistence === "justvoxel") {
+      setOptional(detail.mountTypeRow, detail.mountType, jvT("ui.455a95491f40"));
+      if (mounted) showStorageAction("unmount-for-now", true);
+      else if (status.mount_point) showStorageAction("mount-now", true);
+      showStorageAction("remove-permanent", true);
+      return;
+    }
+
+    if (persistence === "external") {
+      setOptional(detail.mountTypeRow, detail.mountType, jvT("ui.455a95491f40"));
+      if (mounted) showStorageAction("unmount-for-now", true);
+      return;
+    }
+
+    if (persistence === "none") {
+      setOptional(detail.mountTypeRow, detail.mountType, mounted ? jvT("ui.c388aed077e6") : jvT("ui.669cf449a506"));
+      if (mounted) {
+        showStorageAction("unmount-for-now", true);
+        showStorageAction("make-permanent", true);
+      } else {
+        showStorageAction("mount-for-now", true);
+        showStorageAction("mount-permanently", true);
+      }
+      return;
+    }
+
+    setOptional(detail.mountTypeRow, detail.mountType, jvT("ui.c1ebc7817870"));
+    if (mounted) showStorageAction("unmount-for-now", true);
+  }
+
+  async function loadMountStatus(data) {
+    const filesystem = normalizedFilesystem(data);
+    const mountable = ["xfs", "ext4", "btrfs", "ntfs", "vfat", "exfat"].includes(filesystem.toLowerCase());
+    if (!mountable || data.system === "Yes" || data.readonly === "Yes") {
+      selectionFeedback(!filesystem && data.system !== "Yes" && data.readonly !== "Yes"
+        ? jvT("ui.28ec02adbf4f")
+        : jvT("ui.3d6b7be1bb5a"), Boolean(filesystem));
+      return;
+    }
+
+    const selectedPath = data.path || "";
+    try {
+      const response = await fetch("/api/new-storage/mounts/status?device=" + encodeURIComponent(selectedPath), {
+        method: "GET",
+        cache: "no-store",
+        headers: { "Accept": "application/json" },
+        credentials: "same-origin",
+      });
+      let payload = null;
+      try { payload = await response.json(); } catch (_) { payload = null; }
+      if (!response.ok || !payload?.ok) throw new Error(payload?.error || jvT("ui.63a88a5aaa90"));
+      if (selectedPartition !== data) return;
+      selectedMountStatus = payload.proposed || null;
+      if (options.onSelect) {
+        const eligible = options.canSelect?.(selectedPath, selectedMountStatus);
+        selectionFeedback(eligible
+          ? (selectedMountStatus.mounted ? jvT("ui.66c8393ebd93") : "")
+          : (selectedMountStatus?.persistence === "conflict" || selectedMountStatus?.persistence === "other_mount"
+            ? jvT("ui.74c01fdd91bd")
+            : jvT("ui.9e51e9a75d40")), !eligible);
+      }
+      configurePartitionActions(selectedPartition, selectedMountStatus);
+    } catch (error) {
+      if (selectedPartition !== data) return;
+      selectedMountStatus = null;
+      configurePartitionActions(selectedPartition, null);
+      selectionFeedback(setupMountError(error.message), true);
+    }
+  }
+
+  partitionButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!detailDialog) return;
+      const data = button.dataset;
+      closeActionMenu();
+      selectedPartition = { ...data };
+      selectedMountStatus = null;
+      selectionFeedback(jvT("ui.188589be4ae0"));
+      if (detail.title) detail.title.textContent = data.path || jvT("ui.4dbdd221e957");
+      if (detail.role) detail.role.textContent = data.role || jvT("ui.4dbdd221e957");
+      if (detail.path) detail.path.textContent = data.path || "";
+      if (detail.size) detail.size.textContent = data.size || jvT("ui.b764cdc0eab7");
+      const usageKnown = data.filesystemUsageKnown === "Yes";
+      if (detail.usedRow) detail.usedRow.hidden = !usageKnown;
+      if (detail.freeRow) detail.freeRow.hidden = !usageKnown;
+      if (detail.usageUnavailableRow) detail.usageUnavailableRow.hidden = usageKnown || !data.filesystem;
+      if (detail.used) detail.used.textContent = usageKnown ? (data.filesystemUsed || jvT("ui.b764cdc0eab7")) : "";
+      if (detail.free) detail.free.textContent = usageKnown ? (data.filesystemFree || jvT("ui.b764cdc0eab7")) : "";
+      if (detail.filesystem) detail.filesystem.textContent = data.filesystemDisplay || filesystemDisplay(data.filesystem);
+      if (detail.mounted) detail.mounted.textContent = data.mounted || jvT("ui.1ea442a134b2");
+      if (detail.system) detail.system.textContent = data.system || jvT("ui.1ea442a134b2");
+      if (detail.readonly) detail.readonly.textContent = data.readonly || jvT("ui.1ea442a134b2");
+      setOptional(detail.labelRow, detail.label, data.label);
+      setOptional(detail.uuidRow, detail.uuid, data.uuid);
+      if (detail.mountLabel) detail.mountLabel.textContent = jvT("ui.63a2b13c2fdc");
+      setOptional(detail.mountRow, detail.mount, data.system === "Yes" ? "" : data.mountpoints);
+      configurePartitionActions(selectedPartition, null);
+      if (options.onSelect) hideDetails(freeDetailDialog);
+      if (options.inlineDetails) {
+        partitionButtons.forEach(candidate => candidate.classList.toggle("is-selected", candidate === button));
+        freeSpaceButtons.forEach(candidate => candidate.classList.remove("is-selected"));
+      }
+      showDetails(detailDialog);
+      detailClose?.focus();
+      void loadMountStatus(selectedPartition);
+    });
+  });
+
+  function closeDetailDialog() {
+    closeActionMenu();
+    hideDetails(detailDialog);
+  }
+
+  detailClose?.addEventListener("click", closeDetailDialog);
+  detailDialog?.addEventListener("click", (event) => { if (event.target === detailDialog) closeDetailDialog(); });
+  detailDialog?.addEventListener("close", closeActionMenu);
+  detailDialog?.addEventListener("cancel", closeActionMenu);
+  root.addEventListener("pointerdown", (event) => {
+    if (actionMenu?.open) {
+      if (!actionMenu.contains(event.target)) closeActionMenu();
+    }
+    if (freeActionMenu?.open && !freeActionMenu.contains(event.target)) closeFreeActionMenu();
+  });
+
+  function confirmationSliderArmed(slider, shell, text, armedText, idleText) {
+    const value = Number(slider?.value || 0);
+    const progress = Math.max(0, Math.min(100, value));
+    shell?.style.setProperty("--confirm-progress", String(progress / 100));
+    const armed = progress >= 100;
+    shell?.classList.toggle("is-armed", armed);
+    if (text) text.textContent = armed ? armedText : idleText;
+    slider?.setAttribute("aria-valuetext", armed ? jvT("ui.f457978a1756") : progress + " percent");
+    return armed;
+  }
+
+  function resetConfirmationControl(field, summary, slider, shell, text, toggleRow, toggle, idleText) {
+    if (field) field.hidden = true;
+    if (summary) summary.textContent = "";
+    if (slider) slider.value = "0";
+    if (toggle) toggle.checked = false;
+    if (toggleRow) toggleRow.hidden = true;
+    confirmationSliderArmed(slider, shell, text, "", idleText);
+  }
+
+  function renderLocalStorageWarnings(container, warnings) {
+    if (!container) return;
+    container.replaceChildren();
+    if (!warnings?.length) return;
+    const panel = document.createElement("div");
+    panel.className = "notice warning storage-warning-panel";
+    const list = document.createElement("ul");
+    warnings.forEach((message) => {
+      const item = document.createElement("li");
+      item.textContent = message;
+      list.appendChild(item);
+    });
+    panel.appendChild(list);
+    container.appendChild(panel);
+  }
+
+  function renderWholeDiskWarnings(warnings) {
+    renderLocalStorageWarnings(wholeDiskWarnings, warnings);
+  }
+
+  function resetWholeDiskDialog(button) {
+    selectedWholeDisk = {
+      purpose: button.dataset.storageWholePurpose || "",
+      device: button.dataset.storageWholeDevice || "",
+      size: button.dataset.storageWholeSize || "",
+    };
+    reviewedWholeDisk = null;
+    const minecraft = selectedWholeDisk.purpose === "minecraft";
+    if (wholeDiskTitle) wholeDiskTitle.textContent = minecraft ? jvT("ui.5905d384d2ba") : jvT("ui.27e4cc7148be");
+    if (wholeDiskDescription) {
+      wholeDiskDescription.textContent = minecraft
+        ? jvT("ui.1d8aec4443eb")
+        : jvT("ui.d769c6e21f13");
+    }
+    if (wholeDiskDevice) wholeDiskDevice.textContent = selectedWholeDisk.device;
+    if (wholeDiskSize) wholeDiskSize.textContent = selectedWholeDisk.size;
+    if (wholeDiskPlanRow) wholeDiskPlanRow.hidden = true;
+    if (wholeDiskMountRow) wholeDiskMountRow.hidden = true;
+    renderWholeDiskWarnings([]);
+    if (wholeDiskPlayersField) wholeDiskPlayersField.hidden = true;
+    if (wholeDiskPlayers) wholeDiskPlayers.checked = false;
+    if (wholeDiskPlayersNote) wholeDiskPlayersNote.textContent = "";
+    resetConfirmationControl(
+      wholeDiskConfirmationField,
+      wholeDiskConfirmationSummary,
+      wholeDiskConfirmSlider,
+      wholeDiskConfirmSliderShell,
+      wholeDiskConfirmSliderText,
+      wholeDiskConfirmToggleRow,
+      wholeDiskConfirmToggle,
+      jvT("ui.507319d1e586"),
+    );
+    if (wholeDiskError) { wholeDiskError.hidden = true; wholeDiskError.textContent = ""; }
+    if (wholeDiskReview) { wholeDiskReview.hidden = false; wholeDiskReview.disabled = false; wholeDiskReview.textContent = jvT("ui.8f102c2baf65"); }
+    if (wholeDiskApply) { wholeDiskApply.hidden = true; wholeDiskApply.disabled = false; wholeDiskApply.textContent = jvT("ui.a6e53d6b90d2"); }
+  }
+
+  async function postWholeDisk(phase) {
+    const body = new URLSearchParams();
+    body.set("csrf", csrf);
+    body.set("purpose", selectedWholeDisk?.purpose || "");
+    body.set("device", selectedWholeDisk?.device || "");
+    if (reviewedWholeDisk?.fingerprint) body.set("fingerprint", reviewedWholeDisk.fingerprint);
+    if (
+      phase === "apply" &&
+      reviewedWholeDisk?.confirmation &&
+      Number(wholeDiskConfirmSlider?.value || 0) >= 100 &&
+      wholeDiskConfirmToggle?.checked
+    ) {
+      body.set("confirmation", reviewedWholeDisk.confirmation);
+    }
+    if (wholeDiskPlayers?.checked) body.set("players_confirmed", "yes");
+    const response = await fetch("/api/new-storage/whole-disk/" + phase, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+      credentials: "same-origin",
+    });
+    let payload = null;
+    try { payload = await response.json(); } catch (_) { payload = null; }
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || jvT("ui.4b97e34e84c1"));
+    return payload;
+  }
+
+  wholeDiskButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!wholeDiskDialog) return;
+      resetWholeDiskDialog(button);
+      wholeDiskDialog.showModal();
+      wholeDiskReview?.focus();
+    });
+  });
+
+  function closeWholeDiskDialog() {
+    if (wholeDiskApplying) return;
+    wholeDiskDialog?.close();
+  }
+  wholeDiskClose?.addEventListener("click", closeWholeDiskDialog);
+  wholeDiskCancel?.addEventListener("click", closeWholeDiskDialog);
+  wholeDiskDialog?.addEventListener("click", (event) => { if (event.target === wholeDiskDialog) closeWholeDiskDialog(); });
+  wholeDiskDialog?.addEventListener("cancel", (event) => { if (wholeDiskApplying) event.preventDefault(); });
+
+  wholeDiskReview?.addEventListener("click", async () => {
+    if (!selectedWholeDisk) return;
+    if (wholeDiskError) { wholeDiskError.hidden = true; wholeDiskError.textContent = ""; }
+    wholeDiskReview.disabled = true;
+    wholeDiskReview.textContent = jvT("ui.fcc53388888f");
+    try {
+      const payload = await postWholeDisk("plan");
+      reviewedWholeDisk = payload;
+      if (wholeDiskAfter) wholeDiskAfter.textContent = payload.purpose === "minecraft" ? jvT("ui.ab87a9a10a2d") : jvT("ui.b6bd22b5ce0d");
+      if (wholeDiskPlanRow) wholeDiskPlanRow.hidden = false;
+      if (wholeDiskMount) wholeDiskMount.textContent = payload.mount_point || "";
+      if (wholeDiskMountRow) wholeDiskMountRow.hidden = !payload.mount_point;
+      renderWholeDiskWarnings(payload.warnings);
+      const needsPlayers = Boolean(payload.players_confirmation_required);
+      if (wholeDiskPlayersField) wholeDiskPlayersField.hidden = !needsPlayers;
+      if (wholeDiskPlayersNote) {
+        const names = (payload.players || []).join(", ");
+        wholeDiskPlayersNote.textContent = needsPlayers ? (names ? " Online: " + names : jvT("ui.f47eb9db6080")) : "";
+      }
+      const confirmation = payload.confirmation || "";
+      const destructiveSummary = (payload.device || selectedWholeDisk.device) + " will be erased";
+      resetConfirmationControl(
+        wholeDiskConfirmationField,
+        wholeDiskConfirmationSummary,
+        wholeDiskConfirmSlider,
+        wholeDiskConfirmSliderShell,
+        wholeDiskConfirmSliderText,
+        wholeDiskConfirmToggleRow,
+        wholeDiskConfirmToggle,
+        jvT("ui.507319d1e586"),
+      );
+      if (wholeDiskConfirmationSummary) wholeDiskConfirmationSummary.textContent = destructiveSummary;
+      if (wholeDiskConfirmationField) wholeDiskConfirmationField.hidden = !confirmation;
+      wholeDiskReview.hidden = true;
+      if (wholeDiskApply) {
+        wholeDiskApply.hidden = false;
+        wholeDiskApply.disabled = Boolean(confirmation) || Boolean(payload.players_confirmation_required);
+      }
+      if (confirmation) wholeDiskConfirmSlider?.focus();
+      else if (payload.players_confirmation_required) wholeDiskPlayers?.focus();
+      else wholeDiskApply?.focus();
+    } catch (error) {
+      if (wholeDiskError) { wholeDiskError.textContent = error.message; wholeDiskError.hidden = false; }
+    } finally {
+      wholeDiskReview.disabled = false;
+      wholeDiskReview.textContent = jvT("ui.8f102c2baf65");
+    }
+  });
+
+  function updateWholeDiskApplyState() {
+    if (!wholeDiskApply || !reviewedWholeDisk) return;
+    const needsConfirmation = Boolean(reviewedWholeDisk.confirmation);
+    const sliderArmed = confirmationSliderArmed(
+      wholeDiskConfirmSlider,
+      wholeDiskConfirmSliderShell,
+      wholeDiskConfirmSliderText,
+      (reviewedWholeDisk.device || selectedWholeDisk?.device || jvT("ui.2d708b296620")) + " will be erased",
+      jvT("ui.507319d1e586"),
+    );
+    if (wholeDiskConfirmToggleRow) wholeDiskConfirmToggleRow.hidden = !needsConfirmation || !sliderArmed;
+    if (!sliderArmed && wholeDiskConfirmToggle) wholeDiskConfirmToggle.checked = false;
+    const confirmationReady = !needsConfirmation || (sliderArmed && Boolean(wholeDiskConfirmToggle?.checked));
+    const playersReady = !reviewedWholeDisk.players_confirmation_required || Boolean(wholeDiskPlayers?.checked);
+    wholeDiskApply.disabled = !(confirmationReady && playersReady);
+  }
+
+  wholeDiskConfirmSlider?.addEventListener("input", updateWholeDiskApplyState);
+  wholeDiskConfirmToggle?.addEventListener("change", updateWholeDiskApplyState);
+  wholeDiskPlayers?.addEventListener("change", updateWholeDiskApplyState);
+
+  wholeDiskApply?.addEventListener("click", async () => {
+    if (!reviewedWholeDisk) return;
+    if (wholeDiskError) { wholeDiskError.hidden = true; wholeDiskError.textContent = ""; }
+    if (
+      reviewedWholeDisk.confirmation &&
+      (Number(wholeDiskConfirmSlider?.value || 0) < 100 || !wholeDiskConfirmToggle?.checked)
+    ) {
+      if (wholeDiskError) { wholeDiskError.textContent = jvT("ui.8ad19c5363e9"); wholeDiskError.hidden = false; }
+      wholeDiskConfirmSlider?.focus();
+      return;
+    }
+    if (reviewedWholeDisk.players_confirmation_required && !wholeDiskPlayers?.checked) {
+      if (wholeDiskError) { wholeDiskError.textContent = jvT("ui.47a32e58e149"); wholeDiskError.hidden = false; }
+      wholeDiskPlayers?.focus();
+      return;
+    }
+    wholeDiskApplying = true;
+    wholeDiskApply.disabled = true;
+    if (wholeDiskClose) wholeDiskClose.disabled = true;
+    if (wholeDiskCancel) wholeDiskCancel.disabled = true;
+    wholeDiskApply.textContent = jvT("ui.3329a9bb48b9");
+    try {
+      const payload = await postWholeDisk("apply");
+      if (payload.operation_id) {
+        wholeDiskApplying = false;
+        if (wholeDiskClose) wholeDiskClose.disabled = false;
+        if (wholeDiskCancel) wholeDiskCancel.disabled = false;
+        wholeDiskDialog?.close();
+        if (migrationDialog && !migrationDialog.open) migrationDialog.showModal();
+        showMigrationProgress({
+          operation_type: "data_migration",
+          operation_id: payload.operation_id,
+          state: "queued",
+          stage: "queued",
+          status: jvT("ui.ad36ade1e9ed"),
+        });
+      } else {
+        wholeDiskDialog?.close();
+        refreshStorageWorkspace();
+      }
+    } catch (error) {
+      wholeDiskApplying = false;
+      if (wholeDiskError) { wholeDiskError.textContent = error.message; wholeDiskError.hidden = false; }
+      if (wholeDiskClose) wholeDiskClose.disabled = false;
+      if (wholeDiskCancel) wholeDiskCancel.disabled = false;
+      wholeDiskApply.disabled = false;
+      wholeDiskApply.textContent = jvT("ui.a6e53d6b90d2");
+    }
+  });
+
+
+  freeSpaceButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!freeDetailDialog) return;
+      closeActionMenu();
+      closeFreeActionMenu();
+      selectedFreeSpace = { ...button.dataset };
+      reviewedCreatePartition = null;
+      if (freeDetailDevice) freeDetailDevice.textContent = selectedFreeSpace.device || "";
+      if (freeDetailSize) freeDetailSize.textContent = selectedFreeSpace.size || jvT("ui.b764cdc0eab7");
+      if (options.onSelect) hideDetails(detailDialog);
+      if (options.inlineDetails) {
+        freeSpaceButtons.forEach(candidate => candidate.classList.toggle("is-selected", candidate === button));
+        partitionButtons.forEach(candidate => candidate.classList.remove("is-selected"));
+      }
+      showDetails(freeDetailDialog);
+      freeDetailClose?.focus();
+    });
+  });
+
+  function closeFreeDetailDialog() {
+    closeFreeActionMenu();
+    hideDetails(freeDetailDialog);
+  }
+
+  freeDetailClose?.addEventListener("click", closeFreeDetailDialog);
+  freeDetailDialog?.addEventListener("click", (event) => { if (event.target === freeDetailDialog) closeFreeDetailDialog(); });
+  freeDetailDialog?.addEventListener("close", closeFreeActionMenu);
+  freeDetailDialog?.addEventListener("cancel", closeFreeActionMenu);
+
+  function renderCreateWarnings(warnings) {
+    renderLocalStorageWarnings(createWarnings, warnings);
+  }
+
+  function resetCreateReviewState() {
+    reviewedCreatePartition = null;
+    if (createReviewPanel) createReviewPanel.hidden = true;
+    renderCreateWarnings([]);
+    resetConfirmationControl(
+      createConfirmationField,
+      createConfirmationSummary,
+      createConfirmSlider,
+      createConfirmSliderShell,
+      createConfirmSliderText,
+      createConfirmToggleRow,
+      createConfirmToggle,
+      jvT("ui.973f04f1623c"),
+    );
+    if (createReview) {
+      createReview.hidden = false;
+      createReview.disabled = false;
+      createReview.textContent = jvT("ui.8f102c2baf65");
+    }
+    if (createApply) {
+      createApply.hidden = true;
+      createApply.disabled = false;
+      createApply.textContent = jvT("ui.a6e53d6b90d2");
+    }
+  }
+
+  function resetCreateDialog() {
+    if (!selectedFreeSpace) return;
+    if (createDevice) createDevice.textContent = selectedFreeSpace.device || "";
+    if (createAvailable) createAvailable.textContent = selectedFreeSpace.size || jvT("ui.b764cdc0eab7");
+    if (createUseAll) createUseAll.checked = false;
+    if (createSize) {
+      createSize.value = "";
+      createSize.disabled = false;
+      const availableGiB = Math.floor(Number(selectedFreeSpace.sizeBytes || 0) / (1024 * 1024 * 1024));
+      if (availableGiB > 0) createSize.max = String(availableGiB);
+      else createSize.removeAttribute("max");
+    }
+    if (createError) {
+      createError.hidden = true;
+      createError.textContent = "";
+    }
+    resetCreateReviewState();
+  }
+
+  function createSizeGiB() {
+    if (createUseAll?.checked) return "all";
+    const value = Number(createSize?.value || 0);
+    if (!Number.isInteger(value) || value < 1) return "";
+    return String(value);
+  }
+
+  createUseAll?.addEventListener("change", () => {
+    if (createSize) {
+      createSize.disabled = Boolean(createUseAll.checked);
+      if (!createUseAll.checked) createSize.focus();
+    }
+    resetCreateReviewState();
+  });
+  createSize?.addEventListener("input", resetCreateReviewState);
+
+  createPartitionButton?.addEventListener("click", () => {
+    if (!selectedFreeSpace || !createDialog) return;
+    closeFreeActionMenu();
+    hideDetails(freeDetailDialog);
+    resetCreateDialog();
+    createDialog.showModal();
+    createSize?.focus();
+  });
+
+  function closeCreateDialog() {
+    if (createApplying) return;
+    createDialog?.close();
+  }
+
+  createClose?.addEventListener("click", closeCreateDialog);
+  createCancel?.addEventListener("click", closeCreateDialog);
+  createDialog?.addEventListener("click", (event) => { if (event.target === createDialog) closeCreateDialog(); });
+  createDialog?.addEventListener("cancel", (event) => { if (createApplying) event.preventDefault(); });
+
+  async function postCreatePartition(phase) {
+    const sizeGiB = createSizeGiB();
+    if (!sizeGiB) throw new Error(jvT("ui.14ae26043f2b"));
+    const body = new URLSearchParams();
+    body.set("csrf", csrf);
+    body.set("operation", "create_partition");
+    body.set("device", selectedFreeSpace?.device || "");
+    body.set("free_start", selectedFreeSpace?.start || "");
+    body.set("size_gib", sizeGiB);
+    if (reviewedCreatePartition?.fingerprint) body.set("fingerprint", reviewedCreatePartition.fingerprint);
+    if (
+      phase === "apply" &&
+      reviewedCreatePartition?.confirmation &&
+      Number(createConfirmSlider?.value || 0) >= 100 &&
+      createConfirmToggle?.checked
+    ) {
+      body.set("confirmation", reviewedCreatePartition.confirmation);
+    }
+
+    const response = await fetch("/api/new-storage/actions/" + phase, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+      credentials: "same-origin",
+    });
+    let payload = null;
+    try { payload = await response.json(); } catch (_) { payload = null; }
+    if (!response.ok || !payload?.ok) throw new Error(payload?.error || jvT("ui.fddf09b3e6fe"));
+    return payload;
+  }
+
+  createReview?.addEventListener("click", async () => {
+    if (!selectedFreeSpace) return;
+    if (createError) {
+      createError.hidden = true;
+      createError.textContent = "";
+    }
+    createReview.disabled = true;
+    createReview.textContent = jvT("ui.fcc53388888f");
+    try {
+      const payload = await postCreatePartition("plan");
+      reviewedCreatePartition = payload.proposed || null;
+      if (!reviewedCreatePartition) throw new Error(jvT("ui.3ac02776822a"));
+      if (createReviewPanel) createReviewPanel.hidden = false;
+      const requested = createSizeGiB();
+      const plannedSize = requested === "all" ? (selectedFreeSpace.size || "available space") : requested + " GiB";
+      if (createAfter) createAfter.textContent = jvT("ui.277e39a23325") + plannedSize + " XFS partition";
+      renderCreateWarnings(payload.warnings);
+      const confirmation = reviewedCreatePartition.confirmation || "";
+      resetConfirmationControl(
+        createConfirmationField,
+        createConfirmationSummary,
+        createConfirmSlider,
+        createConfirmSliderShell,
+        createConfirmSliderText,
+        createConfirmToggleRow,
+        createConfirmToggle,
+        jvT("ui.973f04f1623c"),
+      );
+      if (createConfirmationSummary) {
+        createConfirmationSummary.textContent =
+          (reviewedCreatePartition.device || selectedFreeSpace.device || jvT("ui.2d708b296620")) +
+          jvT("ui.44cf45caaa3f") + plannedSize + " XFS partition";
+      }
+      if (createConfirmationField) createConfirmationField.hidden = !confirmation;
+      createReview.hidden = true;
+      if (createApply) {
+        createApply.hidden = false;
+        createApply.disabled = Boolean(confirmation);
+      }
+      if (confirmation) createConfirmSlider?.focus();
+      else createApply?.focus();
+    } catch (error) {
+      if (createError) {
+        createError.textContent = error.message;
+        createError.hidden = false;
+      }
+    } finally {
+      createReview.disabled = false;
+      createReview.textContent = jvT("ui.8f102c2baf65");
+    }
+  });
+
+  function updateCreateApplyState() {
+    if (!createApply || !reviewedCreatePartition) return;
+    const needsConfirmation = Boolean(reviewedCreatePartition.confirmation);
+    const requested = createSizeGiB();
+    const plannedSize = requested === "all" ? (selectedFreeSpace?.size || "available space") : requested + " GiB";
+    const sliderArmed = confirmationSliderArmed(
+      createConfirmSlider,
+      createConfirmSliderShell,
+      createConfirmSliderText,
+      (reviewedCreatePartition.device || selectedFreeSpace?.device || jvT("ui.2d708b296620")) +
+        jvT("ui.44cf45caaa3f") + plannedSize + " XFS partition",
+      jvT("ui.973f04f1623c"),
+    );
+    if (createConfirmToggleRow) createConfirmToggleRow.hidden = !needsConfirmation || !sliderArmed;
+    if (!sliderArmed && createConfirmToggle) createConfirmToggle.checked = false;
+    createApply.disabled = needsConfirmation && !(sliderArmed && Boolean(createConfirmToggle?.checked));
+  }
+
+  createConfirmSlider?.addEventListener("input", updateCreateApplyState);
+  createConfirmToggle?.addEventListener("change", updateCreateApplyState);
+
+  createApply?.addEventListener("click", async () => {
+    if (!reviewedCreatePartition) return;
+    if (createError) {
+      createError.hidden = true;
+      createError.textContent = "";
+    }
+    if (
+      reviewedCreatePartition.confirmation &&
+      (Number(createConfirmSlider?.value || 0) < 100 || !createConfirmToggle?.checked)
+    ) {
+      if (createError) {
+        createError.textContent = jvT("ui.8ad19c5363e9");
+        createError.hidden = false;
+      }
+      createConfirmSlider?.focus();
+      return;
+    }
+
+    createApplying = true;
+    createApply.disabled = true;
+    if (createClose) createClose.disabled = true;
+    if (createCancel) createCancel.disabled = true;
+    createApply.textContent = jvT("ui.3329a9bb48b9");
+    try {
+      await postCreatePartition("apply");
+      createDialog?.close();
+      refreshStorageWorkspace();
+    } catch (error) {
+      createApplying = false;
+      if (createError) {
+        createError.textContent = error.message;
+        createError.hidden = false;
+      }
+      if (createClose) createClose.disabled = false;
+      if (createCancel) createCancel.disabled = false;
+      createApply.disabled = false;
+      createApply.textContent = jvT("ui.a6e53d6b90d2");
+    }
+  });
+
+  function minecraftDataPath(mountPoint) {
+    return (mountPoint || "/var/mnt/justvoxel-data").replace(/\/$/, "") + "/minecraft";
+  }
+
+  function migrationBytes(value) {
+    const bytes = Number(value || 0);
+    if (!Number.isFinite(bytes) || bytes <= 0) return jvT("ui.b764cdc0eab7");
+    const gib = bytes / (1024 * 1024 * 1024);
+    if (gib >= 1) return gib.toFixed(gib >= 10 ? 1 : 2) + " GiB";
+    return (bytes / (1024 * 1024)).toFixed(0) + " MiB";
+  }
+
+  function migrationStateLabel(state) {
+    if (state === "queued") return jvT("ui.661ff40a07e0");
+    if (state === "validating") return jvT("ui.5a1a167e3d90");
+    if (state === "running") return jvT("ui.c0902db780a5");
+    if (state === "verifying") return jvT("ui.724382940a57");
+    if (state === "failed") return jvT("ui.d90064dbdb11");
+    if (state === "rolling_back") return jvT("ui.8b9e964b606b");
+    if (state === "rolled_back") return jvT("ui.71592236d852");
+    if (state === "needs_attention") return jvT("ui.c1ebc7817870");
+    if (state === "succeeded") return jvT("ui.143b270a3260");
+    return jvT("ui.a92f0449a9f7");
+  }
+
+  function migrationStageLabel(stage) {
+    if (stage === "queued") return jvT("ui.f5e5f81fd256");
+    if (stage === "migration_preflight" || stage === "target_recheck") return jvT("ui.56ca8cb20172");
+    if (stage === "target_prepare") return jvT("ui.9dd09873773c");
+    if (stage === "staging_space") return jvT("ui.f2e3a490cf35");
+    if (stage === "player_recheck") return jvT("ui.b8d83247878b");
+    if (stage === "minecraft_stop") return jvT("ui.995beb2af122");
+    if (stage === "cold_backup") return jvT("ui.cfe5e3272ffb");
+    if (stage === "copying") return jvT("ui.9d116f928b71");
+    if (stage === "copy_verification") return jvT("ui.e9edf19a183e");
+    if (stage === "switching") return jvT("ui.b88ca5f9a498");
+    if (stage === "minecraft_runtime") return jvT("ui.a0b9cdd2c9e4");
+    if (stage === "migrated_storage") return jvT("ui.9bd0d96bce36");
+    if (stage === "migration_failed") return jvT("ui.b62ffd61bf8c");
+    if (stage === "rollback") return jvT("ui.995d58cec59c");
+    if (stage === "migration_rolled_back") return jvT("ui.71592236d852");
+    if (["migration_needs_attention","migration_backend_interrupted","migration_backend_incomplete","invalid_execution_plan","interrupted"].includes(stage)) return jvT("ui.1e1b96ec8fd9");
+    if (stage === "completed") return jvT("ui.143b270a3260");
+    return jvT("ui.a92f0449a9f7");
+  }
+
+  function migrationTerminal(state) {
+    return ["succeeded", "rolled_back", "needs_attention"].includes(state);
+  }
+
+  function stopMigrationPolling() {
+    if (migrationPollTimer) window.clearTimeout(migrationPollTimer);
+    migrationPollTimer = null;
+  }
+
+  async function migrationJSON(url, options = {}) {
+    const response = await fetch(url, {
+      credentials: "same-origin",
+      cache: "no-store",
+      ...options,
+      headers: {
+        Accept: "application/json",
+        ...(options.headers || {}),
+      },
+    });
+    let payload = {};
+    try { payload = await response.json(); } catch (_) { payload = {}; }
+    if (response.status === 401) {
+      window.location.assign("/login");
+      return null;
+    }
+    if (response.status === 403 && String(jvC(payload.error || "")).toLowerCase().includes("password change")) {
+      window.location.assign("/password");
+      return null;
+    }
+    if (!response.ok || !payload?.ok) {
+      const error = new Error(payload?.error || jvT("ui.28002ab611ca"));
+      error.payload = payload;
+      error.status = response.status;
+      throw error;
+    }
+    return payload;
+  }
+
+  function migrationRequestBody() {
+    const body = new URLSearchParams();
+    body.set("csrf", csrf);
+    body.set("operation", "use_partition");
+    body.set("device", migrationDevice?.value || "");
+    body.set("mount_point", migrationMount?.value.trim() || "");
+    body.set("path", migrationPath?.value.trim() || "");
+    body.set("size_gib", "all");
+    return body;
+  }
+
+  function resetMigrationDialog() {
+    stopMigrationPolling();
+    reviewedMigrationPlan = null;
+    migrationApplying = false;
+    migrationPollFailures = 0;
+    if (migrationTitle) migrationTitle.textContent = jvT("ui.76885b1c6c88");
+    if (migrationSetup) migrationSetup.hidden = false;
+    if (migrationReviewPanel) migrationReviewPanel.hidden = true;
+    if (migrationProgress) migrationProgress.hidden = true;
+    if (migrationError) { migrationError.hidden = true; migrationError.textContent = ""; }
+    if (migrationReviewError) { migrationReviewError.hidden = true; migrationReviewError.textContent = ""; }
+    if (migrationWarnings) migrationWarnings.replaceChildren();
+    if (migrationPlayersField) migrationPlayersField.hidden = true;
+    if (migrationPlayers) migrationPlayers.checked = false;
+    if (migrationPlayersNote) migrationPlayersNote.textContent = "";
+    if (migrationDestructiveField) migrationDestructiveField.hidden = true;
+    if (migrationDestructivePhrase) migrationDestructivePhrase.textContent = "";
+    if (migrationDestructive) migrationDestructive.value = "";
+    if (migrationConfirmation) migrationConfirmation.value = "";
+    if (migrationApply) migrationApply.disabled = true;
+    if (migrationRefresh) migrationRefresh.hidden = true;
+  }
+
+  function renderMigrationWarnings(warnings) {
+    if (!migrationWarnings) return;
+    migrationWarnings.replaceChildren();
+    (warnings || []).forEach((warning) => {
+      const notice = document.createElement("div");
+      notice.className = "notice warning";
+      notice.textContent = warning.message || warning.Message || String(warning);
+      migrationWarnings.appendChild(notice);
+    });
+  }
+
+  function updateMigrationApplyState() {
+    if (!migrationApply || !reviewedMigrationPlan) return;
+    const requirements = reviewedMigrationPlan.requirements || {};
+    const migrateReady = (migrationConfirmation?.value.trim() || "") === "MIGRATE";
+    const playersReady = !requirements.players_confirmation_required || Boolean(migrationPlayers?.checked);
+    const phrase = requirements.confirmation_phrase || "";
+    const destructiveReady = !requirements.destructive_confirmation_required || (migrationDestructive?.value.trim() || "") === phrase;
+    migrationApply.disabled = !(migrateReady && playersReady && destructiveReady);
+  }
+
+  function renderMigrationPlan(plan) {
+    reviewedMigrationPlan = plan;
+    const normalized = plan.normalized || {};
+    const requirements = plan.requirements || {};
+    if (migrationSetup) migrationSetup.hidden = true;
+    if (migrationReviewPanel) migrationReviewPanel.hidden = false;
+    if (migrationProgress) migrationProgress.hidden = true;
+    if (migrationTitle) migrationTitle.textContent = jvT("ui.b98d5022bb6d");
+    if (migrationCurrentPath) migrationCurrentPath.textContent = normalized.current_data_path || jvT("ui.b764cdc0eab7");
+    if (migrationReviewDevice) migrationReviewDevice.textContent = normalized.device || "";
+    if (migrationReviewFilesystem) migrationReviewFilesystem.textContent = normalized.filesystem || jvT("ui.b764cdc0eab7");
+    if (migrationReviewMount) migrationReviewMount.textContent = normalized.mount_point || "";
+    if (migrationReviewPath) migrationReviewPath.textContent = normalized.path || "";
+    if (migrationReviewCapacity) migrationReviewCapacity.textContent = migrationBytes(normalized.target_capacity_bytes);
+    renderMigrationWarnings(plan.warnings);
+    const playersRequired = Boolean(requirements.players_confirmation_required);
+    if (migrationPlayersField) migrationPlayersField.hidden = !playersRequired;
+    if (migrationPlayers) migrationPlayers.checked = false;
+    if (migrationPlayersNote) {
+      const names = (requirements.players || []).join(", ");
+      migrationPlayersNote.textContent = playersRequired ? (names ? "Online: " + names : String(requirements.online || 0) + " player(s) online.") : "";
+    }
+    const destructiveRequired = Boolean(requirements.destructive_confirmation_required);
+    if (migrationDestructiveField) migrationDestructiveField.hidden = !destructiveRequired;
+    if (migrationDestructivePhrase) migrationDestructivePhrase.textContent = requirements.confirmation_phrase || "";
+    if (migrationDestructive) migrationDestructive.value = "";
+    if (migrationConfirmation) migrationConfirmation.value = "";
+    if (migrationReviewError) { migrationReviewError.hidden = true; migrationReviewError.textContent = ""; }
+    updateMigrationApplyState();
+    migrationConfirmation?.focus();
+  }
+
+  function showMigrationProgress(operation) {
+    if (!operation || operation.operation_type !== "data_migration") return;
+    reviewedMigrationPlan = null;
+    if (migrationSetup) migrationSetup.hidden = true;
+    if (migrationReviewPanel) migrationReviewPanel.hidden = true;
+    if (migrationProgress) migrationProgress.hidden = false;
+    if (migrationTitle) migrationTitle.textContent = jvT("ui.ef50e1e3c523");
+    if (migrationProgressState) migrationProgressState.textContent = migrationStateLabel(operation.state);
+    if (migrationProgressStage) migrationProgressStage.textContent = migrationStageLabel(operation.stage);
+    if (migrationProgressStatus) migrationProgressStatus.textContent = operation.status || jvT("ui.dde3c697d2f2");
+    if (migrationProgressID) migrationProgressID.textContent = operation.operation_id || "";
+    if (migrationReconnect) migrationReconnect.hidden = true;
+    if (migrationSuccess) migrationSuccess.hidden = operation.state !== "succeeded";
+    if (migrationRollback) migrationRollback.hidden = operation.state !== "rolled_back";
+    if (migrationAttention) migrationAttention.hidden = operation.state !== "needs_attention";
+    const terminal = migrationTerminal(operation.state);
+    if (migrationRefresh) migrationRefresh.hidden = !terminal;
+    stopMigrationPolling();
+    if (!terminal && operation.operation_id) {
+      migrationPollFailures = 0;
+      migrationPollTimer = window.setTimeout(() => pollMigrationProgress(operation.operation_id), 2500);
+    }
+  }
+
+  async function pollMigrationProgress(operationID) {
+    try {
+      const payload = await migrationJSON("/api/new-storage/minecraft-data/progress/" + encodeURIComponent(operationID));
+      if (!payload) return;
+      migrationPollFailures = 0;
+      showMigrationProgress(payload.operation);
+    } catch (_) {
+      migrationPollFailures += 1;
+      if (migrationPollFailures >= 2 && migrationReconnect) migrationReconnect.hidden = false;
+      migrationPollTimer = window.setTimeout(() => pollMigrationProgress(operationID), 2500);
+    }
+  }
+
+  async function showCurrentMigrationIfAny() {
+    try {
+      const payload = await migrationJSON("/api/new-storage/minecraft-data/current");
+      if (payload?.operation) {
+        if (migrationDialog && !migrationDialog.open) migrationDialog.showModal();
+        showMigrationProgress(payload.operation);
+        return true;
+      }
+    } catch (error) {
+      if (migrationError) {
+        migrationError.textContent = error.message;
+        migrationError.hidden = false;
+      }
+    }
+    return false;
+  }
+
+  function closeMigrationDialog() {
+    if (migrationApplying) return;
+    stopMigrationPolling();
+    migrationDialog?.close();
+  }
+
+  migrateButton?.addEventListener("click", async () => {
+    if (!selectedPartition || selectedPartition.minecraftCandidate !== "Yes" || !migrationDialog) return;
+    closeActionMenu();
+    hideDetails(detailDialog);
+    resetMigrationDialog();
+
+    const existingMount = selectedPartition.minecraftMountPoint || "";
+    const mountPoint = existingMount || "/var/mnt/justvoxel-data";
+    if (migrationDevice) migrationDevice.value = selectedPartition.path || "";
+    if (migrationSelected) migrationSelected.textContent = selectedPartition.path || "";
+    if (migrationMount) {
+      migrationMount.value = mountPoint;
+      migrationMount.readOnly = Boolean(existingMount);
+    }
+    if (migrationMountNote) {
+      migrationMountNote.textContent = existingMount
+        ? jvT("ui.a9b612c0b766")
+        : jvT("ui.cc764c13a4bf");
+    }
+    if (migrationPath) migrationPath.value = minecraftDataPath(mountPoint);
+    migrationDialog.showModal();
+    const active = await showCurrentMigrationIfAny();
+    if (!active) migrationPath?.focus();
+  });
+
+  migrationReview?.addEventListener("click", async () => {
+    if (migrationError) { migrationError.hidden = true; migrationError.textContent = ""; }
+    migrationReview.disabled = true;
+    migrationReview.textContent = jvT("ui.fcc53388888f");
+    try {
+      const body = migrationRequestBody();
+      const payload = await migrationJSON("/api/new-storage/minecraft-data/plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+      });
+      if (payload?.plan) renderMigrationPlan(payload.plan);
+    } catch (error) {
+      if (error.payload?.operation) {
+        showMigrationProgress(error.payload.operation);
+      } else if (migrationError) {
+        migrationError.textContent = error.message;
+        migrationError.hidden = false;
+      }
+    } finally {
+      migrationReview.disabled = false;
+      migrationReview.textContent = jvT("ui.03e285059a0f");
+    }
+  });
+
+  migrationApply?.addEventListener("click", async () => {
+    if (!reviewedMigrationPlan || migrationApplying) return;
+    updateMigrationApplyState();
+    if (migrationApply.disabled) return;
+    migrationApplying = true;
+    migrationApply.disabled = true;
+    if (migrationClose) migrationClose.disabled = true;
+    if (migrationBack) migrationBack.disabled = true;
+    migrationApply.textContent = jvT("ui.bbe5fc3b9ef3");
+    try {
+      const body = migrationRequestBody();
+      body.set("plan_fingerprint", reviewedMigrationPlan.plan_fingerprint || "");
+      body.set("migration_confirmation", migrationConfirmation?.value.trim() || "");
+      if (migrationPlayers?.checked) body.set("players_confirmed", "yes");
+      if (!(migrationDestructiveField?.hidden)) body.set("destructive_confirmation", migrationDestructive?.value.trim() || "");
+      const payload = await migrationJSON("/api/new-storage/minecraft-data/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+      });
+      if (payload?.operation) showMigrationProgress(payload.operation);
+    } catch (error) {
+      if (error.payload?.plan) renderMigrationPlan(error.payload.plan);
+      if (migrationReviewError) {
+        migrationReviewError.textContent = error.message;
+        migrationReviewError.hidden = false;
+      }
+    } finally {
+      migrationApplying = false;
+      if (migrationClose) migrationClose.disabled = false;
+      if (migrationBack) migrationBack.disabled = false;
+      migrationApply.textContent = jvT("ui.91d77a655ec1");
+      updateMigrationApplyState();
+    }
+  });
+
+  migrationMount?.addEventListener("input", () => {
+    if (!migrationMount.readOnly && migrationPath) migrationPath.value = minecraftDataPath(migrationMount.value.trim());
+  });
+  migrationConfirmation?.addEventListener("input", updateMigrationApplyState);
+  migrationDestructive?.addEventListener("input", updateMigrationApplyState);
+  migrationPlayers?.addEventListener("change", updateMigrationApplyState);
+  migrationBack?.addEventListener("click", () => {
+    reviewedMigrationPlan = null;
+    if (migrationSetup) migrationSetup.hidden = false;
+    if (migrationReviewPanel) migrationReviewPanel.hidden = true;
+    if (migrationTitle) migrationTitle.textContent = jvT("ui.76885b1c6c88");
+    migrationPath?.focus();
+  });
+  migrationClose?.addEventListener("click", closeMigrationDialog);
+  migrationCancel?.addEventListener("click", closeMigrationDialog);
+  migrationProgressClose?.addEventListener("click", closeMigrationDialog);
+  migrationRefresh?.addEventListener("click", refreshStorageWorkspace);
+  migrationDialog?.addEventListener("click", (event) => { if (event.target === migrationDialog) closeMigrationDialog(); });
+  migrationDialog?.addEventListener("cancel", (event) => { if (migrationApplying) event.preventDefault(); else stopMigrationPolling(); });
+
+  void showCurrentMigrationIfAny();
+
+  function actionLabel(action) {
+    if (action === "use-for-backups") return jvT("ui.3e445d7176e5");
+    if (action === "delete_partition") return jvT("ui.c122a05a345e");
+    if (action === "initialize_disk") return jvT("ui.25a4b0df9763");
+    if (action === "mount-for-now") return jvT("ui.b38026295cf7");
+    if (action === "mount-permanently") return jvT("ui.c25aca017ad2");
+    if (action === "make-permanent") return jvT("ui.47c6c7c07b5a");
+    if (action === "mount-now") return jvT("ui.ee66044030fe");
+    if (action === "unmount-for-now") return jvT("ui.3bfad184955d");
+    if (action === "remove-permanent") return jvT("ui.5b8d0b0a935c");
+    return jvT("ui.9c138f81e8f1");
+  }
+
+  function actionCopy(action) {
+    if (action === "use-for-backups") return jvT("ui.9b336d24fadf");
+    if (action === "delete_partition") return jvT("ui.63f8d5517bed");
+    if (action === "initialize_disk") return jvT("ui.18bd18ebd2bb");
+    if (action === "mount-for-now") return jvT("ui.936e8a08a57e");
+    if (action === "mount-permanently") return jvT("ui.55459c21e4fb");
+    if (action === "make-permanent") return jvT("ui.19f306d1294c");
+    if (action === "mount-now") return jvT("ui.91a63a9b84d9");
+    if (action === "unmount-for-now") {
+      if (selectedMountStatus?.persistence === "justvoxel") {
+        return jvT("ui.939f86ea1091");
+      }
+      if (selectedMountStatus?.persistence === "external") {
+        return jvT("ui.e9db1950e7bc");
+      }
+      return jvT("ui.2b8b3f575593");
+    }
+    if (action === "remove-permanent") return jvT("ui.629b167e6d94");
+    return jvT("ui.d9725ded7258");
+  }
+
+  function defaultMountPoint(data) {
+    const name = data.name || (data.path || "").split("/").pop() || "storage";
+    return "/var/mnt/" + name;
+  }
+
+  function actionRequest() {
+    if (selectedAction === "use-for-backups") {
+      return { family: "backup-partition", operation: "", mountPoint: "" };
+    }
+    if (selectedAction === "mount-for-now") {
+      return { family: "actions", operation: "mount", mountPoint: mountInput?.value.trim() || "" };
+    }
+    if (selectedAction === "unmount-for-now") {
+      return { family: "actions", operation: "unmount", mountPoint: "" };
+    }
+    if (["format", "delete_partition", "initialize_disk"].includes(selectedAction)) {
+      return { family: "actions", operation: selectedAction, mountPoint: "" };
+    }
+    if (selectedAction === "mount-permanently") {
+      return { family: "mounts", operation: "persist", mountPoint: mountInput?.value.trim() || "" };
+    }
+    if (selectedAction === "make-permanent") {
+      return { family: "mounts", operation: "persist", mountPoint: selectedMountStatus?.current_mount_point || "" };
+    }
+    if (selectedAction === "mount-now") {
+      return { family: "mounts", operation: "persist", mountPoint: selectedMountStatus?.mount_point || "" };
+    }
+    if (selectedAction === "remove-permanent") {
+      return { family: "mounts", operation: "remove", mountPoint: "" };
+    }
+    return null;
+  }
+
+  function resetActionDialog(action) {
+    selectedAction = action;
+    applyButton?.classList.toggle("danger", action !== "use-for-backups");
+    reviewedPlan = null;
+    if (actionTitle) actionTitle.textContent = actionLabel(action);
+    if (actionDescription) actionDescription.textContent = actionCopy(action);
+    const asksForMountPoint = action === "mount-for-now" || action === "mount-permanently";
+    if (mountField) mountField.hidden = !asksForMountPoint;
+    if (mountInput) mountInput.value = asksForMountPoint ? defaultMountPoint(selectedPartition || {}) : "";
+    if (reviewPanel) reviewPanel.hidden = true;
+    if (warningBox) warningBox.replaceChildren();
+    resetConfirmationControl(
+      confirmationField,
+      confirmationSummary,
+      confirmSlider,
+      confirmSliderShell,
+      confirmSliderText,
+      confirmToggleRow,
+      confirmToggle,
+      jvT("ui.7f9334299170"),
+    );
+    if (actionError) { actionError.hidden = true; actionError.textContent = ""; }
+    if (reviewButton) { reviewButton.hidden = false; reviewButton.disabled = false; reviewButton.textContent = jvT("ui.8f102c2baf65"); }
+    if (applyButton) { applyButton.hidden = true; applyButton.disabled = false; applyButton.textContent = jvT("ui.79ca6b45e0ef"); }
+  }
+
+  root.querySelectorAll("[data-storage-initialize]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!actionDialog) return;
+      selectedPartition = { ...button.dataset, type: "disk" };
+      selectedMountStatus = null;
+      resetActionDialog("initialize_disk");
+      actionDialog.showModal();
+      reviewButton?.focus();
+    });
+  });
+
+  actionButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!selectedPartition || !actionDialog) return;
+      closeActionMenu();
+      resetActionDialog(button.dataset.storageAction);
+      if (options.onSelect || options.inlineDetails) hideDetails(detailDialog);
+      actionDialog.showModal();
+      if (selectedAction === "mount-for-now" || selectedAction === "mount-permanently") mountInput?.focus();
+      else reviewButton?.focus();
+    });
+  });
+
+  function closeActionDialog() {
+    if (actionApplying) return;
+    actionDialog?.close();
+  }
+  actionClose?.addEventListener("click", closeActionDialog);
+  actionCancel?.addEventListener("click", closeActionDialog);
+  actionDialog?.addEventListener("click", (event) => { if (event.target === actionDialog) closeActionDialog(); });
+  actionDialog?.addEventListener("cancel", (event) => { if (actionApplying) event.preventDefault(); });
+
+  async function postAction(phase, extra) {
+    const request = actionRequest();
+    if (!request) throw new Error(jvT("ui.966432911d4d"));
+    const body = new URLSearchParams();
+    body.set("csrf", csrf);
+    body.set("operation", request.operation);
+    body.set("device", selectedPartition?.path || "");
+    if (request.mountPoint) body.set("mount_point", request.mountPoint);
+    if (selectedAction === "use-for-backups" && phase === "apply") {
+      body.set("mount_point", reviewedPlan.mount_point);
+      body.set("path", reviewedPlan.path);
+    }
+    Object.entries(extra || {}).forEach(([key, value]) => body.set(key, value || ""));
+    const response = await fetch("/api/new-storage/" + request.family + "/" + phase, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+      credentials: "same-origin",
+    });
+    let payload = null;
+    try { payload = await response.json(); } catch (_) { payload = null; }
+    if (!response.ok || !payload?.ok) {
+      throw new Error(payload?.error || jvT("ui.4e3c976cd0a3"));
+    }
+    return payload;
+  }
+
+  function renderWarnings(warnings) {
+    renderLocalStorageWarnings(warningBox, warnings);
+  }
+
+  function targetDescription(plan) {
+    if (selectedAction === "use-for-backups") return "Mount: " + plan.mount_point + " · Backup directory: " + plan.path;
+    if (selectedAction === "delete_partition") return jvT("ui.2feb49e37e60");
+    if (selectedAction === "initialize_disk") return jvT("ui.1940637b5b73");
+    if (selectedAction === "mount-for-now") return jvT("ui.0a9aeb1ab18f") + (plan.mount_point || "selected location");
+    if (selectedAction === "mount-permanently" || selectedAction === "make-permanent") return jvT("ui.9a7be41be876") + (plan.mount_point || "selected location");
+    if (selectedAction === "mount-now") return jvT("ui.eeff23f0dc71") + (plan.mount_point || "saved location");
+    if (selectedAction === "unmount-for-now") {
+      if (selectedMountStatus?.persistence === "justvoxel") return jvT("ui.6b827e9c3609");
+      if (selectedMountStatus?.persistence === "external") return jvT("ui.e25262547997");
+      return jvT("ui.870c28714a20");
+    }
+    if (selectedAction === "remove-permanent") return jvT("ui.7987f37b3c2c");
+    return jvT("ui.5cf3142fae57");
+  }
+
+  reviewButton?.addEventListener("click", async () => {
+    if (!selectedPartition || !selectedAction) return;
+    if (actionError) { actionError.hidden = true; actionError.textContent = ""; }
+    reviewButton.disabled = true;
+    reviewButton.textContent = jvT("ui.fcc53388888f");
+    try {
+      const payload = await postAction("plan");
+      reviewedPlan = payload.proposed;
+      if (selectedAction === "use-for-backups") reviewedPlan.fingerprint = payload.fingerprint;
+      if (reviewPanel) reviewPanel.hidden = false;
+      if (reviewDevice) reviewDevice.textContent = reviewedPlan.device || selectedPartition.path;
+      if (reviewRole) reviewRole.textContent = reviewedPlan.role || selectedPartition.role || jvT("ui.e674447337e8");
+      if (reviewFilesystem) reviewFilesystem.textContent = filesystemDisplay(reviewedPlan.filesystem);
+      if (reviewTarget) reviewTarget.textContent = targetDescription(reviewedPlan);
+      if (reviewTargetRow) reviewTargetRow.hidden = false;
+      renderWarnings(payload.warnings);
+      const needsConfirmation = Boolean(reviewedPlan.confirmation);
+      const destructiveSummary = (reviewedPlan.device || selectedPartition.path) + (selectedAction === "delete_partition" ? " will be deleted" : selectedAction === "initialize_disk" ? jvT("ui.b81e47b89397") : " will be formatted");
+      resetConfirmationControl(
+        confirmationField,
+        confirmationSummary,
+        confirmSlider,
+        confirmSliderShell,
+        confirmSliderText,
+        confirmToggleRow,
+        confirmToggle,
+        jvT("ui.7f9334299170"),
+      );
+      if (confirmationSummary) confirmationSummary.textContent = destructiveSummary;
+      if (confirmationField) confirmationField.hidden = !needsConfirmation;
+      reviewButton.hidden = true;
+      if (applyButton) {
+        applyButton.hidden = false;
+        applyButton.disabled = needsConfirmation;
+        applyButton.textContent = reviewedPlan.destructive ? jvT("ui.a6e53d6b90d2") : jvT("ui.79ca6b45e0ef");
+      }
+      if (needsConfirmation) confirmSlider?.focus();
+      else applyButton?.focus();
+    } catch (error) {
+      if (actionError) { actionError.textContent = options.onSelect && selectedAction.startsWith("mount") ? setupMountError(error.message) : error.message; actionError.hidden = false; }
+    } finally {
+      reviewButton.disabled = false;
+      reviewButton.textContent = jvT("ui.8f102c2baf65");
+    }
+  });
+
+  function updateActionApplyState() {
+    if (!applyButton || !reviewedPlan) return;
+    const needsConfirmation = Boolean(reviewedPlan.confirmation);
+    const sliderArmed = confirmationSliderArmed(
+      confirmSlider,
+      confirmSliderShell,
+      confirmSliderText,
+      (reviewedPlan.device || selectedPartition?.path || jvT("ui.aea1c108998d")) + (selectedAction === "delete_partition" ? " will be deleted" : selectedAction === "initialize_disk" ? jvT("ui.b81e47b89397") : " will be formatted"),
+      jvT("ui.7f9334299170"),
+    );
+    if (confirmToggleRow) confirmToggleRow.hidden = !needsConfirmation || !sliderArmed;
+    if (!sliderArmed && confirmToggle) confirmToggle.checked = false;
+    applyButton.disabled = needsConfirmation && !(sliderArmed && Boolean(confirmToggle?.checked));
+  }
+
+  confirmSlider?.addEventListener("input", updateActionApplyState);
+  confirmToggle?.addEventListener("change", updateActionApplyState);
+
+  applyButton?.addEventListener("click", async () => {
+    if (!reviewedPlan) return;
+    if (actionError) { actionError.hidden = true; actionError.textContent = ""; }
+    const expected = reviewedPlan.confirmation || "";
+    const confirmationReady = Number(confirmSlider?.value || 0) >= 100 && Boolean(confirmToggle?.checked);
+    if (expected && !confirmationReady) {
+      if (actionError) { actionError.textContent = jvT("ui.8ad19c5363e9"); actionError.hidden = false; }
+      confirmSlider?.focus();
+      return;
+    }
+    const entered = expected && confirmationReady ? expected : "";
+    actionApplying = true;
+    applyButton.disabled = true;
+    if (actionClose) actionClose.disabled = true;
+    if (actionCancel) actionCancel.disabled = true;
+    applyButton.textContent = jvT("ui.3329a9bb48b9");
+    try {
+      await postAction("apply", {
+        fingerprint: reviewedPlan.fingerprint,
+        confirmation: entered,
+      });
+      actionDialog?.close();
+      refreshStorageWorkspace(selectedAction.startsWith("mount") ? jvT("ui.f88542d3a421") : jvT("ui.019bd0148d26"));
+    } catch (error) {
+      actionApplying = false;
+      if (actionError) { actionError.textContent = options.onSelect && selectedAction.startsWith("mount") ? setupMountError(error.message) : error.message; actionError.hidden = false; }
+      if (actionClose) actionClose.disabled = false;
+      if (actionCancel) actionCancel.disabled = false;
+      applyButton.disabled = false;
+      applyButton.textContent = reviewedPlan.destructive ? jvT("ui.a6e53d6b90d2") : jvT("ui.79ca6b45e0ef");
+    }
+  });
+  }
+
+  window.JustVoxelStorageBrowser = { init: initStorageBrowser };
+  const initialStorageBrowser = document.querySelector("[data-storage-browser-root]");
+  if (initialStorageBrowser && !initialStorageBrowser.closest("[data-setup-storage-form], [data-setup-backup-form]")) initStorageBrowser(initialStorageBrowser);
+})();

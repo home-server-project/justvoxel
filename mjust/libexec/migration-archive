@@ -1,0 +1,831 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+command_name="${1:-}"
+shift || true
+
+case "${command_name}" in
+    inspect|extract|copy-dir|detect|create-native|verify-native) ;;
+    *)
+        echo 'Usage: migration-archive {inspect|extract|copy-dir|detect|create-native|verify-native} ...' >&2
+        exit 2
+        ;;
+esac
+
+python3 - "${command_name}" "$@" <<'PY'
+import hashlib
+import json
+import os
+import pathlib
+import re
+import shutil
+import stat
+import sys
+import tarfile
+import tempfile
+import zipfile
+
+CMD = sys.argv[1]
+ARGS = sys.argv[2:]
+MAX_MEMBERS = int(os.environ.get("JV_MIGRATION_MAX_MEMBERS", "250000"))
+MAX_EXPANDED = int(os.environ.get("JV_MIGRATION_MAX_EXPANDED_BYTES", str(8 * 1024**4)))
+MAX_PATH = int(os.environ.get("JV_MIGRATION_MAX_PATH", "1024"))
+MAX_MANIFEST = int(os.environ.get("JV_MIGRATION_MAX_MANIFEST_BYTES", str(1024 * 1024)))
+MAX_INDEX = int(os.environ.get("JV_MIGRATION_MAX_INDEX_BYTES", str(128 * 1024 * 1024)))
+NATIVE_ROOT = "justvoxel-migration"
+
+
+def fail(message):
+    print(f"ERROR: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def path_parts(name):
+    if not name or "\x00" in name or any(ord(c) < 32 for c in name):
+        fail("archive contains an empty or control-character path")
+    if len(name.encode("utf-8", errors="surrogateescape")) > MAX_PATH:
+        fail(f"archive path exceeds {MAX_PATH} bytes: {name[:120]}")
+    p = pathlib.PurePosixPath(name.replace("\\", "/"))
+    if p.is_absolute():
+        fail(f"archive contains an absolute path: {name}")
+    parts = []
+    for part in p.parts:
+        if part in ("", "."):
+            continue
+        if part == "..":
+            fail(f"archive contains path traversal: {name}")
+        parts.append(part)
+    if not parts:
+        fail(f"archive contains an invalid path: {name}")
+    return parts
+
+
+def safe_rel(name):
+    return "/".join(path_parts(name))
+
+
+def ensure_budget(count, total):
+    if count > MAX_MEMBERS:
+        fail(f"source contains too many entries ({count}); limit is {MAX_MEMBERS}")
+    if total > MAX_EXPANDED:
+        fail(f"source expanded size exceeds limit ({total} bytes); limit is {MAX_EXPANDED}")
+
+
+def read_small_file(path, limit):
+    st = os.stat(path, follow_symlinks=False)
+    if st.st_size > limit:
+        fail(f"metadata file is too large: {path}")
+    with open(path, "rb") as f:
+        data = f.read(limit + 1)
+    if len(data) > limit:
+        fail(f"metadata file is too large: {path}")
+    return data
+
+
+def tar_kind(path):
+    name = str(path).lower()
+    if name.endswith((".tar.gz", ".tgz")):
+        return "tar.gz"
+    if name.endswith(".tar"):
+        return "tar"
+    return None
+
+
+def source_kind(path):
+    if os.path.isdir(path):
+        return "directory"
+    if not os.path.isfile(path):
+        fail(f"source does not exist: {path}")
+    if zipfile.is_zipfile(path):
+        return "zip"
+    kind = tar_kind(path)
+    if kind:
+        try:
+            with tarfile.open(path, "r:*"):
+                pass
+        except (tarfile.TarError, OSError) as exc:
+            fail(f"could not open tar archive: {exc}")
+        return kind
+    try:
+        if tarfile.is_tarfile(path):
+            with open(path, "rb") as f:
+                magic = f.read(2)
+            return "tar.gz" if magic == b"\x1f\x8b" else "tar"
+    except OSError:
+        pass
+    fail("unsupported import format; supported: directory, .tar.gz/.tgz, .tar, .zip")
+
+
+def validate_symlink(parts, linkname, root_name=None):
+    if not linkname or "\x00" in linkname or any(ord(c) < 32 for c in linkname):
+        fail(f"unsafe symlink target at {'/'.join(parts)}")
+    lp = pathlib.PurePosixPath(linkname.replace("\\", "/"))
+    if lp.is_absolute():
+        fail(f"absolute symlink target at {'/'.join(parts)}")
+    stack = list(parts[:-1])
+    for part in lp.parts:
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if not stack:
+                fail(f"symlink escapes source root at {'/'.join(parts)}")
+            stack.pop()
+        else:
+            stack.append(part)
+    if root_name is not None and (not stack or stack[0] != root_name):
+        fail(f"symlink escapes source root at {'/'.join(parts)}")
+
+
+def inspect_tar(path):
+    seen = set()
+    symlinks = set()
+    roots = set()
+    file_sizes = {}
+    hardlinks = []
+    count = 0
+    total = 0
+    with tarfile.open(path, "r:*") as tf:
+        for member in tf:
+            if member.isdir() and member.name.strip("/") in ("", "."):
+                continue
+            parts = path_parts(member.name)
+            normalized = "/".join(parts)
+            if normalized in seen:
+                fail(f"archive contains duplicate path: {normalized}")
+            seen.add(normalized)
+            roots.add(parts[0])
+            count += 1
+            ensure_budget(count, total)
+            if member.isreg():
+                if member.size < 0:
+                    fail(f"archive contains invalid file size: {member.name}")
+                file_sizes[normalized] = member.size
+                total += member.size
+            elif member.islnk():
+                target_name = safe_rel(member.linkname)
+                hardlinks.append((normalized, target_name))
+            elif member.issym():
+                validate_symlink(parts, member.linkname, parts[0])
+                symlinks.add(normalized)
+            elif not member.isdir():
+                fail(f"archive contains unsupported special file: {member.name}")
+            ensure_budget(count, total)
+
+    for normalized in seen:
+        parts = normalized.split("/")
+        for i in range(1, len(parts)):
+            if "/".join(parts[:i]) in symlinks:
+                fail(f"archive contains content beneath a symlink: {normalized}")
+
+    for normalized, target in hardlinks:
+        if target not in seen:
+            fail(f"archive hardlink target is missing: {normalized}")
+        if target not in file_sizes:
+            fail(f"archive hardlink target is not a regular file: {normalized}")
+        total += file_sizes[target]
+        ensure_budget(count, total)
+
+    return {"format": source_kind(path), "members": count, "expandedBytes": total, "roots": sorted(roots)}
+
+
+def zip_mode(info):
+    return (info.external_attr >> 16) & 0xFFFF
+
+
+def inspect_zip(path):
+    seen = set()
+    roots = set()
+    count = 0
+    total = 0
+    with zipfile.ZipFile(path, "r") as zf:
+        infos = zf.infolist()
+        for info in infos:
+            parts = path_parts(info.filename)
+            normalized = "/".join(parts)
+            if normalized in seen:
+                fail(f"ZIP contains duplicate path: {normalized}")
+            seen.add(normalized)
+            roots.add(parts[0])
+            count += 1
+            mode = zip_mode(info)
+            ftype = stat.S_IFMT(mode) if mode else 0
+            if ftype == stat.S_IFLNK:
+                fail(f"ZIP symlink entries are not accepted: {info.filename}")
+            if ftype not in (0, stat.S_IFREG, stat.S_IFDIR):
+                fail(f"ZIP contains unsupported special file: {info.filename}")
+            if not info.is_dir():
+                if info.file_size < 0:
+                    fail(f"ZIP contains invalid file size: {info.filename}")
+                total += info.file_size
+            ensure_budget(count, total)
+    return {"format": "zip", "members": count, "expandedBytes": total, "roots": sorted(roots)}
+
+
+def inspect_directory(path):
+    base = os.path.realpath(path)
+    if not os.path.isdir(base):
+        fail(f"directory source does not exist: {path}")
+    count = 0
+    total = 0
+    symlink_dirs = set()
+    for root, dirs, files in os.walk(base, topdown=True, followlinks=False):
+        rel_root = os.path.relpath(root, base)
+        rel_root = "" if rel_root == "." else rel_root
+        for name in list(dirs) + list(files):
+            full = os.path.join(root, name)
+            rel = os.path.join(rel_root, name).replace(os.sep, "/")
+            path_parts(rel)
+            st = os.lstat(full)
+            count += 1
+            if stat.S_ISREG(st.st_mode):
+                total += st.st_size
+            elif stat.S_ISDIR(st.st_mode):
+                pass
+            elif stat.S_ISLNK(st.st_mode):
+                target = os.readlink(full)
+                validate_symlink(path_parts(rel), target)
+                resolved = os.path.realpath(full)
+                if os.path.commonpath([base, resolved]) != base:
+                    fail(f"directory symlink escapes source root: {rel}")
+                if name in dirs:
+                    dirs.remove(name)
+                    symlink_dirs.add(rel)
+            else:
+                fail(f"directory contains unsupported special file: {rel}")
+            ensure_budget(count, total)
+    return {"format": "directory", "members": count, "expandedBytes": total, "roots": [os.path.basename(base)]}
+
+
+def inspect_source(path):
+    kind = source_kind(path)
+    if kind == "directory":
+        summary = inspect_directory(path)
+    elif kind == "zip":
+        summary = inspect_zip(path)
+    else:
+        summary = inspect_tar(path)
+    summary["nativeBundle"] = False
+    if kind != "directory":
+        names = archive_names(path)
+        summary["nativeBundle"] = f"{NATIVE_ROOT}/manifest.json" in names and f"{NATIVE_ROOT}/integrity/files.json" in names
+    else:
+        summary["nativeBundle"] = os.path.isfile(os.path.join(path, "manifest.json")) and os.path.isfile(os.path.join(path, "integrity", "files.json"))
+    return summary
+
+
+def archive_names(path):
+    kind = source_kind(path)
+    if kind == "zip":
+        with zipfile.ZipFile(path, "r") as zf:
+            return {safe_rel(i.filename) for i in zf.infolist()}
+    with tarfile.open(path, "r:*") as tf:
+        names = set()
+        for m in tf.getmembers():
+            if m.isdir() and m.name.strip("/") in ("", "."):
+                continue
+            names.add(safe_rel(m.name))
+        return names
+
+
+def extract_tar(path, destination):
+    inspect_tar(path)
+    dest = pathlib.Path(destination)
+    if dest.exists():
+        fail(f"staging destination already exists: {destination}")
+    dest.mkdir(parents=True, mode=0o700)
+    dest_real = dest.resolve()
+    symlink_members = []
+    try:
+        with tarfile.open(path, "r:*") as tf:
+            for member in tf:
+                if member.isdir() and member.name.strip("/") in ("", "."):
+                    continue
+                parts = path_parts(member.name)
+                target = dest.joinpath(*parts)
+                parent = target.parent
+                parent.mkdir(parents=True, exist_ok=True)
+                if os.path.commonpath([str(dest_real), str(parent.resolve())]) != str(dest_real):
+                    fail(f"extraction would escape staging: {member.name}")
+                if member.isdir():
+                    target.mkdir(parents=True, exist_ok=True)
+                    os.chmod(target, member.mode & 0o777)
+                elif member.issym():
+                    symlink_members.append((member.name, member.linkname, parts))
+                else:
+                    source = tf.extractfile(member)
+                    if source is None:
+                        fail(f"could not read archived file: {member.name}")
+                    if target.exists() or target.is_symlink():
+                        fail(f"extraction path already exists: {member.name}")
+                    with open(target, "xb") as out:
+                        shutil.copyfileobj(source, out, length=1024 * 1024)
+                    os.chmod(target, member.mode & 0o777)
+            for member_name, linkname, parts in symlink_members:
+                target = dest.joinpath(*parts)
+                if target.exists() or target.is_symlink():
+                    fail(f"extraction path already exists: {member_name}")
+                os.symlink(linkname, target)
+    except BaseException:
+        shutil.rmtree(dest, ignore_errors=True)
+        raise
+
+
+def extract_zip(path, destination):
+    inspect_zip(path)
+    dest = pathlib.Path(destination)
+    if dest.exists():
+        fail(f"staging destination already exists: {destination}")
+    dest.mkdir(parents=True, mode=0o700)
+    dest_real = dest.resolve()
+    try:
+        with zipfile.ZipFile(path, "r") as zf:
+            for info in zf.infolist():
+                parts = path_parts(info.filename)
+                target = dest.joinpath(*parts)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if os.path.commonpath([str(dest_real), str(target.parent.resolve())]) != str(dest_real):
+                    fail(f"ZIP extraction would escape staging: {info.filename}")
+                if info.is_dir():
+                    target.mkdir(parents=True, exist_ok=True)
+                    continue
+                if target.exists() or target.is_symlink():
+                    fail(f"ZIP extraction path already exists: {info.filename}")
+                with zf.open(info, "r") as src, open(target, "xb") as out:
+                    shutil.copyfileobj(src, out, length=1024 * 1024)
+                mode = zip_mode(info) & 0o777
+                if mode:
+                    os.chmod(target, mode)
+    except BaseException:
+        shutil.rmtree(dest, ignore_errors=True)
+        raise
+
+
+def copy_directory(source, destination):
+    inspect_directory(source)
+    src = os.path.realpath(source)
+    dest = pathlib.Path(destination)
+    if dest.exists():
+        fail(f"staging destination already exists: {destination}")
+    dest.mkdir(parents=True, mode=0o700)
+    try:
+        for root, dirs, files in os.walk(src, topdown=True, followlinks=False):
+            rel_root = os.path.relpath(root, src)
+            out_root = dest if rel_root == "." else dest / rel_root
+            out_root.mkdir(parents=True, exist_ok=True)
+            for name in list(dirs):
+                s = os.path.join(root, name)
+                d = out_root / name
+                st = os.lstat(s)
+                if stat.S_ISLNK(st.st_mode):
+                    target = os.readlink(s)
+                    os.symlink(target, d)
+                    dirs.remove(name)
+                else:
+                    d.mkdir(exist_ok=True)
+                    os.chmod(d, st.st_mode & 0o777)
+            for name in files:
+                s = os.path.join(root, name)
+                d = out_root / name
+                st = os.lstat(s)
+                if stat.S_ISLNK(st.st_mode):
+                    os.symlink(os.readlink(s), d)
+                else:
+                    with open(s, "rb") as inp, open(d, "xb") as out:
+                        shutil.copyfileobj(inp, out, length=1024 * 1024)
+                    os.chmod(d, st.st_mode & 0o777)
+    except BaseException:
+        shutil.rmtree(dest, ignore_errors=True)
+        raise
+
+
+def read_properties(path):
+    props = {}
+    try:
+        raw = read_small_file(path, 1024 * 1024).decode("iso-8859-1", errors="replace")
+    except (OSError, UnicodeError):
+        return props
+    for raw_line in raw.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith(("#", "!")):
+            continue
+        if "=" in line:
+            key, value = line.split("=", 1)
+        elif ":" in line:
+            key, value = line.split(":", 1)
+        else:
+            continue
+        props[key.strip()] = value.strip().replace(r"\ ", " ")
+    return props
+
+
+def detect_version(root):
+    paper_env = os.path.join(root, ".paper.env")
+    candidates = []
+    if os.path.isfile(paper_env):
+        try:
+            text = read_small_file(paper_env, 1024 * 1024).decode("utf-8", errors="replace")
+            for key in ("VERSION", "MINECRAFT_VERSION", "MC_VERSION", "PAPER_VERSION"):
+                m = re.search(rf"(?m)^{re.escape(key)}=['\"]?([0-9]+(?:\.[0-9]+)+(?:[-+._A-Za-z0-9]*)?)", text)
+                if m:
+                    candidates.append(m.group(1))
+        except OSError:
+            pass
+    try:
+        for name in os.listdir(root):
+            m = re.match(r"paper[-_]?([0-9]+(?:\.[0-9]+)+(?:[-+._A-Za-z0-9]*)?)(?:[-_.].*)?\.jar$", name, re.I)
+            if m:
+                candidates.append(m.group(1))
+    except OSError:
+        pass
+    latest = os.path.join(root, "logs", "latest.log")
+    if os.path.isfile(latest):
+        try:
+            text = read_small_file(latest, 4 * 1024 * 1024).decode("utf-8", errors="replace")
+            patterns = [
+                r"\(MC:\s*([0-9]+(?:\.[0-9]+)+[^) ]*)\)",
+                r"Starting minecraft server version\s+([0-9]+(?:\.[0-9]+)+[^ ]*)",
+            ]
+            for pattern in patterns:
+                matches = re.findall(pattern, text, re.I)
+                if matches:
+                    candidates.append(matches[-1])
+        except OSError:
+            pass
+    for value in candidates:
+        m = re.match(r"^([0-9]+(?:\.[0-9]+){1,2})", value)
+        if m:
+            return m.group(1)
+    return None
+
+
+def nonempty_dir(path):
+    try:
+        return os.path.isdir(path) and any(os.scandir(path))
+    except OSError:
+        return False
+
+
+def detect_one(root):
+    props_path = os.path.join(root, "server.properties")
+    props = read_properties(props_path)
+    level = props.get("level-name", "world") or "world"
+    if level in (".", "..") or "/" in level or "\\" in level or "\x00" in level:
+        return None
+    world = os.path.join(root, level, "level.dat")
+    if not os.path.isfile(world):
+        return None
+
+    fabric = (
+        os.path.exists(os.path.join(root, "fabric-server-launch.jar"))
+        or os.path.exists(os.path.join(root, "fabric-server-launcher.properties"))
+        or os.path.isdir(os.path.join(root, "libraries", "net", "fabricmc"))
+    )
+    neoforge = (
+        os.path.isdir(os.path.join(root, "libraries", "net", "neoforged"))
+        or any(re.match(r"neoforge-.*\.jar$", n, re.I) for n in os.listdir(root))
+    )
+    forge = (
+        os.path.isdir(os.path.join(root, "libraries", "net", "minecraftforge"))
+        or any(re.match(r"forge-.*\.jar$", n, re.I) for n in os.listdir(root))
+    )
+    mods = nonempty_dir(os.path.join(root, "mods"))
+    paper_markers = [
+        os.path.join(root, "config", "paper-global.yml"),
+        os.path.join(root, "paper.yml"),
+        os.path.join(root, ".paper.env"),
+    ]
+    paper = any(os.path.isfile(p) for p in paper_markers)
+    if not paper:
+        latest = os.path.join(root, "logs", "latest.log")
+        if os.path.isfile(latest):
+            try:
+                text = read_small_file(latest, 4 * 1024 * 1024).decode("utf-8", errors="replace")
+                paper = bool(re.search(r"\bPaper\b", text, re.I))
+            except OSError:
+                pass
+
+    if fabric:
+        source_type = "fabric"
+        supported = False
+    elif neoforge:
+        source_type = "neoforge"
+        supported = False
+    elif forge:
+        source_type = "forge"
+        supported = False
+    elif mods:
+        source_type = "modded-unknown"
+        supported = False
+    elif paper:
+        source_type = "itzg-paper" if os.path.isfile(os.path.join(root, ".paper.env")) else "paper"
+        supported = True
+    else:
+        source_type = "vanilla"
+        supported = True
+
+    plugins = []
+    plugins_dir = os.path.join(root, "plugins")
+    if os.path.isdir(plugins_dir):
+        plugins = sorted(n for n in os.listdir(plugins_dir) if n.lower().endswith(".jar"))
+
+    geyser_cfg = os.path.join(root, "plugins", "Geyser-Spigot", "config.yml")
+    floodgate_key_paths = [
+        os.path.join(root, "plugins", "floodgate", "key.pem"),
+        os.path.join(root, "plugins", "Floodgate", "key.pem"),
+        os.path.join(root, "plugins", "Geyser-Spigot", "key.pem"),
+    ]
+    geyser_enabled = os.path.isfile(geyser_cfg) or any("geyser" in p.lower() for p in plugins)
+    geyser_port = None
+    geyser_auth_type = None
+    if os.path.isfile(geyser_cfg):
+        try:
+            text = read_small_file(geyser_cfg, 4 * 1024 * 1024).decode("utf-8", errors="replace")
+            auth_matches = re.findall(r"(?mi)^[ \t]*auth-type:[ \t]*['\"]?([A-Za-z0-9_-]+)", text)
+            if auth_matches:
+                geyser_auth_type = auth_matches[-1].lower()
+            in_bedrock = False
+            bedrock_indent = 0
+            for line in text.splitlines():
+                if not line.strip() or line.lstrip().startswith("#"):
+                    continue
+                indent = len(line) - len(line.lstrip(" "))
+                stripped = line.strip()
+                if stripped == "bedrock:":
+                    in_bedrock = True
+                    bedrock_indent = indent
+                    continue
+                if in_bedrock and indent <= bedrock_indent:
+                    in_bedrock = False
+                if in_bedrock:
+                    m = re.match(r"port:\s*([0-9]+)\s*(?:#.*)?$", stripped)
+                    if m:
+                        value = int(m.group(1))
+                        if 1 <= value <= 65535:
+                            geyser_port = value
+                            break
+        except OSError:
+            pass
+    floodgate_enabled = any("floodgate" in p.lower() for p in plugins) or any(os.path.isfile(p) for p in floodgate_key_paths)
+    floodgate_key = next((p for p in floodgate_key_paths if os.path.isfile(p)), None)
+    floodgate_sha = None
+    if floodgate_key:
+        h = hashlib.sha256()
+        with open(floodgate_key, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                h.update(chunk)
+        floodgate_sha = h.hexdigest()
+
+    def bool_prop(key):
+        value = props.get(key)
+        if value is None:
+            return None
+        value = value.lower()
+        if value in ("true", "yes", "1", "on"):
+            return True
+        if value in ("false", "no", "0", "off"):
+            return False
+        return None
+
+    return {
+        "root": os.path.realpath(root),
+        "sourceType": source_type,
+        "supported": supported,
+        "levelName": level,
+        "minecraftVersion": detect_version(root),
+        "onlineMode": bool_prop("online-mode"),
+        "gameMode": props.get("gamemode", "survival"),
+        "difficulty": props.get("difficulty", "normal"),
+        "whitelistEnabled": bool_prop("white-list"),
+        "enforceWhitelist": bool_prop("enforce-whitelist"),
+        "maxPlayers": props.get("max-players"),
+        "motd": props.get("motd"),
+        "javaPortHint": props.get("server-port"),
+        "pluginJarCount": len(plugins),
+        "pluginJars": plugins[:200],
+        "geyserEnabled": geyser_enabled,
+        "geyserAuthType": geyser_auth_type,
+        "bedrockPortHint": geyser_port,
+        "floodgateEnabled": floodgate_enabled,
+        "floodgateKeySha256": floodgate_sha,
+    }
+
+
+def detect_roots(path):
+    base = os.path.realpath(path)
+    if not os.path.isdir(base):
+        fail(f"detection path is not a directory: {path}")
+    candidates = []
+    for root, dirs, files in os.walk(base, topdown=True, followlinks=False):
+        rel = os.path.relpath(root, base)
+        depth = 0 if rel == "." else len(pathlib.Path(rel).parts)
+        if depth > 5:
+            dirs[:] = []
+            continue
+        dirs[:] = [d for d in dirs if d not in (".git", "cache", "logs") or depth < 2]
+        if "server.properties" in files:
+            detected = detect_one(root)
+            if detected:
+                candidates.append(detected)
+        if len(candidates) > 32:
+            fail("too many possible Minecraft server roots; narrow the import source")
+    return candidates
+
+
+def native_read_member(path, member_name, limit):
+    kind = source_kind(path)
+    if kind == "zip":
+        with zipfile.ZipFile(path, "r") as zf:
+            try:
+                info = zf.getinfo(member_name)
+            except KeyError:
+                fail(f"native bundle is missing {member_name}")
+            if info.file_size > limit:
+                fail(f"native metadata is too large: {member_name}")
+            return zf.read(info)
+    with tarfile.open(path, "r:*") as tf:
+        for member in tf:
+            if member.isdir() and member.name.strip("/") in ("", "."):
+                continue
+            if safe_rel(member.name) != member_name:
+                continue
+            if not member.isreg() or member.size > limit:
+                fail(f"invalid native metadata member: {member_name}")
+            src = tf.extractfile(member)
+            if src is None:
+                fail(f"could not read native metadata: {member_name}")
+            data = src.read(limit + 1)
+            if len(data) > limit:
+                fail(f"native metadata is too large: {member_name}")
+            return data
+    fail(f"native bundle is missing {member_name}")
+
+
+def verify_native(path):
+    summary = inspect_source(path)
+    if not summary.get("nativeBundle"):
+        fail("source is not a native JustVoxel migration bundle")
+    manifest_name = f"{NATIVE_ROOT}/manifest.json"
+    index_name = f"{NATIVE_ROOT}/integrity/files.json"
+    try:
+        manifest = json.loads(native_read_member(path, manifest_name, MAX_MANIFEST))
+        index = json.loads(native_read_member(path, index_name, MAX_INDEX))
+    except json.JSONDecodeError as exc:
+        fail(f"native migration metadata is invalid JSON: {exc}")
+    if manifest.get("schema") != "org.justvoxel.migration" or manifest.get("schemaVersion") != 1:
+        fail("unsupported native JustVoxel migration schema")
+    if not isinstance(index, dict) or index.get("algorithm") != "sha256" or not isinstance(index.get("files"), list):
+        fail("native integrity index is invalid")
+    expected = {}
+    for entry in index["files"]:
+        if not isinstance(entry, dict):
+            fail("native integrity index contains an invalid entry")
+        rel = entry.get("path")
+        typ = entry.get("type")
+        if not isinstance(rel, str) or rel in expected:
+            fail("native integrity index contains a missing or duplicate path")
+        safe_rel(rel)
+        if not rel.startswith("server/") and rel != "manifest.json":
+            fail(f"native integrity index contains an unexpected path: {rel}")
+        if typ == "file":
+            digest = entry.get("sha256")
+            size = entry.get("size")
+            if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest) or not isinstance(size, int) or size < 0:
+                fail(f"native integrity entry is invalid: {rel}")
+        elif typ == "symlink":
+            target = entry.get("target")
+            if not isinstance(target, str):
+                fail(f"native symlink integrity entry is invalid: {rel}")
+        else:
+            fail(f"native integrity entry has unsupported type: {rel}")
+        expected[rel] = entry
+
+    actual = set()
+    kind = source_kind(path)
+    if kind == "zip":
+        fail("native JustVoxel bundles are tar archives, not ZIP")
+    with tarfile.open(path, "r:*") as tf:
+        for member in tf:
+            if member.isdir() and member.name.strip("/") in ("", "."):
+                continue
+            name = safe_rel(member.name)
+            prefix = f"{NATIVE_ROOT}/"
+            if not name.startswith(prefix):
+                continue
+            rel = name[len(prefix):]
+            if rel in ("integrity", "integrity/files.json") or rel.endswith("/"):
+                continue
+            if rel == "manifest.json" or rel.startswith("server/"):
+                if member.isdir():
+                    continue
+                actual.add(rel)
+                entry = expected.get(rel)
+                if entry is None:
+                    fail(f"native bundle contains unindexed content: {rel}")
+                if member.issym():
+                    if entry["type"] != "symlink" or entry["target"] != member.linkname:
+                        fail(f"native symlink integrity mismatch: {rel}")
+                    continue
+                if not (member.isreg() or member.islnk()):
+                    fail(f"native indexed member has unsupported type: {rel}")
+                src = tf.extractfile(member)
+                if src is None:
+                    fail(f"could not read native bundle member: {rel}")
+                h = hashlib.sha256()
+                size = 0
+                for chunk in iter(lambda: src.read(1024 * 1024), b""):
+                    size += len(chunk)
+                    h.update(chunk)
+                if entry["type"] != "file" or entry["size"] != size or entry["sha256"] != h.hexdigest():
+                    fail(f"native checksum mismatch: {rel}")
+    if actual != set(expected):
+        missing = sorted(set(expected) - actual)
+        fail(f"native bundle is missing indexed content: {missing[0] if missing else 'unknown'}")
+    return manifest
+
+
+def create_native(data_dir, manifest_path, output):
+    inspect_directory(data_dir)
+    manifest_data = read_small_file(manifest_path, MAX_MANIFEST)
+    try:
+        manifest = json.loads(manifest_data)
+    except json.JSONDecodeError as exc:
+        fail(f"manifest is invalid JSON: {exc}")
+    if manifest.get("schema") != "org.justvoxel.migration" or manifest.get("schemaVersion") != 1:
+        fail("manifest does not describe JustVoxel migration schema version 1")
+
+    records = []
+    h = hashlib.sha256(manifest_data).hexdigest()
+    records.append({"path": "manifest.json", "type": "file", "size": len(manifest_data), "sha256": h})
+    base = os.path.realpath(data_dir)
+    for root, dirs, files in os.walk(base, topdown=True, followlinks=False):
+        rel_root = os.path.relpath(root, base)
+        rel_root = "" if rel_root == "." else rel_root.replace(os.sep, "/")
+        for name in sorted(list(dirs) + list(files)):
+            full = os.path.join(root, name)
+            rel = (f"{rel_root}/{name}" if rel_root else name).replace(os.sep, "/")
+            path_parts(rel)
+            st = os.lstat(full)
+            bundle_rel = f"server/{rel}"
+            if stat.S_ISREG(st.st_mode):
+                hh = hashlib.sha256()
+                with open(full, "rb") as f:
+                    for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                        hh.update(chunk)
+                records.append({"path": bundle_rel, "type": "file", "size": st.st_size, "sha256": hh.hexdigest()})
+            elif stat.S_ISLNK(st.st_mode):
+                records.append({"path": bundle_rel, "type": "symlink", "target": os.readlink(full)})
+            elif not stat.S_ISDIR(st.st_mode):
+                fail(f"unsupported special file in export source: {rel}")
+
+    index = json.dumps({"algorithm": "sha256", "files": records}, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+    if len(index) > MAX_INDEX:
+        fail("native integrity index exceeds its size limit")
+
+    output_path = pathlib.Path(output)
+    if output_path.exists():
+        fail(f"output already exists: {output}")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="justvoxel-migration-meta-") as temp:
+        troot = pathlib.Path(temp) / NATIVE_ROOT
+        (troot / "integrity").mkdir(parents=True)
+        (troot / "manifest.json").write_bytes(manifest_data)
+        (troot / "integrity" / "files.json").write_bytes(index)
+        with tarfile.open(output, "w:gz", format=tarfile.PAX_FORMAT) as tf:
+            tf.add(troot, arcname=NATIVE_ROOT, recursive=False)
+            tf.add(troot / "manifest.json", arcname=f"{NATIVE_ROOT}/manifest.json", recursive=False)
+            tf.add(troot / "integrity", arcname=f"{NATIVE_ROOT}/integrity", recursive=False)
+            tf.add(troot / "integrity" / "files.json", arcname=f"{NATIVE_ROOT}/integrity/files.json", recursive=False)
+            tf.add(data_dir, arcname=f"{NATIVE_ROOT}/server", recursive=True)
+
+
+if CMD == "inspect":
+    if len(ARGS) != 1:
+        fail("inspect requires SOURCE")
+    print(json.dumps(inspect_source(ARGS[0]), separators=(",", ":")))
+elif CMD == "extract":
+    if len(ARGS) != 2:
+        fail("extract requires SOURCE DESTINATION")
+    kind = source_kind(ARGS[0])
+    if kind == "directory":
+        copy_directory(ARGS[0], ARGS[1])
+    elif kind == "zip":
+        extract_zip(ARGS[0], ARGS[1])
+    else:
+        extract_tar(ARGS[0], ARGS[1])
+elif CMD == "copy-dir":
+    if len(ARGS) != 2:
+        fail("copy-dir requires SOURCE DESTINATION")
+    copy_directory(ARGS[0], ARGS[1])
+elif CMD == "detect":
+    if len(ARGS) != 1:
+        fail("detect requires DIRECTORY")
+    print(json.dumps({"candidates": detect_roots(ARGS[0])}, separators=(",", ":")))
+elif CMD == "create-native":
+    if len(ARGS) != 3:
+        fail("create-native requires DATA_DIR MANIFEST OUTPUT")
+    create_native(ARGS[0], ARGS[1], ARGS[2])
+elif CMD == "verify-native":
+    if len(ARGS) != 1:
+        fail("verify-native requires ARCHIVE")
+    print(json.dumps(verify_native(ARGS[0]), separators=(",", ":")))
+PY

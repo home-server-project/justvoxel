@@ -1,0 +1,357 @@
+# JustVoxel Agent Instructions
+
+Read this file before modifying the repository.
+
+## Project
+
+This repository contains the shared appliance source and the JustVoxel VM and HWS bootc products.
+
+It owns:
+
+- WebUI
+- privileged Management Agent and Management API
+- mjust
+- Minecraft runtime integration
+- storage, backup, restore, migration, import, and reset workflows
+- networking integration used by the appliance
+- system/image integration
+- source and image validation
+
+Common development image for testing:
+
+ghcr.io/home-server-project/justvoxel-dev:testing
+
+Upstream platform:
+
+Home Server Base 10 -> AlmaLinux 10 -> bootc
+
+This repository does not own the JustVoxel ISO installer.
+
+## Product boundary
+
+JustVoxel is a focused Minecraft server appliance, not a general-purpose server distribution.
+
+The supported product manages multiple independent Minecraft server instances. Each
+instance has its own immutable ID, runtime configuration, container, ports, data,
+backups, lifecycle, and status. Optional Minecraft Network infrastructure can join
+eligible instances behind one Velocity entrance and lobby.
+
+Knowledgeable users may run additional non-JustVoxel Podman containers manually,
+but generic container management remains outside the supported JustVoxel product.
+
+Prefer simple, safe, stable, secure solutions. Do not add machinery merely because it is technically possible.
+
+## Protected product invariants
+
+### CurseForge distribution permission is protected
+
+**allowModDistribution IS A PROTECTED PRODUCT INVARIANT. DO NOT CHANGE IT WITHOUT EXPLICIT HUMAN APPROVAL FOR THAT EXACT CHANGE.**
+
+Do not change, bypass, weaken, default, synthesize, ignore, invert, or reinterpret
+CurseForge allowModDistribution handling as collateral work.
+
+Approval for Plugins, Mods, Switch, Migration, CurseForge integration, refactors,
+tests, or adjacent work does not authorize changing this behavior.
+
+If an approved task appears to require changing allowModDistribution, STOP and
+request explicit human approval before touching it.
+
+### Known-working behavior
+
+**WORKING FEATURE = DO NOT TOUCH IT.**
+
+**IF A SUPPORTED SYSTEM / FEATURE / USER FLOW WORKS IN REAL USE AND THERE IS NO DEMONSTRATED BUG OR EXPLICITLY APPROVED REQUIREMENT TO CHANGE IT, LEAVE IT ALONE.**
+
+Do not redesign, remove, tighten, replace, refactor, "clean up", or reinterpret known-working behavior merely because another implementation seems cleaner or theoretically safer. Working behavior is an asset, not technical debt.
+
+Approval to modify one feature is not permission to alter adjacent working features. Do not change a working feature as collateral damage, incidental cleanup, refactoring, simplification, consistency work, visual polish, or because changing it makes implementation easier.
+
+If accomplishing an approved task appears to require changing another working feature, STOP. Identify that dependency and obtain explicit human approval for that additional change before touching it.
+
+Before changing an established workflow, inspect its existing behavior, history, tests, and compatibility expectations.
+
+### WebUI appearance is human-controlled
+
+**THE RENDERED WEBUI IS A PROTECTED PRODUCT INVARIANT. WITHOUT EXPLICIT HUMAN APPROVAL FOR THE EXACT VISUAL CHANGE, DO NOT CHANGE EVEN ONE PIXEL OF IT.**
+
+Approval for backend, API, behavior, bug-fix, cleanup, refactor, test, accessibility, or responsive work does not authorize incidental WebUI changes. Do not move, resize, reorder, restyle, relabel, hide/show, or "polish" controls; do not change spacing, geometry, colors, typography, icons, animations, responsive breakpoints, window/dialog placement, or other rendered appearance unless the human explicitly approved that exact UI scope.
+
+If a functional change appears to require an unapproved WebUI change, stop and propose the exact visual change for human approval. Do not make it as an incidental implementation detail.
+
+### Recovery is protected product behavior
+
+Recovery is a normal appliance feature, not a developer or sysadmin escape hatch. **Never remove, destroy, strand, or silently make an existing supported recovery path unusable.**
+
+A failed supported operation must not become instructions to use the terminal, manually edit/delete operation journals, remove locks, repair internal state, use Factory Reset or Minecraft Reset, or reinstall the appliance merely because the implementation changed.
+
+First-run Setup Recovery is specifically protected:
+
+**Retry recovery -> verified rollback/recovery -> `rolled_back` -> setup lock releases -> Start setup over becomes available.**
+
+Factory Reset and Minecraft Reset are separate product operations, never substitutes for failed Setup Recovery. A `needs_attention` state must retain a usable recovery path whenever the appliance has enough evidence to recover safely.
+
+### Persistent-state compatibility
+
+Persistent operation journals, transaction manifests, recovery evidence, schemas, and state-machine changes must account for already deployed appliances. Never intentionally introduce a persistent-state format that makes an existing valid/recoverable operation permanently unrecoverable.
+
+When changing persistent transaction evidence or recovery schemas:
+
+- inspect compatibility with state written by currently and previously deployed implementations;
+- preserve compatibility whenever technically possible;
+- add a bounded compatibility path when safe;
+- never invent missing evidence or bypass identity or ownership checks;
+- never silently discard an existing operation.
+
+### Safety must preserve usability
+
+Do not improve theoretical safety by breaking practical recoverability. Fail-closed behavior is required when safety cannot be established; new validation must not unnecessarily strand previously valid appliance state.
+
+Before tightening persistent-workflow validation, determine how deployed appliances behave after update. If a new rule would strand existing safe/recoverable state, implement safe compatibility handling rather than simply declaring it unsupported.
+
+**SIMPLE. SAFE. STABLE. SECURE. Safe must not mean unusable; fail closed must not mean permanently unrecoverable when safe recovery can be proven.**
+
+### SELinux is not a troubleshooting knob
+
+SELinux Enforcing is a protected appliance invariant. Never:
+
+- disable SELinux or switch the appliance to permissive;
+- weaken policy merely to make a failing feature work;
+- change types, contexts, file labels, or labeling strategy as speculative troubleshooting;
+- add `chcon` hacks, broad `restorecon` or relabel-at-boot hacks;
+- add `semanage fcontext` changes merely to silence an unexplained problem.
+
+Preserve the established Podman `:Z` data-labeling model. **If SELinux is Enforcing and the existing labeling works, LEAVE IT ALONE.**
+
+Investigate an AVC and prove its relevance before proposing policy or labeling changes. Any deliberate SELinux policy/labeling change requires:
+
+1. evidence that SELinux is actually the cause;
+2. explicit task scope for the SELinux change;
+3. human approval.
+
+## Branch and release model
+
+Active integration development happens on `testing`.
+
+Short-lived development branches are allowed when the human explicitly selects or creates them for a task. Do not silently switch branches or create a branch on your own.
+
+Before editing, inspect:
+
+- `git status -sb`
+- `git branch --show-current`
+- `git log -1 --oneline --decorate`
+
+Normal Codex scope is `testing` or an explicitly selected development branch.
+
+`main` is outside normal Codex modification scope unless the human explicitly
+approves a branch-specific task.
+
+Promotion is human-controlled. The intended release flow is development branch ->
+PR to `testing` -> testing image -> human runtime/VM acceptance -> PR from
+`testing` to `main` -> stable image from the validated `main` revision. The stable workflow builds both products on main pushes, manual main dispatch, and Saturdays at 08:00 UTC. It builds the common layer locally and compiles the Management Agent from source.
+
+Codex must not merge, promote, tag, publish a release, or modify a stable branch unless the human explicitly authorizes that exact action.
+
+For a major/global change, flag when a human-created backup checkpoint such as `testing-backup` would be sensible. Do not create it automatically.
+
+## Working model
+
+Use this loop:
+
+Research/reproduce -> define exact scope -> human approval -> implement -> validate -> independent review -> human decides commit/push/promotion.
+
+Do not edit files before implementation is approved.
+
+Do not expand scope without explicit approval.
+
+If the human expands scope during the task, absorb the new approved scope into the same work cycle.
+
+If another problem is discovered:
+
+1. decide whether it blocks the approved task;
+2. report it clearly;
+3. do not fix it unless it is required by the approved scope or the human expands scope.
+
+If a relevant test fails because of an unrelated area, do not chase the failure through other subsystems. Report the failure, likely cause, and boundary.
+
+Avoid speculative cleanup and endless test-fix-test loops.
+
+## Skills
+
+Repository-local skills live under `.agents/skills/`.
+
+Always read this AGENTS file first. Then load only the skill or skills that materially apply to the task.
+
+Normally use one primary skill and, when needed, one supporting skill. Three skills are reasonable only for a genuinely cross-cutting task. Do not load the whole skill directory.
+
+Available skills:
+
+- `justvoxel-human-experience`: user-facing language, flows, warnings, confirmations, and appliance usability.
+- `justvoxel-management-api`: privileged operations, Management Agent/API boundaries, authorization, and shared backend capabilities.
+- `justvoxel-transactional-ops`: backup, restore, migration, storage movement, import, reset, and other multi-stage state-changing operations.
+- `justvoxel-webui`: WebUI handlers, templates, JavaScript, CSS, workspaces, roles, dialogs, progress, and responsive behavior.
+- `justvoxel-mjust`: mjust menus, direct commands, recovery CLI, and terminal behavior.
+- `justvoxel-image`: Containerfile, build files, system files, packages, systemd, SELinux, bootc image composition, and persistence boundaries.
+- `justvoxel-ci`: GitHub Actions, source checks, image builds, publishing/signing, workflow triggers, and CI failure investigation.
+- `justvoxel-networking`: appliance networking, HSP Network Manager CLI integration, WebUI networking, LAN behavior, and Tailscale, NetBird, Playit, and NordVPN Meshnet flows.
+- `justvoxel-review`: independent human-directed verification/review of a completed change.
+
+Typical routing examples:
+
+- WebUI layout or copy: `justvoxel-webui` + `justvoxel-human-experience`.
+- New privileged WebUI operation: `justvoxel-webui` + `justvoxel-management-api`; add human-experience only when user-facing behavior changes.
+- Restore/migration/storage change: `justvoxel-transactional-ops` + `justvoxel-management-api`.
+- Networking WebUI change: `justvoxel-networking` + `justvoxel-webui`.
+- mjust networking change: `justvoxel-mjust` + `justvoxel-networking`.
+- Image/system integration change: `justvoxel-image`.
+- Workflow/build failure: `justvoxel-ci`.
+- Independent review: `justvoxel-review` + the relevant domain skill.
+
+For the image skill, apply common composition guidance to `Containerfile.dev` and final product guidance to the VM/HWS targets in `Containerfile`. For the CI skill, use the channel and promotion contracts in [the unified build guide](docs/BUILD.md). Only the development testing dispatch may publish the internal Management Agent testing package.
+
+A skill supplements this file. It never overrides the global scope, Git/GitHub, or approval rules here.
+
+## Git and GitHub safety
+
+Read-only Git inspection is allowed when relevant.
+
+Never perform any of the following unless the human explicitly approves that exact action:
+
+- commit
+- push
+- force push
+- create or delete branches
+- create or modify pull requests
+- merge
+- tag
+- release
+- manually trigger or cancel GitHub Actions
+- modify repository settings
+
+Local source edits inside the approved scope are allowed after implementation is approved.
+
+Never discard existing user changes.
+
+Never use destructive Git commands such as:
+
+- `git reset --hard`
+- `git clean -fd`
+- `git checkout -- .`
+- `git restore .`
+
+unless the human explicitly asks for that exact action.
+
+## Immutable OS rules
+
+JustVoxel is an image-built immutable bootc appliance.
+
+Do not design product fixes around runtime RPM layering.
+
+Do not use or re-enable `rpm-ostree` as a product solution.
+
+Required host packages, binaries, services, and policy belong in the image.
+
+Prefer image composition, systemd, Podman, NetworkManager, firewalld, SELinux, and bootc-native patterns.
+
+Home Server Packages are consumed by their channel tags. Stable packages use `:stable`.
+
+Do not introduce a custom digest-resolution layer for Home Server Packages.
+
+Do not instruct the human to paste `set -euo pipefail` into an interactive shell. Existing non-interactive scripts/CI using it are not automatically a problem.
+
+## Architecture boundary
+
+Preserve the privileged-operation model:
+
+Browser -> unprivileged WebUI -> Management API over local Unix socket -> privileged Management Agent -> explicit appliance operation.
+
+Do not make the WebUI:
+
+- run arbitrary shell commands;
+- run arbitrary mjust commands;
+- control generic systemd units;
+- control generic Podman containers;
+- bypass the Management Agent for privileged operations.
+
+For genuine product capabilities shared by WebUI and mjust, prefer one authoritative backend implementation.
+
+Do not force artificial parity between interfaces when the design intentionally differs.
+
+## Repository layout
+
+Important areas:
+
+- `management/`: privileged Go Management Agent and API
+- `webui/`: unprivileged Go WebUI
+- `mjust/`: terminal appliance interface and helper commands
+- `runtime/`: Minecraft runtime helpers and service integration
+- `system_files/`: files installed into the appliance image
+- `templates/`: generated/runtime configuration templates
+- `build_files/`: image composition and build logic
+- `tests/`: source-level integration and regression tests
+- `docs/`: architecture and user/developer documentation
+- `Containerfile.dev`: shared development image
+- `Containerfile`: final VM and HWS images
+
+Before creating a new implementation path, inspect whether equivalent logic already exists.
+
+## Coding and security rules
+
+Keep changes narrowly scoped.
+
+Prefer simple, explicit implementations over abstraction unless the abstraction removes real duplication.
+
+Do not weaken validation merely to make a failing input pass.
+
+Do not remove strict decoding or safety checks globally to work around one contract mismatch.
+
+Do not silently ignore errors that can identify a real runtime failure.
+
+Do not expose passwords, credentials, tokens, session secrets, SMB passwords, or other secrets through logs, command arguments, audit output, URLs, browser storage, or returned API payloads.
+
+Preserve SELinux enforcement and existing permission boundaries.
+
+## Validation
+
+During implementation, run reasonable checks for the changed area.
+
+Use the narrowest relevant tests first.
+
+Examples:
+
+- Management Go changes: relevant `go test` / `go vet`.
+- WebUI Go changes: relevant WebUI tests.
+- Shell/helpers: syntax checks and directly relevant tests under `tests/`.
+- Cross-layer changes: verify the affected layers together when practical.
+
+Do not run every possible check for every tiny change.
+
+Do not repeatedly prove facts already guaranteed by Home Server Base unless JustVoxel has a specific integration assumption to validate.
+
+Do not claim a check passed unless it was actually executed.
+
+Keep validation levels separate:
+
+- local/source checks prove source behavior only;
+- CI image build proves the image built and passed configured image checks;
+- human development-VM testing proves real boot/runtime/visual behavior.
+
+Do not claim runtime or visual acceptance from source tests or CI alone.
+
+## Documentation
+
+Update documentation when behavior, architecture, supported configuration, user workflow, or security boundaries change.
+
+Do not update documentation merely to narrate implementation details that users or future maintainers do not need.
+
+When documentation and implementation disagree, investigate rather than silently choosing one.
+
+## Final report
+
+After an implementation task, keep the report short:
+
+1. what was implemented;
+2. main files/areas changed;
+3. tests/checks run and results;
+4. blocker or important unverified item, if any.
+
+Codex's report is not proof of correctness. Independent human-directed review follows before release decisions.

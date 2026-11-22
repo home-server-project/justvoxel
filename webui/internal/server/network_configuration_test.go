@@ -1,0 +1,1850 @@
+package server
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"regexp"
+	"strings"
+	"testing"
+
+	"github.com/home-server-project/justvoxel-webui/internal/api"
+)
+
+type fakeNetworkConfigurationAPI struct {
+	*fakeNetworkAPI
+	calls            int
+	ethernet         api.EthernetSettings
+	provider, action string
+}
+
+func (f *fakeNetworkConfigurationAPI) RemoteAccessStatus(context.Context, string) (api.RemoteAccessStatus, error) {
+	return api.RemoteAccessStatus{Providers: []api.RemoteAccessProvider{{ID: "playit", DisplayName: "Playit.gg", Installed: true, ServiceActive: true, ServiceEnabled: true}}}, nil
+}
+func (f *fakeNetworkConfigurationAPI) ChangeRemoteAccess(_ context.Context, _, provider, action string) (api.RemoteAccessChange, error) {
+	f.calls++
+	f.provider, f.action = provider, action
+	if provider == "netbird" && action == "activate" {
+		return api.RemoteAccessChange{OK: true, LoginURL: "https://app.netbird.io/login?test=1"}, nil
+	}
+	return api.RemoteAccessChange{OK: true}, nil
+}
+func (f *fakeNetworkConfigurationAPI) ConfigureEthernet(_ context.Context, _, _ string, settings api.EthernetSettings) (api.NetworkWiFiMutation, error) {
+	f.calls++
+	f.ethernet = settings
+	return api.NetworkWiFiMutation{OK: true}, nil
+}
+func (f *fakeNetworkConfigurationAPI) CheckNetworkConnectivity(context.Context, string) error {
+	f.calls++
+	return nil
+}
+func (f *fakeNetworkConfigurationAPI) ReconnectNetwork(context.Context, string, string, string, string) (api.NetworkWiFiMutation, error) {
+	f.calls++
+	return api.NetworkWiFiMutation{OK: true}, nil
+}
+
+func TestNetworkWorkspaceTabsFollowAuthenticatedRole(t *testing.T) {
+	for _, role := range []string{"administrator", "operator", "viewer"} {
+		fake := &fakeNetworkAPI{fakeAPI: &fakeAPI{}, role: role}
+		app, err := New(fake, Config{Version: "1.0.0", ManagementAPI: "v1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodGet, "/api/network", nil)
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, req)
+		var status api.NetworkStatus
+		if rr.Code != http.StatusOK {
+			t.Fatalf("role %s: %d", role, rr.Code)
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &status); err != nil {
+			t.Fatal(err)
+		}
+		want := []string{"Overview"}
+		if role == "administrator" {
+			want = []string{"Overview", "Ethernet", "Wi-Fi", "Troubleshoot", "Remote Access", "Router"}
+		}
+		if !reflect.DeepEqual(status.WorkspaceTabs, want) {
+			t.Fatalf("role %s tabs %v", role, status.WorkspaceTabs)
+		}
+	}
+}
+
+func TestNetworkRouterHasNoGenericProxy(t *testing.T) {
+	app, err := New(&fakeNetworkAPI{fakeAPI: &fakeAPI{}, role: "administrator"}, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/api/network/router", "/api/network/router/mikrotik/rest/ip/firewall/nat"} {
+		for _, method := range []string{http.MethodGet, http.MethodPost} {
+			req := httptest.NewRequest(method, path, nil)
+			req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+			rr := httptest.NewRecorder()
+			app.Handler().ServeHTTP(rr, req)
+			if rr.Code != http.StatusNotFound && rr.Code != http.StatusMethodNotAllowed {
+				t.Errorf("%s %s is registered: %d", method, path, rr.Code)
+			}
+		}
+	}
+	for _, path := range []string{"static/network-workspace.js", "static/minecraft-servers.js"} {
+		source, err := assets.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(source), "/rest/") {
+			t.Errorf("%s addresses a RouterOS resource directly", path)
+		}
+	}
+}
+
+func TestNetworkRouterCatalogReferences(t *testing.T) {
+	var keys []string
+	for key := range catalogs["en"] {
+		if strings.HasPrefix(key, "network.router.") {
+			keys = append(keys, key)
+		}
+	}
+	for _, path := range []string{"static/network-workspace.js", "static/minecraft-servers.js", "templates/minecraft_servers.html"} {
+		source, err := assets.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, match := range regexp.MustCompile(`"(network\.router\.[a-z_]+)"`).FindAllStringSubmatch(string(source), -1) {
+			keys = append(keys, match[1])
+		}
+	}
+	if len(keys) == 0 {
+		t.Fatal("Router catalog references missing")
+	}
+	examplePhrases := map[string]string{
+		"en": "for example", "fr-CA": "par exemple", "de": "zum Beispiel", "pl": "na przykład",
+		"pt-BR": "por exemplo", "es-419": "por ejemplo", "uk": "наприклад", "ru": "например", "zh-Hans": "例如",
+	}
+	if len(examplePhrases) != len(supportedLocales) {
+		t.Fatal("Router guide example wording must cover every supported locale")
+	}
+	for _, locale := range supportedLocales {
+		for _, key := range keys {
+			if strings.TrimSpace(catalogs[locale][key]) == "" {
+				t.Errorf("%s missing %q", locale, key)
+			}
+		}
+		for _, token := range []string{"<JUSTVOXEL_IP>", "<ROUTER_IP>"} {
+			if !strings.Contains(catalogs[locale]["network.router.input_help"], token) {
+				t.Errorf("%s router input help missing %q", locale, token)
+			}
+		}
+		if !strings.Contains(catalogs[locale]["network.router.user_help"], "<JUSTVOXEL_IP>/32") {
+			t.Errorf("%s router user help missing allowed address placeholder", locale)
+		}
+		phrase := examplePhrases[locale]
+		if phrase == "" || !strings.Contains(catalogs[locale]["network.router.group_help"], phrase+" jv") {
+			t.Errorf("%s router group help must present jv as an example", locale)
+		}
+		if phrase == "" || !strings.Contains(catalogs[locale]["network.router.user_help"], phrase+" justvoxel") {
+			t.Errorf("%s router user help must present justvoxel as an example", locale)
+		}
+	}
+}
+
+func TestNetworkConfigurationProxyRequiresAdministratorAndCSRF(t *testing.T) {
+	paths := []string{"/api/network/ethernet/enp1s0", "/api/network/reconnect/enp1s0", "/api/network/connectivity-check", "/api/network/remote-access/playit"}
+	for _, role := range []string{"administrator", "operator", "viewer"} {
+		for _, csrf := range []string{"", "token"} {
+			fake := &fakeNetworkConfigurationAPI{fakeNetworkAPI: &fakeNetworkAPI{fakeAPI: &fakeAPI{}, role: role}}
+			app, err := New(fake, Config{Version: "1.0.0", ManagementAPI: "v1", ExternalScheme: "http"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, path := range paths {
+				req := httptest.NewRequest(http.MethodPost, path, strings.NewReader("csrf="+csrf+"&method=auto&prefix=0&mtu=0&autoconnect=true&profile_uuid=12345678-1234-1234-1234-123456789abc&checkpoint_id=opaque&action=activate"))
+				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+				req.AddCookie(&http.Cookie{Name: csrfCookie, Value: "token"})
+				rr := httptest.NewRecorder()
+				app.Handler().ServeHTTP(rr, req)
+				want := http.StatusForbidden
+				if role == "administrator" && csrf == "token" {
+					want = http.StatusOK
+				}
+				if rr.Code != want {
+					t.Fatalf("%s %s csrf=%q: %d body=%s", role, path, csrf, rr.Code, rr.Body.String())
+				}
+			}
+			if role != "administrator" || csrf == "" {
+				if fake.calls != 0 {
+					t.Fatal("rejected mutation reached Management API")
+				}
+			} else {
+				if fake.ethernet.CheckpointID != "opaque" || fake.provider != "playit" || fake.action != "activate" {
+					t.Fatal("proxy lost checkpoint or fixed provider action")
+				}
+			}
+		}
+	}
+}
+
+func TestNetworkWiFiControlsRemainInsideWiFiTab(t *testing.T) {
+	source, err := englishPresentationAsset("static/network-workspace.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(source)
+	start := strings.Index(script, `} else if (selectedTab === "Wi-Fi") {`)
+	end := strings.Index(script, `} else if (selectedTab === "Troubleshoot") {`)
+	if start < 0 || end <= start {
+		t.Fatal("Wi-Fi tab missing")
+	}
+	wifiTab := script[start:end]
+	for _, want := range []string{"renderWiFiNetworks", "renderSavedWiFi", "renderConnectPanel"} {
+		if !strings.Contains(wifiTab, want) {
+			t.Fatalf("Wi-Fi tab lost %s", want)
+		}
+	}
+	for _, want := range []string{"renderWiFiNetworks(device, currentNetworks.get(device.interface))", "renderSavedWiFi(currentSnapshot)", "renderConnectPanel()", "networkWifiRadio", "networkWifiSavedConnect", "networkWifiJoin", "networkWifiOther", "networkWifiDisconnect", "networkWifiForget", "runCheckpointedMutation", "rollback_timeout_seconds: 90"} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("Wi-Fi behavior missing %s", want)
+		}
+	}
+	if !strings.Contains(script, `effectiveTabs(currentSnapshot)`) || !strings.Contains(script, "if (!isAdministrator()) return;") {
+		t.Fatal("read-only tab/action guard missing")
+	}
+}
+
+func (f *fakeNetworkConfigurationAPI) PlayitSetup(_ context.Context, _ string, start bool) (api.PlayitSetupState, error) {
+	f.calls++
+	return api.PlayitSetupState{State: "waiting", ClaimURL: "https://playit.gg/claim/0123abcdef"}, nil
+}
+
+func (f *fakeNetworkConfigurationAPI) PlayitRelink(ctx context.Context, session string) (api.PlayitSetupState, error) {
+	return f.PlayitSetup(ctx, session, true)
+}
+
+func TestPlayitSetupProxyAdministratorAndCSRF(t *testing.T) {
+	for _, role := range []string{"administrator", "operator", "viewer"} {
+		for _, method := range []string{http.MethodGet, http.MethodPost} {
+			for _, csrf := range []string{"", "token"} {
+				fake := &fakeNetworkConfigurationAPI{fakeNetworkAPI: &fakeNetworkAPI{fakeAPI: &fakeAPI{}, role: role}}
+				app, err := New(fake, Config{Version: "1.0.0", ManagementAPI: "v1", ExternalScheme: "http"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				req := httptest.NewRequest(method, "/api/network/remote-access/playit/setup", strings.NewReader("csrf="+csrf))
+				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+				req.AddCookie(&http.Cookie{Name: csrfCookie, Value: "token"})
+				rr := httptest.NewRecorder()
+				app.Handler().ServeHTTP(rr, req)
+				allowed := role == "administrator" && (method == http.MethodGet || csrf == "token")
+				if allowed {
+					if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "https://playit.gg/claim/0123abcdef") || fake.calls != 1 {
+						t.Fatal(rr.Body.String())
+					}
+				} else if rr.Code != http.StatusForbidden || strings.Contains(rr.Body.String(), "0123abcdef") || fake.calls != 0 {
+					t.Fatalf("%s %s csrf=%q: %d %s", role, method, csrf, rr.Code, rr.Body.String())
+				}
+			}
+		}
+	}
+}
+
+func TestPlayitRelinkProxyAdministratorAndCSRF(t *testing.T) {
+	for _, role := range []string{"administrator", "operator", "viewer"} {
+		for _, method := range []string{http.MethodPost} {
+			for _, csrf := range []string{"", "token"} {
+				fake := &fakeNetworkConfigurationAPI{fakeNetworkAPI: &fakeNetworkAPI{fakeAPI: &fakeAPI{}, role: role}}
+				app, err := New(fake, Config{Version: "1.0.0", ManagementAPI: "v1", ExternalScheme: "http"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				req := httptest.NewRequest(method, "/api/network/remote-access/playit/relink", strings.NewReader("csrf="+csrf))
+				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+				req.AddCookie(&http.Cookie{Name: csrfCookie, Value: "token"})
+				rr := httptest.NewRecorder()
+				app.Handler().ServeHTTP(rr, req)
+				allowed := role == "administrator" && (method == http.MethodGet || csrf == "token")
+				if allowed {
+					if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "https://playit.gg/claim/0123abcdef") || fake.calls != 1 {
+						t.Fatal(rr.Body.String())
+					}
+				} else if rr.Code != http.StatusForbidden || strings.Contains(rr.Body.String(), "0123abcdef") || fake.calls != 0 {
+					t.Fatalf("%s %s csrf=%q: %d %s", role, method, csrf, rr.Code, rr.Body.String())
+				}
+			}
+		}
+	}
+}
+
+func TestRemoteAccessCardBehavior(t *testing.T) {
+	source, err := englishPresentationAsset("static/network-workspace.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(source)
+	controlsStart := strings.Index(script, "  const providerTransitional =")
+	controlsEnd := strings.Index(script, "  const isAdministrator =")
+	renderStart := strings.Index(script, "  const providerIcons =")
+	renderEnd := strings.Index(script, "  const renderNetwork =")
+	if controlsStart < 0 || controlsEnd <= controlsStart || renderStart < 0 || renderEnd <= renderStart {
+		t.Fatal("remote card functions missing")
+	}
+	program := `
+const assert = require("node:assert/strict");
+class Element {
+  constructor(tag) { this.tag = tag; this.children = []; this.dataset = {}; this.disabled = false; this.textContent = ""; }
+  append(...nodes) { this.children.push(...nodes); }
+  appendChild(node) { this.append(node); return node; }
+  prepend(node) { this.children.unshift(node); }
+  setAttribute(name, value) { this[name] = value; }
+}
+const document = { createElement: (tag) => new Element(tag) };
+const row = (name, value) => { const e = new Element("row"); e.textContent = name + ": " + value; return e; };
+const sectionHeading = () => new Element("heading");
+const actionButton = (text, key, value, kind = "secondary") => { const e = new Element("button"); e.textContent = text; e.dataset[key] = value; e.className = kind + " nav-admin-only network-action-button"; return e; };
+const label = (value) => String(value || "unknown");
+let remoteBusy = false, remoteError = "", remoteProviders = [], playitSetup = { state: "idle" };
+const providerProgress = new Map();
+let playitPopup = null, playitClaimOpened = false, netbirdLoginURL = "", tailscaleLoginURL = "";
+const validTailscaleLoginURL = (value) => typeof value === "string" && value.startsWith("https://login.tailscale.com/a/");
+const validNetbirdLoginURL = (value) => typeof value === "string" && value.startsWith("https://");
+` + script[controlsStart:controlsEnd] + script[renderStart:renderEnd] + `
+const flatten = (node) => [node, ...node.children.flatMap(flatten)];
+const render = (provider) => { remoteProviders = [provider]; return flatten(renderRemoteAccess()); };
+const base = { id: "playit", display_name: "Playit.gg", installed: true, service_active: true, service_enabled: true, service_state: "active", configured: false, dashboard_url: "https://evil.test/" };
+for (const account of ["Logged in", "Not logged in", "Unknown"]) {
+  for (const meshnet of ["Enabled", "Disabled", "Unknown"]) {
+    for (const service_enabled of [false, true]) {
+      for (const service_active of [false, true]) {
+        const nord = render({ ...base, id: "nordvpn", account, meshnet, connected: meshnet === "Enabled", service_active, service_enabled, service_state: service_active ? "active" : "inactive" });
+        assert(nord.some((n) => n.textContent === "Activate" && n.disabled === service_active));
+        assert(nord.some((n) => n.textContent === "Deactivate" && n.disabled === !service_active));
+        const token = nord.find(n => n.textContent === "Token");
+        assert(token && !token.disabled);
+        assert.equal(token.dataset.action, "token");
+        assert.equal(token.dataset.networkProvider, "nordvpn");
+        const group = nord.find(n => n.className === "network-nord-actions");
+        assert.deepEqual(group.children.map(n => n.textContent), ["Token", "Activate"]);
+      }
+    }
+  }
+}
+for (const [installed, busy] of [[false, false], [true, true]]) {
+  remoteBusy = busy;
+  const nord = render({ ...base, id: "nordvpn", installed });
+  assert(nord.find(n => n.textContent === "Token").disabled);
+}
+remoteBusy = false;
+let nodes = render(base);
+assert(!nodes.some((n) => n.textContent === "Set up Playit"));
+assert(nodes.some((n) => n.textContent === "Activate" && n.disabled));
+const fresh = render({ ...base, service_active: false, service_enabled: false, service_state: "inactive" });
+assert(fresh.some((n) => n.textContent === "Activate" && !n.disabled));
+assert(fresh.some((n) => n.textContent === "Deactivate" && n.disabled));
+assert(nodes.some((n) => n.textContent === "Deactivate" && !n.disabled));
+assert(!nodes.some((n) => /mjust net|use CLI/.test(n.textContent)));
+for (const state of ["activating", "deactivating", "reloading", "refreshing"]) {
+  nodes = render({ ...base, configured: true, service_active: false, service_state: state });
+  assert(nodes.some((n) => n.textContent === "Activate" && n.disabled));
+  assert(nodes.some((n) => n.textContent === "Deactivate" && n.disabled === (state === "deactivating")));
+  const netbird = render({ ...base, id: "netbird", configured: false, service_active: false, service_state: state });
+  assert(netbird.some((n) => n.textContent === "Activate" && n.disabled === (state !== "activating")));
+  assert(netbird.some((n) => n.textContent === "Deactivate" && n.disabled === (state === "deactivating")));
+  assert(nodes.some((n) => n.textContent === "Service: " + state[0].toUpperCase() + state.slice(1) + "…"));
+}
+for (const id of ["tailscale", "netbird", "playit"]) {
+  nodes = render({ ...base, id, configured: true });
+  assert(!nodes.some(n => n.textContent === "Token" || n.className === "network-nord-actions"));
+  assert(nodes.some((n) => n.textContent === "Activate" && n.disabled === (id === "playit")));
+  assert(nodes.some((n) => n.textContent === "Deactivate" && !n.disabled));
+  assert(!nodes.some((n) => n.textContent === "Set up Playit"));
+  const link = nodes.find((n) => n.textContent === { tailscale: "Open Tailscale dashboard", netbird: "Open NetBird dashboard", playit: "Open Playit.gg dashboard" }[id]);
+  assert.equal(link.className, "button-link warning network-action-button");
+  assert.equal(nodes.find((n) => n.textContent === "Activate").className, "primary nav-admin-only network-action-button");
+  assert.equal(nodes.find((n) => n.textContent === "Deactivate").className, "secondary nav-admin-only network-action-button");
+  assert(nodes.indexOf(nodes.find((n) => n.textContent === "Deactivate")) < nodes.indexOf(nodes.find((n) => n.textContent === "Activate")));
+  assert.equal(link.target, "_blank"); assert.equal(link.rel, "noopener noreferrer");
+  assert.equal(link.href, { tailscale: "https://console.tailscale.com/admin/", netbird: "https://app.netbird.io/", playit: "https://playit.gg/account/" }[id]);
+}
+for (const service_active of [false, true]) {
+  for (const configured of [false, true]) {
+    nodes = render({ ...base, configured, service_active });
+    const group = nodes.find(n => n.className === "network-playit-actions");
+    assert.deepEqual(group.children.map(n => n.textContent), ["Account", "Activate"]);
+    assert.equal(group.children[0].className, "secondary nav-admin-only network-action-button");
+    assert.equal(group.children[0].disabled, false);
+  }
+}
+for (const id of ["tailscale", "netbird", "nordvpn"]) {
+  assert(!render({ ...base, id }).some(n => n.textContent === "Account" || n.className === "network-playit-actions"));
+}
+for (const busy of [false, true]) {
+  for (const installed of [false, true]) {
+    for (const state of ["idle", "starting", "waiting"]) {
+      remoteBusy = busy; playitSetup = { state };
+      const account = render({ ...base, installed }).find(n => n.textContent === "Account");
+      assert.equal(account.disabled, busy || !installed || state !== "idle");
+    }
+  }
+}
+remoteBusy = false; playitSetup = { state: "idle" };
+for (const summary of ["No tunnels", "Unavailable", "Running"]) {
+  nodes = render({ ...base, configured: true, summary, tunnels: summary === "No tunnels" ? [{ display_address: "disabled.playit.gg", destination: "127.0.0.1:25565", is_disabled: true }] : [] });
+  assert(nodes.some(n => n.textContent === "Tunnels: " + (summary === "Running" ? "Unavailable" : summary)));
+  assert(!nodes.some(n => n.textContent === "Tunnels: Running"));
+  if (summary === "No tunnels") assert(nodes.some(n => n.textContent === "Disabled tunnel: disabled.playit.gg"));
+}
+nodes = render({ ...base, configured: true, connected: true, summary: "2 tunnels", tunnels: [
+  { display_address: "one.playit.gg:1234", destination: "127.0.0.1:25565", is_disabled: false },
+  { display_address: "two.playit.gg:2345", destination: "127.0.0.1:19132", is_disabled: false },
+  { display_address: "disabled.playit.gg:3456", destination: "127.0.0.1:25566", is_disabled: true },
+] });
+for (const text of ["Software: Installed", "Service enabled: Yes", "Service: Running", "Configuration: Configured", "Tunnels: 2 tunnels", "Public tunnel: one.playit.gg:1234", "Public tunnel: two.playit.gg:2345", "Disabled tunnel: disabled.playit.gg:3456", "Local destination: 127.0.0.1:25565", "Local destination: 127.0.0.1:19132", "Local destination: 127.0.0.1:25566"]) assert(nodes.some((n) => n.textContent === text));
+assert(nodes.some((n) => n.textContent === "Activate" && n.disabled));
+assert(nodes.some((n) => n.textContent === "Deactivate" && !n.disabled));
+for (const summary of ["No tunnels", "Connecting", "Unavailable"]) {
+  nodes = render({ ...base, configured: true, summary });
+  assert(nodes.some((n) => n.textContent === "Tunnels: " + summary));
+  assert(!nodes.some((n) => n.textContent.startsWith("Public tunnel:")));
+}
+netbirdLoginURL = "https://app.netbird.io/login?code=abcd";
+nodes = render({ ...base, id: "netbird", configured: false, service_active: false, service_enabled: false, service_state: "inactive" });
+assert(nodes.some((n) => n.textContent === "Complete NetBird login" && n.href === netbirdLoginURL));
+netbirdLoginURL = "";
+nodes = render({ ...base, id: "netbird", configured: true, connected: true, ip: "100.80.12.5/16" });
+assert(nodes.some((n) => n.textContent === "NetBird IP: 100.80.12.5"));
+assert(nodes.some((n) => n.textContent === "Activate" && n.disabled));
+tailscaleLoginURL = "https://login.tailscale.com/a/0123456789abcdef";
+nodes = render({ ...base, id: "tailscale", configured: false, connected: false, service_active: true });
+assert(nodes.some((n) => n.textContent === "Activate" && !n.disabled));
+assert(nodes.some((n) => n.textContent === "Complete Tailscale login" && n.href === tailscaleLoginURL));
+tailscaleLoginURL = "";
+nodes = render({ ...base, id: "tailscale", configured: true, connected: true, ip: "100.101.102.103", summary: "Connected" });
+assert(nodes.some((n) => n.textContent === "Tailscale IP: 100.101.102.103"));
+assert(nodes.some((n) => n.textContent === "Connection: Connected"));
+assert(nodes.some((n) => n.textContent === "Activate" && n.disabled));
+nodes = render({ ...base, configured: true, service_active: false, service_enabled: false, service_state: "inactive" });
+assert(nodes.some((n) => n.textContent === "Activate" && !n.disabled));
+assert(nodes.some((n) => n.textContent === "Deactivate" && n.disabled));
+for (const state of ["inactive", "failed"]) {
+  nodes = render({ ...base, configured: true, service_active: false, service_state: state });
+  assert(nodes.some((n) => n.textContent === "Activate" && !n.disabled));
+  assert(nodes.some((n) => n.textContent === "Deactivate" && !n.disabled));
+}
+for (const state of ["starting", "waiting"]) {
+  playitSetup = { state, claim_url: "https://playit.gg/claim/0123abcdef" };
+  nodes = render(base);
+  assert(nodes.filter((n) => ["Activate", "Set up Playit"].includes(n.textContent)).every((n) => n.disabled));
+  assert(nodes.some((n) => n.textContent === "Deactivate" && !n.disabled));
+  assert(nodes.some((n) => n.textContent === "Open Playit.gg dashboard"));
+  assert(render({ ...base, service_active: false, service_enabled: false, service_state: "inactive" }).some((n) => n.textContent === "Deactivate" && !n.disabled));
+  if (state === "waiting") {
+    const claim = nodes.find((n) => n.textContent === "Open Playit setup");
+    assert(nodes.indexOf(nodes.find((n) => n.textContent === "Deactivate")) < nodes.indexOf(claim));
+    assert.equal(claim.href, playitSetup.claim_url);
+    assert.equal(claim.className, "button-link primary network-action-button");
+    assert(nodes.some((n) => n.textContent === "Activate" && n.disabled));
+    playitClaimOpened = true;
+    assert(render(base).some((n) => n.textContent === "Activate" && n.disabled));
+    assert(!render(base).some((n) => n.textContent === "Open Playit setup"));
+    playitClaimOpened = false;
+  }
+}
+for (const claim_url of ["https://playit.gg/claim/0123abcdef", "https://playit.gg/claim/A1B2C3D4E5"]) {
+  playitSetup = { state: "waiting", claim_url };
+  assert.equal(render(base).find((n) => n.textContent === "Open Playit setup").href, claim_url);
+}
+for (const claim_url of [
+  "https://playit.gg/claim/0123abcde",
+  "https://playit.gg/claim/0123abcdef0",
+  "https://playit.gg/claim/0123abcdeg",
+  "https://playit.gg/claim/0123abcdef?secret=x",
+  "https://playit.gg/claim/0123abcdef/path",
+  "http://playit.gg/claim/0123abcdef",
+  "https://evil.test/claim/0123abcdef",
+  "https://playit.gg/claim/",
+  "prefixhttps://playit.gg/claim/0123abcdef",
+  "https://playit.gg/claim/0123abcdefsuffix",
+  "https://playit.gg/claim/0123abcdef\n",
+]) {
+  playitSetup = { state: "waiting", claim_url };
+  assert(!render(base).some((n) => n.textContent === "Open Playit setup"));
+}
+playitSetup = { state: "failed" };
+assert(!render(base).some((n) => n.textContent === "Set up Playit"));
+`
+	cmd := nodeTestCommand()
+	cmd.Stdin = strings.NewReader(program)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("card behavior: %v\n%s", err, output)
+	}
+	css, err := englishPresentationAsset("static/network-workspace.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		".network-provider-card .button-link{display:inline-flex;",
+		".network-provider-card>.network-inline-actions.network-playit-lifecycle{grid-template-columns:auto minmax(0,1fr)}",
+		".network-playit-actions{display:flex;justify-content:flex-end;align-items:center;gap:.4rem;flex-wrap:wrap;min-width:0}",
+		".network-provider-card :is(button,.button-link).warning{background:var(--jv-warning);color:var(--jv-surface-sunken)}",
+		".network-provider-card>.network-inline-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));",
+		".network-provider-card>.network-inline-actions>.button-link{grid-column:1/-1;order:-1}",
+		".network-provider-card>.network-inline-actions>.button-link.warning{order:-2}",
+		`.network-provider-card [data-action="deactivate"]{grid-column:1;justify-self:start}`,
+		`.network-provider-card [data-action="activate"]{grid-column:2;justify-self:end}`,
+	} {
+		if !strings.Contains(string(css), want) {
+			t.Fatalf("provider action layout or styling missing %q", want)
+		}
+	}
+}
+
+func TestRemoteAccessPollingIsBoundedAndStopsWhenStable(t *testing.T) {
+	source, err := englishPresentationAsset("static/network-workspace.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(source)
+	start := strings.Index(script, "  const pollRemoteAccess =")
+	end := strings.Index(script, "  const runRemoteAction =")
+	if start < 0 || end <= start {
+		t.Fatal("bounded remote polling missing")
+	}
+	program := `
+const assert = require("node:assert/strict");
+let now = 0, polls = 0, remotePollSequence = 0;
+const pendingDashboards = new Set(), providerProgress = new Map();
+let playitSetup = { state: "idle" }, remoteProviders = [{ service_state: "activating" }];
+const dialog = { open: true }, state = {};
+const isAdministrator = () => true;
+const providerTransitional = (p) => ["activating", "deactivating", "reloading"].includes(p.service_state);
+const setupRunning = () => ["starting", "waiting"].includes(playitSetup.state);
+Date.now = () => now;
+const setTimeout = (callback, interval) => { now += interval; callback(); };
+let remoteError = "";
+const failPlayitPopup = () => {}, renderNetwork = () => {};
+let refreshRemoteAccess = async () => { polls++; if (polls === 2) remoteProviders = [{ service_state: "active" }]; };
+` + script[start:end] + `
+(async () => {
+  await pollRemoteAccess(); assert.equal(polls, 2);
+  polls = 0; now = 0; remoteProviders = [{ service_state: "deactivating" }];
+  refreshRemoteAccess = async () => { polls++; };
+  await pollRemoteAccess(); assert(polls > 0 && polls <= 27); assert(now >= 20000);
+  polls = 0; now = 0; playitSetup = { state: "waiting" };
+  await pollRemoteAccess(); assert(polls > 0 && polls <= 305); assert(now >= 610000);
+  polls = 0; dialog.open = false;
+  await pollRemoteAccess(); assert.equal(polls, 0);
+  dialog.open = true; now = 0; playitSetup = { state: "waiting" };
+  refreshRemoteAccess = async () => { polls++; playitSetup = { state: "complete" }; remoteProviders = [{ service_state: "active", configured: true }]; };
+  await pollRemoteAccess(); assert.equal(polls, 1); assert(remoteProviders[0].configured);
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+`
+	cmd := nodeTestCommand()
+	cmd.Stdin = strings.NewReader(program)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("polling behavior: %v\n%s", err, output)
+	}
+}
+
+func TestNetworkOverviewCompactCanonicalRows(t *testing.T) {
+	source, err := englishPresentationAsset("static/network-workspace.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(source)
+	start := strings.Index(script, "  const renderOverview =")
+	end := strings.Index(script, "  const renderCheckpoint =")
+	if start < 0 || end <= start {
+		t.Fatal("overview function missing")
+	}
+	program := `
+const assert = require("node:assert/strict");
+class Element {
+  constructor(tag) { this.tag = tag; this.children = []; this.textContent = ""; }
+  append(...nodes) { this.children.push(...nodes); }
+  appendChild(node) { this.append(node); return node; }
+}
+const document = { createElement: (tag) => new Element(tag) };
+const row = (name, value) => { const e = new Element("row"); e.textContent = name + ": " + value; return e; };
+
+const remoteProviders = [
+  { id: "tailscale", summary: "Awaiting approval" },
+  { id: "netbird", summary: "Not configured" },
+  { id: "playit", summary: "Setup pending", claim_url: "https://playit.gg/claim/0123abcdef" },
+];
+` + script[strings.Index(script, "  const connectivitySummary ="):strings.Index(script, "  const validPlayitClaim =")] + script[strings.Index(script, "  const firstAddress ="):strings.Index(script, "  const clearRecoveryTimer =")] + script[strings.Index(script, "  const badge ="):strings.Index(script, "  const actionButton =")] + script[start:end] + `
+const snapshot = { connectivity: "full", devices: [
+  { kind: "ethernet", interface: "enp1s0", state: "activated", carrier: true, ipv4: { gateway: "192.168.0.1", addresses: [{ address: "192.168.0.28/24", prefix: 24 }] } },
+] };
+const panel = renderOverview(snapshot);
+assert.equal(panel.tag, "section"); assert.equal(panel.children.length, 6);
+assert.deepEqual(panel.children.map((node) => node.textContent), [
+  "Internet connected", "IPv4: 192.168.0.28", "Ethernet: enp1s0 · Connected",
+  "Tailscale: Awaiting approval", "NetBird: Not configured", "Playit: Setup pending",
+]);
+assert(!JSON.stringify(panel).includes("claim"));
+assert(!JSON.stringify(panel).includes("Connectivity"));
+assert.equal(panel.children[0].className, "badge network-badge good network-internet-status");
+const missing = renderOverview({ devices: [] });
+assert.equal(missing.children[1].textContent, "IPv4: Unavailable");
+assert.equal(missing.children[2].textContent, "Ethernet: Unavailable");
+`
+	cmd := nodeTestCommand()
+	cmd.Stdin = strings.NewReader(program)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("overview behavior: %v\n%s", err, output)
+	}
+	start = strings.Index(script, `if (selectedTab === "Overview") {`)
+	if start < 0 {
+		t.Fatal("overview tab missing")
+	}
+	end = strings.Index(script[start:], `} else if (selectedTab === "Ethernet")`)
+	if end < 0 || strings.Count(script[start:start+end], "panel.appendChild(") != 1 || strings.Contains(script[start:start+end], "Interfaces") {
+		t.Fatal("overview contains a second panel")
+	}
+	if strings.Contains(script[strings.Index(script, "  const renderOverview ="):strings.Index(script, "  const renderCheckpoint =")], "claim_url") {
+		t.Fatal("overview reads administrator setup data")
+	}
+	if !strings.Contains(script, `if (isAdministrator() && selectedTab === "Remote Access")`) || !strings.Contains(script, `if (selectedTab === "Remote Access") playitSetup = await requestJSON`) {
+		t.Fatal("overview setup fetch guard missing")
+	}
+}
+
+func TestDrawerRetainsNetworkBlockAndShowsActiveRemoteAccess(t *testing.T) {
+	source, err := englishPresentationAsset("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(source)
+	start := strings.Index(script, `    const overlays = quickLook.querySelector("[data-quick-look-overlays]");`)
+	if start < 0 {
+		t.Fatal("existing drawer status block missing")
+	}
+	end := strings.Index(script[start:], `    setValue("[data-quick-look-backup]"`)
+	if end < 0 {
+		t.Fatal("existing drawer status block missing")
+	}
+	program := `
+const assert = require("node:assert/strict");
+class Element {
+  constructor(tag) { this.tag = tag; this.children = []; this.textContent = ""; }
+  append(...nodes) { this.children.push(...nodes); }
+  appendChild(node) { this.append(node); }
+  replaceChildren() { this.children = []; }
+}
+const document = { createElement: (tag) => new Element(tag) };
+const overlays = new Element("div");
+const quickLook = { querySelector: () => overlays };
+const render = (providers) => {
+` + strings.Replace(script[start:start+end], `    const overlays = quickLook.querySelector("[data-quick-look-overlays]");`, "", 1) + `
+  return overlays.children.map((line) => line.children.map((cell) => cell.textContent));
+};
+assert.deepEqual(render([]), []);
+assert.deepEqual(render(["tailscale", "netbird", "nordvpn", "playit"].map(id => ({
+  id, connected:true, configured:true, service_active:true, summary:"Not configured"
+}))), []);
+for (const summary of ["Stopped", "Not configured", "Not connected", "Unavailable"]) {
+  assert.deepEqual(render(["tailscale", "netbird", "playit", "nordvpn"].map(id => ({id, summary, connected: false, ip: "100.64.0.3"}))), []);
+}
+assert.deepEqual(render([{id:"tailscale",connected:true,ip:"100.64.0.3/16"},
+  {id:"netbird",connected:true,ip:"100.64.0.4"}, {id:"nordvpn",connected:true,ip:"100.64.0.5"}]),
+  [["Tailscale","100.64.0.3"],["NetBird","100.64.0.4"],["NordVPN","100.64.0.5"]]);
+for (const ip of ["", "invalid", "fd00::1", "999.1.2.3"]) {
+  assert.deepEqual(render([{id:"nordvpn",connected:true,ip}]), []);
+}
+for (const tunnels of [undefined, [], [{is_disabled:true}]]) {
+  assert.deepEqual(render([{id:"playit",connected:true,tunnels}]), []);
+}
+assert.deepEqual(render([{id:"playit",connected:true,tunnels:[{is_disabled:false},{is_disabled:true}]}]), [["Playit","1 tunnel"]]);
+assert.deepEqual(render([{id:"playit",connected:true,tunnels:[{is_disabled:false},{is_disabled:false},{is_disabled:true}]}]), [["Playit","2 tunnels"]]);
+
+`
+	cmd := nodeTestCommand()
+	cmd.Stdin = strings.NewReader(program)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("drawer behavior: %v\n%s", err, output)
+	}
+	header, err := englishPresentationAsset("templates/header.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(header), `quick-look-tile quick-look-network-tile`) != 1 || !strings.Contains(string(header), `<span>IPv4</span><strong data-quick-look-ipv4>`) || !strings.Contains(string(header), `data-quick-look-overlays`) {
+		t.Fatal("existing drawer block changed")
+	}
+	if !strings.Contains(script, `fetch("/api/network/remote-access"`) {
+		t.Fatal("drawer does not consume canonical status")
+	}
+}
+
+func TestReadOnlyRemoteAccessProxyUsesStatusWithoutSetup(t *testing.T) {
+	for _, role := range []string{"administrator", "operator", "viewer"} {
+		fake := &fakeNetworkConfigurationAPI{fakeNetworkAPI: &fakeNetworkAPI{fakeAPI: &fakeAPI{}, role: role}}
+		app, err := New(fake, Config{Version: "1.0.0", ManagementAPI: "v1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodGet, "/api/network/remote-access", nil)
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: "session-token"})
+		rr := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK || fake.calls != 0 || strings.Contains(rr.Body.String(), "claim") {
+			t.Fatalf("role %s status=%d setup calls=%d body=%s", role, rr.Code, fake.calls, rr.Body.String())
+		}
+	}
+}
+
+func TestNetworkVisibleTabsAndConnectivityPresentation(t *testing.T) {
+	source, err := englishPresentationAsset("static/network-workspace.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(source)
+	start := strings.Index(script, "  const effectiveTabs =")
+	end := strings.Index(script, "  const validPlayitClaim =")
+	validation := `    const tabs = effectiveTabs(currentSnapshot);
+    if (!tabs.includes(selectedTab)) selectedTab = "Overview";`
+	if start < 0 || end <= start || !strings.Contains(script, validation) || strings.Count(script, "const tabs = effectiveTabs(currentSnapshot);") != 2 {
+		t.Fatal("rendering, selection and keyboard navigation must share visible tabs")
+	}
+	selectStart := strings.Index(script, "  const selectNetworkTab =")
+	selectEnd := strings.Index(script, `  content.addEventListener("click",`)
+	keyboardStart := strings.Index(script, `  content.addEventListener("keydown", (event) => {`)
+	keyboardEnd := strings.Index(script, `  content.addEventListener("submit"`)
+	if selectStart < 0 || selectEnd <= selectStart || keyboardStart < 0 || keyboardEnd <= keyboardStart {
+		t.Fatal("tab selection helper or keyboard handler missing")
+	}
+	program := `
+const assert = require("node:assert/strict");
+` + script[start:end] + `
+const all = ["Overview", "Ethernet", "Wi-Fi", "Troubleshoot", "Remote Access", "Router"];
+let currentSnapshot = { workspace_tabs: all, devices: [{ kind: "ethernet" }], wireless_enabled: true };
+assert.deepEqual(effectiveTabs(currentSnapshot), ["Overview", "Ethernet", "Troubleshoot", "Remote Access", "Router"]);
+for (const state of ["disconnected", "unavailable"]) {
+  assert.deepEqual(effectiveTabs({ workspace_tabs: all, devices: [{ kind: "wifi", state }], wireless_enabled: false }), all);
+}
+assert.deepEqual(effectiveTabs({ workspace_tabs: ["Overview", "Troubleshoot"], devices: [{ kind: "wifi" }] }), ["Overview", "Troubleshoot"]);
+let selectedTab = "Wi-Fi", connectionDraft = null;
+let routerSubview = "", routerConnectionView = null;
+const renderNetwork = () => {
+` + validation + `
+};
+renderNetwork(); assert.equal(selectedTab, "Overview");
+let onKey;
+const content = { addEventListener: (_, callback) => { onKey = callback; }, querySelector: () => null };
+const refreshRouter = () => {};
+const refreshRemoteAccess = async () => {}, pollRemoteAccess = () => {}, state = {};
+` + script[selectStart:selectEnd] + script[keyboardStart:keyboardEnd] + `
+const key = (key) => onKey({ key, target: { closest: () => ({}) }, preventDefault() {} });
+selectedTab = "Ethernet"; key("ArrowRight"); assert.equal(selectedTab, "Troubleshoot");
+key("ArrowLeft"); assert.equal(selectedTab, "Ethernet");
+key("End"); assert.equal(selectedTab, "Router");
+key("ArrowRight"); assert.equal(selectedTab, "Overview");
+key("ArrowLeft"); assert.equal(selectedTab, "Router");
+key("ArrowLeft"); assert.equal(selectedTab, "Remote Access");
+key("Home"); assert.equal(selectedTab, "Overview");
+for (const [value, expected] of Object.entries({ full: "Internet connected", limited: "Limited connectivity", portal: "Sign-in network detected", none: "No internet connection", unknown: "Network status unknown" })) {
+  assert.equal(connectivitySummary(value), expected);
+}
+`
+	cmd := nodeTestCommand()
+	cmd.Stdin = strings.NewReader(program)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("visible tabs: %v\n%s", err, output)
+	}
+	if strings.Contains(script, `row("NetworkManager connectivity",`) || strings.Contains(script, `sectionHeading("Network health", "Connectivity")`) {
+		t.Fatal("troubleshoot must not duplicate connectivity status")
+	}
+}
+
+func TestNetworkTroubleshootInternetStates(t *testing.T) {
+	source, err := englishPresentationAsset("static/network-workspace.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(source)
+	start := strings.Index(script, "  const renderTroubleshoot =")
+	end := strings.Index(script, "  const renderRemoteAccess =")
+	if start < 0 || end <= start {
+		t.Fatal("troubleshoot renderer missing")
+	}
+	program := `
+const assert = require("node:assert/strict");
+class Element {
+  constructor(tag) { this.tag = tag; this.children = []; this.dataset = {}; this.textContent = ""; this.classList = { add: (name) => { this.className += " " + name; } }; }
+  append(...nodes) { this.children.push(...nodes); }
+  appendChild(node) { this.append(node); return node; }
+}
+const document = { createElement: (tag) => new Element(tag) };
+const row = (name, value) => { const e = new Element("row"); e.textContent = name + ": " + value; return e; };
+const label = (value) => value;
+const firstAddress = (ip) => ip?.addresses?.[0] || "Missing";
+const actionButton = (text, key, value) => { const e = new Element("button"); e.textContent = text; e.dataset[key] = value; return e; };
+let currentCheckpoint = null;
+` + script[strings.Index(script, "  const connectivitySummary ="):strings.Index(script, "  const validPlayitClaim =")] + script[strings.Index(script, "  const badge ="):strings.Index(script, "  const actionButton =")] + script[start:end] + `
+const flatten = (node) => [node, ...node.children.flatMap(flatten)];
+const device = { kind: "ethernet", interface: "enp1s0", state: "activated", carrier: true, managed: true,
+  ipv4: { addresses: ["192.168.0.28"], gateway: "192.168.0.1", dns: ["192.168.0.1"] },
+  active_connection: { id: "Wired", uuid: "profile-uuid" } };
+for (const connectivity of ["full", "none", "limited", "portal", "unknown", "unavailable", "", null, undefined]) {
+  const section = renderTroubleshoot({ connectivity, networking_enabled: true, devices: [device] });
+  const heading = section.children[0];
+  const knownDisconnected = ["none", "limited", "portal"].includes(connectivity);
+  assert.equal(heading.children[0].textContent, "Network health");
+  assert.equal(heading.children[1].textContent, connectivitySummary(connectivity));
+  assert.equal(heading.children[0].tag, "p");
+  assert.equal(heading.children[0].className, "eyebrow");
+  assert.equal(heading.children[1].className, "badge network-badge " + (connectivity === "full" ? "good" : knownDisconnected ? "danger" : "muted") + " network-internet-status");
+  assert.equal(heading.children.length, knownDisconnected ? 3 : 2);
+  if (knownDisconnected) {
+    assert.equal(heading.children[2].textContent, "Check internet now");
+    assert.equal(heading.children[2].dataset.networkConnectivityCheck, "true");
+  }
+  const nodes = flatten(section);
+  assert(!nodes.some((n) => n.textContent.startsWith("NetworkManager connectivity:")));
+  for (const text of ["Interface: enp1s0", "State: activated", "Link: Carrier present", "IPv4: 192.168.0.28", "Default gateway: 192.168.0.1", "DNS servers: 192.168.0.1", "Active profile: Wired"]) {
+    assert(nodes.some((n) => n.textContent === text));
+  }
+  assert.equal(nodes.find((n) => n.textContent === "Reconnect active profile").disabled, false);
+}
+currentCheckpoint = { id: "pending" };
+const nodes = flatten(renderTroubleshoot({ connectivity: "none", networking_enabled: false, devices: [device] }));
+assert(nodes.some((n) => n.textContent === "Condition: Networking is disabled"));
+assert.equal(nodes.find((n) => n.textContent === "Reconnect active profile").disabled, true);
+assert(flatten(renderTroubleshoot({ connectivity: "unknown", devices: [] })).some((n) => n.textContent === "Condition: No Ethernet or Wi-Fi interface is available"));
+`
+	cmd := nodeTestCommand()
+	cmd.Stdin = strings.NewReader(program)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("troubleshoot internet states: %v\n%s", err, output)
+	}
+}
+
+// Model only the popup nodes used by production; textContent escapes markup.
+const popupDOMFixture = `
+const popupElement = (tab, selector) => {
+  const patterns = {
+    "header .brand": /(<span class="brand">)[^<]*(<\/span>)/,
+    "#setup-title": /(<h1 id="setup-title">)[^<]*(<\/h1>)/,
+    "#setup-title + p": /(<h1 id="setup-title">[^<]*<\/h1>\s*<p>)[^<]*(<\/p>)/,
+    ".muted": /(<p class="muted">)[^<]*(<\/p>)/,
+    ".claim-heading": /(<h2 class="claim-heading"><span class="pulse-dot" aria-hidden="true"><\/span>)[^<]*(<\/h2>)/,
+    ".claim-panel p": /(<div class="claim-panel" role="status">[\s\S]*?<p>)[^<]*(<\/p>)/
+  };
+  assert(selector === "header" || selector === ".setup-card" || selector === ".claim-panel" || patterns[selector], "unexpected popup selector: " + selector);
+  const node = {
+    setAttribute(name, value) { assert.equal(selector, "header"); assert.equal(name, "aria-label"); tab.html = tab.html.replace(/(<header aria-label=")[^"]*(")/, (_, a, b) => a + escapePopupText(value) + b); },
+    classList: {toggle(name, enabled) { assert.equal(selector, ".setup-card"); assert.equal(name, "failure"); tab.html = tab.html.replace(/class="setup-card(?: failure)?"/, enabled ? 'class="setup-card failure"' : 'class="setup-card"'); }},
+    set textContent(value) {
+      assert(patterns[selector], "missing text node: " + selector);
+      assert(patterns[selector].test(tab.html), "popup node missing: " + selector);
+      tab.html = tab.html.replace(patterns[selector], (_, a, b) => a + escapePopupText(value) + b);
+    }
+  };
+  node.lastChild = node;
+  return node;
+};
+const escapePopupText = value => String(value).replace(/[&<>"']/g, char => ({"&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"}[char]));
+`
+
+func TestPlayitActivationOpensPopupBeforeSetup(t *testing.T) {
+	source, err := assets.ReadFile("static/network-workspace.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stylesheet, err := englishPresentationAsset("static/playit-setup.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(stylesheet)
+	for _, token := range []string{"color-scheme:dark", "max-width:580px", "border-radius:18px", "radial-gradient", "background:#0d1822", ".pulse-dot", "@keyframes setup-pulse", "prefers-reduced-motion", ".failure", "@media (prefers-reduced-motion: reduce){.pulse-dot{animation:none}}"} {
+		if !strings.Contains(css, token) {
+			t.Fatalf("missing popup stylesheet design token: %s", token)
+		}
+	}
+	for _, forbidden := range []string{"@import", "url("} {
+		if strings.Contains(strings.ToLower(css), forbidden) {
+			t.Fatalf("popup stylesheet must not contain %s", forbidden)
+		}
+	}
+	script := string(source)
+	start := strings.Index(script, "  const validPlayitClaim =")
+	end := strings.Index(script, "  const isAdministrator =")
+	clickStart := strings.Index(script, `    const provider = event.target.closest("[data-network-provider]");`)
+	clickEnd := strings.Index(script[clickStart:], "    const check =")
+	actionStart := strings.Index(script, "  const runRemoteAction =")
+	actionEnd := strings.Index(script, "  const submitEthernet =")
+	// Both popup documents must remain complete static literals, with no interpolation.
+	popupWrites := strings.Split(script[start:end], "playitPopup.document.write(`")
+	if len(popupWrites) != 3 || strings.Count(script[start:end], "playitPopup.document.write(") != 2 {
+		t.Fatal("popup pages must be written as two fixed HTML literals")
+	}
+	for _, write := range popupWrites[1:] {
+		html, _, ok := strings.Cut(write, "`);")
+		if !ok || strings.Contains(html, "${") || strings.Contains(html, "`") {
+			t.Fatal("popup HTML must not interpolate or concatenate values")
+		}
+		if !strings.HasPrefix(html, "<!doctype html>\n<html lang=\"en\">\n<head>") || !strings.HasSuffix(html, "</body>\n</html>") {
+			t.Fatal("popup HTML must be a complete document")
+		}
+	}
+	program := popupDOMFixture + `
+const assert = require("node:assert/strict");
+let playitPopup = null, playitClaimOpened = false, remoteError = "", playitSetup = { state: "idle" }, remoteBusy = false;
+` + script[start:end] + `
+let events = [], popup, blocked = false, pending, resolveSetup, rejectSetup;
+const writes = [], navigations = [];
+const window = { open(url, target) {
+  events.push("open");
+  assert.equal(url, "about:blank"); assert.equal(target, "_blank");
+  if (blocked) return null;
+  popup = {
+    closed: false, closeCalls: 0, html: "", opener: {},
+    close() { this.closeCalls++; this.closed = true; },
+    location: { replace(url) { navigations.push({ popup, url }); } },
+    document: {
+      documentElement: {style: {}, setAttribute(name, value) { assert.equal(name, "lang"); assert.equal(value, justVoxelLanguage.locale); popup.lang = value; }},
+      querySelector(selector) { return popupElement(popup, selector); },
+      set title(value) { popup.html = popup.html.replace(/(<title>)[^<]*(<\/title>)/, (_, a, b) => a + escapePopupText(value) + b); },
+      open() { events.push("document.open"); popup.html = ""; },
+      write(html) { events.push("document.write"); popup.html += html; writes.push(html); },
+      close() { events.push("document.close"); }
+    }
+  };
+  return popup;
+} };
+let remotePollSequence = 0;
+const state = { textContent: "" };
+const renderNetwork = () => {}, refreshRemoteAccess = async () => {}, pollRemoteAccess = () => {};
+` + strings.Replace(script[actionStart:actionEnd], "const runRemoteAction =", "const executeRemoteAction =", 1) + `
+const runRemoteAction = (action) => { pending = executeRemoteAction(action); };
+const postForm = (url) => {
+  events.push("request"); assert.equal(url, "/api/network/remote-access/playit/setup");
+  if (!blocked) {
+    assert.equal(popup.lang, "en");
+    assert.match(popup.html, /<h1 id="setup-title">Preparing Playit setup…<\/h1>/);
+    assert.equal(popup.opener, null);
+  }
+  return new Promise((resolve, reject) => { resolveSetup = resolve; rejectSetup = reject; });
+};
+const remoteProviders = [{ id: "playit", configured: false }];
+const providerButton = { disabled: false, dataset: { networkProvider: "playit", action: "activate" } };
+const click = () => {
+  const event = { target: { closest: () => providerButton } };
+` + script[clickStart:clickStart+clickEnd] + `
+};
+(async () => {
+  click();
+  const initialPopup = popup;
+  assert.deepEqual(events, ["open", "document.open", "document.write", "document.close", "request"]);
+  assert.equal(playitPopup, initialPopup); assert.equal(popup.opener, null);
+  assert.match(popup.html, /Starting Playit and generating your secure setup link\./);
+  assert.match(popup.html, /This page will open Playit automatically when ready\./);
+  assert.equal(navigations.length, 0);
+  resolveSetup({ state: "starting" });
+  await pending;
+  const loadingHTML = popup.html;
+  const loadingDocument = writes[writes.length - 1];
+  assert.match(loadingHTML, /<section class="setup-card" aria-labelledby="setup-title">/);
+  assert.match(loadingHTML, /<div class="claim-panel" role="status">/);
+  assert.match(loadingHTML, /Claim link/);
+  assert.match(loadingHTML, /Waiting for Playit to generate the secure claim link\./);
+  assert.match(loadingHTML, /class="pulse-dot" aria-hidden="true"/);
+  for (const claim_url of [
+    "https://evil.test/claim/0123abcdef", "javascript:alert(1)",
+    "https://playit.gg/claim/0123abcde", "https://playit.gg/claim/0123abcdef0",
+    "https://playit.gg/claim/0123abcdeg", "https://playit.gg/claim/0123abcdef?secret=x",
+    "https://playit.gg/claim/0123abcdef/path", "https://playit.gg/claim/0123abcdef\n",
+    "<script>untrusted</script>"
+  ]) {
+    playitSetup = { state: "waiting", claim_url };
+    updatePlayitPopup();
+    assert.equal(navigations.length, 0); assert.equal(popup.html, loadingHTML);
+  }
+  playitSetup.claim_url = "https://playit.gg/claim/0123abcdef";
+  updatePlayitPopup();
+  assert.deepEqual(navigations, [{ popup: initialPopup, url: "https://playit.gg/claim/0123abcdef" }]);
+  assert(playitClaimOpened); assert.equal(playitPopup, null);
+  assert.equal(popup.html, loadingHTML);
+
+  events = []; blocked = true; click();
+  assert.deepEqual(events, ["open", "request"]);
+  resolveSetup({ state: "waiting", claim_url: "https://playit.gg/claim/0123abcdef" });
+  await pending; assert.equal(playitPopup, null); assert(!playitClaimOpened);
+  assert.equal(navigations.length, 1);
+  click(); rejectSetup(Error("<script>backend-secret</script> https://evil.test/claim/0123abcdef"));
+  await pending; assert.equal(playitPopup, null);
+
+  blocked = false; click();
+  rejectSetup(Error("<script>backend-secret</script> https://evil.test/claim/0123abcdef"));
+  await pending;
+  const failureHTML = popup.html;
+  const failureDocument = writes[writes.length - 1];
+  assert.match(failureHTML, /<h1 id="setup-title">Playit setup could not be started\.<\/h1>/);
+  assert.match(failureHTML, /Return to JustVoxel and try Activate again\./);
+  assert(!failureHTML.includes("Preparing Playit setup"));
+  assert.match(failureHTML, /<section class="setup-card failure" aria-labelledby="setup-title">/);
+  for (const html of [loadingHTML, failureHTML]) {
+    for (const token of ["PLAYIT SETUP", "JUSTVOXEL", "PLAYIT"]) {
+      assert(html.includes(token), "missing popup design token: " + token);
+    }
+    assert(!html.includes("Login"));
+    assert(!html.includes("Create Account"));
+    assert(!html.includes("${"));
+    assert(!/<(?:button|a|input|script|img)\b/i.test(html));
+    assert.match(html, /<style>\s*:root\{color-scheme:dark/);
+    assert(!/\b(?:src|style)\s*=|url\(/i.test(html));
+    const stylesheetLink = '<link rel="stylesheet" href="/static/playit-setup.css">';
+    assert.equal(html.split(stylesheetLink).length - 1, 1);
+    assert(html.indexOf("<style>") < html.indexOf(stylesheetLink));
+    assert(!/\bhref\s*=/i.test(html.replace(stylesheetLink, "")));
+    assert.match(html, /<head>\s*<meta charset="utf-8">\s*<meta name="viewport" content="width=device-width, initial-scale=1">\s*<title>Playit setup<\/title>\s*<style>[\s\S]*?<\/style>\s*<link rel="stylesheet" href="\/static\/playit-setup\.css">\s*<\/head>/);
+  }
+  assert.equal(playitPopup, null); assert.equal(popup.opener, null);
+  closePlayitPopup();
+  assert.equal(popup.closeCalls, 0); assert.equal(popup.closed, false);
+
+  click(); resolveSetup({ state: "starting" }); await pending;
+  playitSetup = { state: "failed", error: "backend-secret", claim_url: "https://evil.test/claim/0123abcdef" };
+  updatePlayitPopup(); closePlayitPopup();
+  assert.equal(popup.html, failureHTML); assert.equal(popup.closeCalls, 0);
+  assert.equal(playitPopup, null);
+
+  click(); const closedPopup = popup; closedPopup.close();
+  const writesBeforeFailure = writes.length;
+  rejectSetup(Error("backend-secret")); await pending;
+  assert.equal(playitPopup, null); assert.equal(closedPopup.closeCalls, 1);
+  assert.equal(writes.length, writesBeforeFailure);
+  assert(writes.every((html) => html === loadingDocument || html === failureDocument));
+  assert(writes.every((html) => !html.includes("backend-secret") && !html.includes("https://") && !html.includes("<script>")));
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+`
+	cmd := nodeTestCommand()
+	cmd.Stdin = strings.NewReader(program)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("Playit activation: %v\n%s", err, output)
+	}
+}
+
+func TestNetBirdActivationOpensCorrectLoginAndRejectsTailscale(t *testing.T) {
+	data, err := assets.ReadFile("static/network-workspace.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(data)
+	validStart := strings.Index(script, "  const validNetbirdLoginURL =")
+	validEnd := strings.Index(script, "  const openActivatedDashboards =")
+	clickStart := strings.Index(script, `    const provider = event.target.closest("[data-network-provider]");`)
+	clickEnd := strings.Index(script[clickStart:], "    const check =")
+	if validStart < 0 || validEnd <= validStart || clickStart < 0 || clickEnd < 0 {
+		t.Fatal("NetBird login code missing")
+	}
+	popupSource := script[validStart:validEnd]
+	writes := strings.Split(popupSource, "popup.document.write(`")
+	if len(writes) != 2 || strings.Count(popupSource, "popup.document.write(") != 1 {
+		t.Fatal("remote login popup must use one static HTML literal")
+	}
+	popupHTML, _, complete := strings.Cut(writes[1], "`);")
+	if !complete || strings.Contains(popupHTML, "${") || strings.Contains(popupHTML, "`") {
+		t.Fatal("remote login popup HTML must not interpolate or concatenate values")
+	}
+	program := popupDOMFixture + `
+const assert = require("node:assert/strict");
+let remoteBusy = false, netbirdLoginURL = "", pending, loginTab, responseURL, responseError;
+let blocked = false, events = [];
+const remoteProviders = [{ id: "netbird", service_active: false, connected: false, configured: false }];
+const providerProgress = new Map();
+const window = { open(url, target) {
+  events.push("open");
+  assert.equal(url, "about:blank");
+  assert.equal(target, "_blank");
+  if (blocked) return null;
+  loginTab = { closed: false, opener: {}, navigations: [], html: "",
+    location: { replace(url) { loginTab.navigations.push(url); } },
+    close() { this.closed = true; },
+    document: {
+      documentElement: {setAttribute(name, value) { assert.equal(name, "lang"); assert.equal(value, justVoxelLanguage.locale); loginTab.lang = value; }},
+      querySelector(selector) { return popupElement(loginTab, selector); },
+      open() { events.push("document.open"); loginTab.html = ""; },
+      write(html) { events.push("document.write"); loginTab.html += html; },
+      close() { events.push("document.close"); }
+    }
+  };
+  return loginTab;
+} };
+const postForm = async (path, params) => {
+  events.push("request");
+  assert.equal(path, "/api/network/remote-access/netbird");
+  assert.deepEqual(params, { action: "activate" });
+  if (!blocked) {
+    assert.equal(loginTab.lang, "en");
+    assert.match(loginTab.html, /Preparing NetBird login/);
+    assert.match(loginTab.html, /Waiting for the authentication link/);
+    assert.equal(loginTab.opener, null);
+  }
+  if (responseError) throw Error(responseError);
+  return { login_url: responseURL };
+};
+const runRemoteAction = (action) => { pending = action(); };
+const button = { disabled: false, dataset: { networkProvider: "netbird", action: "activate" } };
+` + script[validStart:validEnd] + `
+assert(validNetbirdLoginURL("https://app.netbird.io/verify?user_code=abc"));
+assert(validNetbirdLoginURL("https://idp.example.org/authorize?state=123"));
+assert(!validNetbirdLoginURL("https://login.tailscale.com/a/123"));
+assert(!validNetbirdLoginURL("https://console.tailscale.com/admin/"));
+assert(!validNetbirdLoginURL("javascript:alert(1)"));
+const click = () => {
+  const event = { target: { closest: (selector) => selector === "[data-network-provider]" ? button : null } };
+` + script[clickStart:clickStart+clickEnd] + `
+};
+(async () => {
+  responseURL = "https://app.netbird.io/verify?user_code=abc";
+  click();
+  assert.deepEqual(events.slice(0, 5), ["open", "document.open", "document.write", "document.close", "request"]);
+  assert(loginTab.html.includes('<h1 id="setup-title">Preparing NetBird login…</h1>'));
+  assert.match(loginTab.html, /class="pulse-dot"/);
+  assert.match(loginTab.html, /JUSTVOXEL/);
+  assert(loginTab.html.includes('/static/playit-setup.css'));
+  assert(!loginTab.html.includes(responseURL));
+  await pending;
+  assert.deepEqual(loginTab.navigations, [responseURL]);
+  assert.equal(loginTab.opener, null);
+  assert.equal(netbirdLoginURL, responseURL);
+
+  responseURL = "https://login.tailscale.com/a/123";
+  click();
+  await assert.rejects(pending, /invalid login link/);
+  assert.deepEqual(loginTab.navigations, []);
+  assert.equal(loginTab.closed, false);
+  assert.match(loginTab.html, /Remote access setup could not continue/);
+  assert(!loginTab.html.includes(responseURL));
+
+  responseURL = "https://app.netbird.io/verify?user_code=abc";
+  responseError = "private backend message <script>alert(1)</script>";
+  click();
+  await assert.rejects(pending, /private backend message/);
+  assert.match(loginTab.html, /Remote access setup could not continue/);
+  assert(!loginTab.html.includes("private backend message"));
+  assert(!loginTab.html.includes("<script>"));
+  responseError = "";
+
+  responseURL = "";
+  click();
+  await pending;
+  assert.equal(loginTab.closed, true);
+
+  blocked = true;
+  responseURL = "https://app.netbird.io/verify?user_code=abc";
+  click();
+  await pending;
+  assert.equal(netbirdLoginURL, responseURL);
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+`
+	cmd := nodeTestCommand()
+	cmd.Stdin = strings.NewReader(program)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("NetBird browser redirect: %v\n%s", err, output)
+	}
+}
+
+func TestTailscaleActivationOpensMachineLink(t *testing.T) {
+	data, err := assets.ReadFile("static/network-workspace.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(data)
+	validStart := strings.Index(script, "  const validTailscaleLoginURL =")
+	validEnd := strings.Index(script, "  const providerDashboards =")
+	popupStart := strings.Index(script, "  const renderRemoteLoginPopup =")
+	popupEnd := strings.Index(script, "  const openActivatedDashboards =")
+	clickStart := strings.Index(script, `    const provider = event.target.closest("[data-network-provider]");`)
+	clickEnd := strings.Index(script[clickStart:], "    const check =")
+	if validStart < 0 || validEnd <= validStart || popupStart < 0 || popupEnd <= popupStart || clickStart < 0 || clickEnd < 0 {
+		t.Fatal("Tailscale login UI path missing")
+	}
+	program := popupDOMFixture + `
+const assert = require("node:assert/strict");
+let remoteBusy = false, tailscaleLoginURL = "", pending;
+let popup, events = [], responseURL = "https://login.tailscale.com/a/0123456789abcdef", responseError = "";
+const remoteProviders = [{ id: "tailscale", service_active: true, connected: false }];
+const providerProgress = new Map();
+const providerDashboards = { tailscale: "https://console.tailscale.com/admin/" };
+const window = { open(url, target) {
+  events.push(["open", url]);
+  assert.equal(target, "_blank");
+  popup = { closed: false, opener: {}, html: "", location: { replace(url) { events.push(["navigate", url]); } },
+    close() { this.closed = true; },
+    document: {
+      documentElement: {setAttribute(name, value) { assert.equal(name, "lang"); assert.equal(value, justVoxelLanguage.locale); popup.lang = value; }},
+      querySelector(selector) { return popupElement(popup, selector); },
+      set title(value) { popup.html = popup.html.replace(/(<title>)[^<]*(<\/title>)/, (_, a, b) => a + escapePopupText(value) + b); },
+      open() { events.push(["document.open"]); popup.html = ""; },
+      write(html) { events.push(["document.write"]); popup.html += html; },
+      close() { events.push(["document.close"]); }
+    }
+  };
+  return popup;
+} };
+const postForm = async (path, params) => {
+  events.push(["request", path]);
+  assert.deepEqual(params, { action: "activate" });
+  assert.equal(popup.lang, "en");
+  assert.match(popup.html, /Preparing Tailscale login/);
+  assert.equal(popup.opener, null);
+  if (responseError) throw Error(responseError);
+  return { login_url: responseURL };
+};
+const runRemoteAction = (action) => { pending = action(); };
+const button = { disabled: false, dataset: { networkProvider: "tailscale", action: "activate" } };
+` + script[validStart:validEnd] + script[popupStart:popupEnd] + `
+const click = () => {
+  const event = { target: { closest: (selector) => selector === "[data-network-provider]" ? button : null } };
+` + script[clickStart:clickStart+clickEnd] + `
+};
+(async () => {
+  click();
+  assert.deepEqual(events.slice(0, 5), [
+    ["open", "about:blank"], ["document.open"], ["document.write"], ["document.close"],
+    ["request", "/api/network/remote-access/tailscale"]
+  ]);
+  assert.match(popup.html, /Preparing Tailscale login/);
+  assert.match(popup.html, /Waiting for the authentication link/);
+  assert.match(popup.html, /class="pulse-dot"/);
+  await pending;
+  assert.deepEqual(events[5], ["navigate", responseURL]);
+  assert.equal(popup.opener, null);
+  assert.equal(tailscaleLoginURL, responseURL);
+  assert(!events.some((event) => event.includes("https://console.tailscale.com/admin/")));
+
+  responseError = "secret activation failure";
+  click();
+  await assert.rejects(pending, /secret activation failure/);
+  assert.match(popup.html, /Remote access setup could not continue/);
+  assert(!popup.html.includes("secret activation failure"));
+  assert.equal(popup.closed, false);
+  responseError = "";
+
+  responseURL = "";
+  click();
+  await pending;
+  assert.equal(popup.closed, true);
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+`
+	cmd := nodeTestCommand()
+	cmd.Stdin = strings.NewReader(program)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("Tailscale browser login: %v\n%s", err, output)
+	}
+}
+
+func TestProviderDashboardWaitsForSuccessfulServiceActivation(t *testing.T) {
+	data, err := englishPresentationAsset("static/network-workspace.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(data)
+	start := strings.Index(script, "  const providerDashboards =")
+	end := strings.Index(script, "  let remotePollSequence =")
+	if start < 0 || end <= start {
+		t.Fatal("Provider dashboard flow missing")
+	}
+	program := `
+const assert = require("node:assert/strict");
+let remoteProviders = [];
+const providerTransitional = (provider) => ["activating", "deactivating", "reloading", "refreshing"].includes(provider.service_state);
+let blocked = false, opens = [], popup;
+const window = { open(url, target) {
+  assert.equal(target, "_blank");
+  assert.notEqual(url, "about:blank");
+  opens.push(url);
+  popup = blocked ? null : { opener: {} };
+  return popup;
+} };
+` + script[start:end] + `
+for (const id of ["tailscale", "netbird"]) {
+  opens = [];
+  const provider = { id, service_state: "activating", service_active: false, configured: false, connected: false };
+  remoteProviders = [provider]; pendingDashboards.add(id);
+  openActivatedDashboards(); assert.equal(opens.length, 0);
+  assert(pendingDashboards.has(id));
+  provider.service_state = "active"; provider.service_active = true;
+  openActivatedDashboards();
+  assert.deepEqual(opens, [providerDashboards[id]]);
+  assert.equal(popup.opener, null);
+  assert.equal(provider.configured, false); assert.equal(provider.connected, false);
+  assert(!pendingDashboards.has(id));
+  openActivatedDashboards(); assert.equal(opens.length, 1);
+
+  blocked = true; pendingDashboards.add(id); openActivatedDashboards();
+  assert.match(providerProgress.get(id), /Use Open provider dashboard/);
+  assert.equal(provider.configured, false); assert.equal(provider.connected, false);
+  blocked = false;
+  provider.service_active = false; provider.service_state = "failed";
+  const previous = opens.length;
+  pendingDashboards.add(id); openActivatedDashboards();
+  assert.equal(opens.length, previous);
+  assert.match(providerProgress.get(id), /has not completed/);
+}
+`
+	cmd := nodeTestCommand()
+	cmd.Stdin = strings.NewReader(program)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("Provider dashboard flow: %v\n%s", err, output)
+	}
+}
+
+func TestRemoteAccessFailuresRenderOnlyInSectionHint(t *testing.T) {
+	source, err := englishPresentationAsset("static/network-workspace.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(source)
+	renderStart := strings.Index(script, "  const providerIcons =")
+	renderEnd := strings.Index(script, "  const renderNetwork =")
+	actionStart := strings.Index(script, "  const pollRemoteAccess =")
+	actionEnd := strings.Index(script, "  const submitEthernet =")
+	if renderStart < 0 || renderEnd <= renderStart || actionStart < 0 || actionEnd <= actionStart {
+		t.Fatal("remote render/action functions missing")
+	}
+	if strings.Contains(script, "state.textContent = remoteError") {
+		t.Fatal("Remote Access error copied to outer workspace")
+	}
+	program := `
+const assert = require("node:assert/strict");
+class Element {
+  constructor(tag) { this.tag = tag; this.children = []; this.textContent = ""; }
+  appendChild(node) { this.children.push(node); return node; }
+}
+const document = { createElement: (tag) => new Element(tag) };
+const sectionHeading = () => new Element("heading");
+const flatten = (node) => [node, ...node.children.flatMap(flatten)];
+let remoteBusy = false, remoteError = "", remotePollSequence = 0, remoteProviders = [];
+const state = { get textContent() { return "Existing network state"; }, set textContent(_) { assert.fail("Remote Access changed outer workspace state"); } };
+const pendingDashboards = new Set(), providerProgress = new Map();
+const dialog = { open: true }, isAdministrator = () => true;
+const setupRunning = () => false, providerTransitional = (p) => p.service_state === "activating";
+const failPlayitPopup = () => {};
+const setTimeout = (callback) => callback();
+let refreshRemoteAccess = async () => {};
+` + script[renderStart:renderEnd] + `
+let nodes = [];
+const renderNetwork = () => { nodes = flatten(renderRemoteAccess()); };
+` + script[actionStart:actionEnd] + `
+(async () => {
+  for (const message of [
+    "NordVPN could not be deactivated. Open Troubleshoot and generate a Network report before retrying.",
+    "NordVPN Meshnet could not be activated. Use Token to reconnect with a current access token, or open Troubleshoot for diagnostics.",
+    "<img src=x onerror=alert(1)>"
+  ]) {
+    await runRemoteAction(async () => { throw new Error(message); });
+    assert.equal(remoteError, message);
+    assert.equal(nodes.filter((n) => n.textContent === message).length, 1);
+    assert.equal(nodes.find((n) => n.textContent === message).tag, "p");
+    assert.equal(state.textContent, "Existing network state");
+    assert.equal(remoteBusy, false);
+  }
+  remoteProviders = [{ service_state: "activating" }];
+  refreshRemoteAccess = async () => { remoteProviders = []; throw new Error("Remote access status unavailable. Refresh to retry."); };
+  await pollRemoteAccess();
+  assert.equal(remoteError, "Remote access status unavailable. Refresh to retry.");
+  assert.equal(nodes.filter((n) => n.textContent === remoteError).length, 1);
+  assert.equal(state.textContent, "Existing network state");
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+`
+	cmd := nodeTestCommand()
+	cmd.Stdin = strings.NewReader(program)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("remote error rendering: %v\n%s", err, output)
+	}
+}
+
+func TestPlayitAccountConfirmationAndSharedSetup(t *testing.T) {
+	source, err := englishPresentationAsset("static/network-workspace.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(source)
+	start := strings.Index(script, "  const startPlayitAccountSetup =")
+	end := strings.Index(script, "  const validNordAccessToken =")
+	if start < 0 || end <= start {
+		t.Fatal("Playit account flow missing")
+	}
+	program := `
+const assert = require("node:assert/strict");
+class Element {
+  constructor(tag) { this.tag = tag; this.children = []; this.listeners = {}; this.textContent = ""; }
+  append(...nodes) { this.children.push(...nodes); }
+  appendChild(node) { this.append(node); return node; }
+  setAttribute() {}
+  addEventListener(name, handler) { this.listeners[name] = handler; }
+  showModal() { this.open = true; }
+  close() { this.open = false; this.listeners.close?.(); }
+  remove() {}
+}
+const document = { createElement: tag => new Element(tag), body: new Element("body") };
+const window = { open() { throw new Error("account flow automatically opened browser"); } };
+let remoteBusy = false, playitClaimOpened = true, playitSetup = { state: "idle" };
+const setupRunning = () => ["starting", "waiting"].includes(playitSetup.state);
+let requests = [], popupUpdates = 0, polling = 0, pending, fail = false;
+const closePlayitPopup = () => {};
+const updatePlayitPopup = () => { popupUpdates++; };
+const postForm = async path => {
+  requests.push(path);
+  if (fail) throw new Error("raw backend secret");
+  return { state: "waiting", claim_url: "https://playit.gg/claim/0123abcdef" };
+};
+const runRemoteAction = action => pending = (async () => {
+  await action(); polling++;
+})();
+const flatten = node => [node, ...node.children.flatMap(flatten)];
+` + script[start:end] + `
+(async () => {
+  showPlayitAccountDialog();
+  assert.equal(requests.length, 0);
+  let popup = playitAccountDialog;
+  let nodes = flatten(popup);
+  assert(nodes.some(n => n.textContent === "Playit.gg account"));
+  assert(nodes.some(n => n.textContent.includes("Existing tunnels are not migrated to another account automatically.")));
+  nodes.find(n => n.textContent === "Cancel").listeners.click();
+  assert.equal(requests.length, 0);
+  showPlayitAccountDialog();
+  flatten(playitAccountDialog).find(n => n.textContent === "Relink account").listeners.click();
+  await pending;
+  assert.deepEqual(requests, ["/api/network/remote-access/playit/relink"]);
+  assert.equal(playitAccountDialog, null);
+  assert.equal(playitSetup.state, "waiting");
+  assert.equal(playitSetup.claim_url, "https://playit.gg/claim/0123abcdef");
+  assert.equal(playitClaimOpened, false);
+  assert.equal(popupUpdates, 1); assert.equal(polling, 1);
+  playitSetup = { state: "idle" };
+  await startPlayitAccountSetup(false);
+  assert.equal(requests[1], "/api/network/remote-access/playit/setup");
+  playitSetup = { state: "idle" }; fail = true;
+  await assert.rejects(startPlayitAccountSetup(true), error => error.message === "Playit account could not be relinked. Try again.");
+  remoteBusy = true; showPlayitAccountDialog(); assert.equal(playitAccountDialog, null);
+  remoteBusy = false; playitSetup = { state: "waiting" };
+  showPlayitAccountDialog(); assert.equal(playitAccountDialog, null);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+`
+	cmd := nodeTestCommand()
+	cmd.Stdin = strings.NewReader(program)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("Playit account: %v\n%s", err, output)
+	}
+}
+
+func TestNetworkPresentationLayoutContract(t *testing.T) {
+	source, err := englishPresentationAsset("static/network-workspace.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(source)
+	if strings.Contains(script, "router.svg") {
+		t.Error("network workspace references the removed generic router icon")
+	}
+	routerCSS, err := assets.ReadFile("static/network-router.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value := regexp.MustCompile(`(?i)(?:[0-9]*\.)?[0-9]+px\b`).Find(routerCSS); value != nil {
+		t.Errorf("Router stylesheet contains an explicit pixel value: %s", value)
+	}
+	slice := func(start, end string) string {
+		t.Helper()
+		a, b := strings.Index(script, start), strings.Index(script, end)
+		if a < 0 || b <= a {
+			t.Fatalf("missing renderer boundary %q / %q", start, end)
+		}
+		return script[a:b]
+	}
+	if strings.Contains(slice("  const routerDiagnostic =", "  const renderNetwork ="), "innerHTML") {
+		t.Error("Router guide and certificate details must use safe DOM APIs")
+	}
+	if !strings.Contains(script, `refreshButton?.addEventListener("click", loadNetwork)`) ||
+		!strings.Contains(slice("  const loadNetwork =", "  const requestScan ="), `if (selectedTab === "Router") refreshRouter();`) {
+		t.Error("Network header Refresh must refresh Router state when Router is selected")
+	}
+	program := `
+const assert = require("node:assert/strict");
+class Element {
+  constructor(tag) {
+    this.tag = tag; this.children = []; this.dataset = {}; this.textContent = ""; this.className = "";
+    this.classList = { add: (name) => { this.className += " " + name; } };
+  }
+  append(...nodes) {
+    for (const node of nodes) {
+      if (node.parentElement) node.parentElement.children = node.parentElement.children.filter((child) => child !== node);
+      node.parentElement = this; this.children.push(node);
+    }
+  }
+  appendChild(node) { this.append(node); return node; }
+  prepend(node) { this.children.unshift(node); }
+  replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
+  setAttribute(name, value) { this[name] = value; }
+  addEventListener(event, listener) { this["on" + event] = listener; }
+  focus() { document.activeElement = this; }
+  reportValidity() { return !this.required || Boolean(this.value); }
+}
+const document = {
+  createElement: (tag) => new Element(tag),
+  createTextNode: (textContent) => ({ tag: "#text", textContent, children: [], dataset: {}, className: "" }),
+};
+const flatten = (node) => [node, ...node.children.flatMap(flatten)];
+const find = (root, predicate) => flatten(root).find(predicate);
+const hasClass = (name) => (node) => node.className.split(" ").includes(name);
+const isAdministrator = () => true;
+const remoteProviders = [];
+const remoteError = "";
+const content = new Element("div"), state = new Element("p");
+const routerActions = { "[data-router-open-guide]": "routerOpenGuide", "[data-router-open-connection]": "routerOpenConnection", "[data-router-heading]": "routerHeading" };
+content.querySelector = (selector) => find(content, (node) => selector === '[aria-selected="true"]'
+  ? node['aria-selected'] === "true" : Object.hasOwn(node.dataset, routerActions[selector]));
+let selectedTab = "Overview", currentCheckpoint = null, connectionDraft = null;
+let routerSubview = "", routerStatus = { status: "not_configured", can_configure: true };
+let routerSequence = 0, routerConnectionView = null;
+const routerPath = "/api/network/router/mikrotik";
+const csrf = "test-csrf";
+let testResult, testFailure, previewResult;
+const routerRequests = [];
+const routerRequestCAs = [];
+const requestJSON = async (path, options) => {
+  if (!options) return routerStatus;
+  routerRequests.push([path, options.method]);
+  routerRequestCAs.push(options.body?.get("ca_pem") ?? null);
+  if (path === routerPath + "/ca" && options.method === "POST") return previewResult;
+  if (options.method === "POST" && testFailure) throw new Error("Connection failed");
+  return options.method === "POST" ? testResult : routerStatus;
+};
+const refreshRemoteAccess = async () => {}, pollRemoteAccess = () => {};
+const wifi = { kind: "wifi", interface: "wlp1s0", state: "activated", managed: true,
+  wireless: { ssid: "Robinson Crusoe", signal: 79 },
+  ipv4: { addresses: [{ address: "192.168.0.27", prefix: 24 }] },
+  ipv6: { addresses: [{ address: "2001:db8::1", prefix: 64 }] },
+  active_connection: { uuid: "wifi-profile", id: "Robinson Crusoe", autoconnect: true } };
+const ethernet = { ...wifi, kind: "ethernet", interface: "enp1s0", carrier: true };
+const currentSnapshot = { connectivity: "full", state: "connected-global", networking_enabled: true, wireless_enabled: true,
+  workspace_tabs: ["Overview", "Ethernet", "Wi-Fi", "Troubleshoot"], devices: [ethernet, wifi],
+  profiles: [{ type: "802-11-wireless", uuid: "wifi-profile", ssid: "Robinson Crusoe" }] };
+const currentNetworks = new Map([["wlp1s0", { networks: [
+  { ssid: "Robinson Crusoe", active: true, strength: 79, known: true, security: "wpa-personal" },
+  { ssid: "Other saved", profile_uuid: "other-profile", security: "wpa-personal" },
+  ...Array.from({ length: 18 }, (_, i) => ({ ssid: "Nearby " + i, security: "open" }))
+] }]]);
+` + slice("  const effectiveTabs =", "  const validPlayitClaim =") +
+		slice("  const label =", "  const clearRecoveryTimer =") +
+		slice("  const row =", "  const readStoredCheckpointID =") +
+		slice("  const sectionHeading =", "  const renderCheckpoint =") +
+		slice("  const renderDevice =", "  // Account actions reuse setup state") +
+		slice("  const renderRemoteAccess =", "  const resumeCheckpoint =") +
+		slice("  const selectNetworkTab =", "  content.addEventListener(\"click\",") + `
+for (const tab of currentSnapshot.workspace_tabs) {
+  selectedTab = tab; renderNetwork();
+  const internet = find(content, (node) => node.textContent === "Internet connected");
+  assert(internet, tab + " Internet status");
+  assert.equal(internet.tag, "span");
+  assert.equal(internet.className, "badge network-badge good network-internet-status");
+  if (tab === "Ethernet") {
+    assert.equal(internet.parentElement.className, "network-inline-actions");
+    assert.equal(internet.parentElement.parentElement.className, "network-device-heading");
+  }
+  assert(!flatten(content).some((node) => /Connectivity|Connected global|connected global/.test(node.textContent)));
+}
+selectedTab = "Wi-Fi"; renderNetwork();
+const common = renderConnectivity(currentSnapshot);
+assert(!find(common, (node) => node.dataset.networkWifiRadio));
+assert(!find(common, (node) => node.textContent === "connected global"));
+const settings = find(content, hasClass("network-wifi-settings"));
+const nearby = find(content, hasClass("network-wifi-nearby"));
+assert(find(settings, hasClass("network-saved")));
+assert(!find(nearby, hasClass("network-saved")));
+const left = find(settings, hasClass("network-device-card"));
+assert(!find(left, (node) => node.textContent === "Disconnect"));
+assert(!find(left, (node) => node.dataset.networkWifiDisconnect));
+assert.equal(flatten(settings).filter(hasClass("network-device-card")).length, 1);
+assert.deepEqual(settings.children.map((node) => node.tag), ["article", "details"]);
+assert.equal(nearby.children.length, 1); // No duplicate connected-network card.
+const list = find(nearby, hasClass("network-wifi-list"));
+assert.equal(list.children.length, 20);
+assert(list.children.every((node) => !node.hidden));
+assert(!find(nearby, hasClass("network-list-pages")));
+const active = find(list, hasClass("active"));
+const actions = find(active, hasClass("network-wifi-row-actions"));
+assert.deepEqual(actions.children.map((node) => node.textContent), ["Connected", "Disconnect"]);
+const disconnect = actions.children[1];
+assert(disconnect.className.split(" ").includes("danger"));
+assert.equal(disconnect.dataset.networkWifiDisconnect, "wlp1s0");
+for (const text of ["Connect", "Join"]) {
+  const action = find(list, (node) => node.textContent === text);
+  assert.equal(action.parentElement.className, actions.className);
+}
+const heading = find(nearby, hasClass("network-section-heading"));
+const headingActions = heading.children[1];
+assert.deepEqual(headingActions.children.map((node) => node.textContent), ["Turn Wi-Fi off", "Hidden network", "Scan"]);
+assert(headingActions.children[0].className.startsWith("secondary "));
+assert(headingActions.children[1].className.startsWith("secondary "));
+assert(headingActions.children[2].className.startsWith("primary "));
+assert.equal(flatten(content).filter((node) => node.dataset.networkWifiRadio).length, 1);
+currentSnapshot.wireless_enabled = false;
+assert.equal(renderWiFiNetworks(wifi, {}).children[0].children[1].children[0].textContent, "Turn Wi-Fi on");
+assert.equal(firstAddress(wifi.ipv4, false), "192.168.0.27");
+assert.equal(firstAddress({ addresses: [{ address: "192.168.0.27/24" }] }, false), "192.168.0.27");
+assert.equal(firstAddress(wifi.ipv6), "2001:db8::1/64");
+for (const view of [renderDevice(wifi), renderDevice(ethernet), renderTroubleshoot(currentSnapshot), renderOverview(currentSnapshot)]) {
+  const ipv4 = find(view, (node) => node.children[0]?.textContent === "IPv4");
+  assert.equal(ipv4.children[1].textContent, "192.168.0.27");
+}
+const form = renderEthernetForm(ethernet);
+const prefix = find(form, (node) => node.name === "prefix");
+assert.equal(prefix.value, 24); assert.equal(prefix.min, "0"); assert.equal(prefix.max, "32");
+assert.equal(prefix.disabled, true);
+const info = find(form, hasClass("network-form-information"));
+assert(info.children[0].textContent.startsWith("Settings roll back after 90 seconds"));
+assert.equal(info.children[1].textContent, "Connect automatically");
+assert.equal(info.children[1].children[0].name, "autoconnect");
+assert.equal(find(form, (node) => node.textContent === "Apply").parentElement.className, "network-form-actions");
+const health = renderTroubleshoot(currentSnapshot);
+const healthTitle = find(health, (node) => node.textContent === "Network health");
+assert.equal(healthTitle.tag, "p"); assert.equal(healthTitle.className, "eyebrow");
+const repair = find(health, (node) => node.textContent === "Reconnect active profile");
+assert(hasClass("network-reconnect-information")(repair.parentElement));
+assert(repair.parentElement.children[0].textContent.startsWith("Reconnect this interface using its current settings."));
+
+currentSnapshot.workspace_tabs.push("Remote Access", "Router");
+selectedTab = "Router"; renderNetwork();
+const tabPanel = () => find(content, (node) => node.id === "network-tab-panel");
+assert.equal(tabPanel()["aria-labelledby"], "network-tab-Router");
+const cards = flatten(tabPanel()).filter(hasClass("network-provider-card"));
+const routerProviders = [
+  ["mikrotik", "MikroTik RouterOS"], ["omada", "TP-Link Omada"], ["unifi", "UniFi"],
+  ["openwrt", "OpenWrt"], ["opnsense", "OPNsense"], ["cisco", "Cisco"]
+];
+assert.deepEqual(cards.map((card) => [card.dataset.routerProvider, find(card, (node) => node.tag === "h3").textContent]), routerProviders);
+for (const [index, card] of cards.entries()) {
+  const [id] = routerProviders[index];
+  const icons = flatten(card).filter((node) => node.tag === "img");
+  assert.deepEqual(icons.map((icon) => icon.src), ["/static/router-provider-icons/" + id + ".svg"]);
+  const mikrotik = id === "mikrotik";
+  const actions = flatten(card).filter((node) => ["button", "a", "form", "input", "select", "textarea"].includes(node.tag));
+  if (mikrotik) {
+    const [titleLane, statusLane] = card.children;
+    assert.equal(card.children.length, 2);
+    assert(hasClass("network-router-lane")(titleLane));
+    assert(hasClass("network-router-lane")(statusLane));
+    assert.deepEqual(titleLane.children.map((node) => node.textContent), ["MikroTik RouterOS", "Setup guide"]);
+    assert.equal(titleLane.children[0].children[0], icons[0]);
+    assert.deepEqual(statusLane.children.map((node) => node.textContent), ["Not configured", "Connect"]);
+    assert.equal(statusLane.children[0].role, "status");
+  } else assert.equal(card.children[1].textContent, "Not supported yet");
+  assert.deepEqual(actions.map((node) => [node.tag, node.textContent]), mikrotik ? [["button", "Setup guide"], ["button", "Connect"]] : []);
+  assert(!find(card, (node) => Object.hasOwn(node.dataset, "networkProvider")));
+}
+const setup = content.querySelector("[data-router-open-guide]");
+setup.onclick();
+const guide = find(tabPanel(), hasClass("network-router-guide"));
+assert(guide);
+assert(!find(tabPanel(), hasClass("network-provider-card")));
+assert.equal(document.activeElement, content.querySelector("[data-router-heading]"));
+assert.deepEqual(flatten(guide).filter((node) => ["button", "a", "form", "input", "select", "textarea"].includes(node.tag)), []);
+const guideNodes = flatten(guide);
+const readText = (node) => node.textContent + node.children.map(readText).join("");
+const guideText = guideNodes.filter((node) => node.tag === "p" || node.tag === "pre").map(readText).join("\n");
+const tokens = guideNodes.filter(hasClass("network-router-token"));
+const inlineTokens = tokens.filter((node) => node.tag === "code" && node.parentElement.tag === "p");
+for (const literal of ["www-ssl", "rest-secure", "rest-plain", "read", "write", "api", "rest-api",
+  "jv", "justvoxel", "<JUSTVOXEL_IP>/32", "<JUSTVOXEL_IP>", "<ROUTER_IP>:443/TCP", "dstnat"]) {
+  assert(inlineTokens.some((node) => node.textContent === literal), literal);
+}
+assert(tokens.some((node) => node.textContent === "<WAN_INTERFACE_LIST>" && node.parentElement.parentElement.tag === "pre"));
+for (const required of [
+  "www-ssl", "rest-secure", "rest-plain", "WebFig", "group, for example jv", "read, write, api and rest-api",
+  "TCP 8728", "user, for example justvoxel", "assign it to your dedicated group", "<JUSTVOXEL_IP>/32",
+  "strong, unique password", "<ROUTER_IP>:443/TCP",
+  "chain=forward", "action=accept", "connection-nat-state=dstnat",
+  "in-interface-list=<WAN_INTERFACE_LIST>", "dst-address=<JUSTVOXEL_IP>",
+  "example only, not a universal command", "WAN selection, destination, chains and rule order",
+  "before any rule", "need no additional rule", "never create, move, enable, disable or delete",
+  "never create or modify router input or firewall filter rules", "only its own destination NAT (dstnat) records",
+  "router identity and version", "status and conflicts",
+  "interfaces, VLANs, routes, DNS, DHCP", "RouterOS users and groups, certificates, /ip service",
+  "packages and updates, router reboots and arbitrary RouterOS commands",
+  "justvoxel-ca", "3650 days", "825 days", "RSA 2048", "key-cert-sign", "crl-sign", "self-signed root CA",
+  "Subject Alt Name (SAN)", "select IP as the type and enter only the address, without IP: or ::",
+  "digital-signature", "key-encipherment", "tls-server", "rest-secure=yes", "rest-plain=no",
+  "export only its public certificate as PEM", "leaving the export passphrase blank", "Download the .crt file",
+  "Use Replace CA when the signing CA changes",
+  "Minecraft instance or Minecraft Network (Velocity) configuration", "no way to accept arbitrary ports"
+]) assert(guideText.includes(required), required);
+assert.doesNotMatch(guideText, /\b(?:\d{1,3}\.){3}\d{1,3}\b|RB3011|bridge-minecraft|pppoe-wan/i);
+selectNetworkTab("Router");
+assert.equal(document.activeElement.dataset.networkTab, "Router");
+assert(!find(tabPanel(), hasClass("network-router-guide")));
+assert(find(tabPanel(), hasClass("network-provider-card")));
+routerStatus = { status: "connected", can_configure: false };
+renderNetwork();
+const connectedCard = find(tabPanel(), (node) => node.dataset.routerProvider === "mikrotik");
+assert.deepEqual(connectedCard.children[1].children.map((node) => node.textContent), ["Connected", "Connection"]);
+content.querySelector("[data-router-open-connection]").onclick();
+const routerConnection = find(tabPanel(), hasClass("network-router-connection"));
+assert(routerConnection);
+assert(!find(routerConnection, (node) => node.tag === "button"));
+selectNetworkTab("Router");
+assert(find(tabPanel(), hasClass("network-provider-card")));
+content.querySelector("[data-router-open-guide]").onclick();
+selectNetworkTab("Overview");
+selectNetworkTab("Router");
+assert(find(tabPanel(), hasClass("network-provider-card")));
+selectNetworkTab("Remote Access");
+assert(find(tabPanel(), (node) => node.textContent === "Providers"));
+assert(!find(tabPanel(), (node) => node.dataset.routerProvider || hasClass("network-router-guide")(node)));
+
+(async () => {
+  const metadata = { common_name: "<router-ca>", fingerprint: "a".repeat(64), expires_at: "2030-02-03T00:00:00Z" };
+  routerStatus = { status: "not_configured", can_configure: true, configured: false };
+  const connection = renderRouterConnection();
+  assert(!find(connection, (node) => node.tag === "button" && node.textContent === "Refresh"));
+  const form = find(connection, (node) => node.tag === "form");
+  const [credentialsRow, endpointRow] = form.children;
+  assert.equal(form.children.length, 2);
+  assert(hasClass("network-router-credentials-row")(credentialsRow));
+  assert.deepEqual(credentialsRow.children.map(node => node.textContent), ["Username", "Password"]);
+  const password = credentialsRow.children[1].children[0];
+  assert.equal(password.type, "password");
+  assert(hasClass("network-router-endpoint-row")(endpointRow));
+  assert.equal(endpointRow.children[0].textContent, "HTTPS endpoint");
+  const endpoint = endpointRow.children[0].children[0];
+  endpoint.value = "https://192.168.0.1";
+  credentialsRow.children[0].children[0].value = "operator";
+  const [test, save] = endpointRow.children[1].children;
+  assert.deepEqual([test.textContent, save.textContent], ["Test connection", "Save"]);
+  assert(save.disabled);
+  const lane = find(connection, hasClass("network-router-trust"));
+  const caButton = lane.children.filter(node => node.tag === "button");
+  assert.equal(caButton.length, 1);
+  const action = caButton[0];
+  assert.equal(action.textContent, "Upload trusted CA");
+  const file = find(lane, node => node.type === "file");
+  file.files = [{ size: 12, text: async () => "test-public-ca" }];
+  previewResult = metadata;
+  await file.onchange();
+  assert.equal(action.textContent, "Clear selected CA");
+  assert(lane.children[0].textContent.includes("<router-ca> · expires 2030-02-03"));
+  assert(!flatten(connection).some(node => node.textContent.includes(metadata.fingerprint)));
+  action.onclick();
+  assert.equal(action.textContent, "Upload trusted CA");
+  await file.onchange();
+  testFailure = true;
+  password.value = "test-password";
+  await test.onclick();
+  assert(save.disabled && !password.value);
+  testFailure = false;
+  const wan = {type:"list", name:"WAN"};
+  testResult = {recommended_target:"192.168.0.28", recommended_ingress:wan};
+  password.value = "test-password";
+  await test.onclick();
+  assert.equal(password.value, "test-password");
+  assert(!save.disabled);
+  const forwarding = find(connection, hasClass("network-router-forwarding"));
+  assert(!find(forwarding, node => node.tag === "select"));
+  assert.equal(flatten(forwarding).filter(node => node.textContent === "Detected").length, 2);
+  password.oninput();
+  assert(save.disabled && !forwarding.children.length);
+  testResult = {recommended_ingress:wan, target_choices:["192.168.0.28"]};
+  await test.onclick();
+  let selects = flatten(forwarding).filter(node => node.tag === "select");
+  assert.equal(selects.length, 1);
+  assert.equal(selects[0].parentElement.textContent, "Destination");
+  assert(save.disabled);
+  selects[0].value = "192.168.0.28";
+  selects[0].onchange();
+  assert(!save.disabled);
+  testResult = {recommended_target:"192.168.0.28"};
+  await test.onclick();
+  assert(save.disabled);
+  const advanced = find(forwarding, node => node.tag === "details");
+  assert(advanced && !advanced.open && !find(forwarding, node => node.tag === "select"));
+  testResult = {recommended_target:"192.168.0.28", ingress_choices:[{type:"list",name:"uplinks"}]};
+  await test.onclick();
+  selects = flatten(forwarding).filter(node => node.tag === "select");
+  assert.equal(selects.length, 1);
+  assert.equal(selects[0].parentElement.textContent, "Internet ingress");
+  assert(save.disabled);
+  selects[0].value = "uplinks";
+  selects[0].onchange();
+  assert(!save.disabled);
+  await save.onclick();
+  assert(!password.value);
+  assert.deepEqual(routerRequests.at(-1), [routerPath, "PUT"]);
+  assert.equal(routerRequestCAs.at(-1), "test-public-ca");
+
+  routerStatus = {status:"connected", configured:true, can_configure:true, trusted_ca:metadata,
+    target:"192.168.0.28", ingress:wan};
+  const configured = renderRouterConnection();
+  assert(!find(configured, node => node.type === "password"));
+  assert(!find(configured, node => node.textContent === "Remove CA"));
+  const current = find(configured, hasClass("network-router-forwarding"));
+  for (const value of ["192.168.0.28", "WAN"]) assert(find(current, node => node.textContent === value));
+  assert.equal(flatten(current).filter(node => node.textContent === "Configured").length, 2);
+  const savedLane = find(configured, hasClass("network-router-trust"));
+  assert.equal(savedLane.children.filter(node => node.tag === "button").length, 1);
+  const replace = find(savedLane, node => node.textContent === "Replace CA");
+  assert(replace && savedLane.children[0].textContent.includes("<router-ca> · expires 2030-02-03"));
+  const replacement = find(savedLane, node => node.type === "file");
+  replacement.files = [{size:11, text:async () => "replacement"}];
+  await replacement.onchange();
+  assert.equal(replace.textContent, "Clear selected CA");
+  await find(configured, node => Object.hasOwn(node.dataset, "routerSaveCA")).onclick();
+  assert.deepEqual(routerRequests.at(-1), [routerPath + "/ca", "PUT"]);
+  assert.equal(routerRequestCAs.at(-1), "replacement");
+  find(configured, node => node.textContent === "Edit connection").onclick();
+  assert(find(routerConnectionView, node => node.type === "password"));
+  const remove = find(routerConnectionView, node => node.textContent === "Remove CA");
+  await remove.onclick();
+  assert.deepEqual(routerRequests.at(-1), [routerPath + "/ca", "DELETE"]);
+  routerStatus = {...routerStatus, status:"unavailable", diagnostic:"tls_error"};
+  assert(find(renderRouterConnection(), node => node.textContent === "Router certificate could not be verified. Check the trusted CA and HTTPS endpoint."));
+})().catch(error => { console.error(error); process.exitCode = 1; });
+`
+	cmd := nodeTestCommand()
+	cmd.Stdin = strings.NewReader(program)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("network presentation contract: %v\n%s", err, output)
+	}
+
+	if strings.Contains(script, "paginateList(list, 4)") || strings.Contains(script, `"Other network…"`) {
+		t.Fatal("Nearby Wi-Fi must use available height and Hidden network wording")
+	}
+	css, err := englishPresentationAsset("static/network-workspace.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var providerTracks []string
+	providerGrid := regexp.MustCompile(`\.network-provider-grid\{grid-template-columns:([^}]+)\}`)
+	for _, match := range providerGrid.FindAllStringSubmatch(string(css), -1) {
+		providerTracks = append(providerTracks, match[1])
+	}
+	if want := []string{"minmax(0,1fr)", "repeat(2,minmax(0,1fr))", "repeat(3,minmax(0,1fr))", "repeat(4,minmax(0,1fr))"}; !reflect.DeepEqual(providerTracks, want) {
+		t.Errorf("provider grid tracks = %v, want %v", providerTracks, want)
+	}
+	for _, want := range []string{
+		`.network-workspace-content:has([data-network-view="Wi-Fi"]){height:100%}`,
+		`.network-workspace-view:has([data-network-view="Wi-Fi"]){height:100%;min-height:0}`,
+		`#network-tab-panel[data-network-view="Wi-Fi"]{display:flex;flex-direction:column;flex:1;min-height:0}`,
+		`.network-wifi-layout{flex:1;min-height:0}`,
+		`.network-wifi-nearby{grid-auto-rows:minmax(0,1fr);min-height:0}`,
+		`.network-wifi-section{display:flex;flex-direction:column;min-height:0}`,
+		`.network-wifi-list{flex:1;min-height:0;overflow-y:auto;align-content:start}`,
+		`.network-device-heading>.network-inline-actions{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap}`,
+		`.network-wifi-row-actions .danger{background:var(--jv-error);color:#fff}`,
+		`.network-wifi-section .network-section-heading>.network-inline-actions{display:flex;flex-direction:row;flex-wrap:nowrap;gap:.4rem}`,
+		`.network-wifi-section .network-section-heading button{flex:none;width:auto;white-space:nowrap}`,
+		`.network-form-information{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:.75rem}`,
+		`.network-reconnect-information{flex-wrap:nowrap;justify-content:space-between}`,
+		`.network-form-information,.network-reconnect-information{align-items:flex-start;flex-direction:column}`,
+	} {
+		if !strings.Contains(string(css), want) {
+			t.Fatalf("network layout missing %q", want)
+		}
+	}
+}

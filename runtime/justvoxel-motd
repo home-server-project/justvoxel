@@ -1,0 +1,257 @@
+#!/usr/bin/bash
+set -u
+
+output_mode='shell'
+if [[ ${1:-} == '--issue' ]]; then
+    output_mode='issue'
+elif (( $# > 0 )); then
+    printf 'Usage: %s [--issue]\n' "$0" >&2
+    exit 2
+fi
+
+export LC_ALL=C
+
+pretty_name='JustVoxel'
+if [[ -r /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    source /etc/os-release
+    pretty_name="${PRETTY_NAME:-JustVoxel}"
+fi
+
+variant_id="$(cat /usr/lib/justvoxel/variant 2>/dev/null || true)"
+case "${variant_id}" in
+    justvoxel-vm|vm) variant='VM' ;;
+    justvoxel-hws|hws) variant='HWS' ;;
+    *) variant='Unknown' ;;
+esac
+
+host="$(cat /proc/sys/kernel/hostname 2>/dev/null || true)"
+host="${host%%.*}"
+[[ -n ${host} ]] || host='unknown'
+
+device_state() {
+    local device="$1" state
+    state="$(timeout 1s nmcli -g GENERAL.STATE device show "${device}" 2>/dev/null || true)"
+    printf '%s' "${state%% *}"
+}
+
+device_ipv4() {
+    local device="$1" address
+    address="$(timeout 1s nmcli -g IP4.ADDRESS device show "${device}" 2>/dev/null | head -n1 || true)"
+    address="${address%%/*}"
+    [[ ${address} =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || address=''
+    printf '%s' "${address}"
+}
+
+wifi_ssid() {
+    local device="$1" ssid
+    ssid="$(timeout 1s nmcli -t --escape no -f IN-USE,SSID device wifi list ifname "${device}" 2>/dev/null \
+        | awk -F: '$1 == "*" {sub(/^[^:]*:/, ""); print; exit}' || true)"
+    if [[ -z ${ssid} || ${ssid} == '--' ]]; then
+        ssid="$(timeout 1s nmcli -g GENERAL.CONNECTION device show "${device}" 2>/dev/null || true)"
+    fi
+    [[ ${ssid} != '--' ]] || ssid=''
+    printf '%s' "${ssid}"
+}
+
+mapfile -t ethernet_devices < <(timeout 1s nmcli -t -f DEVICE,TYPE device status 2>/dev/null | awk -F: '$2 == "ethernet" {print $1}')
+mapfile -t wifi_devices < <(timeout 1s nmcli -t -f DEVICE,TYPE device status 2>/dev/null | awk -F: '$2 == "wifi" {print $1}')
+
+ethernet_connected=no
+ethernet_connecting=no
+ethernet_ipv4=''
+for device in "${ethernet_devices[@]}"; do
+    state="$(device_state "${device}")"
+    carrier="$(timeout 1s nmcli -g GENERAL.CARRIER device show "${device}" 2>/dev/null || true)"
+
+    if [[ ${state} == 100 ]]; then
+        ethernet_connected=yes
+        [[ -n ${ethernet_ipv4} ]] || ethernet_ipv4="$(device_ipv4 "${device}")"
+    elif [[ ${state} =~ ^[0-9]+$ ]] && (( state >= 40 && state < 100 )); then
+        ethernet_connecting=yes
+    elif [[ ${carrier} == on ]]; then
+        ethernet_connecting=yes
+    fi
+done
+
+wifi_connected=no
+wifi_ipv4=''
+wifi_value=''
+for device in "${wifi_devices[@]}"; do
+    state="$(device_state "${device}")"
+    if [[ ${state} == 100 ]]; then
+        wifi_connected=yes
+        [[ -n ${wifi_ipv4} ]] || wifi_ipv4="$(device_ipv4 "${device}")"
+        if [[ -z ${wifi_value} ]]; then
+            ssid="$(wifi_ssid "${device}")"
+            if [[ -n ${ssid} ]]; then
+                wifi_value="${ssid} connected"
+            else
+                wifi_value='Connected'
+            fi
+        fi
+    fi
+done
+if (( ${#wifi_devices[@]} > 0 )) && [[ ${wifi_connected} != yes ]]; then
+    wifi_value='Not connected'
+fi
+
+ipv4='Not assigned'
+network_state='Not connected - use mjust net'
+network_has_address=no
+
+if [[ ${ethernet_connected} == yes ]]; then
+    if [[ -n ${ethernet_ipv4} ]]; then
+        ipv4="${ethernet_ipv4}"
+        network_state='Ethernet connected'
+        network_has_address=yes
+    else
+        network_state='Ethernet connected, obtaining address...'
+    fi
+elif [[ ${wifi_connected} == yes ]]; then
+    if [[ -n ${wifi_ipv4} ]]; then
+        ipv4="${wifi_ipv4}"
+        network_state='Wi-Fi connected'
+        network_has_address=yes
+    else
+        network_state='Wi-Fi connected, obtaining address...'
+    fi
+elif [[ ${ethernet_connecting} == yes ]]; then
+    network_state='Ethernet connected, obtaining address...'
+fi
+
+# A committed modern Quadlet is public evidence for MOTD presentation.
+modern_quadlet_found=no
+for quadlet in /etc/containers/systemd/minecraft-jv-*.container; do
+    [[ ${quadlet##*/} =~ ^minecraft-jv-[a-z0-9]{6,12}\.container$ ]] || continue
+    [[ -f ${quadlet} && ! -L ${quadlet} ]] || continue
+    modern_quadlet_found=yes
+    break
+done
+if [[ ${modern_quadlet_found} == yes ]]; then
+    minecraft_state='Configured'
+    needs_setup=no
+else
+    minecraft_state='Not configured'
+    needs_setup=yes
+fi
+
+web_state='Disabled'
+if [[ ${host} != unknown ]]; then
+    web_browser="http://${host}.local:8099"
+else
+    web_browser='Waiting for hostname'
+fi
+if [[ ${network_has_address} == yes ]]; then
+    web_direct="http://${ipv4}:8099"
+else
+    web_direct='Waiting for network address'
+fi
+web_enabled_marker=/var/lib/justvoxel/webui/enabled
+web_initialized_marker=/var/lib/justvoxel/webui/initialized
+
+if systemctl is-active --quiet justvoxel-webui.service 2>/dev/null && \
+    curl -fsS --max-time 1 http://127.0.0.1:8099/healthz >/dev/null 2>&1; then
+    web_state='Ready'
+elif systemctl is-failed --quiet justvoxel-web-bootstrap.service 2>/dev/null; then
+    web_state='Unavailable'
+elif [[ -e ${web_enabled_marker} ]]; then
+    web_state='Unavailable'
+elif [[ ! -e ${web_initialized_marker} ]]; then
+    web_state='Starting...'
+fi
+
+if [[ ${web_state} == Ready && ${network_has_address} != yes ]]; then
+    web_state='Waiting for network'
+fi
+
+remote_status=/usr/libexec/justvoxel/remote-access-status
+tailscale_value="$("${remote_status}" tailscale 2>/dev/null || printf '%s' 'Unavailable')"
+netbird_value="$(/usr/bin/sudo -n "${remote_status}" netbird 2>/dev/null || printf '%s' 'Unavailable')"
+nordvpn_value="$("${remote_status}" nordvpn 2>/dev/null || printf '%s' 'Unavailable')"
+playit_value="$(/usr/bin/sudo -n "${remote_status}" playit 2>/dev/null || printf '%s' 'Unavailable')"
+
+if [[ ${output_mode} == issue ]]; then
+    # agetty translates \e into ESC, preserving the interactive 256-color palette.
+    cyan='\e[38;5;45m'
+    white='\e[97m'
+    green='\e[38;5;82m'
+    yellow='\e[38;5;220m'
+    blue='\e[38;5;75m'
+    dim='\e[38;5;245m'
+    bold='\e[1m'
+    reset='\e[0m'
+elif [[ -t 1 && ${TERM:-dumb} != dumb ]]; then
+    cyan=$'\033[38;5;45m'
+    white=$'\033[97m'
+    green=$'\033[38;5;82m'
+    yellow=$'\033[38;5;220m'
+    blue=$'\033[38;5;75m'
+    dim=$'\033[38;5;245m'
+    bold=$'\033[1m'
+    reset=$'\033[0m'
+else
+    cyan='' white='' green='' yellow='' blue='' dim='' bold='' reset=''
+fi
+
+line() {
+    printf '  %s%-18s%s %s%s%s\n' "${cyan}" "$1" "${reset}" "${2:-${white}}" "$3" "${reset}"
+}
+
+printf '%s%s====================================================%s\n' "${cyan}" "${bold}" "${reset}"
+printf '%s%s                    JUSTVOXEL%s\n' "${cyan}" "${bold}" "${reset}"
+printf '%s%s              Minecraft Server Appliance%s\n' "${cyan}" "${bold}" "${reset}"
+printf '%s%s====================================================%s\n\n' "${cyan}" "${bold}" "${reset}"
+
+line 'System:' "${white}" "${pretty_name}"
+line 'Variant:' "${white}" "${variant}"
+line 'Host:' "${white}" "${host}"
+line 'Minecraft:' "$([[ ${minecraft_state} == Configured ]] && printf '%s' "${green}" || printf '%s' "${yellow}")" "${minecraft_state}"
+
+printf '\n'
+line 'Web interface:' "$([[ ${web_state} == Ready ]] && printf '%s' "${green}" || printf '%s' "${yellow}")" "${web_state}"
+if [[ ${web_state} == Ready ]]; then
+    line 'Open in browser:' "${blue}" "${web_browser}"
+    line 'Direct address:' "${blue}" "${web_direct}"
+elif [[ ${output_mode} != issue ]]; then
+    case "${web_state}" in
+        Disabled)
+            line 'Enable with:' "${green}" 'mjust web enable'
+            ;;
+        Unavailable)
+            line 'Check status:' "${green}" 'mjust web status'
+            ;;
+    esac
+fi
+
+printf '\n'
+line 'Network:' "$([[ ${network_has_address} == yes ]] && printf '%s' "${white}" || printf '%s' "${yellow}")" "${network_state}"
+if [[ ${network_has_address} == yes ]]; then
+    line 'IPv4:' "${white}" "${ipv4}"
+fi
+if (( ${#wifi_devices[@]} > 0 )); then
+    line 'Wi-Fi:' "$([[ ${wifi_connected} == yes ]] && printf '%s' "${white}" || printf '%s' "${yellow}")" "${wifi_value}"
+fi
+
+line 'Tailscale:' "${white}" "${tailscale_value}"
+line 'NetBird:' "${white}" "${netbird_value}"
+line 'Playit:' "${white}" "${playit_value}"
+line 'NordVPN:' "${white}" "${nordvpn_value}"
+
+if [[ ${output_mode} == issue ]]; then
+    printf '\n'
+    exit 0
+fi
+
+printf '\n%s%sCommon commands%s\n' "${bold}" "${cyan}" "${reset}"
+if [[ ${needs_setup} == yes ]]; then
+    line 'First setup:' "${green}" 'mjust setup'
+fi
+line 'Admin menu:' "${green}" 'mjust'
+line 'Server status:' "${green}" 'mjust status'
+line 'List commands:' "${green}" 'mjust --list'
+
+printf '\n%s%sLinks%s\n' "${bold}" "${cyan}" "${reset}"
+line 'Documentation:' "${blue}" 'https://github.com/home-server-project/justvoxel'
+line 'Report an issue:' "${blue}" 'https://github.com/home-server-project/justvoxel/issues'
+line 'Hide this message:' "${dim}" 'mjust welcome-off'

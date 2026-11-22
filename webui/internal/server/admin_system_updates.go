@@ -1,0 +1,204 @@
+package server
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+
+	"github.com/home-server-project/justvoxel-webui/internal/api"
+)
+
+type adminSystemUpdatesAPI interface {
+	Session(ctx context.Context, session string) (api.SessionInfo, error)
+	AdminSystemUpdateStatus(ctx context.Context, session string) (api.AdminSystemUpdateStatus, error)
+	AdminSystemUpdateCheck(ctx context.Context, session string) (api.AdminSystemUpdateStatus, error)
+	AdminSystemUpdate(ctx context.Context, session string) (api.AdminSystemUpdateStatus, error)
+	AdminSystemUpdateRebootStatus(ctx context.Context, session string) (api.AdminSystemUpdateRebootStatus, error)
+	AdminSystemUpdateReboot(ctx context.Context, session string, options api.AdminSystemUpdateRebootOptions) (api.AdminSystemUpdateRebootStatus, error)
+}
+
+func (a *App) registerAdminSystemUpdatePages(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/system-updates", a.systemUpdateStatus)
+	mux.HandleFunc("POST /api/system-updates/force", a.systemUpdateForce)
+	mux.HandleFunc("POST /api/system-updates/check", a.systemUpdateCheck)
+	mux.HandleFunc("POST /api/system-updates", a.systemUpdateApply)
+	mux.HandleFunc("GET /api/system-updates/reboot", a.systemUpdateRebootStatus)
+	mux.HandleFunc("POST /api/system-updates/reboot", a.systemUpdateReboot)
+}
+
+func (a *App) systemUpdateStatus(w http.ResponseWriter, r *http.Request) {
+	session, client, ok := a.systemUpdateRequest(w, r, false)
+	if !ok {
+		return
+	}
+	status, err := client.AdminSystemUpdateStatus(r.Context(), session)
+	if err != nil {
+		a.handleSystemUpdateAPIError(w, err)
+		return
+	}
+	writeSystemUpdateJSON(w, http.StatusOK, status)
+}
+
+func (a *App) systemUpdateCheck(w http.ResponseWriter, r *http.Request) {
+	session, client, ok := a.systemUpdateRequest(w, r, true)
+	if !ok {
+		return
+	}
+	status, err := client.AdminSystemUpdateCheck(r.Context(), session)
+	if err != nil {
+		a.handleSystemUpdateAPIError(w, err)
+		return
+	}
+	writeSystemUpdateJSON(w, http.StatusOK, status)
+}
+
+func (a *App) systemUpdateApply(w http.ResponseWriter, r *http.Request) {
+	session, client, ok := a.systemUpdateRequest(w, r, true)
+	if !ok {
+		return
+	}
+	status, err := client.AdminSystemUpdate(r.Context(), session)
+	if err != nil {
+		a.handleSystemUpdateAPIError(w, err)
+		return
+	}
+	writeSystemUpdateJSON(w, http.StatusOK, status)
+}
+
+func (a *App) systemUpdateRebootStatus(w http.ResponseWriter, r *http.Request) {
+	session, client, ok := a.systemUpdateRequest(w, r, false)
+	if !ok {
+		return
+	}
+	status, err := client.AdminSystemUpdateRebootStatus(r.Context(), session)
+	if err != nil {
+		a.handleSystemUpdateAPIError(w, err)
+		return
+	}
+	writeSystemUpdateJSON(w, http.StatusOK, status)
+}
+
+func (a *App) systemUpdateReboot(w http.ResponseWriter, r *http.Request) {
+	session, client, ok := a.systemUpdateRequest(w, r, true)
+	if !ok {
+		return
+	}
+	warningSeconds := 60
+	if r.FormValue("quick_reboot") == "yes" {
+		warningSeconds = 10
+	}
+	result, err := client.AdminSystemUpdateReboot(r.Context(), session, api.AdminSystemUpdateRebootOptions{
+		ConfirmPlayers:  r.FormValue("confirm_players") == "yes",
+		StagedDigest:    r.FormValue("staged_digest"),
+		BackupMinecraft: r.FormValue("backup_minecraft") == "yes",
+		WarningSeconds:  warningSeconds,
+	})
+	if err != nil {
+		var responseErr *api.ResponseError
+		if errors.As(err, &responseErr) {
+			status := responseErr.StatusCode
+			if status < 400 || status > 599 {
+				status = http.StatusBadGateway
+			}
+			writeSystemUpdateJSON(w, status, result)
+			return
+		}
+		a.handleSystemUpdateAPIError(w, err)
+		return
+	}
+	status := http.StatusOK
+	if result.Accepted {
+		status = http.StatusAccepted
+	}
+	writeSystemUpdateJSON(w, status, result)
+}
+
+func (a *App) systemUpdateRequest(w http.ResponseWriter, r *http.Request, requireCSRF bool) (string, adminSystemUpdatesAPI, bool) {
+	if requireCSRF && !a.validCSRF(r) {
+		http.Error(w, "invalid CSRF token", http.StatusForbidden)
+		return "", nil, false
+	}
+	if mustChange(r) {
+		http.Error(w, ui(w, "ui.63bae92440ec"), http.StatusForbidden)
+		return "", nil, false
+	}
+	session, ok := sessionFromRequest(r)
+	if !ok {
+		http.Error(w, ui(w, "ui.cbac8bee7536"), http.StatusUnauthorized)
+		return "", nil, false
+	}
+	client, ok := a.api.(adminSystemUpdatesAPI)
+	if !ok {
+		http.Error(w, ui(w, "ui.05add43d545f"), http.StatusServiceUnavailable)
+		return "", nil, false
+	}
+	identity, err := client.Session(r.Context(), session)
+	if err != nil {
+		a.handleSystemUpdateAPIError(w, err)
+		return "", nil, false
+	}
+	if !isAdministratorLevel(identity.Role) {
+		http.Error(w, ui(w, "ui.031cc7a3ec82"), http.StatusForbidden)
+		return "", nil, false
+	}
+	return session, client, true
+}
+
+func (a *App) handleSystemUpdateAPIError(w http.ResponseWriter, err error) {
+	if errors.Is(err, api.ErrUnauthorized) {
+		a.clearSessionCookies(w)
+		http.Error(w, ui(w, "ui.cbac8bee7536"), http.StatusUnauthorized)
+		return
+	}
+	if errors.Is(err, api.ErrPasswordChangeRequired) {
+		http.Error(w, ui(w, "ui.63bae92440ec"), http.StatusForbidden)
+		return
+	}
+	var responseErr *api.ResponseError
+	if errors.As(err, &responseErr) {
+		status := responseErr.StatusCode
+		if status < 400 || status > 599 {
+			status = http.StatusBadGateway
+		}
+		message := responseErr.Message
+		if message == "" {
+			message = ui(w, "ui.787303f8fef1")
+		}
+		writeSystemUpdateJSON(w, status, map[string]string{"error": message})
+		return
+	}
+	http.Error(w, ui(w, "ui.b312c215bcd9"), http.StatusBadGateway)
+}
+
+func writeSystemUpdateJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
+}
+
+func (a *App) systemUpdateForce(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	session, client, ok := a.systemUpdateRequest(w, r, true)
+	if !ok {
+		return
+	}
+	if r.URL.RawQuery != "" || len(r.PostForm) != 1 || len(r.PostForm["csrf"]) != 1 {
+		http.Error(w, ui(w, "ui.b7d8b6dcc785"), http.StatusBadRequest)
+		return
+	}
+	recovery, ok := client.(interface {
+		AdminSystemUpdateForce(context.Context, string) (api.AdminSystemUpdateStatus, error)
+	})
+	if !ok {
+		http.Error(w, ui(w, "ui.fd01efc54fe6"), http.StatusServiceUnavailable)
+		return
+	}
+	status, err := recovery.AdminSystemUpdateForce(r.Context(), session)
+	if err != nil {
+		a.handleSystemUpdateAPIError(w, err)
+		return
+	}
+	writeSystemUpdateJSON(w, http.StatusOK, status)
+}

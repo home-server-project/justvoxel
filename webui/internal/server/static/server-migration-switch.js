@@ -1,0 +1,190 @@
+(() => {
+  const terminal = new Set(["succeeded", "resolved", "needs_attention", "failed"]);
+  window.JustVoxelServerMigrationSwitch = {
+    init(root) {
+      if (!root?.matches("[data-migration-switch]") || root.dataset.switchInitialized) return;
+      root.dataset.switchInitialized = "true";
+      const server = root.dataset.serverId;
+      const generation = globalThis.justVoxelSelectionGeneration?.migration;
+      const current = () => root.isConnected && generation === globalThis.justVoxelSelectionGeneration?.migration;
+      const state = root.querySelector("[data-switch-state]");
+      const review = root.querySelector("[data-switch-review]");
+      const progress = root.querySelector("[data-switch-operation]");
+      const cards = [...root.querySelectorAll("[data-switch-target]")];
+      const csrf = root.querySelector("[data-switch-csrf]").value;
+      let sequence = 0;
+      let operation = null;
+      let busy = false;
+      let polling = false;
+      const request = async (action, params = {}, post = false) => {
+        if (!current()) throw new Error(jvT("ui.bed53cc46da9"));
+        const query = new URLSearchParams({ server, ...(post ? {} : params) });
+        const response = await fetch(`/api/migration/switch/${action}?${query}`, {
+          method: post ? "POST" : "GET", credentials: "same-origin", cache: "no-store",
+          ...(post ? { headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ csrf, ...params }) } : {}),
+        });
+        const result = await response.json();
+        if (!current()) throw new Error(jvT("ui.bed53cc46da9"));
+        if (!response.ok) throw new Error(result.error || jvT("ui.1eb6b959b7ce"));
+        return result;
+      };
+      const paragraph = (text, className = "") => {
+        const node = document.createElement("p"); node.textContent = text; node.className = className; return node;
+      };
+      const showCard = (node, plan) => {
+        const active = plan.current === node.dataset.switchTarget;
+        const available = !active && Boolean(plan.convert || plan.clone);
+        node.classList.toggle("is-pending", false);
+        node.classList.toggle("is-current", active);
+        node.classList.toggle("is-available", available);
+        node.classList.toggle("is-unsupported", !active && !available);
+        node.disabled = active || !available || busy;
+        const marker = node.querySelector("[data-switch-status]");
+        marker.textContent = active ? "C" : available ? "A" : "N";
+        marker.classList.toggle("plugins-badge-disabled", active);
+        marker.classList.toggle("plugins-badge-enabled", available);
+        node.title = plan.reason || (active ? jvT("ui.7d4f12e4405b") : jvT("ui.a195a363286b", {v0: (plan.version)}));
+      };
+      const reconnect = async (id = "") => {
+        const ticket = sequence;
+        const result = await request("operation", { operation_id: id });
+        if (!current() || ticket !== sequence) return;
+        operation = result.operation || null;
+        busy = Boolean(operation && !["succeeded", "resolved"].includes(operation.state));
+        if (!operation) { progress.replaceChildren(); return; }
+        if (cards.some((node) => node.dataset.switchTarget === result.target)) {
+          cards.forEach((node) => node.classList.toggle("is-selected", node.dataset.switchTarget === result.target));
+        }
+        progress.replaceChildren(paragraph(operation.status || jvT("ui.934767ef0bcc"), "notice"));
+        if (operation.state === "succeeded" && result.clone_id) {
+          progress.appendChild(paragraph(jvT("ui.b62c04b44caf")));
+          const link = document.createElement("a"); link.className = "button-link";
+          link.href = `/?server=${encodeURIComponent(result.clone_id)}`; link.textContent = jvT("ui.10c040af618e"); progress.appendChild(link);
+        }
+        if (["needs_attention", "failed"].includes(operation.state)) {
+          const label = document.createElement("label"); label.className = "minecraft-native-toggle";
+          const consent = document.createElement("input"); consent.type = "checkbox"; consent.setAttribute("role", "switch");
+          label.append(paragraph(jvT("ui.75ea388b9a14")), consent);
+          const recover = document.createElement("button"); recover.type = "button"; recover.textContent = jvT("ui.b8e7e9e5f031"); recover.disabled = true;
+          consent.addEventListener("change", () => { recover.disabled = !consent.checked; });
+          recover.addEventListener("click", async () => {
+            if (!current() || ticket !== sequence || !consent.checked || recover.disabled) return;
+            recover.disabled = true;
+            try {
+              const result = await request("recover", { operation_id: operation.operation_id, confirm: "yes" }, true);
+              if (current() && ticket === sequence) await load(result.operation.operation_id);
+            }
+            catch (failure) { if (current() && ticket === sequence) { state.textContent = failure.message; recover.disabled = !consent.checked; } }
+          });
+          progress.append(label, recover);
+        }
+        cards.forEach((node) => { if (busy) node.disabled = true; });
+        if (!terminal.has(operation.state) && !polling) {
+          polling = true;
+          const operationID = operation.operation_id;
+          setTimeout(async () => {
+            polling = false;
+            if (!current() || ticket !== sequence || operation?.operation_id !== operationID) return;
+            try {
+              await reconnect(operationID);
+              if (current() && ticket === sequence && terminal.has(operation?.state)) await load(operationID);
+            }
+            catch (failure) { if (current() && ticket === sequence) state.textContent = jvT("ui.796b21621486", {v0: (failure.message)}); }
+          }, 2000);
+        }
+      };
+      const select = async (target) => {
+        if (busy) return;
+        const ticket = ++sequence;
+        cards.forEach((node) => node.classList.toggle("is-selected", node.dataset.switchTarget === target));
+        review.hidden = true;
+        if (operation && terminal.has(operation.state)) {
+          operation = null;
+          progress.replaceChildren();
+        }
+        state.textContent = jvT("ui.e29d2712155f");
+        try {
+          // Selection always re-reads authoritative inventory, even if a prior
+          // catalogue response had made this card available.
+          const plan = await request("plan", { target });
+          if (!current() || ticket !== sequence) return;
+          showCard(cards.find((node) => node.dataset.switchTarget === target), plan);
+          review.replaceChildren();
+          review.append(paragraph(jvT("ui.3101457ed8e3", {v0: (plan.current)})), paragraph(jvT("ui.740cb666e20a", {v0: (plan.target)})), paragraph(jvT("ui.6a5ef5b0f8c1", {v0: (plan.version || jvT("ui.33c8e8de41c3"))})),
+            paragraph(jvT("ui.9ccd64d18f1e", {v0: (plan.convert ? "Available" : jvT("ui.ca1844969742"))})), paragraph(jvT("ui.b985dbadc276", {v0: (plan.clone ? "Available" : jvT("ui.ca1844969742"))})));
+          if (plan.reason) review.appendChild(paragraph(plan.reason, "notice warning"));
+          for (const item of plan.content || []) {
+            const label = { verified: jvT("ui.630d4989d81c"), incompatible: jvT("ui.8777e3a9e3ec"), unknown: jvT("ui.1a31290e493f") }[item.compatibility] || jvT("ui.1a31290e493f");
+            review.appendChild(paragraph(jvT("ui.31d29868e4e3", {v0: (item.name), v1: (item.filename), v2: (label), v3: (item.reason)}), item.compatibility === "verified" ? "muted" : "notice warning"));
+          }
+          for (const warning of plan.warnings || []) review.appendChild(paragraph(warning, "notice warning"));
+          const actions = document.createElement("div"); actions.className = "action-row";
+          const plugins = document.createElement("a"); plugins.href = `/?workspace=plugins&server=${encodeURIComponent(server)}`; plugins.className = "button-link secondary"; plugins.textContent = jvT("ui.70171ec7a356");
+          actions.appendChild(plugins);
+          if (plan.convert || plan.clone) {
+            review.appendChild(paragraph(jvT("ui.6b2df59bf4f2"), "notice"));
+            const label = document.createElement("label"); label.className = "minecraft-native-toggle system-ups-shutdown-switch";
+            const consent = document.createElement("input"); consent.type = "checkbox"; consent.setAttribute("role", "switch");
+            label.append(paragraph(jvT("ui.1ee40e71974c")), consent); review.appendChild(label);
+            for (const [action, text, allowed] of [["convert", jvT("ui.5abb6e80374e"), plan.convert], ["clone", jvT("ui.90b908765b19"), plan.clone]]) {
+              const button = document.createElement("button"); button.type = "button"; button.textContent = text; button.disabled = true;
+              if (!allowed) button.title = plan.reason || jvT("ui.f4239cda81ee");
+              consent.addEventListener("change", () => { button.disabled = !allowed || !consent.checked || busy; });
+              button.addEventListener("click", async () => {
+                if (!current() || ticket !== sequence || !allowed || !consent.checked || busy || button.disabled) return;
+                busy = true; actions.querySelectorAll("button").forEach((item) => { item.disabled = true; }); cards.forEach((item) => { item.disabled = true; });
+                try {
+                  const result = await request("apply", { target, action, plan_fingerprint: plan.plan_fingerprint, confirm: "yes" }, true);
+                  if (!current() || ticket !== sequence) return;
+                  if (!result.operation?.operation_id) throw new Error(jvT("ui.d8bcc288b463"));
+                  review.hidden = true; await reconnect(result.operation.operation_id);
+                  if (current() && ticket === sequence && terminal.has(operation?.state)) await load(result.operation.operation_id);
+                } catch (failure) {
+                  if (!current() || ticket !== sequence) return;
+                  state.textContent = failure.message;
+                  // A lost Apply response may have started work. Reconnect
+                  // before enabling another review or action.
+                  try {
+                    await reconnect();
+                    if (!current() || ticket !== sequence) return;
+                    if (!operation) {
+                      await load();
+                      if (current()) state.textContent = failure.message;
+                    } else if (terminal.has(operation.state)) {
+                      await load(operation.operation_id);
+                    }
+                  }
+                  catch (_) { if (current() && ticket === sequence) state.textContent = jvT("ui.683b73665685", {v0: (failure.message)}); }
+                }
+              });
+              actions.appendChild(button);
+            }
+          }
+          review.appendChild(actions);
+          review.hidden = false; state.textContent = "";
+        } catch (failure) { if (current() && ticket === sequence) state.textContent = failure.message; }
+      };
+      const load = async (id = "") => {
+        const ticket = ++sequence;
+        review.hidden = true;
+        cards.forEach((node) => { node.disabled = true; });
+        state.textContent = jvT("ui.e29d2712155f");
+        try {
+          await reconnect(id);
+          if (!current() || ticket !== sequence) return;
+          if (!operation) cards.forEach((node) => { node.classList.toggle("is-selected", false); });
+          const results = await Promise.allSettled(cards.map(async (node) => ({ node, plan: await request("plan", { target: node.dataset.switchTarget }) })));
+          if (!current() || ticket !== sequence) return;
+          let failed = false;
+          results.forEach((result) => {
+            if (result.status === "fulfilled") showCard(result.value.node, result.value.plan);
+            else failed = true;
+          });
+          state.textContent = failed ? jvT("ui.f2d442c804c0") : "";
+        } catch (failure) { if (current() && ticket === sequence) state.textContent = failure.message; }
+      };
+      cards.forEach((node) => node.addEventListener("click", () => { if (!node.disabled) void select(node.dataset.switchTarget); }));
+      void load();
+    },
+  };
+})();

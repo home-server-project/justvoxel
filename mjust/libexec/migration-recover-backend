@@ -1,0 +1,15 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/common.sh
+source /usr/libexec/justvoxel/mjust/migration-common.sh
+source /usr/libexec/justvoxel/mjust/migration-instance.sh
+require_root
+[[ ${1:-} == --instance && ${2:-} =~ ^jv-[a-z0-9]{6,12}$ && $# == 3 ]] || exit 2
+jv_migration_load_instance "$2" migration-recovery
+transaction="$3"
+plan="$(jq -cn --arg transaction "${transaction}" '{transaction:$transaction}' | /usr/libexec/justvoxel/mjust/admin-migration-recovery-json --instance "${JV_INSTANCE_ID}" plan)"
+jq -e '.ok==true' <<< "${plan}" >/dev/null
+printf 'Type FINALIZE ROLLBACK to recover/finalize the selected instance transaction: ' >/dev/tty
+IFS= read -r answer </dev/tty
+[[ ${answer} == 'FINALIZE ROLLBACK' ]] || exit 0
+jq -cn --arg transaction "${transaction}" --arg state_identity "$(jq -r '.context.state_identity' <<< "${plan}")" '{transaction:$transaction,state_identity:$state_identity}' | /usr/libexec/justvoxel/mjust/admin-migration-recovery-transaction-json --instance "${JV_INSTANCE_ID}"

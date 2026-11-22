@@ -1,0 +1,249 @@
+#!/usr/bin/bash
+set -euo pipefail
+source /usr/libexec/justvoxel/mjust/ui.sh
+source /usr/libexec/justvoxel/mjust/setup-api.sh
+
+if (( $# > 0 )); then
+    echo 'Usage: setup' >&2
+    exit 2
+fi
+if (( EUID != 0 )); then
+    echo 'ERROR: this operation must run as root.' >&2
+    exit 1
+fi
+
+current="$(jv_setup_current_operation)" || exit 1
+if [[ $(jq -r '.operation != null' <<<"${current}") == true ]]; then
+    operation_id="$(jq -r '.operation.operation_id' <<<"${current}")"
+    echo "Reconnecting to setup operation ${operation_id}."
+    jv_setup_monitor_operation "${operation_id}"
+    exit $?
+fi
+
+diagnostic_id="$(jv_setup_diagnostic_start || true)"
+if [[ -n ${diagnostic_id} ]]; then
+    jv_setup_diagnostic_event "${diagnostic_id}" 'mjust setup started' '{}'
+fi
+
+defaults="$(jv_setup_defaults)" || exit 1
+inventory="$(jv_setup_storage)" || exit 1
+
+choose_partition() {
+    local title="$1" choice path model fs size label
+    local -a paths=() labels=()
+    while IFS=$'\t' read -r path model fs size; do
+        [[ -n ${path} ]] || continue
+        paths+=("${path}")
+        labels+=("${path} - ${fs}, ${size} GiB${model:+ - ${model}}")
+    done < <(jq -r '
+        .devices[]
+        | select(.type == "part" and (.read_only == false))
+        | select(.filesystem == "xfs" or .filesystem == "ext4" or .filesystem == "btrfs")
+        | select((.mountpoints // []) | all(. != "/" and . != "/var" and . != "/boot" and . != "/boot/efi"))
+        | [.path, (.model // ""), .filesystem, (((.size_bytes / 1073741824) * 10 | floor) / 10 | tostring)]
+        | @tsv
+    ' <<<"${inventory}")
+    if (( ${#paths[@]} == 0 )); then
+        echo 'No safe existing formatted partition is available.'
+        return 1
+    fi
+    choice="$(jui_choose "${title}" "${labels[@]}" 'Back')" || return 1
+    [[ ${choice} != Back ]] || return 1
+    for i in "${!labels[@]}"; do
+        if [[ ${labels[$i]} == "${choice}" ]]; then
+            printf '%s\n' "${paths[$i]}"
+            return 0
+        fi
+    done
+    return 1
+}
+
+partition_mount() {
+    local device="$1" default_mount="$2" mounted
+    mounted="$(jq -r --arg device "${device}" '.devices[] | select(.path == $device) | (.mountpoints[0] // "")' <<<"${inventory}")"
+    if [[ -n ${mounted} ]]; then
+        printf '%s\n' "${mounted}"
+    else
+        jui_input 'Mount point' "${default_mount}"
+    fi
+}
+
+echo 'JustVoxel first setup'
+echo '---------------------'
+echo 'Setup uses the JustVoxel Management Agent for validation, apply and rollback.'
+echo
+
+server_choice="$(jui_choose 'Minecraft server software' Paper Purpur Vanilla)" || exit 0
+server_type="${server_choice,,}"
+motd="$(jui_input 'Server welcome message (MOTD)' "$(jq -r '.motd' <<<"${defaults}")")" || exit 0
+max_players="$(jui_input 'Maximum players' "$(jq -r '.max_players' <<<"${defaults}")")" || exit 0
+game_mode_choice="$(jui_choose 'Game mode' Survival Creative Adventure Spectator)" || exit 0
+game_mode="${game_mode_choice,,}"
+[[ ${max_players} =~ ^[1-9][0-9]*$ ]] || { echo 'ERROR: maximum players must be a positive integer.' >&2; exit 1; }
+
+if [[ ${server_type} == vanilla ]]; then
+    bedrock_enabled=false
+    echo 'Managed Bedrock cross-play requires Paper or Purpur.'
+else
+    bedrock_choice="$(jui_choose 'Bedrock cross-play' 'Enable Bedrock cross-play' 'Disable Bedrock cross-play')" || exit 0
+    if [[ ${bedrock_choice} == 'Enable Bedrock cross-play' ]]; then bedrock_enabled=true; else bedrock_enabled=false; fi
+fi
+jv_setup_diagnostic_event "${diagnostic_id}" 'server settings collected' "$(jq -cn --arg motd "${motd}" --arg max_players "${max_players}" --arg bedrock_enabled "${bedrock_enabled}" '{motd:$motd,max_players:$max_players,bedrock_enabled:$bedrock_enabled}')"
+
+java_memory="$(jui_input 'Minecraft Java heap' "$(jq -r '.java_memory' <<<"${defaults}")")" || exit 0
+container_memory="$(jui_input 'Maximum total Minecraft memory' "$(jq -r '.container_memory' <<<"${defaults}")")" || exit 0
+java_port="$(jui_input 'Minecraft Java port' "$(jq -r '.java_port' <<<"${defaults}")")" || exit 0
+bedrock_port="$(jui_input 'Bedrock host TCP/UDP port' "$(jq -r '.bedrock_port' <<<"${defaults}")")" || exit 0
+[[ ${java_port} =~ ^[0-9]+$ && ${bedrock_port} =~ ^[0-9]+$ ]] || { echo 'ERROR: Minecraft ports must be numbers.' >&2; exit 1; }
+
+image_choice="$(jui_choose 'Minecraft container channel'     'Stable - recommended'     'Latest - newest upstream image'     'Exact/custom tag')" || exit 0
+case "${image_choice}" in
+    'Stable - recommended') image_tag=stable ;;
+    'Latest - newest upstream image') image_tag=latest ;;
+    *) image_tag="$(jui_input 'Container image tag' "$(jq -r '.image_tag' <<<"${defaults}")")" || exit 0 ;;
+esac
+
+version_choice="$(jui_choose 'Minecraft game version'     'Recommended - newest stable server version'     'Latest - follow newer server versions'     'Specific version')" || exit 0
+case "${version_choice}" in
+    'Recommended - newest stable server version') version_policy=recommended; version='' ;;
+    'Latest - follow newer server versions') version_policy=latest; version='' ;;
+    *) version_policy=pinned; version="$(jui_input 'Exact Minecraft version' '')" || exit 0 ;;
+esac
+jv_setup_diagnostic_event "${diagnostic_id}" 'Minecraft settings collected' "$(jq -cn --arg java_memory "${java_memory}" --arg container_memory "${container_memory}" --arg java_port "${java_port}" --arg bedrock_port "${bedrock_port}" --arg minecraft_image "${image_tag}" --arg version_policy "${version_policy}" --arg minecraft_version "${version}" '{java_memory:$java_memory,container_memory:$container_memory,java_port:$java_port,bedrock_port:$bedrock_port,minecraft_image:$minecraft_image,version_policy:$version_policy,minecraft_version:$minecraft_version}')"
+
+data_choice="$(jui_choose 'Minecraft data storage'     'JustVoxel system storage'     'Existing formatted local partition'     'Back')" || exit 0
+case "${data_choice}" in
+    'Back') exit 0 ;;
+    'JustVoxel system storage')
+        storage_type=system
+        storage_path="$(jq -r '.data_path' <<<"${defaults}")"
+        storage_device=''
+        storage_mount=''
+        ;;
+    *)
+        storage_type=partition
+        storage_device="$(choose_partition 'Minecraft data filesystem')" || exit 0
+        storage_mount="$(partition_mount "${storage_device}" '/var/mnt/justvoxel-data')" || exit 0
+        storage_path="$(jui_input 'Minecraft data directory' "${storage_mount}/minecraft")" || exit 0
+        ;;
+esac
+jv_setup_diagnostic_event "${diagnostic_id}" 'storage settings collected' "$(jq -cn --arg storage_type "${storage_type}" --arg storage_path "${storage_path}" --arg storage_device "${storage_device}" --arg storage_mount_point "${storage_mount}" '{storage_type:$storage_type,storage_path:$storage_path,storage_device:$storage_device,storage_mount_point:$storage_mount_point}')"
+
+backup_choice="$(jui_choose 'Backup storage'     'JustVoxel system storage'     'Existing formatted local partition'     'NFS network share'     'SMB/CIFS network share'     'Back')" || exit 0
+backup_device='' backup_mount='' backup_source='' backup_username='' backup_domain='' smb_password=''
+case "${backup_choice}" in
+    'Back') exit 0 ;;
+    'JustVoxel system storage')
+        backup_type=system
+        backup_path="$(jq -r '.backup_path' <<<"${defaults}")"
+        ;;
+    'Existing formatted local partition')
+        backup_type=partition
+        backup_device="$(choose_partition 'Backup filesystem')" || exit 0
+        backup_mount="$(partition_mount "${backup_device}" '/var/mnt/justvoxel-backup')" || exit 0
+        backup_path="$(jui_input 'Backup directory' "${backup_mount}/backups")" || exit 0
+        ;;
+    'NFS network share')
+        backup_type=nfs
+        backup_source="$(jui_input 'NFS source (server:/export)' 'server:/export')" || exit 0
+        backup_mount="$(jui_input 'Local mount point' '/var/mnt/justvoxel-backup')" || exit 0
+        backup_path="$(jui_input 'Backup directory' "${backup_mount}/backups")" || exit 0
+        ;;
+    'SMB/CIFS network share')
+        backup_type=smb
+        backup_source="$(jui_input 'SMB source (//server/share)' '//server/share')" || exit 0
+        backup_mount="$(jui_input 'Local mount point' '/var/mnt/justvoxel-backup')" || exit 0
+        backup_path="$(jui_input 'Backup directory' "${backup_mount}/backups")" || exit 0
+        backup_username="$(jui_input 'SMB username' '')" || exit 0
+        backup_domain="$(jui_input 'SMB domain/workgroup (optional)' '')" || exit 0
+        ;;
+esac
+
+backup_keep="$(jui_input 'Number of backups to keep' "$(jq -r '.backup_keep' <<<"${defaults}")")" || exit 0
+[[ ${backup_keep} =~ ^[1-9][0-9]*$ ]] || { echo 'ERROR: backup retention must be a positive integer.' >&2; exit 1; }
+backup_daily_time="$(jui_input 'Daily backup time' "$(jq -r '.backup_daily_time' <<<"${defaults}")")" || exit 0
+automatic_choice="$(jui_choose 'Automatic daily backups' 'Enable automatic backups' 'Disable automatic backups')" || exit 0
+if [[ ${automatic_choice} == 'Enable automatic backups' ]]; then backup_automatic=true; else backup_automatic=false; fi
+
+request="$(jq -cn --arg server_type "${server_type}"     --arg motd "${motd}" --argjson max_players "${max_players}" --argjson bedrock_enabled "${bedrock_enabled}"     --arg java_memory "${java_memory}" --arg container_memory "${container_memory}" --argjson java_port "${java_port}" --argjson bedrock_port "${bedrock_port}"     --arg image_tag "${image_tag}" --arg version_policy "${version_policy}" --arg version "${version}" --arg game_mode "${game_mode}"     --arg storage_type "${storage_type}" --arg storage_path "${storage_path}" --arg storage_device "${storage_device}" --arg storage_mount "${storage_mount}"     --argjson backup_automatic "${backup_automatic}" --arg backup_time "${backup_daily_time}" --argjson backup_keep "${backup_keep}"     --arg backup_type "${backup_type}" --arg backup_path "${backup_path}" --arg backup_device "${backup_device}" --arg backup_mount "${backup_mount}"     --arg backup_source "${backup_source}" --arg backup_username "${backup_username}" --arg backup_domain "${backup_domain}"     '{
+      server:{motd:$motd,max_players:$max_players,bedrock_enabled:$bedrock_enabled},
+      minecraft:{server_type:$server_type,java_memory:$java_memory,container_memory:$container_memory,java_port:$java_port,bedrock_port:$bedrock_port,image_tag:$image_tag,version_policy:$version_policy,version:$version,game_mode:$game_mode},
+      storage:{type:$storage_type,path:$storage_path,device:$storage_device,mount_point:$storage_mount},
+      backups:{automatic:$backup_automatic,daily_time:$backup_time,keep:$backup_keep,type:$backup_type,path:$backup_path,device:$backup_device,mount_point:$backup_mount,source:$backup_source,username:$backup_username,domain:$backup_domain}
+    }')"
+
+echo
+if [[ -n ${diagnostic_id} ]]; then
+    request="$(jq -c --arg diagnostic_session_id "${diagnostic_id}" '. + {diagnostic_session_id:$diagnostic_session_id}' <<<"${request}")"
+fi
+
+echo 'Validating setup with the Management Agent...'
+plan="$(jv_setup_plan "${request}")" || exit 1
+if ! jq -e '.ok == true and (.plan_fingerprint | type == "string")' <<<"${plan}" >/dev/null 2>&1; then
+    jv_setup_api_error "${plan}" 'Setup validation returned invalid data.'
+    exit 1
+fi
+jv_setup_diagnostic_event "${diagnostic_id}" 'backup settings collected' "$(jq -cn --arg backup_automatic "${backup_automatic}" --arg backup_daily_time "${backup_daily_time}" --arg backup_keep "${backup_keep}" --arg backup_type "${backup_type}" --arg backup_path "${backup_path}" --arg backup_device "${backup_device}" --arg backup_mount_point "${backup_mount}" --arg backup_source "${backup_source}" --arg backup_username "${backup_username}" --arg backup_domain "${backup_domain}" '{backup_automatic:$backup_automatic,backup_daily_time:$backup_daily_time,backup_keep:$backup_keep,backup_type:$backup_type,backup_path:$backup_path,backup_device:$backup_device,backup_mount_point:$backup_mount_point,backup_source:$backup_source,backup_username:$backup_username,backup_domain:$backup_domain}')"
+
+if [[ $(jq '.warnings | length' <<<"${plan}") -gt 0 ]]; then
+    echo
+    echo 'Notice:'
+    jq -r '.warnings[] | "  " + .message' <<<"${plan}"
+fi
+
+echo
+echo 'Reviewed configuration:'
+echo "  Server software: $(jq -r '.normalized.minecraft.server_type' <<<"${plan}")"
+echo "  Minecraft data: $(jq -r '.normalized.storage.path' <<<"${plan}")"
+echo "  Container image: docker.io/itzg/minecraft-server:$(jq -r '.normalized.minecraft.image_tag' <<<"${plan}")"
+echo "  Minecraft version: $(jq -r '.normalized.minecraft.version_policy + " (" + .normalized.minecraft.version + ")"' <<<"${plan}")"
+echo "  Game mode: $(jq -r '.normalized.minecraft.game_mode' <<<"${plan}")"
+echo "  Java heap / maximum memory: $(jq -r '.normalized.minecraft.java_memory + " / " + .normalized.minecraft.container_memory' <<<"${plan}")"
+echo "  Java port: $(jq -r '.normalized.minecraft.java_port' <<<"${plan}")/tcp"
+if [[ $(jq -r '.normalized.server.bedrock_enabled' <<<"${plan}") == true ]]; then
+    echo "  Bedrock port: $(jq -r '.normalized.minecraft.bedrock_port' <<<"${plan}")/tcp+udp"
+else
+    echo '  Bedrock: disabled'
+fi
+echo "  Backups: $(jq -r '.normalized.backups.path' <<<"${plan}")"
+echo "  Backup retention: $(jq -r '.normalized.backups.keep' <<<"${plan}")"
+if [[ $(jq -r '.normalized.backups.automatic' <<<"${plan}") == true ]]; then
+    echo "  Automatic backups: daily at $(jq -r '.normalized.backups.daily_time' <<<"${plan}")"
+else
+    echo '  Automatic backups: disabled'
+fi
+
+echo
+echo 'Minecraft EULA acceptance is required before JustVoxel can start the server.'
+echo 'Review: https://www.minecraft.net/eula'
+read -r -p 'Type ACCEPT to confirm that you accept the Minecraft EULA: ' eula
+if [[ ${eula} != ACCEPT ]]; then
+    jv_setup_diagnostic_event "${diagnostic_id}" 'Minecraft EULA not accepted' '{}'
+    echo 'EULA not accepted. No JustVoxel runtime configuration was created.'
+    exit 1
+fi
+jv_setup_diagnostic_event "${diagnostic_id}" 'Minecraft EULA accepted' '{}'
+
+if [[ $(jq -r '.requirements.smb_password_required // false' <<<"${plan}") == true ]]; then
+    read -r -s -p 'SMB password: ' smb_password
+    echo
+fi
+
+read -r -p 'Create this JustVoxel configuration? [y/N]: ' answer
+if [[ ${answer,,} != y && ${answer,,} != yes ]]; then
+    jv_setup_diagnostic_event "${diagnostic_id}" 'mjust setup cancelled after Review' '{}'
+    echo 'Cancelled. No JustVoxel runtime configuration was created.'
+    [[ -n ${diagnostic_id} ]] && echo "Setup diagnostic log: $(jv_setup_diagnostic_path "${diagnostic_id}")"
+    exit 0
+fi
+
+fingerprint="$(jq -r '.plan_fingerprint' <<<"${plan}")"
+apply_payload="$(jq -cn --arg fingerprint "${fingerprint}" --argjson request "${request}" --arg password "${smb_password}"     '{plan_fingerprint:$fingerprint,request:$request,smb_password:$password,eula_accepted:true}')"
+if [[ -n ${diagnostic_id} ]]; then
+    apply_payload="$(jq -c --arg diagnostic_session_id "${diagnostic_id}" '. + {diagnostic_session_id:$diagnostic_session_id}' <<<"${apply_payload}")"
+fi
+apply="$(jv_setup_apply "${apply_payload}")" || exit 1
+operation_id="$(jq -r '.operation.operation_id // empty' <<<"${apply}")"
+[[ -n ${operation_id} ]] || { echo 'ERROR: Management Agent did not return a setup operation id.' >&2; exit 1; }
+
+jv_setup_monitor_operation "${operation_id}"

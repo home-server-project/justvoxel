@@ -1,0 +1,45 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+readonly api_client=/usr/libexec/justvoxel/mjust/api-client
+
+if (( EUID != 0 )); then
+    echo 'ERROR: this operation must run as root.' >&2
+    exit 1
+fi
+
+if (( $# > 0 )); then
+    echo 'Usage: validate' >&2
+    exit 2
+fi
+
+set +e
+response="$("${api_client}" GET /v1/admin/validation)"
+rc=$?
+set -e
+
+if (( rc != 0 )); then
+    if jq -e 'type == "object" and (.error | type == "string")' <<<"${response}" >/dev/null 2>&1; then
+        printf 'ERROR: %s\n' "$(jq -r '.error' <<<"${response}")" >&2
+    else
+        echo 'ERROR: JustVoxel validation is unavailable from the Management API.' >&2
+    fi
+    exit 1
+fi
+
+if ! jq -e '
+    type == "object" and
+    (.ok | type == "boolean") and
+    (.output | type == "string") and
+    (.exit_code == 0 or .exit_code == 1)
+' <<<"${response}" >/dev/null 2>&1; then
+    echo 'ERROR: JustVoxel Management API returned invalid validation data.' >&2
+    exit 1
+fi
+
+jq -rj '.output' <<<"${response}"
+
+if [[ $(jq -r '.ok' <<<"${response}") == true ]]; then
+    exit 0
+fi
+exit "$(jq -r '.exit_code' <<<"${response}")"

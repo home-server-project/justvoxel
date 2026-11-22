@@ -1,0 +1,33 @@
+name: Publish and sign VM and HWS
+description: Publish and sign VM and HWS
+runs:
+  using: composite
+  steps:
+    - name: Sign and publish VM and HWS
+      shell: bash
+      run: |
+        set -euo pipefail
+        version="$(date -u +%Y%m%d)-${GITHUB_SHA:0:7}"
+        case "${CURRENT_TAG}" in
+          testing) immutable_tag="testing-${version}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" ;;
+          stable) immutable_tag="stable-${version}" ;;
+          *) echo "Unsupported CURRENT_TAG: ${CURRENT_TAG}" >&2; exit 1 ;;
+        esac
+        for edition in vm hws; do
+          repository="${VM_IMAGE_REPOSITORY}"
+          if [[ "${edition}" == hws ]]; then
+            repository="${HWS_IMAGE_REPOSITORY}"
+          fi
+          destination="${repository}:${immutable_tag}"
+          moving="${repository}:${CURRENT_TAG}"
+          sudo podman push --authfile "${HOME}/.docker/config.json" --digestfile "${RUNNER_TEMP}/digest" \
+            "localhost/justvoxel-${edition}:test" "docker://${destination}"
+          digest="$(cat "${RUNNER_TEMP}/digest")"
+          [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          cosign sign -y --new-bundle-format=false --use-signing-config=false \
+            --key env://COSIGN_PRIVATE_KEY "${repository}@${digest}"
+          cosign verify --new-bundle-format=false --key cosign.pub "${repository}@${digest}" >/dev/null
+          skopeo copy --authfile "${HOME}/.docker/config.json" --preserve-digests \
+            "docker://${repository}@${digest}" "docker://${moving}"
+          echo "- ${destination} and ${moving} (${digest})" >> "${GITHUB_STEP_SUMMARY}"
+        done

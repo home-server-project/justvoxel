@@ -1,0 +1,280 @@
+package server
+
+import (
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestDateTimeAndVersionWorkspaceContracts(t *testing.T) {
+	read := func(name string) string {
+		data, err := englishPresentationAsset(filepath.Join(name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	header := read("templates/header.html")
+	for _, want := range []string{
+		`data-system-tab="date-time"`, `data-date-time-panel`, `data-timezone-search`, `data-date-time-automatic`,
+		`data-date-time-manual`, `data-version-open`, `data-version-workspace-dialog`,
+		`data-version-tab="container"`, `data-version-tab="minecraft"`, `Minecraft Settings`,
+	} {
+		if !strings.Contains(header, want) {
+			t.Fatalf("header missing %q", want)
+		}
+	}
+	if strings.Contains(header, `data-minecraft-tab="version"`) {
+		t.Fatal("Version remains inside Minecraft Settings")
+	}
+	search := read("static/timezone-search.js")
+	date := read("static/date-time.js")
+	if !strings.Contains(search, "scoreZone") || !strings.Contains(date, "initializeJustVoxelTimezoneSearch") {
+		t.Fatal("Date & Time is missing the city search")
+	}
+	for _, want := range []string{"date.disabled = automatic.checked", "time.disabled = automatic.checked", "/api/system/workspace/date-time", "csrf"} {
+		if !strings.Contains(date, want) {
+			t.Fatalf("Date & Time missing %q", want)
+		}
+	}
+	version := read("static/version-workspace.js")
+	for _, want := range []string{"Container", "Installed", "Available", "Recommended", "Latest", "Specific version", "Geyser/Floodgate", "/api/minecraft/workspace/settings/plan", "compatibility_blocked"} {
+		if !strings.Contains(version, want) {
+			t.Fatalf("Version missing %q", want)
+		}
+	}
+	for _, want := range []string{
+		`recommended: "Recommended", latest: "Latest", pinned: "Specific version"`,
+		`card("Version configuration")`,
+		`<select name="policy" aria-label="Version">`,
+		`await settleSelectChange()`,
+		`setTimeout(resolve, 0)`,
+		`previewTicket !== previewSequence`,
+		`includes(minecraft.version_mode) ? minecraft.version_mode : "recommended"`,
+		`line("Installed", status.installed || "Not detected")`,
+		`line("Newest available", status.available ?`,
+		`line("Configured", status.configured_version === "LATEST" ?`,
+		`line("Version", policyLabel(minecraft.version_mode))`,
+		`form.querySelector("[data-version-specific]").hidden = policy !== "pinned"`,
+		`form.elements.version.required = policy === "pinned"`,
+		`line(policy === "latest" ? "Will install now" : "Will install", candidate.selected_candidate)`,
+	} {
+		if !strings.Contains(version, want) {
+			t.Fatalf("Version policy contract missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{`card("Version policy")`, `<label>Policy`, `line("Version policy",`, `Version mode`, `waitForSelectBlur`} {
+		if strings.Contains(version, forbidden) {
+			t.Fatalf("redundant Version label: %q", forbidden)
+		}
+	}
+	if strings.Contains(version, `minecraft.version_mode === "latest" ? "latest" : "pinned"`) {
+		t.Fatal("Recommended policy initializes as Specific version")
+	}
+	css := read("static/app.css")
+	for _, want := range []string{
+		`[hidden]{display:none!important}`,
+		`.version-workspace-dialog{position:absolute`,
+		`height:min(720px,calc(100dvh - 76px))`,
+		`max-height:calc(100dvh - 76px)`,
+		`.version-workspace-shell{display:flex;flex-direction:column;height:100%;min-height:0`,
+		`.version-workspace-header{display:flex;flex:none`,
+		`.version-workspace-tabs{display:flex;flex:none`,
+		`.version-workspace-body{flex:1;min-height:0;min-width:0;overflow-y:auto;overflow-x:hidden`,
+	} {
+		if !strings.Contains(css, want) {
+			t.Fatalf("bounded Version workspace missing %q", want)
+		}
+	}
+	versionDialogCSS := strings.SplitN(strings.SplitN(css, ".version-workspace-dialog{", 2)[1], "}", 2)[0]
+	if strings.Contains(versionDialogCSS, "height:auto") || strings.Contains(versionDialogCSS, "max-height:none") || strings.Contains(versionDialogCSS, "overflow:visible") {
+		t.Fatal("Version workspace must keep bounded outer geometry")
+	}
+	app := read("static/app.js")
+	if strings.Contains(app, `id !== "migration" && id !== "version"`) || !strings.Contains(app, `if (Number.isFinite(saved.height) && saved.height > 0) element.style.height = saved.height + "px";`) {
+		t.Fatal("Version must restore its saved height when switching tabs")
+	}
+	for _, want := range []string{
+		`identity.dataset.containerRow = "identity"`,
+		`controls.dataset.containerRow = "controls"`,
+		`identity.className = "version-status-grid version-container-row version-container-summary"`,
+		`identity.appendChild(statusLine)`,
+		`card("Minecraft Container")`,
+		`library.className = "version-container-history"`,
+		`footer.className = "backup-command-bar version-container-footer"`,
+		`historyActions.className = "backup-command-actions"`,
+		`metric("Images", "0")`,
+		`metric("Total size", "0 MB")`,
+		`metric("Selected", "0")`,
+		`metric("Status", "Checking…")`,
+		`select.type = "checkbox"; select.setAttribute("role", "switch")`,
+		`imageSelectors.forEach((input) => { input.checked = input === select && selectedDigest !== ""; })`,
+		`selectedCount.textContent = selectedDigest ? "1" : "0"`,
+		`body.set("restore_digest", selectedDigest)`,
+		`toggle("Restart server now")`,
+		`toggle("Create backup before restart")`,
+		`terminal.textContent = text`,
+		`terminal.hidden = true`,
+		`terminal.hidden = false`,
+		`configuration.className = "version-container-configuration"`,
+		`configurationHeading.textContent = "Container configuration"`,
+		`configuration.append(configurationHeading, controls, helper, actionLane)`,
+		`panel.append(identity, configuration, library)`,
+		`historyHeading.textContent = "Previous Container Images"`,
+	} {
+		if !strings.Contains(version, want) {
+			t.Fatalf("Container workspace contract missing %q", want)
+		}
+	}
+	for _, want := range []string{
+		`channelTitle.textContent = "Server update channel"`,
+		`channelTitle.textContent = "Runtime image"`,
+		`["paper", "purpur", "vanilla"].includes(runtime.configured_server_type || runtime.server_type)`,
+		`runtimeTag.textContent = runtime?.image_tag || configuredTag || "Unavailable"`,
+		`current, beforeApply: saveRetention`,
+		`plan.review !== status.plan_fingerprint`,
+	} {
+		if !strings.Contains(version, want) {
+			t.Fatalf("Container channel contract missing %q", want)
+		}
+	}
+	for _, label := range []string{
+		`data-version-tab="container" aria-selected="true">Container</button>`,
+		`data-version-tab="minecraft" aria-selected="false">Version</button>`,
+	} {
+		if !strings.Contains(header, label) {
+			t.Fatalf("Update tab contract missing %q", label)
+		}
+	}
+	for _, retired := range []string{`data-version-tab="software"`, `data-version-tab="switch"`} {
+		if strings.Contains(header, retired) {
+			t.Fatalf("Minecraft Update contains retired tab %q", retired)
+		}
+	}
+	for _, forbidden := range []string{`data-version-custom`, `name="channel"`, `Check for updates`} {
+		if strings.Contains(version, forbidden) {
+			t.Fatalf("mixed Version image controls remain: %q", forbidden)
+		}
+	}
+	if !strings.Contains(version, `tabs.forEach((tab) => tab.addEventListener("click", () => { currentTab = tab.dataset.versionTab;`) || strings.Contains(version, `versionDialog.style.height`) {
+		t.Fatal("Version tab switching must keep the workspace height")
+	}
+	if strings.Contains(app, `<label>Timezone<input name="timezone"`) {
+		t.Fatal("Minecraft Players still edits timezone")
+	}
+	if !strings.Contains(app, "data-crossplay-compatibility") {
+		t.Fatal("Cross-play compatibility missing")
+	}
+	if !strings.Contains(app, `Geyser/Floodgate compatible with ${status.geyser_supported_version}`) {
+		t.Fatal("Cross-play compatibility must use the Geyser-supported Java version")
+	}
+	if strings.Contains(app, `Geyser/Floodgate compatible with ${status.available}.`) {
+		t.Fatal("Cross-play compatibility must not use the newest available Minecraft version")
+	}
+}
+
+func TestSecondRoundWorkspacePresentationContracts(t *testing.T) {
+	read := func(name string) string {
+		data, err := englishPresentationAsset(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	header := read("templates/header.html")
+	last := -1
+	for _, tab := range []string{"health", "history", "users", "logs", "date-time", "wallpaper", "reset", "about"} {
+		position := strings.Index(header, `data-system-tab="`+tab+`"`)
+		if position <= last {
+			t.Fatalf("System tab missing or out of order: %s", tab)
+		}
+		last = position
+	}
+	if strings.Contains(header, "data-date-time-open") || strings.Contains(header, "data-date-time-dialog") {
+		t.Fatal("Date & Time must be embedded in System")
+	}
+	footer := read("templates/project_footer.html")
+	if strings.Contains(footer, "data-wallpaper-dialog") || !strings.Contains(footer, `data-system-settings-panel="wallpaper"`) {
+		t.Fatal("Wallpaper must be embedded in System")
+	}
+	app := read("static/app.js")
+	for _, want := range []string{"parkSettingsPanels()", "content.appendChild(panel)", `clockPreferences.time === "12" ? { hour12: true } : { hourCycle: "h23" }`, "topbarClock.dataset.systemTimezone", "workspaceTopInset", "getBoundingClientRect().bottom"} {
+		if !strings.Contains(app, want) {
+			t.Fatalf("Workspace presentation missing %q", want)
+		}
+	}
+	wallpaper := read("static/wallpaper.js")
+	if strings.Contains(wallpaper, "showModal") || !strings.Contains(wallpaper, `window.JustVoxelSystem?.openTab("wallpaper")`) {
+		t.Fatal("Footer must open the System Wallpaper tab")
+	}
+	network := read("static/network-workspace.js")
+	for _, want := range []string{"root.append(tablist, state)", "network-troubleshoot-devices", "Activating service…", "openActivatedDashboards()", "if (!provider.service_active)", "popup.opener = null"} {
+		if !strings.Contains(network, want) {
+			t.Fatalf("Network presentation missing %q", want)
+		}
+	}
+	storage := read("static/storage-browser.js")
+	for _, want := range []string{"workspace.dataset.storageSelectedDisk = name", "button.dataset.storageDisk === rememberedDisk", "|| diskButtons[0]", "selectDisk(initialDisk.dataset.storageDisk)"} {
+		if !strings.Contains(storage, want) {
+			t.Fatalf("Drive restoration missing %q", want)
+		}
+	}
+}
+
+func TestApprovedSystemAndNetworkRepairContracts(t *testing.T) {
+	read := func(path string) string {
+		data, err := englishPresentationAsset(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	app, date, header, css := read("static/app.js"), read("static/date-time.js"), read("templates/header.html"), read("static/app.css")
+	if strings.Contains(header, `id="date-time-title"`) || strings.Contains(header, `aria-labelledby="date-time-title"`) {
+		t.Fatal("Date & Time must not repeat the System tab heading")
+	}
+	if !strings.Contains(header, `data-date-time-panel aria-label="Date &amp; Time"`) {
+		t.Fatal("Date & Time panel must have an accessible label")
+	}
+	for _, source := range []string{app, date, header} {
+		for _, stale := range []string{"justvoxel.topbar.display.v1", "Display preferences", "Topbar clock and date", "Saved in this browser. System time and scheduled tasks stay unchanged.", "Manage how you sign in and protect your account."} {
+			if strings.Contains(source, stale) {
+				t.Fatalf("stale System presentation: %s", stale)
+			}
+		}
+	}
+	for _, want := range []string{`Choose the password WebUI uses to sign in.`, `month: "short"`, `refreshClockDisplay`, `/api/session-info`} {
+		if !strings.Contains(app, want) {
+			t.Fatalf("System repair missing %s", want)
+		}
+	}
+	for _, want := range []string{`time_format: timeFormat.value`, `date_format: dateFormat.value`, `window.JustVoxelClockDisplay?.update(payload)`} {
+		if !strings.Contains(date, want) {
+			t.Fatalf("shared format form missing %s", want)
+		}
+	}
+	for _, want := range []string{`.system-users-table th:last-child,.system-users-table td:last-child{text-align:center}`, `.system-user-menu{display:inline-block;width:max-content`, `.system-security-heading{display:flex;align-items:center;flex-wrap:wrap;gap:.4rem}`, `margin-inline:auto`, `max-width:380px`, `font-size:.84rem!important`} {
+		if !strings.Contains(css, want) {
+			t.Fatalf("layout repair missing %s", want)
+		}
+	}
+	network, networkCSS := read("static/network-workspace.js"), read("static/network-workspace.css")
+	if strings.Contains(network, "Apply with safety checkpoint") || !strings.Contains(network, `apply.textContent = "Apply"`) {
+		t.Fatal("Ethernet Apply wording")
+	}
+	for _, want := range []string{`wrap.appendChild(input)`, `if (activate.parentElement === actions) actions.appendChild(activate)`} {
+		if !strings.Contains(network, want) {
+			t.Fatalf("Network action ordering missing %s", want)
+		}
+	}
+	for _, want := range []string{
+		`.network-provider-card>.network-inline-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));`,
+		`.network-provider-card [data-action="deactivate"]{grid-column:1;justify-self:start}`,
+		`.network-provider-card [data-action="activate"]{grid-column:2;justify-self:end}`,
+		`.toggle-line{display:flex;align-items:center;justify-content:flex-end;gap:.5rem`,
+	} {
+		if !strings.Contains(networkCSS, want) {
+			t.Fatalf("Network alignment missing %s", want)
+		}
+	}
+}

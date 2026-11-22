@@ -1,0 +1,139 @@
+set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+
+default:
+    @/usr/libexec/justvoxel/mjust/menu
+
+setup:
+    @sudo /usr/libexec/justvoxel/mjust/setup
+
+configure:
+    @sudo /usr/libexec/justvoxel/mjust/configure
+
+configure-max-players:
+    @sudo /usr/libexec/justvoxel/mjust/configure-max-players
+
+status:
+    @sudo /usr/libexec/justvoxel/mjust/status
+
+start instance_id="":
+    @if [ -n "{{instance_id}}" ]; then sudo /usr/libexec/justvoxel/mjust/service start --instance "{{instance_id}}"; else sudo /usr/libexec/justvoxel/mjust/service start; fi
+
+stop instance_id="":
+    @if [ -n "{{instance_id}}" ]; then sudo /usr/libexec/justvoxel/mjust/service stop --instance "{{instance_id}}"; else sudo /usr/libexec/justvoxel/mjust/service stop; fi
+
+restart instance_id="":
+    @if [ -n "{{instance_id}}" ]; then sudo /usr/libexec/justvoxel/mjust/service restart --instance "{{instance_id}}"; else sudo /usr/libexec/justvoxel/mjust/service restart; fi
+
+players instance_id="":
+    @if [ -n "{{instance_id}}" ]; then sudo /usr/libexec/justvoxel/mjust/players --instance "{{instance_id}}" ; else sudo /usr/libexec/justvoxel/mjust/players ; fi
+
+whitelist-list instance_id="":
+    @if [ -n "{{instance_id}}" ]; then sudo /usr/libexec/justvoxel/mjust/whitelist --instance "{{instance_id}}" list; else sudo /usr/libexec/justvoxel/mjust/whitelist list; fi
+
+whitelist-add-java name instance_id="":
+    @if [ -n "{{instance_id}}" ]; then sudo /usr/libexec/justvoxel/mjust/whitelist --instance "{{instance_id}}" add-java "{{name}}"; else sudo /usr/libexec/justvoxel/mjust/whitelist add-java "{{name}}"; fi
+
+whitelist-remove-java name instance_id="":
+    @if [ -n "{{instance_id}}" ]; then sudo /usr/libexec/justvoxel/mjust/whitelist --instance "{{instance_id}}" remove-java "{{name}}"; else sudo /usr/libexec/justvoxel/mjust/whitelist remove-java "{{name}}"; fi
+
+whitelist-add-bedrock gamertag instance_id="":
+    @if [ -n "{{instance_id}}" ]; then sudo /usr/libexec/justvoxel/mjust/whitelist --instance "{{instance_id}}" add-bedrock "{{gamertag}}"; else sudo /usr/libexec/justvoxel/mjust/whitelist add-bedrock "{{gamertag}}"; fi
+
+whitelist-remove-bedrock gamertag instance_id="":
+    @if [ -n "{{instance_id}}" ]; then sudo /usr/libexec/justvoxel/mjust/whitelist --instance "{{instance_id}}" remove-bedrock "{{gamertag}}"; else sudo /usr/libexec/justvoxel/mjust/whitelist remove-bedrock "{{gamertag}}"; fi
+
+backup instance_id="":
+    @if [ -n "{{instance_id}}" ]; then sudo /usr/libexec/justvoxel/mjust/backup --instance "{{instance_id}}" ; else sudo /usr/libexec/justvoxel/mjust/backup ; fi
+
+restore instance_id="":
+    @if [ -n "{{instance_id}}" ]; then sudo /usr/libexec/justvoxel/mjust/restore --instance "{{instance_id}}" full; else sudo /usr/libexec/justvoxel/mjust/restore full; fi
+
+restore-full instance_id="":
+    @if [ -n "{{instance_id}}" ]; then sudo /usr/libexec/justvoxel/mjust/restore --instance "{{instance_id}}" full; else sudo /usr/libexec/justvoxel/mjust/restore full; fi
+
+export destination="":
+    @if [ -n "{{destination}}" ]; then sudo /usr/libexec/justvoxel/mjust/migration-export "{{destination}}"; else sudo /usr/libexec/justvoxel/mjust/migration-export; fi
+
+import source="":
+    @if [ -n "{{source}}" ]; then sudo /usr/libexec/justvoxel/mjust/migration-import "{{source}}"; else sudo /usr/libexec/justvoxel/mjust/migration-import; fi
+
+migration-recover transaction="":
+    @if [ -n "{{transaction}}" ]; then sudo /usr/libexec/justvoxel/mjust/migration-recover "{{transaction}}"; else sudo /usr/libexec/justvoxel/mjust/migration-recover; fi
+
+update-minecraft instance_id="":
+    @if [ -n "{{instance_id}}" ]; then sudo /usr/libexec/justvoxel/mjust/update-minecraft --instance "{{instance_id}}" ; else sudo /usr/libexec/justvoxel/mjust/update-minecraft ; fi
+
+logs instance_id="":
+    @if [ -n "{{instance_id}}" ]; then sudo /usr/libexec/justvoxel/mjust/logs --instance "{{instance_id}}"; else sudo /usr/libexec/justvoxel/mjust/logs; fi
+
+validate:
+    @sudo /usr/libexec/justvoxel/mjust/validate
+
+os-status:
+    @sudo /usr/libexec/justvoxel/mjust/os-status
+
+os-update:
+    @sudo /usr/libexec/justvoxel/mjust/os-update
+
+resources:
+    @/usr/libexec/justvoxel/mjust/resources
+
+files:
+    @/usr/libexec/justvoxel/mjust/files
+
+net:
+    @/usr/libexec/justvoxel/mjust/network
+
+ups:
+    @sudo /usr/libexec/justvoxel/mjust/ups
+
+reboot:
+    @sudo /usr/libexec/justvoxel/mjust/system-power reboot
+
+poweroff:
+    @sudo /usr/libexec/justvoxel/mjust/system-power poweroff
+
+firmware:
+    @sudo /usr/libexec/justvoxel/mjust/firmware
+
+web action="status":
+    @sudo /usr/libexec/justvoxel/mjust/web "{{action}}"
+
+password-reset:
+    @sudo /usr/libexec/justvoxel/mjust/web password-reset
+
+welcome:
+    @/usr/libexec/justvoxel/mjust/welcome show
+
+welcome-off:
+    @/usr/libexec/justvoxel/mjust/welcome off
+
+welcome-on:
+    @/usr/libexec/justvoxel/mjust/welcome on
+
+storage:
+    @sudo /usr/libexec/justvoxel/mjust/storage-provision menu
+
+storage-plan:
+    @sudo /usr/libexec/justvoxel/mjust/storage-plan
+
+storage-disk:
+    @sudo /usr/libexec/justvoxel/mjust/storage-provision disk
+
+storage-partition:
+    @sudo /usr/libexec/justvoxel/mjust/storage-provision partition
+
+storage-free-space:
+    @sudo /usr/libexec/justvoxel/mjust/storage-provision free
+
+storage-network:
+    @sudo /usr/libexec/justvoxel/mjust/storage-provision network
+
+storage-system:
+    @sudo /usr/libexec/justvoxel/mjust/storage-provision system
+
+storage-migrate:
+    @sudo /usr/libexec/justvoxel/mjust/data-migration
+
+start-over:
+    @sudo /usr/libexec/justvoxel/mjust/start-over
