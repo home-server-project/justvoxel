@@ -44,7 +44,7 @@ cleanup() {
         rm -f -- "$staged_bundle" "$staged_bundle.partial" 2>/dev/null || safe=no
     fi
 
-    if [[ "$restart_required" == yes ]]; then
+    if [[ "$restart_required" == yes && ${JV_MIGRATION_STOP_REQUESTED:-no} == yes ]]; then
         if systemctl start "${JV_INSTANCE_UNIT}" >/dev/null 2>&1 \
             && jv_migration_validate_runtime >/dev/null 2>&1; then
             restart_required=no
@@ -246,19 +246,20 @@ if [[ "$live_minecraft_state" == running ]]; then
     if server_supports_plugins; then
         server_reported="$(podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli 'version' 2>/dev/null | head -n1 || true)"
         geyser_reported="$(podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli 'geyser version' 2>/dev/null | head -n1 || true)"
-    else
+    elif [[ ${MINECRAFT_SERVER_TYPE} != bedrock ]]; then
         server_reported="$(podman exec "${JV_INSTANCE_CONTAINER}" mc-monitor status --json 2>/dev/null | jq -er '.server_info.version.name | select(type == "string")' || true)"
     fi
     emit_progress running player_recheck 'Rechecking players immediately before the cold export.'
     stop_mode=required
     [[ "$players_confirmed" == true ]] && stop_mode=confirmed
+    JV_MIGRATION_STOP_REQUESTED=no
     restart_required=yes
     set +e
     JV_INTERRUPT_CONFIRMATION_MODE="$stop_mode" jv_stop_minecraft_adaptive 'Export server' >/dev/null 2>&1
     stop_rc=$?
     set -e
     case "$stop_rc" in
-        0) restart_required=yes ;;
+        0) restart_required="$JV_MIGRATION_STOP_REQUESTED" ;;
         10) failure_status='A player joined after export review; interruption confirmation is required again.'; exit 1 ;;
         *) failure_status='Minecraft could not be stopped safely for export.'; exit 1 ;;
     esac

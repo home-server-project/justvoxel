@@ -3,10 +3,6 @@
 source /usr/libexec/justvoxel/mjust/instance-context.sh
 jv_migration_load_instance() {
     jv_load_instance "$1" "${2:-}" || { echo 'ERROR: selected Minecraft instance is unavailable.' >&2; return 1; }
-    case "${MINECRAFT_SERVER_TYPE-paper}" in paper|purpur|vanilla) ;; *)
-        echo 'ERROR: migration for this server software requires separate compatibility support.' >&2
-        return 1 ;;
-    esac
     JV_MIGRATION_INSTANCE_CONFIG="/etc/justvoxel/instances/${JV_INSTANCE_ID}/config.json"
     JV_MIGRATION_INSTANCE_QUADLET="/etc/containers/systemd/${JV_INSTANCE_CONTAINER}.container"
     local record="${JV_MIGRATION_INSTANCE_CONFIG}"
@@ -44,7 +40,23 @@ jv_migration_validate_data() {
 jv_migration_validate_runtime() {
     /usr/libexec/justvoxel/mjust/validate-instance-runtime-commit "${JV_INSTANCE_ID}" || return 1
     jv_migration_validate_data || return 1
+    if [[ ${MINECRAFT_SERVER_TYPE} == bedrock ]]; then
+        local deadline=$((SECONDS + 900))
+        while (( SECONDS < deadline )) && systemctl is-active --quiet "${JV_INSTANCE_UNIT}"; do
+            jv_migration_bedrock_players >/dev/null && return 0
+            sleep 2
+        done
+        return 1
+    fi
     JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack --instance "${JV_INSTANCE_ID}" "${1:-${MINECRAFT_VERSION}}"
+}
+jv_migration_bedrock_players() {
+    local response
+    response="$(/usr/libexec/justvoxel/mjust/api-client GET "/v1/minecraft/instances/${JV_INSTANCE_ID}/players")" || return 1
+    jq -ce --arg id "${JV_INSTANCE_ID}" '
+        select(.id == $id and .state == "online" and (.online | type) == "number"
+            and .online >= 0 and .online <= .maximum)
+        | {state:"running",online,names:[]}' <<< "${response}"
 }
 jv_migration_players_json() {
     local raw online state
@@ -52,6 +64,7 @@ jv_migration_players_json() {
     case "${state}" in
         inactive|failed) jq -cn '{state:"stopped",online:0,names:[]}' ;;
         active)
+            if [[ ${MINECRAFT_SERVER_TYPE} == bedrock ]]; then jv_migration_bedrock_players; return; fi
             raw="$(podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli list)" || return 1
             [[ ${raw} =~ There[[:space:]]are[[:space:]]([0-9]+)[[:space:]]of[[:space:]]a[[:space:]]max[[:space:]]of[[:space:]]([0-9]+)[[:space:]]players[[:space:]]online:[[:space:]]*(.*)$ ]] || return 1
             online="${BASH_REMATCH[1]}"
@@ -67,6 +80,10 @@ jv_minecraft_still_running() {
 }
 jv_minecraft_announce_shutdown() { podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli "say Server shutting down in $1 seconds" >/dev/null; }
 jv_begin_minecraft_stop() {
+    JV_MIGRATION_STOP_REQUESTED=yes
+    if [[ ${MINECRAFT_SERVER_TYPE} == bedrock ]]; then
+        podman exec "${JV_INSTANCE_CONTAINER}" send-command stop >/dev/null || return 1
+    fi
     if declare -F jv_trace_run >/dev/null; then
         jv_trace_run systemctl --no-block stop "${JV_INSTANCE_UNIT}"
     else
@@ -81,28 +98,43 @@ jv_bypass_container_shutdown_delay() {
         sleep 0.1
     done
 }
+jv_migration_online_count() {
+    local raw
+    if [[ ${MINECRAFT_SERVER_TYPE} == bedrock ]]; then
+        raw="$(jv_migration_bedrock_players)" || return 1
+        jq -er '.online' <<< "${raw}"
+    else
+        raw="$(jv_player_list_raw)" || return 1
+        jv_player_online_count "${raw}"
+    fi
+}
 jv_player_check_before_interrupt() {
-    local players online
+    local online
     systemctl is-active --quiet "${JV_INSTANCE_UNIT}" || return 0
-    players="$(jv_player_list_raw)" || return 1
-    online="$(jv_player_online_count "${players}")" || return 1
+    online="$(jv_migration_online_count)" || return 1
     (( online == 0 )) && return 0
     case "${JV_INTERRUPT_CONFIRMATION_MODE:-interactive}" in
         confirmed) return 0 ;; required) return 10 ;; interactive) confirm "Players appear to be online. $1 anyway?" ;; *) return 1 ;;
     esac
 }
 jv_stop_minecraft_adaptive() {
-    local raw online
+    local online
     systemctl is-active --quiet "${JV_INSTANCE_UNIT}" || return 0
-    raw="$(jv_player_list_raw)" || return 1
-    online="$(jv_player_online_count "${raw}")" || return 1
+    online="$(jv_migration_online_count)" || return 1
     if (( online > 0 )); then
         jv_player_check_before_interrupt "$1" || return $?
+        if [[ ${MINECRAFT_SERVER_TYPE} == bedrock ]]; then
+            podman exec "${JV_INSTANCE_CONTAINER}" send-command 'say Server shutting down in 60 seconds' || return 1
+            sleep 60
+            jv_begin_minecraft_stop || return 1
+            jv_wait_minecraft_stopped
+            return
+        fi
         jv_begin_minecraft_stop || return 1
         jv_countdown_online_server_shutdown
     else
         jv_begin_minecraft_stop || return 1
-        jv_bypass_container_shutdown_delay || true
+        if [[ ${MINECRAFT_SERVER_TYPE} != bedrock ]]; then jv_bypass_container_shutdown_delay || true; fi
         jv_wait_minecraft_stopped
     fi
 }

@@ -40,10 +40,23 @@ if [[ -f ${JV_MIGRATION_SOURCE} ]]; then
     fi
 fi
 
+if [[ $is_native != true && -n ${JV_MIGRATION_API_NATIVE_DIGEST:-} ]]; then
+    echo 'ERROR: reviewed native bundle is no longer present.' >&2
+    exit 1
+fi
 native_manifest=''
+native_software=''
 if [[ ${is_native} == true ]]; then
     echo 'Verifying native JustVoxel bundle SHA-256 integrity.'
-    native_manifest="$(/usr/libexec/justvoxel/mjust/migration-archive verify-native "${JV_MIGRATION_SOURCE}")" || exit 1
+    native_manifest="$(/usr/libexec/justvoxel/mjust/migration-archive verify-native "${JV_MIGRATION_SOURCE}" --review)" || exit 1
+    jv_migration_native_fields && server_allows_in_place_switch "$native_software" "$MINECRAFT_SERVER_TYPE" || {
+        echo 'ERROR: unsupported_server_type: incompatible native Minecraft selection.' >&2
+        exit 1
+    }
+    if [[ ${JV_MIGRATION_API_MODE:-0} == 1 && $native_digest != "${JV_MIGRATION_API_NATIVE_DIGEST:-}" ]]; then
+        echo 'ERROR: native bundle differs from reviewed source.' >&2
+        exit 1
+    fi
 fi
 
 jv_migration_validate_data
@@ -85,8 +98,7 @@ fi
 if [[ ${is_native} == true ]]; then
     detection_base="${staging_source}/justvoxel-migration/server"
     [[ -d ${detection_base} ]] || { echo 'ERROR: native bundle server directory is missing after extraction.' >&2; exit 1; }
-    detection="$(/usr/libexec/justvoxel/mjust/migration-archive detect "${detection_base}")"
-    selected="$(select_candidate "${detection}" "${detection_base}")" || { rc=$?; (( rc == 2 )) && { echo 'Import cancelled.'; exit 0; }; exit "${rc}"; }
+    selected="$(/usr/libexec/justvoxel/mjust/migration-archive native-candidate "$detection_base" "$native_software" "$native_version" "$native_digest")"
     source_class=justvoxel
 else
     detection_base="${staging_source}"
@@ -101,14 +113,14 @@ else
 fi
 
 candidate_type="$(jq -r '.sourceType' <<< "${selected}")"
-if ! server_supports_plugins "${MINECRAFT_SERVER_TYPE-paper}" ||
-    { [[ -n ${native_manifest} ]] && ! server_allows_in_place_switch "${MINECRAFT_SERVER_TYPE-paper}" "$(jq -r '.minecraft.implementation // "paper"' <<< "${native_manifest}")"; }; then
-    echo 'ERROR: Migration v1 imports require a Paper or Purpur destination and a Paper or Purpur native bundle.' >&2
+if [[ $is_native != true ]] && ! server_supports_plugins "${MINECRAFT_SERVER_TYPE-paper}"; then
+    echo 'ERROR: unsupported_server_type: external Import requires a Paper or Purpur destination.' >&2
     exit 1
 fi
-case "${candidate_type}" in
-    paper|itzg-paper) ;;
-    vanilla)
+case "${is_native}:${candidate_type}" in
+    true:*) ;;
+    false:paper|false:itzg-paper) ;;
+    false:vanilla)
         echo
         echo 'WARNING: vanilla Minecraft server detected.'
         echo 'JustVoxel runs Paper. The world can normally be opened by Paper at the same Minecraft version,'
@@ -119,7 +131,7 @@ case "${candidate_type}" in
             jui_confirm 'Continue with vanilla -> Paper conversion?' || { echo 'Import cancelled.'; exit 0; }
         fi
         ;;
-    fabric|forge|neoforge|modded-unknown)
+    false:fabric|false:forge|false:neoforge|false:modded-unknown)
         echo "ERROR: unsupported Minecraft source type detected: ${candidate_type}" >&2
         echo 'Migration v1 supports JustVoxel, Paper, itzg/minecraft-server TYPE=PAPER, and guarded vanilla -> Paper conversion.' >&2
         exit 1
@@ -143,6 +155,7 @@ if [[ ${source_class} == justvoxel ]]; then
     manifest_online="$(jq -r 'if .minecraft.onlineMode == null then "unknown" else (.minecraft.onlineMode|tostring) end' <<< "${native_manifest}")"
 fi
 online_state="$(jv_migration_online_mode_state "${manifest_online}" "${props_online}")"
+[[ $native_software != bedrock ]] || online_state=not_applicable
 case "${online_state}" in
     conflict)
         echo 'ERROR: source metadata and server.properties disagree about online-mode.' >&2
@@ -162,14 +175,7 @@ esac
 # Resolve exact source Minecraft version. Migration never uses LATEST automatically.
 source_version="$(jq -r '.minecraftVersion // empty' <<< "${selected}")"
 if [[ ${source_class} == justvoxel ]]; then
-    manifest_version="$(jq -r '.minecraft.version // empty' <<< "${native_manifest}")"
-    [[ -n ${manifest_version} ]] || { echo 'ERROR: native migration manifest has no exact Minecraft version.' >&2; exit 1; }
-    if resolved_version="$(jv_migration_version_resolution "${manifest_version}" "${source_version}")"; then
-        source_version="${resolved_version}"
-    else
-        echo "ERROR: native manifest Minecraft version (${manifest_version}) conflicts with staged server evidence (${source_version:-unknown})." >&2
-        exit 1
-    fi
+    source_version="$native_version"
 elif [[ ${source_class} == justvoxel-backup ]]; then
     if [[ ${source_backup_meta_mode} == pinned && -n ${source_backup_meta_version} && ${source_backup_meta_version} != LATEST ]]; then
         source_version="${source_version:-${source_backup_meta_version}}"
@@ -186,11 +192,11 @@ if [[ -z ${source_version} ]]; then
         source_version="$(jui_input 'Exact source Minecraft version (example 1.21.8)')" || exit 1
     fi
 fi
-[[ ${source_version} =~ ^[0-9]+([.][0-9]+){1,2}$ ]] || {
+[[ $native_software == bedrock || ${source_version} =~ ^[0-9]+([.][0-9]+){1,2}$ ]] || {
     echo "ERROR: source Minecraft version is not an exact supported version string: ${source_version}" >&2
     exit 1
 }
-if ! server_version_available "$source_version"; then
+if ! jv_migration_import_version_available; then
     echo 'ERROR: The destination server software could not confirm availability of the imported Minecraft version.' >&2
     echo 'Import stopped before activation because the destination server software could not confirm the imported Minecraft version.' >&2
     exit 1

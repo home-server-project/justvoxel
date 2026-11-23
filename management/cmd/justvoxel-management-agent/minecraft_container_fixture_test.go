@@ -650,6 +650,7 @@ source "$FIXTURE_ROOT/interrupt-safety.sh"
 source "$FIXTURE_ROOT/migration-instance.sh"
 JV_INSTANCE_UNIT=minecraft-jv-a1b2c3.service
 JV_INSTANCE_CONTAINER=minecraft-jv-a1b2c3
+MINECRAFT_SERVER_TYPE=paper
 jv_begin_minecraft_stop
 [[ $(cat "$FIXTURE_ROOT/active") == deactivating ]]
 [[ $(podman inspect --format '{{.State.Running}}' "$JV_INSTANCE_CONTAINER") == true ]]

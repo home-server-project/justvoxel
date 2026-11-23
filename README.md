@@ -10,7 +10,7 @@ No collection of scripts to maintain. No separate Minecraft management panel to 
 
 Have an old laptop or PC? **JustVoxel HWS can turn it into a dedicated Minecraft appliance instead of leaving useful hardware in a drawer.** On supported laptops, JustVoxel includes controls to ignore lid-close sleep so the server keeps running with the lid closed, plus local console display controls that can turn the screen off immediately or after a short delay.
 
-> 🚧 **Pre-release:** JustVoxel is being prepared for its first public release. The features described here reflect the current development implementation. Stable installation media and final release instructions will be published after release validation.
+> 🚧 **Pre-release:** JustVoxel is being prepared for its first public release. The current installation ISO is available for testing and early use while final release validation continues.
 
 ## ✨ Minecraft hosting, made simpler
 
@@ -57,6 +57,19 @@ HWS adds physical-machine support such as UPS/NUT integration, SMART and NVMe to
 Both editions use the same JustVoxel Control Center, Management API, Minecraft workflows, storage model, backups, networking, and update experience.
 
 [Learn about the VM/HWS capability model](docs/VARIANTS.md)
+
+## 🚀 Install JustVoxel
+
+One installer ISO supports both JustVoxel editions.
+
+[⬇️ Download JustVoxel x86_64 ISO](https://sourceforge.net/projects/justvoxel/files/JustVoxel-x86_64.iso/download)
+
+Choose the edition that matches where you are installing:
+
+- **JustVoxel VM** for virtual machines and compatible hosted VM environments
+- **JustVoxel HWS** for PCs, laptops, mini PCs, physical home servers, and compatible bare-metal hosting
+
+See the [installation guide](docs/INSTALLER.md) for installation, disk preparation, and first login.
 
 ## 🏠 Minecraft-first, not locked to Minecraft
 
@@ -339,17 +352,6 @@ The comparison uses the current project documentation and repositories:
 - [MineOS Node](https://github.com/hexparrot/mineos-node)
 
 If a comparison entry is outdated or unfair, please open an issue. Corrections that make JustVoxel look worse are welcome too.
-
-## 🚀 Install JustVoxel
-
-JustVoxel is still in pre-release validation.
-
-One online ISO supports both editions. See the [installation guide](docs/INSTALLER.md) for the Actions artifact, disk preparation, and first login.
-
-The intended choices are simple:
-
-- **JustVoxel VM** for virtual machines and compatible hosted VM environments
-- **JustVoxel HWS** for PCs, laptops, mini PCs, physical home servers, and compatible bare-metal hosting
 
 ## 📚 Documentation
 

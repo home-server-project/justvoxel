@@ -42,13 +42,15 @@ mjust export
 mjust import
 ```
 
-A native JustVoxel export is one portable `justvoxel-migration-*.tar.gz` file. It contains the full persistent Minecraft data tree, a versioned source manifest, and a SHA-256 integrity index. SHA-256 detects corruption; it does **not** prove who created the file or make an untrusted bundle trusted.
+Every valid registered JustVoxel server instance can be exported. Native Export uses the software and runtime configuration of the selected instance. A native JustVoxel export is one portable `justvoxel-migration-*.tar.gz` file. It contains the full persistent Minecraft data tree, a versioned source manifest, and a SHA-256 integrity index. SHA-256 detects corruption; it does **not** prove who created the file or make an untrusted bundle trusted.
 
-## Supported sources in migration v1
+## Supported Import sources in migration v1
 
-Supported:
+Native Import restores every valid registered JustVoxel server type to a destination running the same software. The verified manifest supplies the exact Minecraft release and, for mod loaders, the loader version. Cross-software native imports require a supported conversion. External source detection and import support are narrower.
 
-- JustVoxel native migration bundle from Paper or Purpur
+Supported Import sources:
+
+- JustVoxel native migration bundle for the same software or a supported conversion
 - existing JustVoxel `minecraft-*.tar.gz` backup
 - Paper server directory/archive
 - `itzg/minecraft-server` using `TYPE=PAPER`
@@ -63,7 +65,7 @@ Generic import formats:
 
 ZIP uses Python's built-in ZIP support already present in JustVoxel; no additional archive package is installed. 7z and RAR are not supported.
 
-Not supported automatically in v1:
+External sources without automatic import support include:
 
 - Spigot
 - Fabric
@@ -102,7 +104,7 @@ JustVoxel determines the exact source Minecraft version from native metadata or 
 
 If the source version cannot be determined, the administrator must provide the
 exact source version. If JustVoxel cannot confirm that exact version for the
-selected Paper or Purpur destination, import stops before activation.
+selected destination, import stops before activation.
 
 After a migration succeeds and gameplay has been checked, a later version change is a separate operation:
 
@@ -114,11 +116,11 @@ Opening a world with a newer Minecraft version can modify it irreversibly, which
 
 ## Java online-mode / player identity safety
 
-Complete migration v1 requires Java `online-mode=true`.
+Java imports require `online-mode=true`. Native Bedrock imports validate the Bedrock world tree.
 
 If the source reports `online-mode=false`, automatic complete migration is refused. Online-mode and offline-mode can assign different UUID identities, which can disconnect the correct player from inventory, position, advancement, whitelist, ops and plugin data.
 
-If source identity mode cannot be determined, JustVoxel requires the administrator to explicitly confirm that the source used `online-mode=true` before activation. If a native manifest and `server.properties` disagree, the import is refused.
+For Java sources, if identity mode cannot be determined, JustVoxel requires the administrator to explicitly confirm that the source used `online-mode=true` before activation. If a native manifest and `server.properties` disagree, the import is refused.
 
 Geyser/Floodgate Bedrock identity is handled separately and does not make an offline-mode Java migration safe.
 
@@ -393,7 +395,7 @@ The sequence is:
 11. apply destination ownership and SELinux `container_file_t` labels;
 12. render destination runtime with a new RCON secret;
 13. start Minecraft;
-14. validate RCON, destination software/version, plugins, and Geyser/Floodgate when enabled;
+14. validate the selected runtime using Java readiness and software checks or native Bedrock player status;
 15. run appliance validation;
 16. remove transaction/safety data only after success.
 

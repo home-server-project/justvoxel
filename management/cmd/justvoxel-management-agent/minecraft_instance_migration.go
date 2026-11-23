@@ -42,6 +42,9 @@ func (b *instanceRuntimeBackend) migrationPortableSettings(previous instanceRunt
 	}
 	var portable struct {
 		InstanceID       string `json:"instance_id"`
+		SourceSoftware   string `json:"source_software"`
+		Version          string `json:"version"`
+		LoaderVersion    string `json:"loader_version"`
 		GameMode         string `json:"game_mode"`
 		Difficulty       string `json:"difficulty"`
 		Whitelist        bool   `json:"whitelist"`
@@ -51,6 +54,22 @@ func (b *instanceRuntimeBackend) migrationPortableSettings(previous instanceRunt
 	}
 	if instanceDecode(data, &portable) != nil || portable.InstanceID != previous.Runtime.ID {
 		return next, errInstanceRecovery
+	}
+	if portable.Version != "" {
+		if portable.SourceSoftware != "" {
+			if !javaServerAllowsSwitch(portable.SourceSoftware, previous.Runtime.Software) {
+				return next, errInstanceRecovery
+			}
+			next.Runtime.LoaderVersion = portable.LoaderVersion
+			next.Runtime.PreserveContent = true
+		} else if previous.Runtime.Software != "paper" && previous.Runtime.Software != "purpur" {
+			return next, errInstanceRecovery
+		}
+		next.Runtime.Version = portable.Version
+		next.Runtime.VersionPolicy = "pinned"
+		if portable.Version == "LATEST" || validateJavaServerSelection(next.Runtime.Software, "pinned", portable.Version, next.Runtime.LoaderVersion, next.Runtime.ImageTag, next.Runtime.BedrockEnabled) != nil {
+			return next, errInstanceRecovery
+		}
 	}
 	next.Runtime.GameMode = portable.GameMode
 	next.Runtime.Difficulty = portable.Difficulty

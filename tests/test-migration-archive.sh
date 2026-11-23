@@ -87,6 +87,10 @@ native="${tmp}/native.tar.gz"
 mkdir "${tmp}/corrupt-native"
 tar -C "${tmp}/corrupt-native" -xzf "${native}"
 printf 'corrupted\n' >> "${tmp}/corrupt-native/justvoxel-migration/server/world/level.dat"
+index_sha="$("${archive}" verify-native "${native}" --review | jq -er '.indexSHA256')"
+if "${archive}" native-candidate "${tmp}/corrupt-native/justvoxel-migration/server" paper 1.21.8 "$index_sha" >/dev/null 2>&1; then
+    fail 'changed staged world was accepted against the reviewed native index'
+fi
 tar -C "${tmp}/corrupt-native" -czf "${tmp}/corrupt-checksum.tar.gz" justvoxel-migration
 if "${archive}" verify-native "${tmp}/corrupt-checksum.tar.gz" >/dev/null 2>&1; then
     fail 'corrupted native checksum was accepted'

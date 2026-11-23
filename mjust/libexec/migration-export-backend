@@ -21,12 +21,14 @@ fi
 was_active=no
 restart_required=no
 partial=''
+manifest_tmp=''
 transport_started=no
 removable_owned=no
 
 cleanup() {
     local rc=$?
     trap - EXIT INT TERM
+    if [[ -n ${manifest_tmp} ]]; then rm -f -- "${manifest_tmp}" || rc=1; fi
     if [[ -n ${partial:-} && -f ${partial} ]]; then
         rm -f -- "${partial}" || true
     fi
@@ -114,14 +116,19 @@ if systemctl is-active --quiet "${JV_INSTANCE_UNIT}"; then
     if server_supports_plugins; then
         server_reported="$(podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli 'version' 2>/dev/null | head -n1 || true)"
         geyser_reported="$(podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli 'geyser version' 2>/dev/null | head -n1 || true)"
-    else
+    elif [[ ${MINECRAFT_SERVER_TYPE} != bedrock ]]; then
         server_reported="$(podman exec "${JV_INSTANCE_CONTAINER}" mc-monitor status --json 2>/dev/null | jq -er '.server_info.version.name | select(type == "string")' || true)"
     fi
     if server_supports_plugins; then plugins_reported="$(podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli 'plugins' 2>/dev/null | head -n1 || true)"; fi
     jv_player_check_before_interrupt 'Export server' || { echo 'Export cancelled.'; exit 0; }
     echo 'Stopping Minecraft through its configured graceful shutdown path.'
     restart_required=yes
-    systemctl stop "${JV_INSTANCE_UNIT}"
+    if [[ ${MINECRAFT_SERVER_TYPE} == bedrock ]]; then
+        jv_begin_minecraft_stop
+        jv_wait_minecraft_stopped
+    else
+        systemctl stop "${JV_INSTANCE_UNIT}"
+    fi
     if systemctl is-active --quiet "${JV_INSTANCE_UNIT}"; then
         echo 'ERROR: Minecraft is still active; export will not start.' >&2
         exit 1
@@ -134,32 +141,28 @@ fi
 source_info="$(/usr/libexec/justvoxel/mjust/migration-archive inspect "${DATA_PATH}")"
 source_bytes="$(jq -r '.expandedBytes' <<< "${source_info}")"
 source_members="$(jq -r '.members' <<< "${source_info}")"
-detection="$(/usr/libexec/justvoxel/mjust/migration-archive detect "${DATA_PATH}")"
-candidate_count="$(jq -r '.candidates | length' <<< "${detection}")"
-(( candidate_count == 1 )) || {
-    echo "ERROR: active JustVoxel data did not resolve to exactly one Minecraft server root (found ${candidate_count})." >&2
-    exit 1
-}
-candidate="$(jq -c '.candidates[0]' <<< "${detection}")"
-online_mode="$(jq -r '.onlineMode // empty' <<< "${candidate}")"
-[[ ${online_mode} == true ]] || {
-    echo 'ERROR: active JustVoxel server did not confirm online-mode=true; refusing to create a portable native bundle.' >&2
-    exit 1
-}
+candidate="$(/usr/libexec/justvoxel/mjust/migration-archive native-data "${DATA_PATH}" "${MINECRAFT_SERVER_TYPE}" "${MINECRAFT_VERSION}")"
+
+if [[ ${MINECRAFT_SERVER_TYPE} != bedrock && ${JV_NETWORK_MEMBER} != yes ]]; then
+    jq -e '.onlineMode == true' >/dev/null <<< "${candidate}" || {
+        echo 'ERROR: selected Java server did not confirm online-mode=true.' >&2
+        exit 1
+    }
+fi
 
 configured_game_mode="${GAME_MODE:-survival}"
 configured_difficulty="${DIFFICULTY:-normal}"
 configured_whitelist="${WHITELIST_ENABLED:-yes}"
 configured_enforce="${ENFORCE_WHITELIST:-yes}"
 configured_bedrock_plugins="${BEDROCK_MANAGED_PLUGINS:-yes}"
-source_version="$(jq -r '.minecraftVersion // empty' <<< "${candidate}")"
-[[ -n ${source_version} ]] || {
-    if [[ ${MINECRAFT_VERSION_MODE} == pinned && ${MINECRAFT_VERSION} != LATEST ]]; then source_version="${MINECRAFT_VERSION}"; fi
-}
-[[ -n ${source_version} ]] || {
-    echo 'ERROR: exact Minecraft version could not be determined for the source server.' >&2
-    exit 1
-}
+[[ ${MINECRAFT_SERVER_TYPE} != bedrock ]] || configured_bedrock_plugins=no
+source_version="${MINECRAFT_VERSION}"
+if [[ ${source_version} == LATEST ]]; then
+    source_version="$(jq -er '.minecraftVersion // empty' <<< "${candidate}")" || {
+        echo 'ERROR: exact Minecraft version could not be determined for the source server.' >&2
+        exit 1
+    }
+fi
 
 image_ref="${JV_INSTANCE_IMAGE_REF}"
 image_digest="$(podman image inspect "${image_ref}" --format '{{.Digest}}' 2>/dev/null || true)"
@@ -175,7 +178,6 @@ fi
 install -d -m0700 -o root -g root "${JV_MIGRATION_RUN_ROOT}"
 manifest_tmp="$(mktemp "${JV_MIGRATION_RUN_ROOT}/manifest.XXXXXX.json")"
 chmod 0600 "${manifest_tmp}"
-trap 'rm -f -- "${manifest_tmp}" 2>/dev/null || true; cleanup' EXIT INT TERM
 
 created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 bundle_id="$(cat /proc/sys/kernel/random/uuid)"
@@ -195,7 +197,10 @@ jq -n \
     --arg architecture "$(uname -m)" \
     --arg bootcImage "${bootc_ref}" \
     --arg bootcDigest "${bootc_digest}" \
-    --arg implementation "${MINECRAFT_SERVER_TYPE-paper}" \
+    --arg implementation "${MINECRAFT_SERVER_TYPE}" \
+    --argjson onlineMode "$(jq '.onlineMode' <<< "${candidate}")" \
+    --arg loaderVersion "${MINECRAFT_LOADER_VERSION}" \
+    --argjson nativePorts "$(jq -c '.runtime | if .software=="bedrock" then {bedrockTCPPort:.bedrock_tcp_port,bedrockUDPStart:.bedrock_udp_start,bedrockUDPEnd:.bedrock_udp_end} else {} end' "${JV_MIGRATION_INSTANCE_CONFIG}")" \
     --arg version "${source_version}" \
     --arg reportedVersion "${server_reported}" \
     --arg gameMode "${configured_game_mode}" \
@@ -235,7 +240,8 @@ jq -n \
             implementation: $implementation,
             version: $version,
             reportedVersion: (if $reportedVersion == "" then null else $reportedVersion end),
-            onlineMode: true,
+            onlineMode: $onlineMode,
+            loaderVersion: (if $loaderVersion == "" then null else $loaderVersion end),
             gameMode: $gameMode,
             difficulty: $difficulty,
             whitelistEnabled: $whitelistEnabled,
@@ -243,10 +249,10 @@ jq -n \
             maxPlayers: ($maxPlayers | tonumber),
             motd: $motd
         },
-        networkHints: {
+        networkHints: ($nativePorts + {
             javaPort: ($javaPort | tonumber),
             bedrockPort: ($bedrockPort | tonumber)
-        },
+        }),
         bedrock: {
             enabled: $bedrockEnabled,
             geyserEnabled: $geyserEnabled,
@@ -292,10 +298,14 @@ if [[ ${restart_required} == yes ]]; then
     echo 'Starting Minecraft.'
     systemctl start "${JV_INSTANCE_UNIT}"
     restart_required=no
-    wait_for_rcon 900 || {
-        echo 'ERROR: export completed, but Minecraft did not become RCON-ready after restart.' >&2
-        exit 1
-    }
+    if [[ ${MINECRAFT_SERVER_TYPE} == bedrock ]]; then
+        jv_migration_validate_runtime
+    else
+        wait_for_rcon 900 || {
+            echo 'ERROR: export completed, but Minecraft did not become RCON-ready after restart.' >&2
+            exit 1
+        }
+    fi
 fi
 
 size="$(stat -c '%s' "${JV_MIGRATION_DESTINATION}")"

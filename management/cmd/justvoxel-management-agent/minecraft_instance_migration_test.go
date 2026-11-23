@@ -55,6 +55,22 @@ func TestMigrationPortableDataCannotReplaceDestinationIdentityOrRuntimeOwnership
 	if !reflect.DeepEqual(next, expected) {
 		t.Fatal("portable source changed destination identity, ports, limits, storage, boot policy or runtime ownership")
 	}
+	for _, software := range []string{"fabric", "forge", "neoforge", "quilt"} {
+		destination := previous
+		destination.Runtime.Software = software
+		destination.Runtime.BedrockEnabled = false
+		destination.Runtime.ImageTag = "java21"
+		destination.Runtime.Version = "1.21.1"
+		destination.Runtime.LoaderVersion = "1.2.1"
+		portable["source_software"], portable["version"], portable["loader_version"] = software, "1.21.2", "1.2.3"
+		if err = b.writeJSON(filepath.Join(tx, "portable.json"), portable, true); err != nil {
+			t.Fatal(err)
+		}
+		next, err := b.migrationPortableSettings(destination, tx)
+		if err != nil || next.Runtime.Version != "1.21.2" || next.Runtime.LoaderVersion != "1.2.3" || next.Runtime.VersionPolicy != "pinned" {
+			t.Fatalf("%s reviewed release lost: %v", software, err)
+		}
+	}
 	portable["instance_id"] = "jv-d4e5f6"
 	if err = b.writeJSON(filepath.Join(tx, "portable.json"), portable, true); err != nil {
 		t.Fatal(err)

@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+type reviewedMigrationInstanceKey struct{}
+
 type instanceVersionKey struct{}
 type instanceVersionSelectionKey struct{}
 
@@ -74,13 +76,14 @@ func instanceVersionCommand(ctx context.Context, args []string) error {
 		}
 		return instanceMaintenanceColdBackup(ctx, id)
 	case "instance-version-publish":
-		if (len(args) != 7 && (len(args) != 9 || args[7] != "--migration")) || (args[6] != "" && !operationFingerprintPattern.MatchString(args[6])) || !validSetupServerType(args[2]) || !imageTagInputPattern.MatchString(args[3]) || !instanceRuntimeVersionPattern.MatchString(args[4]) || (!containerOnly && args[5] != "recommended" && args[5] != "latest" && args[5] != "pinned") {
+		migration := len(args) == 9 && args[7] == "--migration"
+		if (len(args) != 7 && !migration) || (args[6] != "" && !operationFingerprintPattern.MatchString(args[6])) || !validSetupServerType(args[2]) || !imageTagInputPattern.MatchString(args[3]) || !(instanceRuntimeVersionPattern.MatchString(args[4]) || migration && args[2] == "bedrock" && bedrockVersionPattern.MatchString(args[4])) || (!containerOnly && args[5] != "recommended" && args[5] != "latest" && args[5] != "pinned") {
 			return errInstanceID
 		}
 		if !javaServerAllowsSwitch(previous.Runtime.Software, args[2]) {
 			return instanceRuntimeFailure("Software conversion requires a separate supported operation.")
 		}
-		if !containerOnly && !javaServerPaperFamily(previous.Runtime.Software) && previous.Runtime.Software != "vanilla" && (args[2] != previous.Runtime.Software || args[4] != previous.Runtime.Version || args[5] != previous.Runtime.VersionPolicy) {
+		if !migration && !containerOnly && !javaServerPaperFamily(previous.Runtime.Software) && previous.Runtime.Software != "vanilla" && (args[2] != previous.Runtime.Software || args[4] != previous.Runtime.Version || args[5] != previous.Runtime.VersionPolicy) {
 			return instanceRuntimeFailure("Version updates for this server software require separate compatibility support.")
 		}
 		snapshot, _, _, err := b.snapshot(ctx)
@@ -92,13 +95,18 @@ func instanceVersionCommand(ctx context.Context, args []string) error {
 			return err
 		}
 		next := previous
-		if len(args) == 9 {
+		if migration {
 			next, err = b.migrationPortableSettings(previous, args[8])
 			if err != nil {
 				return err
 			}
+			if args[2] != previous.Runtime.Software || args[3] != previous.Runtime.ImageTag || args[6] != previous.Runtime.ImageDigest || args[5] != "pinned" || next.Runtime.VersionPolicy != "pinned" || args[4] != next.Runtime.Version {
+				return errInstanceRecovery
+			}
+			ctx = context.WithValue(ctx, reviewedMigrationInstanceKey{}, id)
+		} else {
+			next.Runtime.PreserveContent = os.Getenv("JUSTVOXEL_SWITCH_PRESERVE_CONTENT") == "yes"
 		}
-		next.Runtime.PreserveContent = os.Getenv("JUSTVOXEL_SWITCH_PRESERVE_CONTENT") == "yes"
 		next.Runtime.Software = args[2]
 		next.Runtime.ImageTag = args[3]
 		next.Runtime.Version = args[4]
