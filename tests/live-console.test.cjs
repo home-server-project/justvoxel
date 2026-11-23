@@ -345,7 +345,7 @@ test('diagnostic routes, confirmation/recovery and System Logs/Failed units rema
   assert.match(app, /Retry Reset Minecraft/);
   assert.match(app, /confirm_players/);
   assert.match(app, /factoryResetPollOperationID === activeFactoryResetOperationID/);
-  assert.equal(read('webui/VERSION').trim(), '1.0.0-rc.1');
+  assert.equal(read('webui/VERSION').trim(), '1.0.0');
   assert.match(read('webui/internal/server/static/app.css'), /\.live-console-dialog\{[^}]*resize:both/);
   assert.match(read('webui/internal/server/static/app.css'), /\.live-console-transcript\{[^}]*overflow-y:auto[^}]*overflow-x:hidden[^}]*white-space:pre-wrap[^}]*overflow-wrap:anywhere/);
 });

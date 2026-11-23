@@ -3,6 +3,18 @@
 </p>
 
 <p align="center">
+  <a href="README.md">English</a> •
+  <a href="readme_i18n/README_fr-CA.md">Français (Canada)</a> •
+  <a href="readme_i18n/README_de.md">Deutsch</a> •
+  <a href="readme_i18n/README_pl.md">Polski</a> •
+  <a href="readme_i18n/README_pt-BR.md">Português (Brasil)</a> •
+  <a href="readme_i18n/README_es-419.md">Español (Latinoamérica)</a> •
+  <a href="readme_i18n/README_uk.md">Українська</a> •
+  <a href="readme_i18n/README_ru.md">Русский</a> •
+  <a href="readme_i18n/README_zh-Hans.md">简体中文</a>
+</p>
+
+<p align="center">
   <strong>Your Minecraft servers. Your own hardware, rented dedicated server, or hosted VM. One Control Center.</strong>
 </p>
 

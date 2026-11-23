@@ -185,7 +185,7 @@ func assertLanguageDialog(t *testing.T, body, locale, returnPath string) {
 			t.Fatalf("language dialog missing %q", want)
 		}
 	}
-	if strings.Count(dialog, "<select ") != 1 || strings.Count(dialog, "<option ") != 9 || strings.Count(dialog, " selected") != 1 {
+	if strings.Count(dialog, "<select ") != 1 || strings.Count(dialog, "<option") != 9 || strings.Count(dialog, " selected") != 1 {
 		t.Fatal("language picker must have one select, nine options and one selected locale")
 	}
 	groups := regexp.MustCompile(`(?s)<optgroup label="([^"]*)">(.*?)</optgroup>`).FindAllStringSubmatch(dialog, -1)
@@ -202,6 +202,10 @@ func assertLanguageDialog(t *testing.T, body, locale, returnPath string) {
 	}
 	if len(groups) != len(wantGroups) || strings.Count(dialog, "<optgroup") != len(wantGroups) {
 		t.Fatal("language picker must have exactly three optgroups")
+	}
+	separators := regexp.MustCompile(`</optgroup>\s*<hr>\s*<optgroup `).FindAllString(dialog, -1)
+	if len(separators) != len(groups)-1 || strings.Count(dialog, "<hr") != len(separators) {
+		t.Fatal("language picker must have one native separator between each pair of groups")
 	}
 	optionPattern := regexp.MustCompile(`<option [^>]*>[^<]*</option>`)
 	for i, group := range wantGroups {
