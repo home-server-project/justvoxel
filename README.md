@@ -1,8 +1,26 @@
-# 🎮 JustVoxel
+<p align="center">
+  <img src="docs/images/justvoxel-logo.png" width="260" alt="JustVoxel">
+</p>
 
-**Your Minecraft servers. Your own hardware, rented dedicated server, or hosted VM. One Control Center.**
+<h1 align="center">JustVoxel</h1>
 
-Run your own Minecraft servers without becoming a Linux administrator.
+<p align="center">
+  <strong>Your Minecraft servers. Your own hardware, rented dedicated server, or hosted VM. One Control Center.</strong>
+</p>
+
+<p align="center">
+  A self-hosted Minecraft server appliance for people who want to run the server — not administer the operating system underneath it.
+</p>
+
+<p align="center">
+  <a href="#-install-justvoxel">Install</a> •
+  <a href="#-minecraft-hosting-made-simpler">Features</a> •
+  <a href="docs/INSTALLER.md">Documentation</a>
+</p>
+
+<p align="center">
+  <img src="docs/images/justvoxel-overview-1.webp" width="100%" alt="JustVoxel Control Center overview"><img src="docs/images/justvoxel-overview-2.webp" width="100%" alt=""><img src="docs/images/justvoxel-overview-3.webp" width="100%" alt="">
+</p>
 
 JustVoxel is a dedicated, self-hosted Minecraft server appliance. Install it on a compatible PC, laptop, physical server, virtual machine, or hosting service that lets you run your own OS image, then manage Minecraft from a browser.
 
