@@ -1,0 +1,39 @@
+name: Sync testing after main promotion
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-testing-after-main
+  cancel-in-progress: false
+
+jobs:
+  sync-testing:
+    name: Fast-forward testing to main
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout promoted main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Fast-forward testing
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch --no-tags origin \
+            "+refs/heads/testing:refs/remotes/origin/testing"
+
+          if ! git merge-base --is-ancestor origin/testing "${GITHUB_SHA}"; then
+            echo "ERROR: testing is not an ancestor of main; refusing to rewrite history." >&2
+            exit 1
+          fi
+
+          git push origin "${GITHUB_SHA}:refs/heads/testing"
