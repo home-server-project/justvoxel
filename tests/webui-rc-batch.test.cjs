@@ -287,8 +287,8 @@ test('Export polling exposes Logs on success/failure/attention and Done only on 
   assert.ok(template.includes('Details available on System -&gt; Logs -&gt; Migration.'));
 });
 
-test('WebUI authoritative release candidate version', () => {
-  assert.equal(read('webui/VERSION').trim(), '1.0.0-rc.1');
+test('WebUI authoritative stable release version', () => {
+  assert.equal(read('webui/VERSION').trim(), '1.0.0');
 });
 
 test('recommended memory warning boundary is 1536 MiB and hard reserve remains 1024 MiB in both WebUI forms', () => {

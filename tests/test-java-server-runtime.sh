@@ -60,18 +60,6 @@ server_allows_in_place_switch paper purpur
 server_allows_in_place_switch purpur paper
 reject server_allows_in_place_switch paper vanilla
 
-# Recognition must not silently enable the existing portable migration format,
-# which has no loader-version contract. Reject before reading any host paths.
-source <(sed -n '/^jv_migration_load_instance() {/,/^}/p' "${repo_root}/mjust/libexec/migration-instance.sh")
-jv_load_instance() { :; }
-for software in spigot forge neoforge fabric quilt; do
-    MINECRAFT_SERVER_TYPE=${software}
-    if output="$(jv_migration_load_instance jv-aaaaaa 2>&1)"; then
-        echo 'New server software entered migration' >&2; exit 1
-    fi
-    [[ ${output} == *'migration for this server software requires separate compatibility support'* ]]
-done
-
 # Curl can only return a fixture for the exact reviewed upstream URL. Any
 # fallback request fails. The actual parsers and compatibility checks run here.
 curl() {

@@ -90,6 +90,9 @@ done
 # Exercise actual import ownership selection independently of host transport.
 selected='{"geyserEnabled":true,"geyserAuthType":"floodgate","floodgateEnabled":true,"pluginJars":["old-geyser.jar","old-floodgate.jar"]}'
 source_bedrock_manifest=''
+native_software=paper
+native_loader=''
+source_version=1.21.1
 readonly JV_INSTANCE_ID=jv-fixture1
 GAME_MODE=survival DIFFICULTY=normal WHITELIST_ENABLED=yes ENFORCE_WHITELIST=yes MAX_PLAYERS=10 MOTD=Fixture
 transaction="${fixture_dir}/import-transaction"
