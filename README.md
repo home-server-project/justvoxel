@@ -2,8 +2,6 @@
   <img src="docs/images/justvoxel-logo.png" width="260" alt="JustVoxel">
 </p>
 
-<h1 align="center">JustVoxel</h1>
-
 <p align="center">
   <strong>Your Minecraft servers. Your own hardware, rented dedicated server, or hosted VM. One Control Center.</strong>
 </p>
