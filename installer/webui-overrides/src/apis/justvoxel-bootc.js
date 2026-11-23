@@ -12,8 +12,8 @@ const SOURCE_INTERFACE = "org.fedoraproject.Anaconda.Modules.Payloads.Source";
 const BOOTC_INTERFACE = "org.fedoraproject.Anaconda.Modules.Payloads.Source.Bootc";
 
 export const JUSTVOXEL_IMAGE_REFS = {
-    hws: "registry:ghcr.io/home-server-project/justvoxel-hws:stable",
-    vm: "registry:ghcr.io/home-server-project/justvoxel-vm:stable",
+    hws: "ghcr.io/home-server-project/justvoxel-hws:stable",
+    vm: "ghcr.io/home-server-project/justvoxel-vm:stable",
 };
 
 const JUSTVOXEL_REGISTRY_REPOSITORIES = {
@@ -123,8 +123,8 @@ export const checkJustVoxelEditionAvailable = async (edition) => {
 };
 
 export const setJustVoxelEdition = async (edition) => {
-    const imageRef = JUSTVOXEL_IMAGE_REFS[edition];
-    if (!imageRef) {
+    const targetImgRef = JUSTVOXEL_IMAGE_REFS[edition];
+    if (!targetImgRef) {
         throw new Error("Unknown JustVoxel edition");
     }
 
@@ -132,10 +132,11 @@ export const setJustVoxelEdition = async (edition) => {
     const bootcSource = await findBootcSource(client);
     const current = await getProperty(client, bootcSource, BOOTC_INTERFACE, "Configuration");
 
+    const sourceImgRef = "registry:" + targetImgRef;
     const configuration = {
         stateroot: cockpit.variant("s", current.stateroot?.v || ""),
-        sourceImgRef: cockpit.variant("s", imageRef),
-        targetImgRef: cockpit.variant("s", imageRef),
+        sourceImgRef: cockpit.variant("s", sourceImgRef),
+        targetImgRef: cockpit.variant("s", targetImgRef),
     };
 
     await client.call(
@@ -149,5 +150,5 @@ export const setJustVoxelEdition = async (edition) => {
         ]
     );
 
-    return imageRef;
+    return targetImgRef;
 };

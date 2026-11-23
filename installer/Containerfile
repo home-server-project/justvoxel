@@ -22,7 +22,9 @@ RUN git init /work/node-cache \
     && npm ci
 COPY installer/webui-overrides/justvoxel.patch /work/justvoxel.patch
 COPY installer/webui-overrides/src/ /work/anaconda-webui/src/
+COPY tests/installer-bootc-refs.test.cjs /work/installer-bootc-refs.test.cjs
 RUN git apply /work/justvoxel.patch \
+    && JUSTVOXEL_BOOTC_API=src/apis/justvoxel-bootc.js node --test /work/installer-bootc-refs.test.cjs \
     && NODE_ENV=production ./build.js
 
 FROM ${INSTALLER_BASE_IMAGE}
