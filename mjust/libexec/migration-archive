@@ -5,9 +5,9 @@ command_name="${1:-}"
 shift || true
 
 case "${command_name}" in
-    inspect|extract|copy-dir|detect|create-native|verify-native) ;;
+    inspect|extract|copy-dir|detect|native-data|create-native|verify-native) ;;
     *)
-        echo 'Usage: migration-archive {inspect|extract|copy-dir|detect|create-native|verify-native} ...' >&2
+        echo 'Usage: migration-archive {inspect|extract|copy-dir|detect|native-data|create-native|verify-native} ...' >&2
         exit 2
         ;;
 esac
@@ -465,16 +465,7 @@ def nonempty_dir(path):
         return False
 
 
-def detect_one(root):
-    props_path = os.path.join(root, "server.properties")
-    props = read_properties(props_path)
-    level = props.get("level-name", "world") or "world"
-    if level in (".", "..") or "/" in level or "\\" in level or "\x00" in level:
-        return None
-    world = os.path.join(root, level, "level.dat")
-    if not os.path.isfile(world):
-        return None
-
+def external_software(root):
     fabric = (
         os.path.exists(os.path.join(root, "fabric-server-launch.jar"))
         or os.path.exists(os.path.join(root, "fabric-server-launcher.properties"))
@@ -522,6 +513,19 @@ def detect_one(root):
     else:
         source_type = "vanilla"
         supported = True
+
+    return source_type, supported
+
+
+def java_data(root, version=None):
+    props_path = os.path.join(root, "server.properties")
+    props = read_properties(props_path)
+    level = props.get("level-name", "world") or "world"
+    if level in (".", "..") or "/" in level or "\\" in level or "\x00" in level:
+        return None
+    world = os.path.join(root, level, "level.dat")
+    if not os.path.isfile(world):
+        return None
 
     plugins = []
     plugins_dir = os.path.join(root, "plugins")
@@ -588,10 +592,8 @@ def detect_one(root):
 
     return {
         "root": os.path.realpath(root),
-        "sourceType": source_type,
-        "supported": supported,
         "levelName": level,
-        "minecraftVersion": detect_version(root),
+        "minecraftVersion": version or detect_version(root),
         "onlineMode": bool_prop("online-mode"),
         "gameMode": props.get("gamemode", "survival"),
         "difficulty": props.get("difficulty", "normal"),
@@ -608,6 +610,26 @@ def detect_one(root):
         "floodgateEnabled": floodgate_enabled,
         "floodgateKeySha256": floodgate_sha,
     }
+
+
+def detect_one(root):
+    data = java_data(root)
+    if data:
+        data["sourceType"], data["supported"] = external_software(root)
+    return data
+
+
+def native_data(root, software, version):
+    if software == "bedrock":
+        worlds = pathlib.Path(root) / "worlds"
+        if not any(path.is_file() for path in worlds.glob("*/level.dat")):
+            fail("native Bedrock world data is missing")
+        return {"onlineMode": None, "pluginJars": [], "pluginJarCount": 0,
+                "geyserEnabled": False, "floodgateEnabled": False}
+    data = java_data(root, None if version == "LATEST" else version)
+    if not data or data["onlineMode"] is None:
+        fail("selected Java world or online-mode evidence is missing")
+    return data
 
 
 def detect_roots(path):
@@ -820,6 +842,10 @@ elif CMD == "detect":
     if len(ARGS) != 1:
         fail("detect requires DIRECTORY")
     print(json.dumps({"candidates": detect_roots(ARGS[0])}, separators=(",", ":")))
+elif CMD == "native-data":
+    if len(ARGS) != 3:
+        fail("native-data requires DATA_DIR SOFTWARE VERSION")
+    print(json.dumps(native_data(*ARGS), separators=(",", ":")))
 elif CMD == "create-native":
     if len(ARGS) != 3:
         fail("create-native requires DATA_DIR MANIFEST OUTPUT")

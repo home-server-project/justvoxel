@@ -109,6 +109,10 @@ plan() {
     is_native="$(jq -r '.nativeBundle // false' <<< "$source_info")"
     if [[ ${is_native} == true ]]; then
         native_manifest="$(/usr/libexec/justvoxel/mjust/migration-archive verify-native "$source_path" 2>/dev/null)" || { emit_error invalid_integrity 'Native JustVoxel migration bundle integrity verification failed.'; return 0; }
+        if ! server_supports_plugins "$(jq -r '.minecraft.implementation // "paper"' <<< "${native_manifest}")"; then
+            emit_error unsupported_server_type 'Migration v1 requires a Paper or Purpur native bundle.'
+            return 0
+        fi
     fi
 
     if [[ -d ${source_path} ]]; then

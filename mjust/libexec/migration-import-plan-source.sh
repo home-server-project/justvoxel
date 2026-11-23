@@ -44,6 +44,10 @@ native_manifest=''
 if [[ ${is_native} == true ]]; then
     echo 'Verifying native JustVoxel bundle SHA-256 integrity.'
     native_manifest="$(/usr/libexec/justvoxel/mjust/migration-archive verify-native "${JV_MIGRATION_SOURCE}")" || exit 1
+    server_supports_plugins "$(jq -r '.minecraft.implementation // "paper"' <<< "${native_manifest}")" || {
+        echo 'ERROR: Migration v1 requires a Paper or Purpur native bundle.' >&2
+        exit 1
+    }
 fi
 
 jv_migration_validate_data

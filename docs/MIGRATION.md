@@ -42,11 +42,13 @@ mjust export
 mjust import
 ```
 
-A native JustVoxel export is one portable `justvoxel-migration-*.tar.gz` file. It contains the full persistent Minecraft data tree, a versioned source manifest, and a SHA-256 integrity index. SHA-256 detects corruption; it does **not** prove who created the file or make an untrusted bundle trusted.
+Every valid registered JustVoxel server instance can be exported. Native Export uses the software and runtime configuration of the selected instance. A native JustVoxel export is one portable `justvoxel-migration-*.tar.gz` file. It contains the full persistent Minecraft data tree, a versioned source manifest, and a SHA-256 integrity index. SHA-256 detects corruption; it does **not** prove who created the file or make an untrusted bundle trusted.
 
-## Supported sources in migration v1
+## Supported Import sources in migration v1
 
-Supported:
+Import and conversion depend on the source and destination software. The Import planner rejects unsupported combinations. External source auto-detection recognizes a narrower set of servers than native Export.
+
+Supported Import sources:
 
 - JustVoxel native migration bundle from Paper or Purpur
 - existing JustVoxel `minecraft-*.tar.gz` backup

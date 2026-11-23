@@ -53,6 +53,58 @@ available_bytes="$(jv_migration_available_bytes "${repo_root}")" || fail 'migrat
 [[ ${available_bytes} =~ ^[0-9]+$ ]] || fail 'migration free-space helper did not return a numeric byte count'
 (( available_bytes > 0 )) || fail 'migration free-space helper returned no available space'
 
+# Exercise the selected-instance loader and the actual cold manifest writer.
+(
+    fixture="$(mktemp -d)"
+    trap 'rm -rf -- "${fixture}"' EXIT
+    helpers="${repo_root}/mjust/libexec"
+    mkdir -p "${fixture}/jv-abcdef" "${fixture}/run"
+    source <(sed -e '/^source /d' -e "s|/etc/justvoxel/instances|$fixture|g" \
+        -e "s|/etc/justvoxel/minecraft-backup.env|$fixture/no-backup.env|g" "${helpers}/migration-instance.sh")
+    # Stand in for authoritative runtime validation at the loader boundary.
+    jv_load_instance() {
+        [[ $1 == jv-abcdef ]] || return 1
+        JV_INSTANCE_ID=$1 JV_INSTANCE_CONTAINER="minecraft-$1" JV_INSTANCE_UNIT="minecraft-$1.service"
+        MINECRAFT_SERVER_TYPE="$(jq -er '.runtime.software' "${fixture}/$1/config.json")"
+        MINECRAFT_VERSION=1.21.8 MINECRAFT_LOADER_VERSION='' BEDROCK_ENABLED=no JV_NETWORK_MEMBER=no
+        JV_INSTANCE_IMAGE_REF=fixture-image DATA_PATH="${fixture}/$MINECRAFT_SERVER_TYPE"
+    }
+    timedatectl() { echo UTC; }
+    podman() { [[ $1 == image ]]; }
+    bootc() { return 1; }
+    install() { mkdir -p -- "${@: -1}"; }
+    fixture_run="$fixture/run"
+    server_reported='' geyser_reported=''
+    sed -n '/^# Reinspect after the cold stop/,/^partial="/{ /^partial="/!p; }' "${exporter}" |
+        sed -e "s|/usr/libexec/justvoxel/mjust/|$helpers/|g" \
+            -e 's/JV_MIGRATION_RUN_ROOT/fixture_run/g' > "${fixture}/manifest.sh"
+    for software in paper purpur spigot pufferfish leaf fabric neoforge forge quilt vanilla bedrock future; do
+        jq -cn --arg software "$software" '{runtime:{software:$software,max_players:10,
+            java_port:25565,bedrock_port:0,bedrock_tcp_port:19131,bedrock_udp_start:19140,
+            bedrock_udp_end:19149,java_memory:"2G",container_memory:"4G",game_mode:"survival",
+            difficulty:"normal",motd:"fixture"}}' > "${fixture}/jv-abcdef/config.json"
+        jv_migration_load_instance jv-abcdef || fail "loader rejected $software"
+        if [[ $software == bedrock ]]; then
+            mkdir -p "$DATA_PATH/worlds/Bedrock level"
+            touch "$DATA_PATH/worlds/Bedrock level/level.dat"
+        else
+            mkdir -p "$DATA_PATH/world"
+            touch "$DATA_PATH/world/level.dat"
+            echo 'online-mode=true' > "$DATA_PATH/server.properties"
+            case "$software" in
+                leaf|pufferfish) touch "$DATA_PATH/paper.yml" ;;
+                quilt) mkdir "$DATA_PATH/mods"; touch "$DATA_PATH/mods/example.jar" ;;
+            esac
+        fi
+        source "${fixture}/manifest.sh"
+        jq -e --arg software "$software" '.minecraft.implementation==$software and
+            .sourceInstanceID=="jv-abcdef" and .container.image=="fixture-image" and
+            (if $software=="bedrock" then .minecraft.onlineMode==null and
+              .networkHints.bedrockUDPStart==19140 and .plugins.count==0 else .minecraft.onlineMode end)' \
+            "${manifest_tmp}" >/dev/null || fail "incorrect $software export manifest"
+    done
+)
+
 # Shared compatibility and destination-specific availability, without network access.
 api_planner="${repo_root}/mjust/libexec/admin-migration-import-plan-json"
 source_planner="${repo_root}/mjust/libexec/migration-import-plan-source.sh"
@@ -177,6 +229,13 @@ FIXTURE
             [[ $(cat "${review_fixture}/availability") == "$destination_software" ]] || fail 'compatible plan skipped version availability'
             rm "${review_fixture}/availability"
         done
+    done
+    for source_software in spigot pufferfish leaf quilt bedrock; do
+        export REVIEW_SOURCE_TYPE="$source_software" REVIEW_NATIVE=true REVIEW_CANDIDATE_TYPE=vanilla
+        MINECRAFT_SERVER_TYPE=paper
+        rejected="$(plan <<< "$review_request")"
+        jq -e '.ok==false and .code=="unsupported_server_type" and .requirements==null' \
+            >/dev/null <<< "$rejected" || fail "unsupported native $source_software import became available"
     done
     export REVIEW_SOURCE_TYPE=vanilla REVIEW_NATIVE=false REVIEW_CANDIDATE_TYPE=vanilla
     MINECRAFT_SERVER_TYPE=paper
