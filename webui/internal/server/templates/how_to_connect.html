@@ -11,27 +11,29 @@
 </head>
 <body class="connect-page">
 <main class="connect-shell" data-connect-page data-connect-server-name="{{.ConnectionGuide.ServerName}}"{{if .ConnectionGuide.Configured}} data-java-port="{{.ConnectionGuide.JavaPort}}"{{if .ConnectionGuide.Bedrock}} data-bedrock-port="{{.ConnectionGuide.BedrockPort}}"{{end}}{{end}}>
-{{if and (not .ConnectionGuide.Configured) (or .SelectedMinecraftID (not .ConnectionServers))}}
+{{if and (not .ConnectionGuide.Configured) (not .ConnectionGuide.VelocityAvailable) (or .SelectedMinecraftID (not .ConnectionServers))}}
 <section class="connect-empty panel"><h1>{{t "ui.f6d6c7412745"}}</h1><p>{{t "ui.a8c77d8cc282"}}</p></section>
 {{else}}
 <section class="connect-controls panel" aria-labelledby="connect-title">
   <p class="connect-eyebrow eyebrow">{{t "ui.e7faf93f7b32"}}</p>
   <div class="connect-title-row title-row"><h1 id="connect-title">{{t "ui.2198ec8ff357"}}</h1><div class="connect-server-lane">
     <span id="connect-server-label">{{t "ui.087fbe073393"}}</span>
+    {{if .ConnectionGuide.Velocity}}<span class="connect-method-label"><img class="connect-method-icon" src="/static/velocity_logo_blue.min.svg" alt="">Velocity</span>{{else}}
     <details class="server-selector" data-selected-server="{{.SelectedMinecraftID}}">
       <summary aria-labelledby="connect-server-label connect-server-name"><span id="connect-server-name">{{if .SelectedMinecraftID}}{{range .ConnectionServers}}{{if eq .ID $.SelectedMinecraftID}}{{.Name}}{{end}}{{end}}{{else}}{{t "ui.389e87e83148"}}{{end}}</span></summary>
       <div class="server-selector-menu" popover="auto">
         {{range .ConnectionServers}}<button type="button" class="server-selector-option" data-server-id="{{.ID}}" aria-pressed="{{if eq .ID $.SelectedMinecraftID}}true{{else}}false{{end}}"><span>{{.Name}}</span></button>{{end}}
       </div>
-    </details>
+    </details>{{end}}
   </div></div>
-  {{if not .SelectedMinecraftID}}<p>{{t "ui.e35e5206b720"}}</p>
+  {{if not .ConnectionGuide.Configured}}<p>{{t "ui.e35e5206b720"}}</p>{{if .ConnectionGuide.VelocityAvailable}}{{template "velocity-control" .}}{{end}}
 </section>
   {{else}}
   <p>{{t "ui.73ca90a52d27"}}</p>
   <div class="connect-methods">
     <div class="connect-method-row connect-method-row-primary">
     {{range .ConnectionGuide.Methods}}{{if or (eq .ID "local") (eq .ID "playit")}}{{template "connect-method-control" .}}{{end}}{{end}}
+    {{template "velocity-control" .}}
     </div>
     <div class="connect-method-row connect-method-row-private">
     {{range .ConnectionGuide.Methods}}{{if or (eq .ID "tailscale") (eq .ID "netbird") (eq .ID "nordvpn")}}{{template "connect-method-control" .}}{{end}}{{end}}
@@ -91,4 +93,9 @@
 {{define "connect-method-control"}}<div class="connect-method">
   <label class="connect-method-label" for="connect-{{.ID}}">{{if eq .ID "local"}}<img class="connect-method-icon" src="/static/provider-icons/local-network.svg" alt="" aria-hidden="true">{{else if eq .ID "tailscale"}}<img class="connect-method-icon" src="/static/provider-icons/tailscale.svg" alt="" aria-hidden="true">{{else if eq .ID "netbird"}}<img class="connect-method-icon" src="/static/provider-icons/netbird.svg" alt="" aria-hidden="true">{{else if eq .ID "playit"}}<img class="connect-method-icon" src="/static/provider-icons/playit.svg" alt="" aria-hidden="true">{{else if eq .ID "nordvpn"}}<img class="connect-method-icon" src="/static/provider-icons/nordvpn.svg" alt="" aria-hidden="true">{{end}}{{ts .Name}}</label>
   <input id="connect-{{.ID}}" type="checkbox" role="switch" aria-label="{{t "ui.a44fb713f349" "name" (ts .Name)}}" data-connect-method="{{.ID}}"{{if .Default}} checked{{end}}{{if not .Available}} disabled{{end}}>
+</div>{{end}}
+
+{{define "velocity-control"}}<div class="connect-method">
+  <label class="connect-method-label" for="connect-velocity"><img class="connect-method-icon" src="/static/velocity_logo_blue.min.svg" alt="">Velocity</label>
+  <input id="connect-velocity" type="checkbox" role="switch" data-connect-target="{{.ConnectionGuide.VelocityURL}}"{{if .ConnectionGuide.Velocity}} checked{{end}}{{if not .ConnectionGuide.VelocityAvailable}} disabled{{end}}>
 </div>{{end}}

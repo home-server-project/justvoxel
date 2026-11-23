@@ -346,7 +346,8 @@ if (versionLauncher && versionDialog) {
     const progress = document.createElement("div");
     const terminal = document.createElement("pre"); terminal.className = "log-box"; terminal.dataset.containerTerminal = ""; terminal.hidden = true;
     terminal.textContent = jvT("ui.52f09fcd83c9");
-    configuration.append(configurationHeading, controls, helper, actionLane);
+    controls.appendChild(actionLane);
+    configuration.append(configurationHeading, controls, helper);
     panel.append(identity, configuration, library);
     root.append(panel, progress, terminal);
     if (!current()) return;

@@ -118,7 +118,8 @@ func TestDateTimeAndVersionWorkspaceContracts(t *testing.T) {
 		`terminal.hidden = false`,
 		`configuration.className = "version-container-configuration"`,
 		`configurationHeading.textContent = "Container configuration"`,
-		`configuration.append(configurationHeading, controls, helper, actionLane)`,
+		`controls.appendChild(actionLane)`,
+		`configuration.append(configurationHeading, controls, helper)`,
 		`panel.append(identity, configuration, library)`,
 		`historyHeading.textContent = "Previous Container Images"`,
 	} {

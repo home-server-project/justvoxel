@@ -1,6 +1,10 @@
 (() => {
   'use strict';
   const page = document.querySelector('[data-connect-page]');
+  const target = page?.querySelector('[data-connect-target]');
+  target?.addEventListener('change', () => {
+    window.location.href = target.dataset.connectTarget;
+  });
   const selector = page?.querySelector('.server-selector');
   if (selector) {
     const summary = selector.querySelector('summary');

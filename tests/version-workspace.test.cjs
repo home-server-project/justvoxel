@@ -473,13 +473,13 @@ test('Container frames summary, configuration and history with separate action l
  assert.deepEqual(identity.children.map(cell=>cell.children[0].textContent),['Server','Image','Status']);
  assert.ok(identity.children.every(cell=>cell.children[1].tag==='strong'));
  assert.equal(identity.className,'version-status-grid version-container-row version-container-summary');
- assert.deepEqual(controls.children.map(node=>node.children[0].textContent),['Server update channel','Keep previous images','Restart server now','Create backup before restart']);
+ assert.deepEqual(controls.children.map(node=>node.children[0].textContent),['Server update channel','Keep previous images','Restart server now','Create backup before restart','Update']);
  assert.equal(retentionInput(page).parent,controls.children[1]);
- const lane=configuration.children.at(-1);
+ const lane=controls.children.at(-1);
  assert.equal(lane.className,'version-container-action-lane');
  assert.equal(page.update().parent,lane);
  assert.ok(!identity.all().includes(page.update()));
- assert.ok(!controls.all().includes(page.update()));
+ assert.ok(controls.all().includes(page.update()));
  assert.equal(configuration.children[0].textContent,'Container configuration');
  assert.equal(configuration.children[2].className,'muted compact');
  assert.equal(configuration.children[2].textContent,'The new image will be used on the next server start.');
@@ -517,7 +517,8 @@ test('Container reuses Version framing and typography with responsive informatio
  assert.match(cssRule('.version-container-footer .backup-library-summary strong'),/font-size:\.89rem;line-height:1\.3;overflow-wrap:anywhere/);
  assert.match(cssRule('.version-container-channel :is(select,input)'),/width:100%;max-width:100%;min-width:0/);
  assert.match(cssRule('.version-container-action-lane'),/justify-content:flex-end/);
- assert.match(cssRule('.version-container-action-lane'),/border-top:1px solid var\(--jv-border\)/);
+ assert.match(cssRule('.version-container-panel .version-container-controls'),/repeat\(4,minmax\(0,1fr\)\) auto/);
+ assert.match(cssRule('.version-container-action-lane button'),/min-height:32px/);
  assert.match(cssRule('.version-container-footer .backup-command-actions'),/justify-content:flex-end/);
  assert.match(cssRule('.version-container-panel .version-container-footer'),/display:grid;grid-template-columns:minmax\(0,1fr\) auto;align-items:center/);
  assert.match(cssRule('.version-container-footer .backup-command-actions'),/padding:0;border:0/);

@@ -1365,6 +1365,20 @@ func TestMinecraftNetworkRuntimeStatus(t *testing.T) {
 			if !strings.Contains(rr.Body.String(), `"runtime_ready":`) || strings.Contains(rr.Body.String(), "private runtime error") {
 				t.Fatal(rr.Body.String())
 			}
+			for _, role := range []principalRole{roleAdministrator, roleWebUIAdmin, roleOperator, roleViewer} {
+				response := httptest.NewRecorder()
+				roleServerForTest(role).minecraftNetworkEntrance(response, authorizedRequest("GET", "/v1/minecraft/network/entrance", ""))
+				var fields map[string]any
+				want := map[string]any{"enabled": tc.enabled, "runtime_ready": tc.want, "java_port": float64(c.JavaPort), "bedrock_port": float64(c.BedrockPort)}
+				if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &fields) != nil || !reflect.DeepEqual(fields, want) {
+					t.Fatal(role, response.Code, response.Body.String())
+				}
+			}
+			response := httptest.NewRecorder()
+			roleServerForTest(roleViewer).minecraftNetworkEntrance(response, httptest.NewRequest("GET", "/v1/minecraft/network/entrance", nil))
+			if response.Code != http.StatusUnauthorized {
+				t.Fatal(response.Code)
+			}
 			if (!tc.enabled || tc.recovery || !tc.proxy) && probes != 0 {
 				t.Fatal("unnecessary listener probe")
 			}

@@ -94,6 +94,11 @@ publications and whitelists. How to Connect and invitations for enrolled members
 use the network endpoint. Existing remote-access mappings must target those
 public network ports.
 
+In How to Connect, turn on **Velocity** to share the network entrance itself.
+The switch becomes available when the network is enabled, recovery is clear,
+and the proxy is ready. The invitation and PDF use the entrance ports. Turning
+Velocity off returns to the previously selected server.
+
 ## Whitelists
 
 A standalone server owns its whitelist settings and `whitelist.json`; these are

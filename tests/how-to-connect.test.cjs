@@ -220,8 +220,8 @@ test('approved page layout uses a full-width action lane and the same guide and 
   const login = readFileSync(path.join(__dirname, '../webui/internal/server/templates/login.html'), 'utf8');
   assert.ok(login.includes('src="/static/justvoxel-login-logo.png"'));
   assert.match(template, /connect-guide-top-row"><img[^>]+><p>{{.ConnectionGuide.Server}}<\/p>/);
-  assert.ok(!template.slice(0, template.indexOf('<article class="connect-guide"')).includes('<img'));
-  assert.equal((template.match(/<img /g) || []).length, 6);
+  assert.match(template, /{{if .ConnectionGuide.Velocity}}<span[^>]*><img[^>]+velocity_logo_blue.min.svg[^>]*>Velocity<\/span>/);
+  assert.equal((template.match(/<img /g) || []).length, 8);
   assert.match(template, /<h1>JustVoxel Connection Guide<\/h1>/);
   assert.match(screen, /\.connect-print-logo\{display:block;width:145px;height:auto\}/);
   assert.match(screen, /\.connect-guide-top-row\{display:flex;align-items:center;justify-content:space-between;/);
@@ -248,7 +248,7 @@ test('approved page layout uses a full-width action lane and the same guide and 
   assert.ok(frame.includes('background:var(--jv-surface-sunken)'));
   assert.ok(frame.includes('border-radius:var(--jv-radius)'));
   assert.match(screen, /\.connect-methods\{display:grid;gap:10px\}/);
-  assert.match(screen, /\.connect-method-row-primary\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)\}/);
+  assert.match(screen, /\.connect-method-row-primary\{grid-template-columns:repeat\(3,minmax\(0,1fr\)\)\}/);
   assert.match(screen, /\.connect-method-row-private\{grid-template-columns:repeat\(3,minmax\(0,1fr\)\)\}/);
   assert.match(screen, /@media\(max-width:640px\)/);
   assert.match(screen, /\.connect-method-row-primary,\.connect-method-row-private,\.connect-cards\{grid-template-columns:1fr\}/);
@@ -523,7 +523,7 @@ test('invitation keeps Close secondary before primary Copy; selector reuses work
   const css = readFileSync(path.join(__dirname, '../webui/internal/server/static/how-to-connect.css'), 'utf8');
   assert.match(template, /class="secondary" data-connect-invitation-close>Close<\/button><button type="button" data-connect-copy>Copy invitation/);
   const lane = template.split('<div class="connect-server-lane">')[1].split('</details>')[0];
-  assert.match(lane, /<span id="connect-server-label">Server:<\/span>\s*<details class="server-selector"/);
+  assert.match(lane, /<span id="connect-server-label">Server:<\/span>\s*{{if \.ConnectionGuide\.Velocity}}<span class="connect-method-label"><img class="connect-method-icon" src="\/static\/velocity_logo_blue\.min\.svg" alt="">Velocity<\/span>{{else}}\s*<details class="server-selector"/);
   assert.match(lane, /data-selected-server="{{.SelectedMinecraftID}}"/);
   assert.match(lane, /<summary[^>]+aria-labelledby="connect-server-label connect-server-name"/);
   assert.match(lane, /{{else}}Choose server{{end}}/);
