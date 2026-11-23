@@ -2,6 +2,9 @@ name: Development
 on:
   pull_request:
     branches: [testing]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
   workflow_dispatch:
 
 concurrency:
