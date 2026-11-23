@@ -130,7 +130,25 @@ document.addEventListener("DOMContentLoaded", () => {
   diagnosticLogView?.addEventListener("click", () => window.JustVoxelLiveConsole.open({
     kind: "setup", operationID: panel.dataset.operationId, state: consoleState, stage: consoleStage,
   }));
-  dashboardLink?.addEventListener("click", () => window.JustVoxelLiveConsole.close());
+  dashboardLink?.addEventListener("click", (event) => {
+    window.JustVoxelLiveConsole.close();
+    if (window.name === "justvoxel-add-server" && consoleState === "succeeded") {
+      const opener = window.opener;
+      try {
+        if (!opener || opener.closed || opener.location.origin !== window.location.origin) return;
+      } catch {
+        return; // A cross-origin opener leaves the Dashboard link in control.
+      }
+      event.preventDefault();
+      try {
+        opener.location.assign("/?workspace=minecraft-servers");
+        opener.focus();
+        window.close();
+      } catch {
+        window.location.assign(dashboardLink.href);
+      }
+    }
+  });
 
   let failures = 0;
   let finished = false;

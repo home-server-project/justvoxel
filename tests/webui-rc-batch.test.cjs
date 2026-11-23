@@ -736,3 +736,43 @@ test('System accepts bounded dynamic Logs navigation and preserves exact Plugins
   assert.match(setup, /const open = \(\) => \{[\s\S]*?bringToFront\(\);[\s\S]*?options.onOpen\?\.\(\);/);
   assert.ok(app.includes('entry.category === requestedMigrationLog.group.toLowerCase() && entry.log_id === requestedMigrationLog.id'));
 });
+
+test('Open Dashboard returns successful Add Server completion to its opener', () => {
+  const script = read('webui/internal/server/static/setup-operation.js');
+  const handler = script.match(/^  dashboardLink\?\.addEventListener\("click",[\s\S]*?^  \}\);/m)[0];
+  const name = 'justvoxel-add-server';
+  const origin = 'https://justvoxel.test';
+  for (const scenario of ['success', 'first-run', 'direct', 'closed', 'cross-origin', 'rolled_back', 'needs_attention', 'close throws']) {
+    const calls = [];
+    const opener = {
+      closed: scenario === 'closed',
+      get location() {
+        if (scenario === 'cross-origin') throw new Error('cross-origin access');
+        return { origin, assign: url => calls.push(url) };
+      },
+      focus: () => calls.push('focus'),
+    };
+    const window = {
+      name: scenario === 'first-run' ? '' : name,
+      opener: scenario === 'direct' ? null : opener,
+      location: { origin, assign: url => calls.push(url) },
+      JustVoxelLiveConsole: { close: () => calls.push('console') },
+      close() {
+        calls.push('close');
+        if (scenario === 'close throws') throw new Error('close failed');
+      },
+    };
+    const dashboardLink = new Element('a');
+    dashboardLink.href = '/';
+    const consoleState = ['rolled_back', 'needs_attention'].includes(scenario) ? scenario : 'succeeded';
+    vm.runInNewContext(handler, { window, dashboardLink, consoleState });
+    assert.deepEqual(calls, []);
+    dashboardLink.events.click({ preventDefault: () => calls.push('intercept') });
+    const expected = ['console'];
+    if (scenario === 'success' || scenario === 'close throws') {
+      expected.push('intercept', '/?workspace=minecraft-servers', 'focus', 'close');
+      if (scenario === 'close throws') expected.push('/');
+    }
+    assert.deepEqual(calls, expected, scenario);
+  }
+});
