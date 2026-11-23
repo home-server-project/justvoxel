@@ -204,6 +204,14 @@ func TestMinecraftNetworkCorrectionPreservesCSS(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if path == "static/how-to-connect.css" {
+			const approved = ".connect-method-row-primary{grid-template-columns:repeat(3,minmax(0,1fr))}"
+			const previous = ".connect-method-row-primary{grid-template-columns:repeat(2,minmax(0,1fr))}"
+			if strings.Count(string(data), approved) != 1 {
+				t.Fatal("expected exactly one three-column primary connection row")
+			}
+			data = []byte(strings.Replace(string(data), approved, previous, 1))
+		}
 		if path == "static/minecraft-servers.css" {
 			// Only the approved, scoped lifecycle warning may extend the frozen CSS.
 			const warning = "\n.minecraft-server-inventory [data-server-feedback].notice.warning { border: 1px solid var(--jv-warning); background: #4c3f1f55; }\n@media (prefers-color-scheme: light) { .minecraft-server-inventory [data-server-feedback].notice.warning { background: #fff7df; } }\n"

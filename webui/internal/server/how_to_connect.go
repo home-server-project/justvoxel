@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -30,13 +31,16 @@ type connectionMethod struct {
 	Endpoints []connectionEndpoint
 }
 type connectionGuide struct {
-	Configured  bool
-	Server      string
-	ServerName  string
-	Bedrock     bool
-	JavaPort    int
-	BedrockPort int
-	Methods     []connectionMethod
+	VelocityURL       string
+	VelocityAvailable bool
+	Velocity          bool
+	Configured        bool
+	Server            string
+	ServerName        string
+	Bedrock           bool
+	JavaPort          int
+	BedrockPort       int
+	Methods           []connectionMethod
 }
 type connectionStatusAPI interface {
 	RemoteAccessStatus(context.Context, string) (api.RemoteAccessStatus, error)
@@ -107,7 +111,30 @@ func (a *App) howToConnect(w http.ResponseWriter, r *http.Request) {
 		choices = append(choices, selectedServerContext{ID: instance.ID, Name: name})
 	}
 	status.Minecraft = (api.Status{}).Minecraft
-	if selected.ID != "" {
+	var entrance api.MinecraftNetworkEntrance
+	if client, ok := a.api.(interface {
+		MinecraftNetworkEntrance(context.Context, string) (api.MinecraftNetworkEntrance, error)
+	}); ok {
+		result, err := client.MinecraftNetworkEntrance(r.Context(), session)
+		if errors.Is(err, api.ErrUnauthorized) || errors.Is(err, api.ErrPasswordChangeRequired) {
+			a.handleDashboardError(w, r, err)
+			return
+		}
+		if err == nil {
+			entrance = result
+		}
+	}
+	available := entrance.Enabled && entrance.RuntimeReady && validConnectionPort(entrance.JavaPort) && validConnectionPort(entrance.BedrockPort)
+	target := r.URL.Query()["target"]
+	velocity := available && len(target) == 1 && target[0] == "velocity"
+	name := selected.Name
+	if velocity {
+		name = "Velocity"
+		status.Minecraft.Configured = true
+		status.Minecraft.JavaPort = entrance.JavaPort
+		status.Minecraft.Bedrock = true
+		status.Minecraft.BedrockPort = entrance.BedrockPort
+	} else if selected.ID != "" {
 		client, ok := a.api.(interface {
 			MinecraftInstanceConfiguration(context.Context, string, string) (api.InstanceRuntimeSettings, error)
 		})
@@ -136,7 +163,20 @@ func (a *App) howToConnect(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	a.render(w, "how_to_connect.html", pageData{Title: ui(w, "ui.2198ec8ff357"), SelectedMinecraftID: selected.ID, ConnectionServers: choices, ConnectionGuide: newConnectionGuide(status, remote, selected.Name)})
+	guide := newConnectionGuide(status, remote, name)
+	guide.VelocityAvailable, guide.Velocity = available, velocity
+	params := url.Values{}
+	if selected.ID != "" {
+		params.Set("server", selected.ID)
+	}
+	if !velocity {
+		params.Set("target", "velocity")
+	}
+	if r.URL.Query().Get("invite") == "1" {
+		params.Set("invite", "1")
+	}
+	guide.VelocityURL = (&url.URL{Path: "/minecraft/how-to-connect", RawQuery: params.Encode()}).String()
+	a.render(w, "how_to_connect.html", pageData{Title: ui(w, "ui.2198ec8ff357"), SelectedMinecraftID: selected.ID, ConnectionServers: choices, ConnectionGuide: guide})
 }
 
 func usableConnectionIP(value string, ipv4 bool) bool {

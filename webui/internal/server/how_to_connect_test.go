@@ -20,7 +20,12 @@ type connectionGuideAPI struct {
 	identityErr error
 	statusErr   error
 	remoteErr   error
+	entrance    api.MinecraftNetworkEntrance
 	remoteCalls int
+}
+
+func (f *connectionGuideAPI) MinecraftNetworkEntrance(context.Context, string) (api.MinecraftNetworkEntrance, error) {
+	return f.entrance, nil
 }
 
 func (f *connectionGuideAPI) Session(ctx context.Context, session string) (api.SessionInfo, error) {
@@ -428,7 +433,7 @@ func TestConnectionGuideApprovedVisualContract(t *testing.T) {
 		}
 	}
 	guideStart := strings.Index(body, `<article class="connect-guide"`)
-	if guideStart < 0 || strings.Count(body[guideStart:], "<img") != 1 || strings.Count(body[:guideStart], `class="connect-method-icon"`) != 5 {
+	if guideStart < 0 || strings.Count(body[guideStart:], "<img") != 1 || strings.Count(body[:guideStart], `class="connect-method-icon"`) != 6 {
 		t.Fatal("provider icons belong in the controls and the logo only in the shared preview/print guide")
 	}
 	if strings.Count(body, `data-connect-guide`) != 1 || !strings.Contains(body, `<article class="connect-guide" data-connect-guide hidden>`) {
@@ -464,10 +469,14 @@ func TestConnectionGuideApprovedVisualContract(t *testing.T) {
 		}
 		previous = position
 	}
-	if strings.Count(controls, `class="connect-method"`) != 5 || strings.Count(controls, `role="switch"`) != 5 || strings.Contains(controls, "<small") || strings.Contains(controls, "<span") {
+	if strings.Count(controls, `class="connect-method"`) != 6 || strings.Count(controls, `role="switch"`) != 6 || strings.Contains(controls, "<small") || strings.Contains(controls, "<span") {
 		t.Fatal("method cells must contain only their label and shared switch")
 	}
 	privateStart := strings.Index(controls, `class="connect-method-row connect-method-row-private"`)
+	velocity := strings.Index(controls, `for="connect-velocity"`)
+	if velocity <= strings.Index(controls, `data-connect-method="playit"`) || velocity >= privateStart {
+		t.Fatal("Velocity must follow Playit in the primary row")
+	}
 	if privateStart < 0 || strings.Count(controls[privateStart:], `class="connect-method"`) != 3 {
 		t.Fatal("private networks must share one three-cell row")
 	}
@@ -773,5 +782,60 @@ func TestConnectionGuideNordVPNAuthorityAndPorts(t *testing.T) {
 	status.System.NetBird = "100.90.0.9"
 	if newConnectionGuide(status, api.RemoteAccessStatus{}, "").Methods[5].Available {
 		t.Fatal("legacy system status must not substitute for a NordVPN provider")
+	}
+}
+
+func TestVelocityGuideTargetsEntrance(t *testing.T) {
+	client := &connectionGuideAPI{fakeAPI: fakeAPI{statusResult: guideFixture()}, entrance: api.MinecraftNetworkEntrance{Enabled: true, RuntimeReady: true, JavaPort: 30421, BedrockPort: 30422}}
+	for id, ip := range map[string]string{"tailscale": "100.80.1.2", "netbird": "100.80.1.3", "nordvpn": "100.80.1.4"} {
+		client.remote.Providers = append(client.remote.Providers, api.RemoteAccessProvider{ID: id, IP: ip, Connected: true, Account: "private-account"})
+	}
+	client.remote.Providers = append(client.remote.Providers, api.RemoteAccessProvider{ID: "playit", Connected: true, ServiceActive: true, Tunnels: []api.PlayitTunnel{
+		{Destination: "127.0.0.1:30421", DisplayAddress: "java.example"},
+		{Destination: "127.0.0.1:30422", DisplayAddress: "bedrock.example:40123"},
+		{Destination: "127.0.0.1:25571", DisplayAddress: "backend.example"},
+	}})
+	app, err := New(client, Config{ManagementAPI: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	render := func(query string) string {
+		rr := httptestResponse(app, authenticatedAdminRequest("GET", "/minecraft/how-to-connect?server=jv-a1b2c3&"+query, ""))
+		if rr.Code != 200 {
+			t.Fatal(rr.Code, rr.Body.String())
+		}
+		return html.UnescapeString(rr.Body.String())
+	}
+	body := render("target=velocity&invite=1")
+	for _, want := range []string{`src="/static/velocity_logo_blue.min.svg" alt="">Velocity</span>`, `data-connect-server-name="Velocity"`, `<p>Velocity</p>`, `data-connect-target="/minecraft/how-to-connect?invite=1&server=jv-a1b2c3" checked`, `data-java-port="30421" data-bedrock-port="30422"`, "java.example", "bedrock.example:40123"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	for _, ip := range []string{"192.0.2.10", "100.80.1.2", "100.80.1.3", "100.80.1.4"} {
+		for _, port := range []string{"30421", "30422"} {
+			if !strings.Contains(body, ip+":"+port) {
+				t.Error(ip, port)
+			}
+		}
+	}
+	for _, forbidden := range []string{`class="server-selector"`, "backend.example", "private-account", "Paper 1.21.8", `data-connect-card="velocity"`} {
+		if strings.Contains(body, forbidden) {
+			t.Error(forbidden)
+		}
+	}
+	article := regexp.MustCompile(`(?s)<article .*?</article>`).FindString(body)
+	if article == "" || strings.Contains(article, "jv-a1b2c3") || !strings.Contains(article, "<p>Velocity</p>") {
+		t.Error("server ID must occur only in the return URL")
+	}
+	for _, query := range []string{"", "target=unknown", "target=velocity&target=velocity"} {
+		if body := render(query); !strings.Contains(body, `class="server-selector"`) || !strings.Contains(body, "Paper 1.21.8") {
+			t.Fatal(query)
+		}
+	}
+	client.entrance.RuntimeReady = false
+	body = render("target=velocity")
+	if !strings.Contains(body, `class="server-selector"`) || !strings.Contains(body, `data-connect-target="/minecraft/how-to-connect?server=jv-a1b2c3&target=velocity" disabled`) {
+		t.Fatal("stale target must fall back")
 	}
 }

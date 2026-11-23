@@ -351,6 +351,7 @@ config-version: 3
 	}
 }
 func registerMinecraftNetworkRoutes(mux *http.ServeMux, s *server) {
+	mux.HandleFunc("GET /v1/minecraft/network/entrance", s.minecraftNetworkEntrance)
 	mux.HandleFunc("GET /v1/minecraft/network", s.minecraftNetworkStatus)
 	mux.HandleFunc("PUT /v1/minecraft/network", s.minecraftNetworkConfigure)
 	mux.HandleFunc("POST /v1/minecraft/network/recover", s.minecraftNetworkRecover)
@@ -358,6 +359,19 @@ func registerMinecraftNetworkRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("POST /v1/minecraft/network/whitelist", s.minecraftNetworkWhitelist)
 	mux.HandleFunc("GET /v1/minecraft/instances/{id}/connection", s.minecraftNetworkConnection)
 }
+func (s *server) minecraftNetworkEntrance(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.requireReadAccess(w, r); !ok {
+		return
+	}
+	n, err := networkRead(instanceRuntimes)
+	if err != nil {
+		writeError(w, 409, "Minecraft Network configuration is unavailable.")
+		return
+	}
+	ready := n.Config.Enabled && networkPending(instanceRuntimes) == nil && networkRuntimeReady(r.Context(), instanceRuntimes, n.Config.JavaPort)
+	writeJSON(w, 200, map[string]any{"enabled": n.Config.Enabled, "runtime_ready": ready, "java_port": n.Config.JavaPort, "bedrock_port": n.Config.BedrockPort})
+}
+
 func (s *server) minecraftNetworkStatus(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.requireAdministrator(w, r); !ok {
 		return

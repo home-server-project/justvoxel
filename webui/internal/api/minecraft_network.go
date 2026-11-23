@@ -35,6 +35,19 @@ type MinecraftNetworkStatus struct {
 	WhitelistEnforced bool                     `json:"whitelist_enforced"`
 	RecoveryRequired  bool                     `json:"recovery_required"`
 }
+type MinecraftNetworkEntrance struct {
+	Enabled      bool `json:"enabled"`
+	RuntimeReady bool `json:"runtime_ready"`
+	JavaPort     int  `json:"java_port"`
+	BedrockPort  int  `json:"bedrock_port"`
+}
+
+func (c *Client) MinecraftNetworkEntrance(ctx context.Context, session string) (MinecraftNetworkEntrance, error) {
+	var out MinecraftNetworkEntrance
+	err := c.do(ctx, http.MethodGet, "/v1/minecraft/network/entrance", session, nil, &out)
+	return out, err
+}
+
 type MinecraftConnection struct {
 	ID             string `json:"id"`
 	NetworkMember  bool   `json:"network_member"`

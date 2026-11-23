@@ -51,3 +51,16 @@ func TestMinecraftNetworkCompatibilityAndRuntimeTransport(t *testing.T) {
 		t.Fatal(status, err)
 	}
 }
+
+func TestMinecraftNetworkEntranceTransport(t *testing.T) {
+	client := &Client{http: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodGet || r.URL.RequestURI() != "/v1/minecraft/network/entrance" || r.Header.Get("Authorization") != "Bearer token" {
+			t.Fatal(r.Method, r.URL)
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"enabled":true,"runtime_ready":true,"java_port":30421,"bedrock_port":30422}`))}, nil
+	})}}
+	status, err := client.MinecraftNetworkEntrance(context.Background(), "token")
+	if err != nil || status != (MinecraftNetworkEntrance{Enabled: true, RuntimeReady: true, JavaPort: 30421, BedrockPort: 30422}) {
+		t.Fatal(status, err)
+	}
+}

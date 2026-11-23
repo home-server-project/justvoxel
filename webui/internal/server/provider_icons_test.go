@@ -102,9 +102,38 @@ func TestProviderIconsAreLocalColourSVGs(t *testing.T) {
 					t.Fatal("unexpected stylesheet")
 				}
 			}
-			if !root || !colour {
+			if name == "tailscale" {
+				if colour || bytes.Contains(data, []byte("Gradient")) || bytes.Contains(data, []byte("<rect")) || bytes.Count(data, []byte("<circle")) != 9 {
+					t.Fatal("expected the monochrome nine-dot mark")
+				}
+			}
+			if !root || (!colour && name != "tailscale") {
 				t.Fatal("asset must have visible colour artwork")
 			}
 		})
+	}
+}
+
+func TestVelocityGuideUsesLocalSVG(t *testing.T) {
+	const path = "static/velocity_logo_blue.min.svg"
+	data, err := englishPresentationAsset(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root struct {
+		XMLName xml.Name `xml:"http://www.w3.org/2000/svg svg"`
+	}
+	if err := xml.Unmarshal(data, &root); err != nil {
+		t.Fatal(err)
+	}
+	template, err := englishPresentationAsset("templates/how_to_connect.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(template, []byte(`src="/`+path+`"`)) {
+		t.Fatal("How to Connect must reference the local Velocity logo")
+	}
+	if regexp.MustCompile(`(?i)//[^/"'[:space:]]*papermc\.io\b`).Match(template) {
+		t.Fatal("How to Connect must not fetch PaperMC assets")
 	}
 }
