@@ -84,11 +84,12 @@ case "${1:-}" in
         jv_crossplay_mod_compatible "$2" "$3" "$4" || fail
         ;;
     version)
-        [[ $# == 4 || $# == 5 ]] || fail
+        [[ $# == 4 || $# == 5 || ( $# == 6 && $2 == pufferfish && $6 =~ ^[1-9][0-9]*$ ) ]] || fail
         MINECRAFT_SERVER_TYPE=$2
         version=$3
         channel=$4
         MINECRAFT_LOADER_VERSION=${5:-}
+        MINECRAFT_PUFFERFISH_BUILD=${6:-}
         validate_server_type "${MINECRAFT_SERVER_TYPE}" || fail
         [[ ${channel} == default || ${channel} == experimental ]] || fail
         if [[ ${MINECRAFT_SERVER_TYPE} == bedrock ]]; then

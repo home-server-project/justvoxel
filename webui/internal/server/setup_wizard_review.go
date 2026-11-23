@@ -370,7 +370,7 @@ func setupPlanRequestFromDraft(draft setupDraft) (api.AdminSetupPlanRequest, err
 			BedrockEnabled: draft.Server.BedrockEnabled,
 		},
 		Minecraft: api.AdminSetupPlanMinecraftRequest{
-			LoaderVersion: draft.Minecraft.LoaderVersion, ServerType: draft.Minecraft.ServerType, JavaMemory: draft.Minecraft.JavaMemory, ContainerMemory: draft.Minecraft.ContainerMemory,
+			LoaderVersion: draft.Minecraft.LoaderVersion, PufferfishBuild: draft.Minecraft.PufferfishBuild, ServerType: draft.Minecraft.ServerType, JavaMemory: draft.Minecraft.JavaMemory, ContainerMemory: draft.Minecraft.ContainerMemory,
 			JavaPort: javaPort, BedrockPort: bedrockPort, BedrockTCPPort: draft.Minecraft.BedrockTCPPort, BedrockUDPStart: draft.Minecraft.BedrockUDPStart, BedrockUDPEnd: draft.Minecraft.BedrockUDPEnd, ImageTag: draft.Minecraft.ImageTag,
 			VersionPolicy: draft.Minecraft.VersionPolicy, Version: draft.Minecraft.Version, GameMode: draft.Minecraft.GameMode,
 		},

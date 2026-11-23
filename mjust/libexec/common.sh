@@ -545,14 +545,17 @@ validate_java_server_selection() {
 }
 
 # Read only safe archived server identities from the last successful Jenkins build.
-pufferfish_build_version() {
-    local branch="$1"
+pufferfish_build_metadata() {
+    local branch="$1" build="${2:-lastSuccessfulBuild}"
+    [[ ${build} == lastSuccessfulBuild || ${build} =~ ^[1-9][0-9]*$ ]] || return 1
     [[ ${branch} =~ ^[0-9]+[.][0-9]+$ ]] || return 1
     curl --connect-timeout 3 --max-time 12 -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" \
-        "https://ci.pufferfish.host/job/Pufferfish-${branch}/lastSuccessfulBuild/api/json" |
-        jq -er '
+        "https://ci.pufferfish.host/job/Pufferfish-${branch}/${build}/api/json" |
+        jq -esc --arg build "${build}" '
+            select(length == 1) | .[0] | select(.artifacts | type == "array") |
+            .number as $number | select($build == "lastSuccessfulBuild" or ($number | tostring) == $build) |
             select(.result == "SUCCESS" and
-                (.number | type == "number" and . > 0 and floor == .)) |
+                (.number | type == "number" and . > 0 and . <= 2147483647 and floor == .)) |
             [.artifacts[] | select(.fileName | type == "string") |
                 select(.fileName | test("^pufferfish-paperclip-[0-9]+[.][0-9]+([.][0-9]+)?-R0[.]1-SNAPSHOT-(mojmap|reobf)[.]jar$"))] |
             select(length > 0 and all(.[]; .fileName as $name |
@@ -561,7 +564,7 @@ pufferfish_build_version() {
                     (split("/") | all(.[]; . != ".." and . != ".")) and
                     (endswith("/" + $name) or . == $name)))) |
             map(.fileName | capture("^pufferfish-paperclip-(?<version>[0-9]+[.][0-9]+([.][0-9]+)?)-R0").version) |
-            unique | select(length == 1) | .[0]'
+            unique | select(length == 1) | {game:.[0],pufferfish_build:$number}'
 }
 
 # Return the exact verified Leaf build, retaining its upstream channel for advice.
@@ -594,8 +597,8 @@ paper_fork_version_available() {
     case "${software}" in
         pufferfish)
             branch="$(cut -d. -f1,2 <<< "${version}")"
-            resolved="$(pufferfish_build_version "${branch}")" || return 1
-            [[ ${resolved} == "${version}" ]]
+            resolved="$(pufferfish_build_metadata "${branch}" "${MINECRAFT_PUFFERFISH_BUILD:-}")" || return 1
+            jq -e --arg game "${version}" '.game == $game' <<< "${resolved}" >/dev/null
             ;;
         leaf) leaf_build_metadata "${version}" >/dev/null ;;
         *) return 1 ;;
@@ -604,6 +607,12 @@ paper_fork_version_available() {
 
 # Verify an exact pair with the selected project's own metadata/artifact
 # repository. No release synthesis, third-party jars, or alternate loader.
+mojang_release_available() {
+    local version="$1"
+    curl --connect-timeout 3 --max-time 8 -fsSL https://piston-meta.mojang.com/mc/game/version_manifest_v2.json | jq -e --arg version "${version}" '
+        any(.versions[]; .id == $version and .type == "release")' >/dev/null
+}
+
 java_server_version_available() {
     local software="$1" version="$2" loader="${3:-}" url coordinate prefix patch digest java_class=65
     [[ ${version} =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || return 1
@@ -616,8 +625,7 @@ java_server_version_available() {
     esac
     # Loader metadata can describe profiles independently of Mojang releases.
     # Require the exact game release as well as the exact implementation pair.
-    curl --connect-timeout 3 --max-time 8 -fsSL https://piston-meta.mojang.com/mc/game/version_manifest_v2.json | jq -e --arg version "${version}" '
-        any(.versions[]; .id == $version and .type == "release")' >/dev/null || return 1
+    mojang_release_available "${version}" || return 1
     if [[ ${software} == pufferfish || ${software} == leaf ]]; then
         [[ -z ${loader} ]] && paper_fork_version_available "${software}" "${version}"
         return
@@ -700,7 +708,7 @@ resolve_setup_loader() {
 }
 
 resolve_setup_java_runtime() {
-    local software="$1" policy="$2" specific="$3" game loader image releases branches branch discovered metadata reason
+    local software="$1" policy="$2" specific="$3" game loader image releases branches branch discovered metadata reason pufferfish="{}"
     case "${policy}" in recommended|pinned) ;; *) return 1 ;; esac
     if [[ ${policy} == pinned ]]; then
         [[ ${specific} =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || return 1
@@ -718,9 +726,10 @@ resolve_setup_java_runtime() {
                         sort_by(split(".") | map(tonumber)) | reverse | .[0:4][]')" || return 1
                 releases=''
                 while IFS= read -r branch; do
-                    discovered="$(pufferfish_build_version "${branch}")" || continue
+                    pufferfish="$(pufferfish_build_metadata "${branch}")" || continue
+                    discovered="$(jq -er .game <<< "${pufferfish}")" || continue
                     [[ $(cut -d. -f1,2 <<< "${discovered}") == "${branch}" ]] || continue
-                    java_server_version_available pufferfish "${discovered}" || continue
+                    mojang_release_available "${discovered}" || continue
                     releases="${discovered}"
                     break
                 done <<< "${branches}"
@@ -744,7 +753,16 @@ resolve_setup_java_runtime() {
         [[ ${software} != spigot ]] || image+=-jdk
         loader="$(resolve_setup_loader "${software}" "${game}")" || continue
         validate_java_server_selection "${software}" pinned "${game}" "${loader}" "${image}" || continue
-        java_server_version_available "${software}" "${game}" "${loader}" || continue
+        if [[ ${software} == pufferfish ]]; then
+            if [[ ${policy} == pinned ]]; then
+                branch="$(cut -d. -f1,2 <<< "${game}")"
+                pufferfish="$(pufferfish_build_metadata "${branch}")" || continue
+                jq -e --arg game "${game}" '.game == $game' <<< "${pufferfish}" >/dev/null || continue
+                mojang_release_available "${game}" || continue
+            fi
+        else
+            java_server_version_available "${software}" "${game}" "${loader}" || continue
+        fi
         reason=''
         if [[ ${software} == leaf ]]; then
             metadata="$(leaf_build_metadata "${game}")" || continue
@@ -752,7 +770,7 @@ resolve_setup_java_runtime() {
                 reason='Leaf labels this build Experimental. It is available for setup.'
             fi
         fi
-        jq -cn --arg game "${game}" --arg loader "${loader}" --arg image "${image}" --arg reason "${reason}" '{game:$game,loader:$loader,image:$image,reason:$reason}'
+        jq -cn --arg game "${game}" --arg loader "${loader}" --arg image "${image}" --arg reason "${reason}" --argjson fork "${pufferfish}" '{game:$game,loader:$loader,image:$image,reason:$reason} + $fork'
         return
     done <<< "${releases}"
     return 1

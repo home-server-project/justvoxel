@@ -23,6 +23,7 @@ type InstanceRuntimeSettings struct {
 	ContainerMemory  string `json:"container_memory"`
 	Software         string `json:"software"`
 	LoaderVersion    string `json:"loader_version,omitempty"`
+	PufferfishBuild  int    `json:"pufferfish_build,omitempty"`
 	VersionPolicy    string `json:"version_policy,omitempty"`
 	Version          string `json:"version"`
 	PaperChannel     string `json:"paper_channel"`

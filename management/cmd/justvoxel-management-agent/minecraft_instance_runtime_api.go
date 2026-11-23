@@ -24,6 +24,7 @@ type instanceRuntimeSettings struct {
 	ContainerMemory  string `json:"container_memory"`
 	Software         string `json:"software"`
 	LoaderVersion    string `json:"loader_version,omitempty"`
+	PufferfishBuild  int    `json:"pufferfish_build,omitempty"`
 	VersionPolicy    string `json:"version_policy,omitempty"`
 	Version          string `json:"version"`
 	PaperChannel     string `json:"paper_channel"`
@@ -40,10 +41,10 @@ type instanceRuntimeSettings struct {
 }
 
 func (settings instanceRuntimeSettings) runtime(id string, uid, gid uint32, password string) minecraftInstanceRuntimeConfig {
-	return minecraftInstanceRuntimeConfig{ID: id, JavaPort: settings.JavaPort, BedrockEnabled: settings.BedrockEnabled, BedrockPort: settings.BedrockPort, BedrockTCPPort: settings.BedrockTCPPort, BedrockUDPStart: settings.BedrockUDPStart, BedrockUDPEnd: settings.BedrockUDPEnd, JavaMemory: settings.JavaMemory, ContainerMemory: settings.ContainerMemory, Software: settings.Software, LoaderVersion: settings.LoaderVersion, Version: settings.Version, VersionPolicy: settings.VersionPolicy, PaperChannel: settings.PaperChannel, ImageTag: settings.ImageTag, StartOnBoot: settings.StartOnBoot, EULAAccepted: settings.EULAAccepted, UID: uid, GID: gid, GameMode: settings.GameMode, Difficulty: settings.Difficulty, MaxPlayers: settings.MaxPlayers, Whitelist: settings.Whitelist, EnforceWhitelist: settings.EnforceWhitelist, MOTD: settings.MOTD, RCONPassword: password}
+	return minecraftInstanceRuntimeConfig{ID: id, JavaPort: settings.JavaPort, BedrockEnabled: settings.BedrockEnabled, BedrockPort: settings.BedrockPort, BedrockTCPPort: settings.BedrockTCPPort, BedrockUDPStart: settings.BedrockUDPStart, BedrockUDPEnd: settings.BedrockUDPEnd, JavaMemory: settings.JavaMemory, ContainerMemory: settings.ContainerMemory, Software: settings.Software, LoaderVersion: settings.LoaderVersion, PufferfishBuild: settings.PufferfishBuild, Version: settings.Version, VersionPolicy: settings.VersionPolicy, PaperChannel: settings.PaperChannel, ImageTag: settings.ImageTag, StartOnBoot: settings.StartOnBoot, EULAAccepted: settings.EULAAccepted, UID: uid, GID: gid, GameMode: settings.GameMode, Difficulty: settings.Difficulty, MaxPlayers: settings.MaxPlayers, Whitelist: settings.Whitelist, EnforceWhitelist: settings.EnforceWhitelist, MOTD: settings.MOTD, RCONPassword: password}
 }
 func instancePublicSettings(c minecraftInstanceRuntimeConfig) instanceRuntimeSettings {
-	return instanceRuntimeSettings{JavaPort: c.JavaPort, BedrockEnabled: c.BedrockEnabled, BedrockPort: c.BedrockPort, BedrockTCPPort: c.BedrockTCPPort, BedrockUDPStart: c.BedrockUDPStart, BedrockUDPEnd: c.BedrockUDPEnd, JavaMemory: c.JavaMemory, ContainerMemory: c.ContainerMemory, Software: c.Software, LoaderVersion: c.LoaderVersion, Version: c.Version, VersionPolicy: c.VersionPolicy, PaperChannel: c.PaperChannel, ImageTag: c.ImageTag, StartOnBoot: c.StartOnBoot, EULAAccepted: c.EULAAccepted, GameMode: c.GameMode, Difficulty: c.Difficulty, MaxPlayers: c.MaxPlayers, Whitelist: c.Whitelist, EnforceWhitelist: c.EnforceWhitelist, MOTD: c.MOTD}
+	return instanceRuntimeSettings{JavaPort: c.JavaPort, BedrockEnabled: c.BedrockEnabled, BedrockPort: c.BedrockPort, BedrockTCPPort: c.BedrockTCPPort, BedrockUDPStart: c.BedrockUDPStart, BedrockUDPEnd: c.BedrockUDPEnd, JavaMemory: c.JavaMemory, ContainerMemory: c.ContainerMemory, Software: c.Software, LoaderVersion: c.LoaderVersion, PufferfishBuild: c.PufferfishBuild, Version: c.Version, VersionPolicy: c.VersionPolicy, PaperChannel: c.PaperChannel, ImageTag: c.ImageTag, StartOnBoot: c.StartOnBoot, EULAAccepted: c.EULAAccepted, GameMode: c.GameMode, Difficulty: c.Difficulty, MaxPlayers: c.MaxPlayers, Whitelist: c.Whitelist, EnforceWhitelist: c.EnforceWhitelist, MOTD: c.MOTD}
 }
 func registerInstanceRuntimeRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("GET /v1/minecraft/instances/deletions", s.instanceDeletionInventory)

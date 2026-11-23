@@ -1699,6 +1699,7 @@ label.server-software-card>input[type=radio]{position:absolute;width:1px;min-wid
 .minecraft-delete-selected{margin:0 0 .65rem;color:#aab5bd;font-size:.88rem}
 .minecraft-delete-selected strong{display:block;margin-top:.15rem;color:#ff6b61;font-size:1rem;font-weight:800;overflow-wrap:anywhere}
 .minecraft-delete-dialog .action-row button{min-width:105px}
+.minecraft-delete-dialog[aria-labelledby="minecraft-delete-title"] .action-row button{min-width:0;min-height:34px;padding:.38rem .7rem;font-size:.84rem}
 @media(max-width:520px){.minecraft-delete-dialog{width:calc(100% - .8rem)}.minecraft-delete-dialog .destructive-confirm-slider-text{padding:0 54px;font-size:.78rem}}
 @media(prefers-color-scheme:light){.minecraft-delete-dialog{background:#fff;border-color:#d9dfe3;color:#1a2025;box-shadow:0 14px 36px #0003}.minecraft-delete-heading{border-color:#e2e7ea}.minecraft-delete-review{background:#f6f8f9;border-color:#d9dfe3}.minecraft-delete-selected strong{color:#b63f37}}
 

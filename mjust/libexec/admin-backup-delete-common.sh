@@ -44,6 +44,10 @@ try:
         keys.add('loader_version')
         if not isinstance(m.get('loader_version'), str) or len(m['loader_version']) > 64 or not re.fullmatch(r'[0-9]+(?:\.[0-9]+){1,3}(?:-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*)?', m['loader_version']):
             raise ValueError('loader')
+    if m.get('software') == 'pufferfish' and 'pufferfish_build' in m:
+        if type(m['pufferfish_build']) != int or m['pufferfish_build'] <= 0:
+            raise ValueError('pufferfish build')
+        keys.add('pufferfish_build')
     if set(m) != keys or type(m['schema']) != int or m['schema'] != 1 or m['id'] != identity or m['archive'] != filename:
         raise ValueError('identity')
     if software not in ('paper','purpur','pufferfish','leaf','vanilla','spigot','forge','neoforge','fabric','quilt','bedrock') or not isinstance(m['version'], str) or len(m['version']) > 64:

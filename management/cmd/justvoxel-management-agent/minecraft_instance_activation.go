@@ -476,6 +476,12 @@ func (b *instanceRuntimeBackend) renderCandidate(ctx minecraftInstanceRuntimeCon
 				if err != nil {
 					return nil, err
 				}
+				if r.Runtime.Software == "pufferfish" && r.Runtime.PufferfishBuild == 0 {
+					committed, err := b.readRuntimeConfig(r.Runtime.ID)
+					if err != nil || committed.Runtime != r.Runtime || instanceHash(files[i].Environment) != committed.EnvironmentSHA256 || b.verifyLive(committed) != nil {
+						return nil, errInstanceRecovery
+					}
+				}
 				break
 			}
 		}
@@ -509,6 +515,9 @@ func (b *instanceRuntimeBackend) validateSoftware(ctx context.Context, c minecra
 			return err
 		}
 		args = append(args, c.LoaderVersion)
+		if c.Software == "pufferfish" {
+			args = append(args, strconv.Itoa(c.PufferfishBuild))
+		}
 	}
 	_, err := b.command(ctx, instanceRuntimeHelper, args...)
 	if err == nil && c.BedrockEnabled && (c.Software == "fabric" || c.Software == "neoforge") {

@@ -67,6 +67,7 @@ type switchManagedArtifact struct {
 }
 type switchWorkerKey struct{}
 type switchContentKey struct{}
+type switchPufferfishBuildKey struct{}
 
 type minecraftSwitchPlan struct {
 	InstanceID         string             `json:"instance_id"`
@@ -391,6 +392,7 @@ func planMinecraftSwitch(ctx context.Context, id, target string) (minecraftSwitc
 		return p, nil
 	}
 	legacyRuntime := javaServerPaperFamily(p.Current) && javaServerPaperFamily(target)
+	legacyBuild := 0
 	imageTag := record.Runtime.ImageTag
 	if legacyRuntime && (target == "pufferfish" || target == "leaf") {
 		bedrock := "no"
@@ -399,11 +401,12 @@ func planMinecraftSwitch(ctx context.Context, id, target string) (minecraftSwitc
 		}
 		resolved, resolveErr := runSetupVersionPreview(ctx, "pinned", p.Version, bedrock, target)
 		var selection adminVersionStatus
-		if resolveErr != nil || json.Unmarshal(resolved, &selection) != nil || selection.SelectedCandidate != p.Version || selection.ImageTag == "" || !selection.ServerSupported {
+		if resolveErr != nil || json.Unmarshal(resolved, &selection) != nil || selection.SelectedCandidate != p.Version || selection.ImageTag == "" || !selection.ServerSupported || !validPufferfishBuild(target, selection.PufferfishBuild) {
 			p.Reason = "The target runtime does not support this exact Minecraft version, or its availability could not be verified."
 			return p, nil
 		}
 		imageTag = selection.ImageTag
+		legacyBuild = selection.PufferfishBuild
 	}
 	if !legacyRuntime {
 		ctx = context.WithValue(ctx, switchRuntimeKey{}, true)
@@ -412,6 +415,9 @@ func planMinecraftSwitch(ctx context.Context, id, target string) (minecraftSwitc
 	if err != nil || json.Unmarshal(raw, &p.Runtime) != nil || p.Runtime.ServerType != target || p.Runtime.SelectedCandidate != p.Version || p.Runtime.Installed != p.Version || !p.Runtime.ServerSupported || !operationFingerprintPattern.MatchString(p.Runtime.PlanFingerprint) || p.Runtime.StackState != "updates_available" || !p.Runtime.UpdateAvailable || (p.Runtime.CrossplayEnabled && !p.Runtime.CrossplayCompatible) {
 		p.Reason = "The target runtime and managed cross-play could not be verified for Minecraft " + p.Version + ". Switch never upgrades or downgrades Minecraft."
 		return p, nil
+	}
+	if legacyRuntime {
+		p.Runtime.PufferfishBuild = legacyBuild
 	}
 	var managed struct {
 		Artifacts map[string]switchManagedArtifact `json:"managed_artifacts"`
@@ -422,7 +428,7 @@ func planMinecraftSwitch(ctx context.Context, id, target string) (minecraftSwitc
 	}
 	if !legacyRuntime {
 		caps, _ := javaServerSoftware(target)
-		if caps.ModLoader && !javaLoaderVersionPattern.MatchString(p.Runtime.LoaderVersion) || validateJavaServerSelection(target, "pinned", p.Version, p.Runtime.LoaderVersion, p.Runtime.ImageTag, p.Runtime.CrossplayEnabled) != nil {
+		if !validPufferfishBuild(target, p.Runtime.PufferfishBuild) || caps.ModLoader && !javaLoaderVersionPattern.MatchString(p.Runtime.LoaderVersion) || validateJavaServerSelection(target, "pinned", p.Version, p.Runtime.LoaderVersion, p.Runtime.ImageTag, p.Runtime.CrossplayEnabled) != nil {
 			p.Reason = "An exact target loader version could not be verified."
 			return p, nil
 		}
@@ -460,7 +466,8 @@ func planMinecraftSwitch(ctx context.Context, id, target string) (minecraftSwitc
 	raw, err = json.Marshal(struct {
 		ID, Target, Version, Runtime, Content, Record, World string
 		Convert, Clone                                       bool
-	}{id, target, p.Version, p.Runtime.PlanFingerprint, p.ContentFingerprint, instanceHash(mustSwitchJSON(record)), p.WorldFingerprint, p.Convert, p.Clone})
+		PufferfishBuild                                      int `json:",omitempty"`
+	}{id, target, p.Version, p.Runtime.PlanFingerprint, p.ContentFingerprint, instanceHash(mustSwitchJSON(record)), p.WorldFingerprint, p.Convert, p.Clone, p.Runtime.PufferfishBuild})
 	if err != nil {
 		return p, err
 	}
@@ -738,6 +745,7 @@ func (s *server) runMinecraftSwitch(ctx context.Context, j operationJournal, p m
 			err = lock.Close()
 			if err == nil {
 				worker := context.WithValue(ctx, switchWorkerKey{}, true)
+				worker = context.WithValue(worker, switchPufferfishBuildKey{}, p.Runtime.PufferfishBuild)
 				worker = context.WithValue(worker, switchContentKey{}, p.ContentFingerprint)
 				worker = context.WithValue(worker, instanceVersionKey{}, j.InstanceID)
 				worker = context.WithValue(worker, instanceVersionSelectionKey{}, [2]string{"pinned", p.Version})

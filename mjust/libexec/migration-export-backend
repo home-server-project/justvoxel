@@ -199,6 +199,7 @@ jq -n \
     --arg bootcDigest "${bootc_digest}" \
     --arg implementation "${MINECRAFT_SERVER_TYPE}" \
     --argjson onlineMode "$(jq '.onlineMode' <<< "${candidate}")" \
+    --argjson build "$(jq '.runtime.pufferfish_build // null' "${JV_MIGRATION_INSTANCE_CONFIG}")" \
     --arg loaderVersion "${MINECRAFT_LOADER_VERSION}" \
     --argjson nativePorts "$(jq -c '.runtime | if .software=="bedrock" then {bedrockTCPPort:.bedrock_tcp_port,bedrockUDPStart:.bedrock_udp_start,bedrockUDPEnd:.bedrock_udp_end} else {} end' "${JV_MIGRATION_INSTANCE_CONFIG}")" \
     --arg version "${source_version}" \
@@ -236,7 +237,7 @@ jq -n \
             bootcImage: (if $bootcImage == "" then null else $bootcImage end),
             bootcDigest: (if $bootcDigest == "" then null else $bootcDigest end)
         },
-        minecraft: {
+        minecraft: ({
             implementation: $implementation,
             version: $version,
             reportedVersion: (if $reportedVersion == "" then null else $reportedVersion end),
@@ -248,7 +249,7 @@ jq -n \
             enforceWhitelist: $enforceWhitelist,
             maxPlayers: ($maxPlayers | tonumber),
             motd: $motd
-        },
+        } + (if $implementation == "pufferfish" and $build != null then {pufferfishBuild:$build} else {} end)),
         networkHints: ($nativePorts + {
             javaPort: ($javaPort | tonumber),
             bedrockPort: ($bedrockPort | tonumber)

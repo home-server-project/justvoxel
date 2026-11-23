@@ -80,10 +80,10 @@ if [[ ${switch_preview} == yes ]]; then
         if [[ -z ${geyser} ]] || ! server_crossplay_version_compatible "${candidate}" "${geyser}"; then crossplay_compatible=false; fi
     fi
     fingerprint="sha256:$(printf '%s' "${target_type}:${resolved}:${digest}:${BEDROCK_ENABLED}:${crossplay_compatible}" | sha256sum | cut -d ' ' -f1)"
-    jq -n --arg type "${target_type}" --arg game "${candidate}" --arg image "${image}" \
+    jq -n --argjson resolved "${resolved}" --arg type "${target_type}" --arg game "${candidate}" --arg image "${image}" \
         --arg loader "$(jq -r '.loader // empty' <<< "${resolved}")" --arg digest "${digest}" --arg fingerprint "${fingerprint}" \
         --argjson enabled "$([[ ${BEDROCK_ENABLED} == yes ]] && printf true || printf false)" --argjson compatible "${crossplay_compatible}" \
-        '{server_type:$type,installed:$game,selected_candidate:$game,image_tag:$image,loader_version:$loader,server_supported:true,stack_state:"updates_available",update_available:true,plan_fingerprint:$fingerprint,managed_image_digest:$digest,crossplay_enabled:$enabled,crossplay_compatible:$compatible}'
+        '{server_type:$type,installed:$game,selected_candidate:$game,image_tag:$image,loader_version:$loader,server_supported:true,stack_state:"updates_available",update_available:true,plan_fingerprint:$fingerprint,managed_image_digest:$digest,crossplay_enabled:$enabled,crossplay_compatible:$compatible} + ($resolved | with_entries(select(.key == "pufferfish_build")))'
     exit 0
 fi
 if (( $# == 3 )) && [[ ${target_type} == bedrock ]]; then
@@ -131,9 +131,9 @@ if (( $# == 3 )) && [[ ${target_type} != paper && ${target_type} != purpur && ${
             fi
         fi
     else reason='An exact stable Minecraft release and compatible runtime could not be verified. Try again or choose a supported Specific version.'; fi
-    jq -n --arg server_type "${target_type}" --arg candidate "${candidate}" --arg loader "${loader}" --arg image "${image}" --arg geyser "${geyser}" --arg reason "${reason}" \
+    jq -n --argjson resolved "${resolved}" --arg server_type "${target_type}" --arg candidate "${candidate}" --arg loader "${loader}" --arg image "${image}" --arg geyser "${geyser}" --arg reason "${reason}" \
         --argjson compatible "${compatible}" --argjson available "${available}" --argjson enabled "$([[ $3 == yes ]] && printf true || printf false)" \
-        '{server_type:$server_type,selected_candidate:$candidate,candidate_channel:"RELEASE",loader_version:$loader,image_tag:$image,geyser_supported_version:$geyser,reason:$reason,server_supported:($candidate != ""),managed_crossplay_available:$available,crossplay_compatible:$compatible,crossplay_enabled:$enabled}'
+        '{server_type:$server_type,selected_candidate:$candidate,candidate_channel:"RELEASE",loader_version:$loader,image_tag:$image,geyser_supported_version:$geyser,reason:$reason,server_supported:($candidate != ""),managed_crossplay_available:$available,crossplay_compatible:$compatible,crossplay_enabled:$enabled} + ($resolved | with_entries(select(.key == "pufferfish_build")))'
     exit 0
 fi
 available="$(resolve_latest_server_version || true)"

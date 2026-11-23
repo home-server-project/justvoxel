@@ -61,6 +61,9 @@ func newInstanceActivationFixtureFor(t *testing.T, software, version string) *in
 	if software != "" {
 		configs[0].Software = software
 	}
+	if software == "pufferfish" {
+		configs[0].PufferfishBuild = 39
+	}
 	if version != "" {
 		configs[0].Version = version
 	}

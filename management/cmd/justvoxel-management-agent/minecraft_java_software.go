@@ -61,6 +61,13 @@ var javaLoaderVersionPattern = regexp.MustCompile(`^[0-9]+(\.[0-9]+){1,3}(-[A-Za
 var java21GameReleasePattern = regexp.MustCompile(`^1\.(20\.[56]|21(\.([0-9]|1[01]))?)$`)
 var java25GameReleasePattern = regexp.MustCompile(`^26\.[1-9][0-9]*(\.(0|[1-9][0-9]*))?$`)
 
+func validPufferfishBuild(software string, build int) bool {
+	if software == "pufferfish" {
+		return build > 0
+	}
+	return build == 0
+}
+
 // Existing types retain their deployed policies and Java image choices. New
 // types require explicit pins and the Java generation for the game release.
 // Exact upstream game/loader verification is still required before activation.

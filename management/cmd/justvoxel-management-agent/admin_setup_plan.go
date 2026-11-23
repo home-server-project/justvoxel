@@ -36,6 +36,7 @@ type adminSetupPlanServerRequest struct {
 type adminSetupPlanMinecraftRequest struct {
 	ServerType      string `json:"server_type,omitempty"`
 	LoaderVersion   string `json:"loader_version,omitempty"`
+	PufferfishBuild int    `json:"pufferfish_build,omitempty"`
 	GameMode        string `json:"game_mode"`
 	JavaMemory      string `json:"java_memory"`
 	ContainerMemory string `json:"container_memory"`
@@ -97,6 +98,7 @@ type adminSetupPlanServer struct {
 type adminSetupPlanMinecraft struct {
 	ServerType             string `json:"server_type"`
 	LoaderVersion          string `json:"loader_version,omitempty"`
+	PufferfishBuild        int    `json:"pufferfish_build,omitempty"`
 	GameMode               string `json:"game_mode"`
 	JavaMemory             string `json:"java_memory"`
 	ContainerMemory        string `json:"container_memory"`
@@ -190,6 +192,7 @@ type adminSetupPlanResponse struct {
 type adminSetupFingerprintMinecraft struct {
 	ServerType             string `json:"server_type"`
 	LoaderVersion          string `json:"loader_version,omitempty"`
+	PufferfishBuild        int    `json:"pufferfish_build,omitempty"`
 	GameMode               string `json:"game_mode"`
 	JavaMemory             string `json:"java_memory"`
 	ContainerMemory        string `json:"container_memory"`
@@ -316,7 +319,7 @@ func authoritativeAdminSetupPlan(parent context.Context, request adminSetupPlanR
 	if request.Minecraft.ServerType == "" {
 		request.Minecraft.ServerType = "paper"
 	}
-	if validateJavaServerSelection(request.Minecraft.ServerType, request.Minecraft.VersionPolicy, request.Minecraft.Version, request.Minecraft.LoaderVersion, request.Minecraft.ImageTag, request.Server.BedrockEnabled) != nil {
+	if !validPufferfishBuild(request.Minecraft.ServerType, request.Minecraft.PufferfishBuild) || validateJavaServerSelection(request.Minecraft.ServerType, request.Minecraft.VersionPolicy, request.Minecraft.Version, request.Minecraft.LoaderVersion, request.Minecraft.ImageTag, request.Server.BedrockEnabled) != nil {
 		return out, &adminSetupPlanningError{status: http.StatusBadRequest, message: "invalid server software or Bedrock choice"}
 	}
 	request.Server.Timezone = "" // Legacy wire field is accepted but never selected or persisted.
@@ -376,7 +379,7 @@ func authoritativeAdminSetupPlan(parent context.Context, request adminSetupPlanR
 	}
 	if software := request.Minecraft.ServerType; software != "paper" && software != "purpur" && software != "vanilla" {
 		selected, resolved := request.Minecraft, out.Normalized.Minecraft
-		if resolved.ServerType != selected.ServerType || resolved.VersionPolicy != selected.VersionPolicy || resolved.Version != selected.Version || resolved.LoaderVersion != selected.LoaderVersion || resolved.ImageTag != selected.ImageTag {
+		if resolved.ServerType != selected.ServerType || resolved.VersionPolicy != selected.VersionPolicy || resolved.Version != selected.Version || resolved.PufferfishBuild != selected.PufferfishBuild || resolved.LoaderVersion != selected.LoaderVersion || resolved.ImageTag != selected.ImageTag {
 			return out, &adminSetupPlanningError{status: http.StatusInternalServerError, message: "setup planner changed an explicit Java runtime selection"}
 		}
 	}
@@ -453,7 +456,7 @@ func adminSetupPlanFingerprint(schemaVersion string, normalized *adminSetupNorma
 		Normalized: adminSetupFingerprintNormalized{
 			Server: normalized.Server,
 			Minecraft: adminSetupFingerprintMinecraft{
-				ServerType: serverType, LoaderVersion: normalized.Minecraft.LoaderVersion,
+				ServerType: serverType, LoaderVersion: normalized.Minecraft.LoaderVersion, PufferfishBuild: normalized.Minecraft.PufferfishBuild,
 				GameMode:   normalized.Minecraft.GameMode,
 				JavaMemory: normalized.Minecraft.JavaMemory, ContainerMemory: normalized.Minecraft.ContainerMemory,
 				JavaPort: normalized.Minecraft.JavaPort, BedrockPort: normalized.Minecraft.BedrockPort, BedrockTCPPort: normalized.Minecraft.BedrockTCPPort, BedrockUDPStart: normalized.Minecraft.BedrockUDPStart, BedrockUDPEnd: normalized.Minecraft.BedrockUDPEnd,

@@ -18,12 +18,16 @@ func TestFreshSetupPublishesOneVerifiedProvisionalInstance(t *testing.T) {
 	for _, existing := range []bool{false, true} {
 		t.Run(fmt.Sprint("existing-policy-root=", existing), func(t *testing.T) {
 			for _, name := range []string{"", "Family Survival"} {
-				t.Run("name="+name, func(t *testing.T) { testFreshSetupCreatesOneNormalInstance(t, existing, name) })
+				t.Run("name="+name, func(t *testing.T) { testFreshSetupCreatesOneNormalInstance(t, existing, name, "paper") })
 			}
 		})
 	}
 }
-func testFreshSetupCreatesOneNormalInstance(t *testing.T, existing bool, name string) {
+func TestFreshPufferfishPublication(t *testing.T) {
+	testFreshSetupCreatesOneNormalInstance(t, false, "Family", "pufferfish")
+}
+
+func testFreshSetupCreatesOneNormalInstance(t *testing.T, existing bool, name, software string) {
 	f := newInstanceActivationFixture(t)
 	setupProvisionalTestHelpers(t, f)
 	// A fresh registry has no minecraft.json or pre-existing server records.
@@ -63,6 +67,9 @@ func testFreshSetupCreatesOneNormalInstance(t *testing.T, existing bool, name st
 		Server:    setupRuntimeServer{DisplayName: name, MOTD: "Family", MaxPlayers: 20, Timezone: "UTC"},
 		Minecraft: setupRuntimeMinecraft{ServerType: "paper", GameMode: "survival", JavaMemory: "1G", ContainerMemory: "2G", JavaPort: instanceTestPort(t), BedrockPort: 19132, ImageTag: "stable", VersionPolicy: "pinned", Version: "1.21.4", MinecraftUID: 1000, MinecraftGID: 1000},
 		Storage:   setupRuntimeStorage{Type: "system", Path: filepath.Join(f.snapshot.StorageRoot, "minecraft")}, Backups: setupRuntimeBackups{Type: "system", Path: f.snapshot.BackupPath, Keep: 7, Schedule: "*-*-* 04:30:00"}}
+	if software == "pufferfish" {
+		r.Minecraft.ServerType, r.Minecraft.Version, r.Minecraft.ImageTag, r.Minecraft.PufferfishBuild = software, "1.21.10", "java21", 39
+	}
 	for _, action := range []string{"validate", "apply"} {
 		response, err := runSetupInstanceAction(context.Background(), action, r)
 		if err != nil || !response.OK {
@@ -101,7 +108,7 @@ func testFreshSetupCreatesOneNormalInstance(t *testing.T, existing bool, name st
 			t.Fatal(action, response, err)
 		}
 	}
-	if _, err := f.backend.readRecord(id); err != nil {
+	if published, err := f.backend.readRecord(id); err != nil || published.Runtime.PufferfishBuild != r.Minecraft.PufferfishBuild {
 		t.Fatal("exact ID not published", err)
 	}
 	expectedName := name

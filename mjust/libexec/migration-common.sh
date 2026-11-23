@@ -454,6 +454,7 @@ jv_migration_native_fields() {
     native_software="$(jq -er '.minecraft.implementation | strings' <<< "$native_manifest")" &&
     validate_server_type "$native_software" &&
     native_version="$(jq -er '.minecraft.version | strings' <<< "$native_manifest")" &&
+    native_build="$(jq -er '.minecraft | if has("pufferfishBuild") then select(.implementation == "pufferfish") | .pufferfishBuild | select(type == "number" and . > 0 and floor == .) else "" end' <<< "$native_manifest")" &&
     native_loader="$(jq -er '.minecraft.loaderVersion // "" | strings' <<< "$native_manifest")" &&
     native_digest="$(jq -er '.indexSHA256 | strings' <<< "$native_manifest")" || return 1
     if [[ $native_software == bedrock ]]; then
@@ -472,7 +473,9 @@ jv_migration_import_version_available() {
     if [[ ${is_native} == true ]]; then
         [[ $native_software != bedrock ]] || return 0
         validate_java_server_selection "$MINECRAFT_SERVER_TYPE" pinned "$native_version" "$native_loader" "$MINECRAFT_IMAGE_TAG" || return 1
-        MINECRAFT_LOADER_VERSION="$native_loader" server_version_available "$source_version"
+        local selected_build=''
+        if [[ $native_software == pufferfish && $MINECRAFT_SERVER_TYPE == pufferfish ]]; then selected_build="$native_build"; fi
+        MINECRAFT_PUFFERFISH_BUILD="$selected_build" MINECRAFT_LOADER_VERSION="$native_loader" server_version_available "$source_version"
     else
         server_version_available "$source_version"
     fi

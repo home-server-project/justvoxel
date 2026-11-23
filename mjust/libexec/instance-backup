@@ -83,6 +83,10 @@ def validate_meta(fd, filename):
     if not isinstance(m,dict):
         raise ValueError('metadata')
     expected_keys = metadata_keys | ({'loader_version'} if m.get('software') in ('forge','neoforge','fabric','quilt') else set())
+    if m.get('software') == 'pufferfish' and 'pufferfish_build' in m:
+        if type(m['pufferfish_build']) != int or m['pufferfish_build'] <= 0:
+            raise ValueError('pufferfish build')
+        expected_keys.add('pufferfish_build')
     if set(m) != expected_keys or type(m['schema']) != int or m['schema'] != 1 or m['id'] != identity or m['archive'] != filename:
         raise ValueError('identity')
     if m['software'] not in ('paper','purpur','pufferfish','leaf','vanilla','spigot','forge','neoforge','fabric','quilt','bedrock') or not isinstance(m['version'],str) or len(m['version']) > 64:
@@ -271,6 +275,8 @@ try:
                              configuration_sha256=hashlib.sha256(record_raw).hexdigest(),sha256=digest.hexdigest())
                     if software in ('forge','neoforge','fabric','quilt'):
                         m['loader_version'] = record['runtime']['loader_version']
+                    if software == 'pufferfish' and 'pufferfish_build' in record['runtime']:
+                        m['pufferfish_build'] = record['runtime']['pufferfish_build']
                     encoded = json.dumps(m,separators=(',',':')).encode()
                     if len(encoded)>16384:
                         raise ValueError('metadata bound')

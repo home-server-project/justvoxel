@@ -1874,6 +1874,9 @@ func TestMinecraftNetworkGenericWhitelistAuthority(t *testing.T) {
 				t.Run(fmt.Sprintf("%s/%t/%t", software, whitelist, enforce), func(t *testing.T) {
 					c := configs[0]
 					c.Software, c.Whitelist, c.EnforceWhitelist = software, whitelist, enforce
+					if software == "pufferfish" {
+						c.PufferfishBuild = 39
+					}
 					capabilities, ok := javaServerSoftware(software)
 					if !ok || !networkEligible(software) {
 						t.Fatal("fixture must cover supported Network software")

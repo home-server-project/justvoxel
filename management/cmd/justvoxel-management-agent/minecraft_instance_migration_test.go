@@ -71,6 +71,16 @@ func TestMigrationPortableDataCannotReplaceDestinationIdentityOrRuntimeOwnership
 			t.Fatalf("%s reviewed release lost: %v", software, err)
 		}
 	}
+	destination := previous
+	destination.Runtime.Software, destination.Runtime.PufferfishBuild = "pufferfish", 38
+	portable["source_software"], portable["version"], portable["loader_version"], portable["pufferfish_build"] = "pufferfish", "1.21.10", "", 39
+	if err = b.writeJSON(filepath.Join(tx, "portable.json"), portable, true); err != nil {
+		t.Fatal(err)
+	}
+	next, err = b.migrationPortableSettings(destination, tx)
+	if err != nil || next.Runtime.PufferfishBuild != 39 {
+		t.Fatal("native Pufferfish build lost", err)
+	}
 	portable["instance_id"] = "jv-d4e5f6"
 	if err = b.writeJSON(filepath.Join(tx, "portable.json"), portable, true); err != nil {
 		t.Fatal(err)

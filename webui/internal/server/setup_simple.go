@@ -80,6 +80,7 @@ func (a *App) resolveSetupRuntime(ctx context.Context, session string, draft *se
 		draft.Server.BedrockEnabled = false
 		draft.Minecraft.JavaPort, draft.Minecraft.JavaMemory, draft.Minecraft.BedrockPort = "0", "", "0"
 		draft.Minecraft.VersionPolicy, draft.Minecraft.Version, draft.Minecraft.ResolvedVersion = "pinned", status.SelectedCandidate, status.SelectedCandidate
+		draft.Minecraft.PufferfishBuild = 0
 		draft.Minecraft.ImageTag, draft.Minecraft.RuntimeImageTag, draft.Minecraft.LoaderVersion = "stable", "stable", ""
 		draft.Minecraft.BedrockTCPPort, draft.Minecraft.BedrockUDPStart, draft.Minecraft.BedrockUDPEnd = status.BedrockTCPPort, status.BedrockUDPStart, status.BedrockUDPEnd
 		return nil
@@ -87,6 +88,7 @@ func (a *App) resolveSetupRuntime(ctx context.Context, session string, draft *se
 	if automaticCrossplay {
 		draft.Server.BedrockEnabled = false
 	}
+	draft.Minecraft.PufferfishBuild = 0
 	draft.Minecraft.ResolvedVersion, draft.Minecraft.RuntimeImageTag, draft.Minecraft.LoaderVersion = "", "", ""
 	if err := validateSetupVersion(draft.Minecraft); err != nil {
 		return err
@@ -113,13 +115,19 @@ func (a *App) resolveSetupRuntime(ctx context.Context, session string, draft *se
 		// Ask about this exact release; cross-play must never choose a different
 		// game/loader pair or prevent the verified Java server from being created.
 		crossplay, crossErr := client.AdminSetupVersionPreview(ctx, session, "pinned", status.SelectedCandidate, true, draft.Minecraft.ServerType)
-		bedrock = crossErr == nil && crossplay.SelectedCandidate == status.SelectedCandidate && crossplay.LoaderVersion == status.LoaderVersion && crossplay.CrossplayCompatible && (draft.Minecraft.ServerType != "fabric" && draft.Minecraft.ServerType != "neoforge" || crossplay.ManagedCrossplayAvailable)
+		bedrock = crossErr == nil && crossplay.SelectedCandidate == status.SelectedCandidate && crossplay.PufferfishBuild == status.PufferfishBuild && crossplay.LoaderVersion == status.LoaderVersion && crossplay.CrossplayCompatible && (draft.Minecraft.ServerType != "fabric" && draft.Minecraft.ServerType != "neoforge" || crossplay.ManagedCrossplayAvailable)
 	}
 	if bedrock && !automaticCrossplay && (!status.CrossplayCompatible || ((draft.Minecraft.ServerType == "fabric" || draft.Minecraft.ServerType == "neoforge") && !status.ManagedCrossplayAvailable)) {
 		return errors.New(uiText("ui.b3f2d3d83df9"))
 	}
 	if setupNeedsExactRuntime(draft.Minecraft.ServerType) {
 		required := setupRuntimeImage(draft.Minecraft.ServerType, status.SelectedCandidate)
+		if draft.Minecraft.ServerType == "pufferfish" {
+			if status.PufferfishBuild <= 0 {
+				return errors.New(uiText("ui.149789b66d59"))
+			}
+			draft.Minecraft.PufferfishBuild = status.PufferfishBuild
+		}
 		if required == "" || status.ImageTag != required {
 			return errors.New(uiText("ui.4f91c4c63533"))
 		}

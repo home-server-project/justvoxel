@@ -304,6 +304,13 @@ func TestPaperForkRuntimeAndPluginCompatibility(t *testing.T) {
 		store, ctx, configs := instanceRuntimeFixture(t)
 		configs[0].Software = software
 		configs[0].LoaderVersion = ""
+		if software == "pufferfish" {
+			configs[0].Version = "1.21.10"
+			if _, err := store.renderInstanceRuntimes(ctx, configs); err == nil {
+				t.Fatal("rendered unpinned Pufferfish")
+			}
+			configs[0].PufferfishBuild = 39
+		}
 		files, err := store.renderInstanceRuntimes(ctx, configs)
 		if err != nil {
 			t.Fatal(err)
@@ -311,6 +318,13 @@ func TestPaperForkRuntimeAndPluginCompatibility(t *testing.T) {
 		env := string(files[0].Environment)
 		if !strings.Contains(env, "TYPE="+strings.ToUpper(software)+"\n") || !strings.Contains(env, "VERSION="+configs[0].Version+"\n") || !strings.Contains(env, "MODRINTH_PROJECTS=paper:viaversion,paper:viabackwards") {
 			t.Fatalf("missing native runtime/capabilities: %s", env)
+		}
+		if software == "pufferfish" {
+			if !strings.Contains(env, "PUFFERFISH_BUILD=39\nPUFFERFISH_CONFIG_REPO=\n") {
+				t.Fatal("missing exact Pufferfish runtime")
+			}
+		} else if strings.Contains(env, "PUFFERFISH_") {
+			t.Fatal("Pufferfish settings leaked into Leaf")
 		}
 		if strings.Contains(env, "LOADER_VERSION=") || strings.Contains(env, "PAPER_CHANNEL=") {
 			t.Fatal("fork gained a loader or Paper-only channel")
@@ -325,5 +339,33 @@ func TestPaperForkRuntimeAndPluginCompatibility(t *testing.T) {
 		if !pluginVersionCompatible(pluginCatalogVersion{GameVersions: []string{"1.21.8"}, Loaders: []string{"paper"}}, server) || pluginVersionCompatible(pluginCatalogVersion{GameVersions: []string{"1.21.7"}, Loaders: []string{"paper"}}, server) || pluginVersionCompatible(pluginCatalogVersion{GameVersions: []string{"1.21.8"}, Loaders: []string{"fabric"}}, server) {
 			t.Fatal("plugin compatibility must still verify both game and platform")
 		}
+	}
+}
+
+func TestPufferfishRuntimeIdentity(t *testing.T) {
+	var legacy minecraftInstanceRuntimeConfig
+	if err := instanceDecode([]byte(`{"software":"pufferfish","version":"1.21.10"}`), &legacy); err != nil || legacy.PufferfishBuild != 0 {
+		t.Fatal("legacy runtime did not decode with unknown build", err)
+	}
+	var plan adminSetupPlanResponse
+	if err := json.Unmarshal([]byte(validAdminSetupPlanResponse), &plan); err != nil {
+		t.Fatal(err)
+	}
+	m := &plan.Normalized.Minecraft
+	m.ServerType, m.VersionPolicy, m.Version, m.ImageTag = "pufferfish", "pinned", "1.21.10", "java21"
+	m.PufferfishBuild = 38
+	first, err := adminSetupPlanFingerprint("v1", plan.Normalized, plan.Requirements)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.PufferfishBuild = 39
+	second, err := adminSetupPlanFingerprint("v1", plan.Normalized, plan.Requirements)
+	if err != nil || first == second {
+		t.Fatal("fingerprint lost the Jenkins build", err)
+	}
+	op := operationJournal{OperationType: operationTypeSetup, OperationID: "12345678-1234-4234-8234-123456789abc", PlanFingerprint: second}
+	req, err := setupRuntimeRequestForOperation(op, plan.Normalized)
+	if err != nil || req.Minecraft.PufferfishBuild != 39 {
+		t.Fatal("transaction lost the reviewed build", err)
 	}
 }

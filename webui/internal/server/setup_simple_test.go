@@ -110,6 +110,9 @@ func TestSetupResolutionPinsAndOptionalCrossplay(t *testing.T) {
 				loader = "0.16.10"
 			}
 			preview := &exactSetupPreviewAPI{addServerTestAPI: base, status: api.AdminVersionStatus{SelectedCandidate: "1.21.8", ImageTag: setupRuntimeImage(software, "1.21.8"), LoaderVersion: loader}}
+			if software == "pufferfish" {
+				preview.status.PufferfishBuild = 39
+			}
 			app, err := New(preview, Config{Version: "test", ManagementAPI: "v1"})
 			if err != nil {
 				t.Fatal(err)
@@ -131,7 +134,7 @@ func TestSetupResolutionPinsAndOptionalCrossplay(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if request.Minecraft.LoaderVersion != loader || request.Minecraft.Version != "1.21.8" {
+				if request.Minecraft.PufferfishBuild != preview.status.PufferfishBuild || request.Minecraft.LoaderVersion != loader || request.Minecraft.Version != "1.21.8" {
 					t.Fatal("pins lost before planner")
 				}
 				if recommendedServerSupportsBedrock(software) {
@@ -186,6 +189,9 @@ func TestAdvancedJavaSoftwareCanContinueWithoutCrossplay(t *testing.T) {
 				game, loader = "26.3", "26.3.0.99"
 			}
 			preview := &exactSetupPreviewAPI{addServerTestAPI: base, status: api.AdminVersionStatus{SelectedCandidate: game, CandidateChannel: "RELEASE", Reason: reason, ImageTag: setupRuntimeImage(software, game), LoaderVersion: loader}}
+			if software == "pufferfish" {
+				preview.status.PufferfishBuild = 39
+			}
 			app, err := New(preview, Config{Version: "test", ManagementAPI: "v1"})
 			if err != nil {
 				t.Fatal(err)

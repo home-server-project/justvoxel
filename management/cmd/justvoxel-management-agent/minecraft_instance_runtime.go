@@ -38,6 +38,7 @@ type minecraftInstanceRuntimeConfig struct {
 	ContainerMemory  string `json:"container_memory"`
 	Software         string `json:"software"`
 	LoaderVersion    string `json:"loader_version,omitempty"`
+	PufferfishBuild  int    `json:"pufferfish_build,omitempty"`
 	VersionPolicy    string `json:"version_policy,omitempty"`
 	Version          string `json:"version"` // resolved pin or LATEST, as in the legacy environment
 	PaperChannel     string `json:"paper_channel"`
@@ -395,6 +396,12 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 		if limit > ctx.TotalMemoryMiB-1024 {
 			return nil, errors.New("container memory must leave at least 1 GiB for the appliance")
 		}
+		// A committed legacy peer may participate in shared reservation checks.
+		// The backend verifies its original environment after the network overlay.
+		legacyPeer := c.Software == "pufferfish" && c.PufferfishBuild == 0 && c.ID != candidate && ctx.Placements[c.ID].EnvironmentSHA256 != ""
+		if !legacyPeer && !validPufferfishBuild(c.Software, c.PufferfishBuild) {
+			return nil, errors.New("invalid Pufferfish build")
+		}
 		if (c.ImageDigest != "" && !operationFingerprintPattern.MatchString(c.ImageDigest)) || (c.VersionPolicy != "" && c.VersionPolicy != "pinned" && c.VersionPolicy != "recommended" && c.VersionPolicy != "latest") || !validSetupServerType(c.Software) || !(instanceRuntimeVersionPattern.MatchString(c.Version) || c.Software == "bedrock" && bedrockVersionPattern.MatchString(c.Version)) || !imageTagInputPattern.MatchString(c.ImageTag) {
 			return nil, errors.New("invalid Minecraft software, version, or image tag")
 		}
@@ -456,6 +463,8 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 		}
 		if c.Software == "spigot" {
 			f.Environment = append(f.Environment, []byte("BUILD_FROM_SOURCE=TRUE\n")...)
+		} else if c.Software == "pufferfish" && c.PufferfishBuild > 0 {
+			f.Environment = append(f.Environment, []byte("PUFFERFISH_BUILD="+strconv.Itoa(c.PufferfishBuild)+"\nPUFFERFISH_CONFIG_REPO=\n")...)
 		} else if capabilities.ModLoader {
 			f.Environment = append(f.Environment, []byte(capabilities.LoaderEnvironment+"="+c.LoaderVersion+"\n")...)
 		}

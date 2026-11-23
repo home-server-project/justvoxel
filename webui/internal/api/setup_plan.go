@@ -26,6 +26,7 @@ type AdminSetupPlanServerRequest struct {
 
 type AdminSetupPlanMinecraftRequest struct {
 	LoaderVersion   string `json:"loader_version,omitempty"`
+	PufferfishBuild int    `json:"pufferfish_build,omitempty"`
 	ServerType      string `json:"server_type"`
 	GameMode        string `json:"game_mode"`
 	JavaMemory      string `json:"java_memory"`
@@ -87,6 +88,7 @@ type AdminSetupPlanServer struct {
 
 type AdminSetupPlanMinecraft struct {
 	LoaderVersion          string `json:"loader_version,omitempty"`
+	PufferfishBuild        int    `json:"pufferfish_build,omitempty"`
 	ServerType             string `json:"server_type"`
 	GameMode               string `json:"game_mode"`
 	JavaMemory             string `json:"java_memory"`

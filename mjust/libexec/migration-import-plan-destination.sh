@@ -68,7 +68,7 @@ fi
 BEDROCK_MANAGED_PLUGINS=yes
 
 # Capture the reviewed Minecraft-side settings, never source appliance identity.
-jq -cn --arg id "${JV_INSTANCE_ID}" --arg software "$native_software" --arg version "$source_version" --arg loader "${native_loader:-}" --arg game_mode "${GAME_MODE}" --arg difficulty "${DIFFICULTY}" --argjson whitelist "$([[ ${WHITELIST_ENABLED} == yes ]] && echo true || echo false)" --argjson enforce "$([[ ${ENFORCE_WHITELIST} == yes ]] && echo true || echo false)" --argjson max_players "${MAX_PLAYERS}" --arg motd "${MOTD}" '{instance_id:$id,game_mode:$game_mode,difficulty:$difficulty,whitelist:$whitelist,enforce_whitelist:$enforce,max_players:$max_players,motd:$motd,source_software:$software,version:$version,loader_version:$loader}' > "${transaction}/portable.json"
+jq -cn --arg id "${JV_INSTANCE_ID}" --arg software "$native_software" --arg version "$source_version" --arg build "${native_build:-}" --arg loader "${native_loader:-}" --arg game_mode "${GAME_MODE}" --arg difficulty "${DIFFICULTY}" --argjson whitelist "$([[ ${WHITELIST_ENABLED} == yes ]] && echo true || echo false)" --argjson enforce "$([[ ${ENFORCE_WHITELIST} == yes ]] && echo true || echo false)" --argjson max_players "${MAX_PLAYERS}" --arg motd "${MOTD}" '{instance_id:$id,game_mode:$game_mode,difficulty:$difficulty,whitelist:$whitelist,enforce_whitelist:$enforce,max_players:$max_players,motd:$motd,source_software:$software,version:$version,loader_version:$loader} + (if $build == "" then {} else {pufferfish_build:($build|tonumber)} end)' > "${transaction}/portable.json"
 chmod 0600 "${transaction}/portable.json"
 
 # The destination's committed runtime owns ports, resources, software and identity.

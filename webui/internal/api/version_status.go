@@ -15,6 +15,7 @@ type AdminVersionStatus struct {
 	BedrockUDPStart           int    `json:"bedrock_udp_start,omitempty"`
 	BedrockUDPEnd             int    `json:"bedrock_udp_end,omitempty"`
 	LoaderVersion             string `json:"loader_version,omitempty"`
+	PufferfishBuild           int    `json:"pufferfish_build,omitempty"`
 	InstanceID                string `json:"instance_id,omitempty"`
 	ServerType                string `json:"server_type"`
 	ServerSupported           bool   `json:"server_supported"`

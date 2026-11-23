@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -43,7 +44,8 @@ var runMinecraftStackUpdate = func(ctx context.Context, fingerprint string, conf
 	command := exec.CommandContext(ctx, "/usr/libexec/justvoxel/mjust/update-minecraft-backend", args...)
 	if exact, _ := ctx.Value(switchWorkerKey{}).(bool); exact {
 		content, _ := ctx.Value(switchContentKey{}).(string)
-		command.Env = append(os.Environ(), "JUSTVOXEL_SWITCH_EXACT=yes", "JUSTVOXEL_SWITCH_CONTENT="+content)
+		build, _ := ctx.Value(switchPufferfishBuildKey{}).(int)
+		command.Env = append(os.Environ(), "JUSTVOXEL_SWITCH_PUFFERFISH_BUILD="+strconv.Itoa(build), "JUSTVOXEL_SWITCH_EXACT=yes", "JUSTVOXEL_SWITCH_CONTENT="+content)
 	}
 	output, err := command.CombinedOutput()
 	if err == nil {

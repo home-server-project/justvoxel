@@ -89,13 +89,14 @@ validate_request_shape() {
       (.storage|type == "object") and
       (.backups|type == "object") and
       ((.server|keys) - ["motd","max_players","bedrock_enabled","timezone"] | length == 0) and
-      ((.minecraft|keys) - ["bedrock_tcp_port","bedrock_udp_start","bedrock_udp_end","server_type","loader_version","java_memory","container_memory","java_port","bedrock_port","image_tag","version_policy","version","game_mode"] | length == 0) and
+      ((.minecraft|keys) - ["bedrock_tcp_port","bedrock_udp_start","bedrock_udp_end","server_type","pufferfish_build","loader_version","java_memory","container_memory","java_port","bedrock_port","image_tag","version_policy","version","game_mode"] | length == 0) and
       ((.storage|keys) - ["type","path","device","mount_point"] | length == 0) and
       ((.backups|keys) - ["automatic","daily_time","keep","type","path","device","mount_point","source","username","domain"] | length == 0) and
       (.server.motd|type == "string") and
       (.server.max_players|type == "number") and
       (.server.bedrock_enabled|type == "boolean") and
       (.minecraft | (has("server_type") | not) or (.server_type | type == "string" and (. == "paper" or . == "purpur" or . == "pufferfish" or . == "leaf" or . == "vanilla" or . == "spigot" or . == "forge" or . == "neoforge" or . == "fabric" or . == "quilt" or . == "bedrock"))) and
+      (.minecraft | if .server_type == "pufferfish" then .version_policy == "pinned" and (.pufferfish_build | type == "number" and . > 0 and floor == .) else (has("pufferfish_build") | not) end) and
       ((.minecraft.loader_version // "")|type == "string") and
       (.minecraft.java_memory|type == "string") and
       (.minecraft.container_memory|type == "string") and
@@ -270,6 +271,7 @@ fi
 # Planning is shared by first setup and additional instances. Apply owns admission.
 
 MINECRAFT_SERVER_TYPE="$(jq -r '.minecraft.server_type // "paper"' <<< "${request}")"
+MINECRAFT_PUFFERFISH_BUILD="$(jq -r '.minecraft.pufferfish_build // empty' <<< "${request}")"
 MINECRAFT_LOADER_VERSION="$(jq -r '.minecraft.loader_version // ""' <<< "${request}")"
 motd="$(jq -r '.server.motd' <<< "${request}")"
 max_players="$(jq -r '.server.max_players' <<< "${request}")"
@@ -557,6 +559,7 @@ server_json="$(jq -n \
 
 minecraft_json="$(jq -n \
     --arg server_type "${MINECRAFT_SERVER_TYPE}" \
+    --arg build "${MINECRAFT_PUFFERFISH_BUILD}" \
     --arg loader_version "${MINECRAFT_LOADER_VERSION}" \
     --arg java_memory "${java_memory}" \
     --arg container_memory "${container_memory}" \
@@ -571,7 +574,7 @@ minecraft_json="$(jq -n \
     --argjson system_reserve_mib "${remaining_mib}" \
     --argjson minecraft_uid "${minecraft_uid}" \
     --argjson minecraft_gid "${minecraft_gid}" \
-    '{server_type:$server_type,java_memory:$java_memory,container_memory:$container_memory,java_port:$java_port,bedrock_port:$bedrock_port,image_tag:$image_tag,game_mode:$game_mode,requested_version_policy:$requested_version_policy,version_policy:$version_policy,version:$version,system_memory_mib:$system_memory_mib,system_reserve_mib:$system_reserve_mib,minecraft_uid:$minecraft_uid,minecraft_gid:$minecraft_gid} + (if $loader_version == "" then {} else {loader_version:$loader_version} end)')"
+    '{server_type:$server_type,java_memory:$java_memory,container_memory:$container_memory,java_port:$java_port,bedrock_port:$bedrock_port,image_tag:$image_tag,game_mode:$game_mode,requested_version_policy:$requested_version_policy,version_policy:$version_policy,version:$version,system_memory_mib:$system_memory_mib,system_reserve_mib:$system_reserve_mib,minecraft_uid:$minecraft_uid,minecraft_gid:$minecraft_gid} + (if $build == "" then {} else {pufferfish_build:($build|tonumber)} end) + (if $loader_version == "" then {} else {loader_version:$loader_version} end)')"
 
 backup_json="$(jq -c \
     --argjson automatic "${backup_automatic}" \

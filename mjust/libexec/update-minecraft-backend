@@ -14,10 +14,18 @@ source /usr/libexec/justvoxel/mjust/instance-context.sh
 jv_load_instance "$2" || exit 1
 instance_args=(--instance "$2")
 shift 2
+old_pufferfish_build=''
+if [[ ${MINECRAFT_SERVER_TYPE} == pufferfish ]]; then
+    old_pufferfish_build="$(jq -r '.runtime.pufferfish_build // empty' "/etc/justvoxel/instances/${JV_INSTANCE_ID}/config.json")"
+fi
 switch_exact=${JUSTVOXEL_SWITCH_EXACT:-no}
 switch_preserve_content=${switch_exact}
 write_main_config() {
-    JUSTVOXEL_SWITCH_PRESERVE_CONTENT="${switch_preserve_content}" /usr/libexec/justvoxel/management-agent instance-version-publish "${JV_INSTANCE_ID}" "${MINECRAFT_SERVER_TYPE}" "${MINECRAFT_IMAGE_TAG}" "${MINECRAFT_VERSION}" "${MINECRAFT_VERSION_MODE}" "${JV_UPDATE_IMAGE_DIGEST:-${JV_INSTANCE_IMAGE_DIGEST}}"
+    local build=''
+    if [[ ${MINECRAFT_SERVER_TYPE} == pufferfish ]]; then
+        if [[ ${old_server_type} == pufferfish ]]; then build="${old_pufferfish_build}"; else build="${JUSTVOXEL_SWITCH_PUFFERFISH_BUILD:-}"; fi
+    fi
+    JUSTVOXEL_PUBLISH_PUFFERFISH_BUILD="${build}" JUSTVOXEL_SWITCH_PRESERVE_CONTENT="${switch_preserve_content}" /usr/libexec/justvoxel/management-agent instance-version-publish "${JV_INSTANCE_ID}" "${MINECRAFT_SERVER_TYPE}" "${MINECRAFT_IMAGE_TAG}" "${MINECRAFT_VERSION}" "${MINECRAFT_VERSION_MODE}" "${JV_UPDATE_IMAGE_DIGEST:-${JV_INSTANCE_IMAGE_DIGEST}}"
 }
 render_runtime() { :; } # publication above uses the authoritative Go renderer
 

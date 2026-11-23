@@ -705,3 +705,13 @@ func TestMinecraftRecentLogsKeepsOperatorPlusAuthorization(t *testing.T) {
 		})
 	}
 }
+
+func TestDeleteServerFooterButtonGeometry(t *testing.T) {
+	css, err := englishPresentationAsset("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(css), `.minecraft-delete-dialog[aria-labelledby="minecraft-delete-title"] .action-row button{min-width:0;min-height:34px;padding:.38rem .7rem;font-size:.84rem}`) {
+		t.Fatal("Delete Server footer buttons lost their compact geometry")
+	}
+}

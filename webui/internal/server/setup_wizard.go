@@ -51,6 +51,7 @@ type setupMinecraftDraft struct {
 	ResolvedVersion     string
 	RuntimeImageTag     string
 	LoaderVersion       string
+	PufferfishBuild     int
 	GameMode            string
 	ServerType          string
 	JavaMemory          string
@@ -383,6 +384,7 @@ func (a *App) setupWizardSaveServer(w http.ResponseWriter, r *http.Request) {
 		draft.Minecraft.ResourcesComplete = false
 	}
 	if draft.Minecraft.ServerType != serverType {
+		draft.Minecraft.PufferfishBuild = 0
 		draft.Minecraft.ResolvedVersion, draft.Minecraft.RuntimeImageTag, draft.Minecraft.LoaderVersion = "", "", ""
 		if setupNeedsExactRuntime(serverType) {
 			draft.Server.BedrockEnabled = false

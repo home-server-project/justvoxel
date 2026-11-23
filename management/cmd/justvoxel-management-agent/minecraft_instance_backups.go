@@ -491,6 +491,7 @@ type instanceBackupMetadata struct {
 	Software            string `json:"software"`
 	Version             string `json:"version"`
 	LoaderVersion       string `json:"loader_version,omitempty"`
+	PufferfishBuild     int    `json:"pufferfish_build,omitempty"`
 	Created             string `json:"created"`
 	Archive             string `json:"archive"`
 	Size                int64  `json:"size"`

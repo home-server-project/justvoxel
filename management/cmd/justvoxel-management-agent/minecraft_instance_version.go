@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -106,6 +107,15 @@ func instanceVersionCommand(ctx context.Context, args []string) error {
 			ctx = context.WithValue(ctx, reviewedMigrationInstanceKey{}, id)
 		} else {
 			next.Runtime.PreserveContent = os.Getenv("JUSTVOXEL_SWITCH_PRESERVE_CONTENT") == "yes"
+		}
+		if args[2] != "pufferfish" {
+			next.Runtime.PufferfishBuild = 0
+		} else if previous.Runtime.Software != args[2] {
+			build, err := strconv.Atoi(os.Getenv("JUSTVOXEL_PUBLISH_PUFFERFISH_BUILD"))
+			if err != nil || build <= 0 {
+				return errInstanceRecovery
+			}
+			next.Runtime.PufferfishBuild = build
 		}
 		next.Runtime.Software = args[2]
 		next.Runtime.ImageTag = args[3]

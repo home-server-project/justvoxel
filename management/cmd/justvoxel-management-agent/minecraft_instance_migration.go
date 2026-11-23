@@ -45,6 +45,7 @@ func (b *instanceRuntimeBackend) migrationPortableSettings(previous instanceRunt
 		SourceSoftware   string `json:"source_software"`
 		Version          string `json:"version"`
 		LoaderVersion    string `json:"loader_version"`
+		PufferfishBuild  int    `json:"pufferfish_build,omitempty"`
 		GameMode         string `json:"game_mode"`
 		Difficulty       string `json:"difficulty"`
 		Whitelist        bool   `json:"whitelist"`
@@ -59,6 +60,13 @@ func (b *instanceRuntimeBackend) migrationPortableSettings(previous instanceRunt
 		if portable.SourceSoftware != "" {
 			if !javaServerAllowsSwitch(portable.SourceSoftware, previous.Runtime.Software) {
 				return next, errInstanceRecovery
+			}
+			if portable.SourceSoftware == "pufferfish" && previous.Runtime.Software == "pufferfish" {
+				if portable.PufferfishBuild > 0 {
+					next.Runtime.PufferfishBuild = portable.PufferfishBuild
+				} else if portable.PufferfishBuild < 0 || portable.Version != previous.Runtime.Version || previous.Runtime.PufferfishBuild <= 0 {
+					return next, errInstanceRecovery
+				}
 			}
 			next.Runtime.LoaderVersion = portable.LoaderVersion
 			next.Runtime.PreserveContent = true

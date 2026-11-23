@@ -18,9 +18,9 @@ curl() {
             else
                 printf '%s' '{"jobs":[{"name":"Pufferfish-1.21"},{"name":"Pufferfish-1.20"},{"name":"Pufferfish-26.3/unsafe"},{"name":"Other"}]}'
             fi ;;
-        https://ci.pufferfish.host/job/Pufferfish-1.21/lastSuccessfulBuild/api/json)
+        https://ci.pufferfish.host/job/Pufferfish-1.21/lastSuccessfulBuild/api/json|https://ci.pufferfish.host/job/Pufferfish-1.21/39/api/json)
             case "${fixture}" in
-                reobf|both|ambiguous|nonrelease|malformed|zero|fractional|absolute|backslash)
+                reobf|both|ambiguous|nonrelease|malformed|zero|negative|string|fractional|absolute|backslash)
                     jq -cn --arg fixture "${fixture}" '
                         {result:"SUCCESS",number:39,artifacts:[{fileName:"pufferfish-paperclip-1.21.10-R0.1-SNAPSHOT-mojmap.jar",relativePath:"build/libs/pufferfish-paperclip-1.21.10-R0.1-SNAPSHOT-mojmap.jar"}]} |
                         if $fixture == "reobf" then .artifacts |= map(.fileName |= sub("mojmap";"reobf") | .relativePath |= sub("mojmap";"reobf"))
@@ -28,6 +28,8 @@ curl() {
                         elif $fixture == "ambiguous" then .artifacts += [{fileName:"pufferfish-paperclip-1.21.8-R0.1-SNAPSHOT-reobf.jar",relativePath:"pufferfish-paperclip-1.21.8-R0.1-SNAPSHOT-reobf.jar"}]
                         elif $fixture == "nonrelease" then .artifacts |= map(.fileName |= sub("1.21.10";"1.21.9") | .relativePath |= sub("1.21.10";"1.21.9"))
                         elif $fixture == "malformed" then .artifacts[0].fileName="pufferfish-paperclip-latest.jar"
+                        elif $fixture == "negative" then .number=-1
+                        elif $fixture == "string" then .number="39"
                         elif $fixture == "zero" then .number=0
                         elif $fixture == "fractional" then .number=39.5
                         elif $fixture == "absolute" then .artifacts[0].relativePath="/" + .artifacts[0].relativePath
@@ -124,12 +126,14 @@ jq -e '.game == "1.21.11" and .reason == ""' <<< "${specific}" >/dev/null
 specific="$(resolve_setup_java_runtime leaf pinned 26.3)"
 jq -e '.game == "26.3" and .loader == "" and (.reason | contains("Experimental"))' <<< "${specific}" >/dev/null
 specific="$(resolve_setup_java_runtime pufferfish pinned 1.21.10)"
-jq -e '.game == "1.21.10"' <<< "${specific}" >/dev/null
+jq -e '.game == "1.21.10" and .pufferfish_build == 39' <<< "${specific}" >/dev/null
+MINECRAFT_PUFFERFISH_BUILD=39 java_server_version_available pufferfish 1.21.10
+MINECRAFT_PUFFERFISH_BUILD=40 reject java_server_version_available pufferfish 1.21.10
 reject java_server_version_available pufferfish 26.3
 reject resolve_setup_java_runtime pufferfish pinned 26.3
 # A single usable identity, official release, safe path and positive integer
 # build are mandatory even when another archived JAR looks plausible.
-for fixture in ambiguous nonrelease malformed zero fractional absolute backslash; do
+for fixture in ambiguous nonrelease malformed zero negative string fractional absolute backslash; do
     reject resolve_setup_java_runtime pufferfish recommended ''
     reject java_server_version_available pufferfish 1.21.10
 done
@@ -137,7 +141,7 @@ done
 for fixture in reobf both; do
     java_server_version_available pufferfish 1.21.10
     selected="$(resolve_setup_java_runtime pufferfish recommended '')"
-    jq -e '.game == "1.21.10"' <<< "${selected}" >/dev/null
+    jq -e '.game == "1.21.10" and .pufferfish_build == 39' <<< "${selected}" >/dev/null
 done
 
 # Leaf v2 download records retain exact identity and SHA-256 independently of

@@ -50,6 +50,7 @@ func (b *instanceRuntimeBackend) applySwitchRuntime(ctx context.Context, previou
 		p := *plan
 		if !p.Convert || p.InstanceID != e.Source || p.Current != e.SourceRecord.Runtime.Software || previous.Runtime.Software != p.Current ||
 			p.Target != e.Target || next.Runtime.Software != p.Target || p.Version != e.Version || switchWorldRisk(p.Current, p.Target) ||
+			previous.Runtime.PufferfishBuild != e.SourceRecord.Runtime.PufferfishBuild || next.Runtime.PufferfishBuild != p.Runtime.PufferfishBuild ||
 			previous.Runtime.LoaderVersion != e.SourceRecord.Runtime.LoaderVersion ||
 			!operationFingerprintPattern.MatchString(p.Fingerprint) || !instanceSHA256Pattern.MatchString(p.ContentFingerprint) ||
 			p.Runtime.ServerType != p.Target || p.Runtime.Installed != p.Version || p.Runtime.SelectedCandidate != p.Version || !p.Runtime.ServerSupported ||
@@ -163,6 +164,7 @@ func (s *server) convertMinecraftSwitch(ctx context.Context, e *minecraftSwitchE
 	}
 	next := record
 	next.Runtime.Software, next.Runtime.VersionPolicy, next.Runtime.Version = p.Target, "pinned", p.Version
+	next.Runtime.PufferfishBuild = p.Runtime.PufferfishBuild
 	next.Runtime.LoaderVersion, next.Runtime.ImageTag, next.Runtime.ImageDigest = p.Runtime.LoaderVersion, p.Runtime.ImageTag, p.RuntimeDigest
 	next.Runtime.BedrockEnabled = p.Runtime.CrossplayEnabled
 	channel, err := b.command(ctx, instanceRuntimeHelper, "channel", p.Target, p.Version, "pinned")

@@ -202,6 +202,7 @@ func (s *server) cloneMinecraftSwitch(ctx context.Context, e *minecraftSwitchEvi
 	c.PreserveContent = true
 	c.Software = p.Target
 	c.Version = p.Version
+	c.PufferfishBuild = p.Runtime.PufferfishBuild
 	c.LoaderVersion = p.Runtime.LoaderVersion
 	if !(javaServerPaperFamily(p.Current) && javaServerPaperFamily(p.Target)) {
 		c.BedrockEnabled = p.Runtime.CrossplayEnabled
