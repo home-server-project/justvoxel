@@ -4,15 +4,7 @@ One x86_64 online installer supports **JustVoxel VM** for virtual machines and *
 
 ## Get the ISO
 
-1. In this repository’s **Actions** tab, open **ISO** and select a successful run from `main`.
-2. Download the **JustVoxel-x86_64** artifact and extract it. Each artifact is retained for 90 days. If no artifact is available, a maintainer can run **ISO** manually from `main`.
-3. From the extracted directory, check the download against the accompanying checksum. On Linux, run:
-
-   ```sh
-   sha256sum -c JustVoxel-x86_64.iso.sha256
-   ```
-
-   Continue when the result is `OK`. On Windows use `Get-FileHash .\JustVoxel-x86_64.iso -Algorithm SHA256` and compare it with the checksum file.
+[⬇️ Download JustVoxel x86_64 ISO](https://sourceforge.net/projects/justvoxel/files/JustVoxel-x86_64.iso/download)
 
 ## Prepare the machine
 
