@@ -7,9 +7,8 @@
       <input type="hidden" name="return" value="{{languageReturn}}">
       <div class="language-dialog-field">
         <select name="language" aria-label="{{t "language.choose"}}">
-          {{range $index, $group := languageGroups}}
-          {{if $index}}<hr>{{end}}
-          <optgroup label="{{t .Label}}">
+          {{range languageGroups}}
+          <optgroup label="──── {{t .Label}} ────">
             {{range .Options}}
             <option value="{{.Locale}}" lang="{{.Locale}}"{{if eq locale .Locale}} selected{{end}}>{{.Name}}</option>
             {{end}}

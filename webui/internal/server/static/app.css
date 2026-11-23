@@ -1898,7 +1898,6 @@ body:not(.primary-administrator) .nav-admin-only[data-primary-admin-only]{displa
 .language-dialog select{width:100%;max-width:100%;margin-top:0}
 .language-dialog optgroup{font-weight:bold;text-align:center}
 .language-dialog option{font-weight:normal;text-align:left}
-.language-dialog select hr{border:0;border-top:1px solid currentColor;opacity:.35}
 
 /* Compact Minecraft Network presentation; shared Players rules stay unchanged. */
 .minecraft-network{display:grid;gap:.65rem;min-width:0}

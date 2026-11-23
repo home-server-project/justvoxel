@@ -185,10 +185,14 @@ func assertLanguageDialog(t *testing.T, body, locale, returnPath string) {
 			t.Fatalf("language dialog missing %q", want)
 		}
 	}
-	if strings.Count(dialog, "<select ") != 1 || strings.Count(dialog, "<option") != 9 || strings.Count(dialog, " selected") != 1 {
+	if strings.Count(dialog, "<select") != 1 || strings.Count(dialog, "<option") != 9 || strings.Count(dialog, " selected") != 1 {
 		t.Fatal("language picker must have one select, nine options and one selected locale")
 	}
-	groups := regexp.MustCompile(`(?s)<optgroup label="([^"]*)">(.*?)</optgroup>`).FindAllStringSubmatch(dialog, -1)
+	selector := regexp.MustCompile(`(?s)<select [^>]*>.*?</select>`).FindString(dialog)
+	if strings.Contains(selector, "<hr") {
+		t.Fatal("language picker contains an unexpected horizontal separator")
+	}
+	groups := regexp.MustCompile(`(?s)<optgroup label="──── ([^"]*) ────">(.*?)</optgroup>`).FindAllStringSubmatch(selector, -1)
 	wantGroups := []struct {
 		key, english string
 		options      []languageOption
@@ -203,13 +207,13 @@ func assertLanguageDialog(t *testing.T, body, locale, returnPath string) {
 	if len(groups) != len(wantGroups) || strings.Count(dialog, "<optgroup") != len(wantGroups) {
 		t.Fatal("language picker must have exactly three optgroups")
 	}
-	separators := regexp.MustCompile(`</optgroup>\s*<hr>\s*<optgroup `).FindAllString(dialog, -1)
-	if len(separators) != len(groups)-1 || strings.Count(dialog, "<hr") != len(separators) {
-		t.Fatal("language picker must have one native separator between each pair of groups")
-	}
 	optionPattern := regexp.MustCompile(`<option [^>]*>[^<]*</option>`)
 	for i, group := range wantGroups {
-		if catalogs["en"][group.key] != group.english || groups[i][1] != html.EscapeString(catalogs[locale][group.key]) {
+		name := catalogs[locale][group.key]
+		if name == "" || strings.Contains(name, "─") || strings.TrimSpace(name) != name {
+			t.Fatalf("%s: expected a clean catalog name for %s, got %q", locale, group.key, name)
+		}
+		if catalogs["en"][group.key] != group.english || groups[i][1] != html.EscapeString(name) {
 			t.Fatalf("%s: wrong label for %s: %q", locale, group.key, groups[i][1])
 		}
 		options := optionPattern.FindAllString(groups[i][2], -1)
