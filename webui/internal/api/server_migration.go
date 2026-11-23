@@ -207,6 +207,8 @@ type AdminMigrationImportSourceNormalized struct {
 	SourceClass           string `json:"source_class"`
 	CandidateType         string `json:"candidate_type"`
 	MinecraftVersion      string `json:"minecraft_version"`
+	NativeIndexSHA256     string `json:"native_index_sha256,omitempty"`
+	LoaderVersion         string `json:"loader_version,omitempty"`
 	OnlineMode            string `json:"online_mode"`
 	GameMode              string `json:"game_mode"`
 	Difficulty            string `json:"difficulty"`

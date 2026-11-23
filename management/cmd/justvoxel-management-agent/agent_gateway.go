@@ -481,7 +481,7 @@ var gatewayPublicFields = func() map[string]bool {
 		integrity integrity_validation_required intent interface interface_name interfaces ip ip_interface ipv4
 		ipv4_address ipv4_dns ipv4_gateway ipv4_method ipv4_prefix ipv6 ipv6_method items javaPortHint java_enabled
 		java_memory java_port java_port_hint justvoxel keep key_management kind known label label_method last
-		last_attempt last_success latest levelName limit lines load_state loader_version loaders local_address
+		last_attempt last_success latest levelName limit lines load_state native_index_sha256 loader_version loaders local_address
 		local_port logs mac maintenance maintenance_state major_minor managed managed_crossplay_available management
 		management_api max maxPlayers max_bitrate_kbps max_players meshnet message metadata metadata_error
 		metadata_status min minecraft minecraftVersion minecraft_state minecraft_version mode model modrinth

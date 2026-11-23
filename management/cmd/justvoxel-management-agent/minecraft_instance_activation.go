@@ -670,7 +670,8 @@ func (b *instanceRuntimeBackend) applyVersion(ctx context.Context, previous inst
 	if err = b.storage(ctx, "preflight", next); err != nil {
 		return err
 	}
-	if (previous.Runtime.Software == "bedrock" || next.Runtime.Software == "bedrock") && (previous.Runtime.Software != next.Runtime.Software || previous.Runtime.Version != next.Runtime.Version) {
+	reviewedMigration := maintenance && ctx.Value(reviewedMigrationInstanceKey{}) == id && previous.Runtime.Software == next.Runtime.Software
+	if !reviewedMigration && (previous.Runtime.Software == "bedrock" || next.Runtime.Software == "bedrock") && (previous.Runtime.Software != next.Runtime.Software || previous.Runtime.Version != next.Runtime.Version) {
 		return instanceRuntimeFailure("Bedrock software/version conversion is not supported")
 	}
 	// Full configuration changes are stopped-only; boot preference is independent.
@@ -773,7 +774,7 @@ func (b *instanceRuntimeBackend) applyVersion(ctx context.Context, previous inst
 		}
 	}
 	switchApply := maintenance && switchRuntimeApplyAuthorized(ctx, previous, next)
-	if previous.EnvironmentSHA256 != "" && previous.Runtime.LoaderVersion != next.Runtime.LoaderVersion && !switchApply {
+	if previous.EnvironmentSHA256 != "" && previous.Runtime.LoaderVersion != next.Runtime.LoaderVersion && !reviewedMigration && !switchApply {
 		if err = b.storage(ctx, "version-empty", previous); err != nil {
 			return instanceRuntimeFailure("Loader changes on existing data require separate compatibility support. No loader was changed.")
 		}

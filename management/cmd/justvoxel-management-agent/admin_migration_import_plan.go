@@ -107,6 +107,8 @@ type adminMigrationImportSourceNormalized struct {
 	SourceClass           string `json:"source_class"`
 	CandidateType         string `json:"candidate_type"`
 	MinecraftVersion      string `json:"minecraft_version"`
+	NativeIndexSHA256     string `json:"native_index_sha256,omitempty"`
+	LoaderVersion         string `json:"loader_version,omitempty"`
 	OnlineMode            string `json:"online_mode"`
 	GameMode              string `json:"game_mode"`
 	Difficulty            string `json:"difficulty"`
@@ -296,13 +298,15 @@ func validateSuccessfulAdminMigrationImportPlan(request adminMigrationImportRequ
 	if n.Source.Path != request.Source.Path || n.Source.SelectedRoot != request.Source.SelectedRoot && request.Source.SelectedRoot != "" {
 		return errors.New("Import source request mismatch")
 	}
-	if n.Source.MinecraftVersion == "" || n.Source.OnlineMode != "online" || n.Source.SourceClass == "" || n.Source.CandidateType == "" || n.Source.MaxPlayers <= 0 || n.Source.ExpandedBytes == 0 {
+	native := n.Source.SourceClass == "justvoxel"
+	bedrock := native && n.Source.ServerType == "bedrock" && n.Destination.ServerType == "bedrock"
+	if n.Source.MinecraftVersion == "" || (n.Source.OnlineMode != "online" && !(bedrock && n.Source.OnlineMode == "not_applicable")) || n.Source.SourceClass == "" || n.Source.CandidateType == "" || n.Source.MaxPlayers <= 0 || n.Source.ExpandedBytes == 0 {
 		return errors.New("Import source plan incomplete")
 	}
 	if n.Destination.Mode != "replace" {
 		return errors.New("invalid Import destination mode")
 	}
-	if !strings.HasPrefix(n.Destination.DataPath, "/") || !strings.HasPrefix(n.Destination.BackupPath, "/") || n.Destination.JavaPort < 1 || n.Destination.BedrockPort < 1 || n.Destination.MinecraftUID == 0 || n.Destination.MinecraftGID == 0 {
+	if !strings.HasPrefix(n.Destination.DataPath, "/") || !strings.HasPrefix(n.Destination.BackupPath, "/") || (n.Destination.JavaPort < 1 && !(bedrock && n.Destination.JavaPort == 0)) || (n.Destination.BedrockPort < 1 && !(native && n.Destination.BedrockPort == 0)) || n.Destination.MinecraftUID == 0 || n.Destination.MinecraftGID == 0 {
 		return errors.New("Import destination plan incomplete")
 	}
 	if req.EULAAcceptanceRequired || req.BackupSMBPasswordRequired {

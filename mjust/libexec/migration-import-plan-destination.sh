@@ -4,12 +4,16 @@
 staged_server="${transaction}/staged-server"
 [[ ! -e ${staged_server} ]] || { echo 'ERROR: staged-server path already exists.' >&2; exit 1; }
 mv -- "${selected_root}" "${staged_server}"
-redetect="$(/usr/libexec/justvoxel/mjust/migration-archive detect "${staged_server}")"
-[[ $(jq -r '.candidates | length' <<< "${redetect}") == 1 ]] || {
-    echo 'ERROR: selected staged server did not remain a single recognizable server root.' >&2
-    exit 1
-}
-selected="$(jq -c '.candidates[0]' <<< "${redetect}")"
+if [[ $is_native == true ]]; then
+    /usr/libexec/justvoxel/mjust/migration-archive native-data "$staged_server" "$native_software" "$native_version" >/dev/null
+else
+    redetect="$(/usr/libexec/justvoxel/mjust/migration-archive detect "${staged_server}")"
+    [[ $(jq -r '.candidates | length' <<< "${redetect}") == 1 ]] || {
+        echo 'ERROR: selected staged server did not remain a single recognizable server root.' >&2
+        exit 1
+    }
+    selected="$(jq -c '.candidates[0]' <<< "${redetect}")"
+fi
 jv_migration_write_state "${transaction}" prepared "${JV_MIGRATION_SOURCE}" "${source_class}"
 
 # Source-derived portable settings.
@@ -48,7 +52,7 @@ jv_migration_validate_setting_values
 source_geyser="$(jq -r '.geyserEnabled' <<< "${selected}")"
 source_geyser_auth="$(jq -r '.geyserAuthType // empty' <<< "${selected}")"
 source_floodgate="$(jq -r '.floodgateEnabled' <<< "${selected}")"
-if [[ ${source_bedrock_manifest} == true && ${source_geyser_auth} != floodgate ]]; then
+if [[ ${source_bedrock_manifest} == true && ${source_geyser_auth} != floodgate ]] && server_supports_bukkit_plugins "$native_software"; then
     echo 'ERROR: native manifest says Bedrock/Floodgate is enabled, but staged Geyser auth-type is not floodgate.' >&2
     exit 1
 elif [[ ${source_geyser} == true && ${source_floodgate} == true && ${source_geyser_auth} == floodgate ]]; then
@@ -64,7 +68,7 @@ fi
 BEDROCK_MANAGED_PLUGINS=yes
 
 # Capture the reviewed Minecraft-side settings, never source appliance identity.
-jq -cn --arg id "${JV_INSTANCE_ID}" --arg game_mode "${GAME_MODE}" --arg difficulty "${DIFFICULTY}" --argjson whitelist "$([[ ${WHITELIST_ENABLED} == yes ]] && echo true || echo false)" --argjson enforce "$([[ ${ENFORCE_WHITELIST} == yes ]] && echo true || echo false)" --argjson max_players "${MAX_PLAYERS}" --arg motd "${MOTD}" '{instance_id:$id,game_mode:$game_mode,difficulty:$difficulty,whitelist:$whitelist,enforce_whitelist:$enforce,max_players:$max_players,motd:$motd}' > "${transaction}/portable.json"
+jq -cn --arg id "${JV_INSTANCE_ID}" --arg software "$native_software" --arg version "$source_version" --arg loader "${native_loader:-}" --arg game_mode "${GAME_MODE}" --arg difficulty "${DIFFICULTY}" --argjson whitelist "$([[ ${WHITELIST_ENABLED} == yes ]] && echo true || echo false)" --argjson enforce "$([[ ${ENFORCE_WHITELIST} == yes ]] && echo true || echo false)" --argjson max_players "${MAX_PLAYERS}" --arg motd "${MOTD}" '{instance_id:$id,game_mode:$game_mode,difficulty:$difficulty,whitelist:$whitelist,enforce_whitelist:$enforce,max_players:$max_players,motd:$motd,source_software:$software,version:$version,loader_version:$loader}' > "${transaction}/portable.json"
 chmod 0600 "${transaction}/portable.json"
 
 # The destination's committed runtime owns ports, resources, software and identity.
@@ -72,24 +76,31 @@ chmod 0600 "${transaction}/portable.json"
 jv_migration_load_instance "${JV_INSTANCE_ID}"
 
 # Recalculate data destination ownership and normalize only appliance-specific runtime values.
-jv_migration_normalize_staged_runtime_files "${staged_server}" "${BEDROCK_ENABLED}"
-/usr/libexec/justvoxel/mjust/managed-plugin-files "${staged_server}/plugins" all ''
+if [[ $MINECRAFT_SERVER_TYPE != bedrock ]]; then
+    jv_migration_normalize_staged_runtime_files "${staged_server}" "${BEDROCK_ENABLED}"
+    if [[ $is_native != true ]]; then
+        /usr/libexec/justvoxel/mjust/managed-plugin-files "${staged_server}/plugins" all ''
+    fi
+fi
 
 # Show the final plan before any live destination changes.
 echo
 echo 'Import plan'
 echo '-----------'
 echo "Source type: ${source_class} (${candidate_type})"
-echo "Minecraft version: ${MINECRAFT_VERSION} (pinned for migration)"
-echo "Source online-mode: true"
+echo "Minecraft version: ${source_version} (pinned for migration)"
+[[ $native_software == bedrock ]] || echo "Source online-mode: true"
 echo "Destination data: ${DATA_PATH}"
 echo "Destination UID:GID: ${MINECRAFT_UID}:${MINECRAFT_GID}"
-echo "Java port: ${JAVA_PORT}/tcp"
-if [[ ${BEDROCK_ENABLED} == yes ]]; then echo "Bedrock port: ${BEDROCK_PORT}/tcp+udp"; else echo 'Bedrock host publishing: disabled'; fi
-echo "Game mode / difficulty: ${GAME_MODE} / ${DIFFICULTY}"
+if [[ $MINECRAFT_SERVER_TYPE != bedrock ]]; then
+    echo "Java port: ${JAVA_PORT}/tcp"
+    if [[ ${BEDROCK_ENABLED} == yes ]]; then echo "Bedrock port: ${BEDROCK_PORT}/tcp+udp"; else echo 'Bedrock host publishing: disabled'; fi
+fi
+[[ -z ${native_loader:-} ]] || echo "Loader version: $native_loader"
+echo "Game mode / difficulty: ${source_game_mode:-$GAME_MODE} / ${source_difficulty:-$DIFFICULTY}"
 echo "Whitelist / enforce whitelist: ${WHITELIST_ENABLED} / ${ENFORCE_WHITELIST}"
 echo "Maximum players: ${MAX_PLAYERS}"
-echo "Plugins preserved: ${plugin_count} JAR(s) detected"
+[[ $MINECRAFT_SERVER_TYPE == bedrock ]] || echo "Plugins preserved: ${plugin_count} JAR(s) detected"
 echo 'Destination mode: REPLACE selected Minecraft instance data'
 echo 'The selected destination instance configuration remains authoritative.'
 

@@ -140,8 +140,8 @@ destination_planner="${repo_root}/mjust/libexec/migration-import-plan-destinatio
 )
 for planner in "${api_planner}" "${source_planner}"; do
     grep -Fq 'server_supports_plugins "${MINECRAFT_SERVER_TYPE-paper}"' "${planner}" || fail 'planner lacks shared destination compatibility gate'
-    grep -Fq 'server_allows_in_place_switch "${MINECRAFT_SERVER_TYPE-paper}" "$(jq -r '\''.minecraft.implementation // "paper"'\'' <<< "${native_manifest}")"' "${planner}" || fail 'planner lacks existing in-place switch compatibility authority'
-    grep -Fq 'server_version_available "$source_version"' "${planner}" || fail 'planner lacks destination version availability preflight'
+    grep -Fq 'server_allows_in_place_switch' "${planner}" || fail 'planner lacks native compatibility authority'
+    grep -Fq 'jv_migration_import_version_available' "${planner}" || fail 'planner lacks destination version availability preflight'
     if grep -Fq 'paper_version_has_stable_build' "${planner}"; then fail 'Import uses a Paper-only availability check'; fi
 done
 grep -Fq 'instance-version-publish' "${repo_root}/mjust/libexec/migration-import-activate.sh" || fail 'Import does not pin the source version'
@@ -169,8 +169,8 @@ grep -Fq '"${source_version}" pinned' "${repo_root}/mjust/libexec/migration-impo
 set -euo pipefail
 case "$1" in
     inspect) jq -cn --argjson native "$REVIEW_NATIVE" '{expandedBytes:1024,nativeBundle:$native}' ;;
-    verify-native) jq -cn --arg software "$REVIEW_SOURCE_TYPE" '{minecraft:{implementation:$software,version:"26.2",onlineMode:true}}' ;;
-    detect) jq -cn --arg root "$REVIEW_FIXTURE/server" --arg type "$REVIEW_CANDIDATE_TYPE" '{candidates:[{root:$root,sourceType:$type,minecraftVersion:"26.2",onlineMode:true,maxPlayers:10,javaPortHint:25565,pluginJarCount:0}]}' ;;
+    extract|verify-native|native-candidate) exec "$REVIEW_ARCHIVE" "$@" ;;
+    detect) [[ $REVIEW_NATIVE == false ]] || exit 1; jq -cn --arg root "$REVIEW_FIXTURE/server" --arg type "$REVIEW_CANDIDATE_TYPE" '{candidates:[{root:$root,sourceType:$type,minecraftVersion:"26.2",onlineMode:true,maxPlayers:10,javaPortHint:25565,pluginJarCount:0}]}' ;;
     *) exit 1 ;;
 esac
 FIXTURE
@@ -183,19 +183,48 @@ FIXTURE
 printf '%s\n' '{"state":"stopped","online":0,"names":[]}'
 FIXTURE
     chmod +x "${review_fixture}/helpers/"*
+    export REVIEW_ARCHIVE="$repo_root/mjust/libexec/migration-archive"
+    make_native_source() {
+        local software="$1" version=26.2 loader='' data="$review_fixture/native-data"
+        rm -rf "$data"
+        mkdir -p "$data"
+        if [[ $software == bedrock ]]; then
+            version=1.21.90.3
+            mkdir -p "$data/worlds/fixture"
+            touch "$data/worlds/fixture/level.dat"
+        else
+            mkdir -p "$data/world"
+            touch "$data/world/level.dat"
+            echo online-mode=true > "$data/server.properties"
+            case "$software" in
+                pufferfish|leaf) touch "$data/paper.yml" ;;
+                quilt) mkdir "$data/mods"; touch "$data/mods/quilt.jar" ;;
+            esac
+            if server_is_mod_loader "$software"; then loader=1.2.3; fi
+        fi
+        jq -cn --arg software "$software" --arg version "$version" --arg loader "$loader" \
+            '{schema:"org.justvoxel.migration",schemaVersion:1,minecraft:{implementation:$software,version:$version,loaderVersion:$loader}}' > "$review_fixture/manifest.json"
+        rm -f "$review_fixture/native.tar.gz"
+        "$REVIEW_ARCHIVE" create-native "$data" "$review_fixture/manifest.json" "$review_fixture/native.tar.gz"
+    }
     require_config() { :; }
+    jv_migration_require_staging_space() { :; }
+    jv_migration_import_transport_identity() { echo fixture; }
     jv_migration_validate_data() { :; }
     jv_migration_players_json() { printf '%s\n' '{"state":"stopped","online":0,"names":[]}'; }
     jv_migration_import_source_prepare() {
         JV_MIGRATION_IMPORT_SOURCE_PATH="${review_fixture}/server"
-        JV_MIGRATION_IMPORT_SOURCE_IDENTITY=source-fixture
+        if [[ $REVIEW_NATIVE == true ]]; then JV_MIGRATION_IMPORT_SOURCE_PATH="$review_fixture/native.tar.gz"; fi
+        JV_MIGRATION_IMPORT_SOURCE_IDENTITY="$(printf '%s\n%s\n' fixture "$DATA_PATH" | sha256sum | awk '{print $1}')"
     }
     jv_migration_import_source_cleanup() { :; }
     jv_restore_validate_data_layout() { :; }
     jv_migration_check_candidate_port() { :; }
     # A rejected software plan must never ask for version availability.
     server_version_available() {
-        [[ $MINECRAFT_SERVER_TYPE != vanilla ]] || fail 'incompatible plan checked destination version availability'
+        if server_is_mod_loader "$MINECRAFT_SERVER_TYPE"; then
+            [[ $MINECRAFT_LOADER_VERSION == 1.2.3 ]] || return 1
+        fi
         printf '%s\n' "$MINECRAFT_SERVER_TYPE" >> "${review_fixture}/availability"
     }
     DATA_PATH="${review_fixture}/server" BACKUP_PATH="${review_fixture}/backups"
@@ -206,6 +235,7 @@ FIXTURE
     review_request="$(jq -cn --arg path "$DATA_PATH" '{source:{kind:"local",path:$path},destination:{java_port:25565,bedrock_port:19132,backup_keep:7,backup_automatic:true,storage:{},backups:{}}}')"
     for source_software in paper purpur; do
         export REVIEW_SOURCE_TYPE="$source_software" REVIEW_NATIVE=true REVIEW_CANDIDATE_TYPE=itzg-paper
+        make_native_source "$source_software"
         MINECRAFT_SERVER_TYPE=vanilla
         rejected="$(plan <<< "$review_request")"
         jq -e --arg source "$source_software" --arg data "$DATA_PATH" '
@@ -230,13 +260,32 @@ FIXTURE
             rm "${review_fixture}/availability"
         done
     done
-    for source_software in spigot pufferfish leaf quilt bedrock; do
-        export REVIEW_SOURCE_TYPE="$source_software" REVIEW_NATIVE=true REVIEW_CANDIDATE_TYPE=vanilla
-        MINECRAFT_SERVER_TYPE=paper
+    for software in paper purpur spigot pufferfish leaf fabric neoforge forge quilt vanilla bedrock; do
+        export REVIEW_NATIVE=true
+        MINECRAFT_SERVER_TYPE="$software"
+        MINECRAFT_IMAGE_TAG=java25
+        if [[ $software == spigot ]]; then MINECRAFT_IMAGE_TAG=java25-jdk; fi
+        if [[ $software == bedrock ]]; then MINECRAFT_IMAGE_TAG=stable; fi
+        JAVA_PORT=25565 BEDROCK_PORT=0
+        if [[ $software == bedrock ]]; then JAVA_PORT=0; fi
+        make_native_source "$software"
+        compatible="$(plan <<< "$review_request")"
+        jq -e --arg software "$software" '.ok and .normalized.source.candidate_type==$software
+            and .normalized.source.server_type==$software and .normalized.destination.server_type==$software
+            and (.requirements.online_mode_confirmation_required|not)' <<< "$compatible" >/dev/null || fail "native $software plan failed"
+        if server_is_mod_loader "$software"; then
+            jq -e '.normalized.source.loader_version=="1.2.3"' <<< "$compatible" >/dev/null || fail 'review lost loader'
+        fi
+        case "$software" in
+            fabric) MINECRAFT_SERVER_TYPE=forge ;;
+            bedrock) MINECRAFT_SERVER_TYPE=paper ;;
+            vanilla) MINECRAFT_SERVER_TYPE=bedrock ;;
+            *) continue ;;
+        esac
         rejected="$(plan <<< "$review_request")"
-        jq -e '.ok==false and .code=="unsupported_server_type" and .requirements==null' \
-            >/dev/null <<< "$rejected" || fail "unsupported native $source_software import became available"
+        jq -e '.ok==false and .code=="unsupported_server_type"' <<< "$rejected" >/dev/null || fail 'unsupported conversion accepted'
     done
+    JAVA_PORT=25565 BEDROCK_PORT=19132
     export REVIEW_SOURCE_TYPE=vanilla REVIEW_NATIVE=false REVIEW_CANDIDATE_TYPE=vanilla
     MINECRAFT_SERVER_TYPE=paper
     guarded="$(plan <<< "$review_request")"
@@ -349,6 +398,8 @@ if grep -Fq 'postplan=' "${repo_root}/mjust/libexec/admin-migration-import-trans
 if grep -Fq 'jv_migration_source_identity "${JV_MIGRATION_SOURCE}"' "${repo_root}/mjust/libexec/migration-import-activate.sh"; then fail 'Import activation must not re-read the original source after staging'; fi
 grep -Fq 'jv_migration_api_result "${preactivation_outcome}" pre-activation' "${repo_root}/mjust/libexec/migration-import-common.sh" || fail 'Import backend does not report bounded pre-activation failure directly'
 activation="${repo_root}/mjust/libexec/migration-import-activate.sh"
+[[ $(grep -c '="$(jv_migration_online_count)"' "${activation}") == 2 ]] || fail 'Import needs shared initial and final player checks'
+if grep -Fq 'rcon-cli' "${activation}"; then fail 'generic activation depends on Java RCON'; fi
 grep -Fq 'jv_migration_validate_runtime "${source_version}"' "${activation}" || fail 'Import does not verify the concrete source version'
 if grep -Eq 'rcon-cli.*version' "${activation}" "${repo_root}/mjust/libexec/restore-runtime-validate"; then fail 'Import/restore bypasses readiness-aware version verification'; fi
 grep -Fq 'verify-minecraft-stack "${1:-${MINECRAFT_VERSION}}"' "${repo_root}/mjust/libexec/restore-runtime-validate" || fail 'restore does not use the authoritative version verifier'

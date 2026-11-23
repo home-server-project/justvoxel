@@ -1,12 +1,10 @@
 #!/usr/bin/bash
 # Sourced by migration-import: maintenance lock, activation, validation and cleanup.
-query_players() { podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli 'list' 2>/dev/null || true; }
 if [[ ${configured} == yes ]] && systemctl is-active --quiet "${JV_INSTANCE_UNIT}"; then
     minecraft_was_active=yes
-    initial_players="$(query_players)"
-    [[ -n ${initial_players} ]] || { echo 'ERROR: could not confirm player state. Nothing was activated.' >&2; exit 1; }
-    echo "${initial_players}"
-    if ! grep -q 'There are 0 of' <<< "${initial_players}"; then
+    initial_players="$(jv_migration_online_count)" || { echo 'ERROR: could not confirm player state. Nothing was activated.' >&2; exit 1; }
+    echo "Players online: ${initial_players}"
+    if (( initial_players > 0 )); then
         echo 'Players are online. Import will use the normal graceful shutdown path.'
         if [[ ${JV_MIGRATION_API_MODE:-0} == 1 ]]; then
             [[ ${JV_MIGRATION_API_PLAYERS_CONFIRMED:-no} == yes ]] || { echo 'ERROR: players are online and interruption was not explicitly confirmed.' >&2; exit 1; }
@@ -42,10 +40,9 @@ jv_migration_write_state "${transaction}" ready-to-switch "${JV_MIGRATION_SOURCE
 
 if [[ ${configured} == yes && ${minecraft_was_active} == yes ]]; then
     echo 'Final player check immediately before graceful stop.'
-    final_players="$(query_players)"
-    [[ -n ${final_players} ]] || { echo 'ERROR: player state became unknown. Import cancelled before live data changed.' >&2; exit 1; }
-    echo "${final_players}"
-    if ! grep -q 'There are 0 of' <<< "${final_players}" && [[ ${players_override} != yes ]]; then
+    final_players="$(jv_migration_online_count)" || { echo 'ERROR: player state became unknown. Import cancelled before live data changed.' >&2; exit 1; }
+    echo "Players online: ${final_players}"
+    if (( final_players > 0 )) && [[ ${players_override} != yes ]]; then
         if [[ ${JV_MIGRATION_API_MODE:-0} == 1 ]]; then
             echo 'ERROR: a player joined after planning and interruption was not confirmed.' >&2
             exit 1
@@ -106,7 +103,10 @@ echo 'Validating the imported Minecraft server.'
 jv_migration_write_state "${transaction}" validating "${JV_MIGRATION_SOURCE}" "${source_class}"
 jv_migration_validate_runtime "${source_version}"
 
-post_plugin_count="$(find "${DATA_PATH}/plugins" -maxdepth 1 -type f -iname '*.jar' 2>/dev/null | wc -l | tr -d ' ')"
+post_plugin_count=0
+if [[ -d ${DATA_PATH}/plugins && $MINECRAFT_SERVER_TYPE != bedrock ]]; then
+    post_plugin_count="$(find "${DATA_PATH}/plugins" -maxdepth 1 -type f -iname '*.jar' 2>/dev/null | wc -l | tr -d ' ')"
+fi
 [[ ${post_plugin_count} =~ ^[0-9]+$ ]] || post_plugin_count=0
 if [[ ${plugin_count} =~ ^[0-9]+$ ]] && (( post_plugin_count < plugin_count )); then
     echo "ERROR: plugin JAR count after import (${post_plugin_count}) is smaller than staged source count (${plugin_count})." >&2
@@ -143,7 +143,7 @@ echo 'Import completed successfully.'
 echo "Source type: ${source_class}"
 echo "Minecraft version: ${source_version}"
 echo "Minecraft data: ${DATA_PATH}"
-echo "Java: ${JAVA_PORT}/tcp"
+[[ $MINECRAFT_SERVER_TYPE == bedrock ]] || echo "Java: ${JAVA_PORT}/tcp"
 if [[ ${BEDROCK_ENABLED} == yes ]]; then echo "Bedrock: ${BEDROCK_PORT}/tcp+udp"; fi
 if [[ ${removable_owned} == yes ]]; then
     echo 'Device unmounted.'

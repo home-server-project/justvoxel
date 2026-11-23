@@ -5,9 +5,9 @@ command_name="${1:-}"
 shift || true
 
 case "${command_name}" in
-    inspect|extract|copy-dir|detect|native-data|create-native|verify-native) ;;
+    inspect|extract|copy-dir|detect|native-data|native-candidate|create-native|verify-native) ;;
     *)
-        echo 'Usage: migration-archive {inspect|extract|copy-dir|detect|native-data|create-native|verify-native} ...' >&2
+        echo 'Usage: migration-archive {inspect|extract|copy-dir|detect|native-data|native-candidate|create-native|verify-native} ...' >&2
         exit 2
         ;;
 esac
@@ -682,15 +682,17 @@ def native_read_member(path, member_name, limit):
     fail(f"native bundle is missing {member_name}")
 
 
-def verify_native(path):
+def verify_native(path, review=False):
     summary = inspect_source(path)
     if not summary.get("nativeBundle"):
         fail("source is not a native JustVoxel migration bundle")
     manifest_name = f"{NATIVE_ROOT}/manifest.json"
     index_name = f"{NATIVE_ROOT}/integrity/files.json"
     try:
-        manifest = json.loads(native_read_member(path, manifest_name, MAX_MANIFEST))
-        index = json.loads(native_read_member(path, index_name, MAX_INDEX))
+        manifest_bytes = native_read_member(path, manifest_name, MAX_MANIFEST)
+        manifest = json.loads(manifest_bytes)
+        index_bytes = native_read_member(path, index_name, MAX_INDEX)
+        index = json.loads(index_bytes)
     except json.JSONDecodeError as exc:
         fail(f"native migration metadata is invalid JSON: {exc}")
     if manifest.get("schema") != "org.justvoxel.migration" or manifest.get("schemaVersion") != 1:
@@ -762,19 +764,14 @@ def verify_native(path):
     if actual != set(expected):
         missing = sorted(set(expected) - actual)
         fail(f"native bundle is missing indexed content: {missing[0] if missing else 'unknown'}")
+    if review:
+        if hashlib.sha256(manifest_bytes).hexdigest() != expected.get("manifest.json", {}).get("sha256"):
+            fail("reviewed manifest differs from verified integrity index")
+        manifest["indexSHA256"] = hashlib.sha256(index_bytes).hexdigest()
     return manifest
 
 
-def create_native(data_dir, manifest_path, output):
-    inspect_directory(data_dir)
-    manifest_data = read_small_file(manifest_path, MAX_MANIFEST)
-    try:
-        manifest = json.loads(manifest_data)
-    except json.JSONDecodeError as exc:
-        fail(f"manifest is invalid JSON: {exc}")
-    if manifest.get("schema") != "org.justvoxel.migration" or manifest.get("schemaVersion") != 1:
-        fail("manifest does not describe JustVoxel migration schema version 1")
-
+def native_records(data_dir, manifest_data):
     records = []
     h = hashlib.sha256(manifest_data).hexdigest()
     records.append({"path": "manifest.json", "type": "file", "size": len(manifest_data), "sha256": h})
@@ -799,6 +796,20 @@ def create_native(data_dir, manifest_path, output):
             elif not stat.S_ISDIR(st.st_mode):
                 fail(f"unsupported special file in export source: {rel}")
 
+    return records
+
+
+def create_native(data_dir, manifest_path, output):
+    inspect_directory(data_dir)
+    manifest_data = read_small_file(manifest_path, MAX_MANIFEST)
+    try:
+        manifest = json.loads(manifest_data)
+    except json.JSONDecodeError as exc:
+        fail(f"manifest is invalid JSON: {exc}")
+    if manifest.get("schema") != "org.justvoxel.migration" or manifest.get("schemaVersion") != 1:
+        fail("manifest does not describe JustVoxel migration schema version 1")
+
+    records = native_records(data_dir, manifest_data)
     index = json.dumps({"algorithm": "sha256", "files": records}, sort_keys=True, separators=(",", ":")).encode() + b"\n"
     if len(index) > MAX_INDEX:
         fail("native integrity index exceeds its size limit")
@@ -846,12 +857,30 @@ elif CMD == "native-data":
     if len(ARGS) != 3:
         fail("native-data requires DATA_DIR SOFTWARE VERSION")
     print(json.dumps(native_data(*ARGS), separators=(",", ":")))
+elif CMD == "native-candidate":
+    if len(ARGS) != 4:
+        fail("native-candidate requires SERVER SOFTWARE VERSION INDEX_SHA256")
+    root, software, version, digest = ARGS
+    if pathlib.Path(root).is_symlink():
+        fail("native server root is a symlink")
+    inspect_directory(root)
+    bundle = pathlib.Path(root).parent
+    index = read_small_file(bundle / "integrity/files.json", MAX_INDEX)
+    if hashlib.sha256(index).hexdigest() != digest:
+        fail("staged integrity index differs from reviewed bundle")
+    records = native_records(root, read_small_file(bundle / "manifest.json", MAX_MANIFEST))
+    by_path = lambda entry: entry["path"]
+    if sorted(records, key=by_path) != sorted(json.loads(index)["files"], key=by_path):
+        fail("staged data differs from reviewed bundle")
+    candidate = native_data(root, software, version)
+    candidate.update(root=root, sourceType=software, minecraftVersion=version, supported=True)
+    print(json.dumps(candidate, separators=(",", ":")))
 elif CMD == "create-native":
     if len(ARGS) != 3:
         fail("create-native requires DATA_DIR MANIFEST OUTPUT")
     create_native(ARGS[0], ARGS[1], ARGS[2])
 elif CMD == "verify-native":
-    if len(ARGS) != 1:
-        fail("verify-native requires ARCHIVE")
-    print(json.dumps(verify_native(ARGS[0]), separators=(",", ":")))
+    if len(ARGS) != 1 and not (len(ARGS) == 2 and ARGS[1] == "--review"):
+        fail("verify-native requires ARCHIVE [--review]")
+    print(json.dumps(verify_native(ARGS[0], len(ARGS) == 2), separators=(",", ":")))
 PY
