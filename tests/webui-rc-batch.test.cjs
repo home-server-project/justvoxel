@@ -204,7 +204,13 @@ test('Export Done clears operation navigation, selects Export, and reopening loa
   const windowStart = app.indexOf('  const refreshSelection = () => globalThis.justVoxelServerSelection(migrationDialog');
   const windowSource = app.slice(windowStart, app.indexOf('  migrationOpen.addEventListener', windowStart));
   vm.runInContext(update + windowSource + click, context);
-  const link = { getAttribute: () => selectedMigrationURL('/?workspace=migration&tab=export') };
+  const link = {
+    getAttribute: () => selectedMigrationURL('/?workspace=migration&tab=export'),
+    hasAttribute(name) {
+      assert.equal(name, 'data-migration-open-dashboard');
+      return false;
+    },
+  };
   let prevented = false;
   await root.click({ target: { closest: () => link }, preventDefault() { prevented = true; } });
   assert.ok(prevented);
