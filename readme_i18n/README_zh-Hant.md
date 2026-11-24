@@ -108,6 +108,8 @@ HWS 加入實體機器支援，包括 UPS/NUT 整合、SMART 和 NVMe 工具、�
 
 [⬇️ 下載 JustVoxel x86_64 ISO](https://sourceforge.net/projects/justvoxel/files/JustVoxel-x86_64.iso/download)
 
+**製作可開機的 USB 隨身碟：** 使用 [balenaEtcher](https://etcher.balena.io/)、[Rufus](https://rufus.ie/en/)、[Ventoy](https://www.ventoy.net/en/index.html)、[Fedora Media Writer](https://fedoraproject.org/workstation/download/) 或其他能直接寫入磁碟映像檔的工具，將 ISO 寫入 USB 隨身碟。在 Linux 和其他類 Unix 系統上，也可以使用傳統的 `dd` 方法。直接將映像檔寫入 USB 隨身碟會清除隨身碟上的所有資料。
+
 依安裝環境選擇適合的版本：
 
 - **JustVoxel VM** 適用於虛擬機器及相容的託管虛擬機器環境

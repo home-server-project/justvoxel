@@ -108,6 +108,8 @@ HWS には、UPS と NUT の連携、SMART・NVMe ツール、センサー、フ
 
 [⬇️ JustVoxel x86_64 ISO をダウンロード](https://sourceforge.net/projects/justvoxel/files/JustVoxel-x86_64.iso/download)
 
+**起動用 USB メモリーを作成する：** [balenaEtcher](https://etcher.balena.io/)、[Rufus](https://rufus.ie/en/)、[Ventoy](https://www.ventoy.net/en/index.html)、[Fedora Media Writer](https://fedoraproject.org/workstation/download/)、またはディスクイメージを直接書き込める他のツールを使って、ISO を USB メモリーに書き込みます。Linux やその他の Unix 系システムでは、従来どおり `dd` を使う方法もあります。イメージを USB メモリーに直接書き込むと、中のデータはすべて消去されます。
+
 インストール先に合ったエディションを選びます。
 
 - **JustVoxel VM** — 仮想マシンと対応する VM ホスティング環境

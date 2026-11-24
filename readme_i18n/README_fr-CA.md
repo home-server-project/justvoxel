@@ -108,6 +108,8 @@ Une seule image ISO permet d’installer l’une ou l’autre des éditions de J
 
 [⬇️ Télécharger l’image ISO JustVoxel x86_64](https://sourceforge.net/projects/justvoxel/files/JustVoxel-x86_64.iso/download)
 
+**Créez une clé USB de démarrage** en écrivant l’image ISO sur une clé USB avec [balenaEtcher](https://etcher.balena.io/), [Rufus](https://rufus.ie/en/), [Ventoy](https://www.ventoy.net/en/index.html), [Fedora Media Writer](https://fedoraproject.org/workstation/download/) ou un autre outil qui permet d’écrire une image disque directement sur le support. Sous Linux et les autres systèmes de type Unix, la méthode traditionnelle avec `dd` fonctionne aussi. L’écriture directe d’une image sur une clé USB efface tout son contenu.
+
 Choisissez l’édition qui correspond à votre environnement :
 
 - **JustVoxel VM** pour les machines virtuelles, y compris celles des hébergeurs compatibles

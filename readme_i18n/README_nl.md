@@ -108,6 +108,8 @@ Eén installatie-ISO ondersteunt beide JustVoxel-edities.
 
 [⬇️ Download de JustVoxel x86_64-ISO](https://sourceforge.net/projects/justvoxel/files/JustVoxel-x86_64.iso/download)
 
+**Maak een opstartbare USB-stick:** Schrijf het ISO-bestand naar een USB-stick met [balenaEtcher](https://etcher.balena.io/), [Rufus](https://rufus.ie/en/), [Ventoy](https://www.ventoy.net/en/index.html), [Fedora Media Writer](https://fedoraproject.org/workstation/download/) of een ander programma dat schijfkopieën rechtstreeks kan schrijven. Op Linux en andere Unix-achtige systemen werkt de traditionele methode met `dd` ook. Als je een schijfkopie rechtstreeks naar een USB-stick schrijft, wordt de hele inhoud van de stick gewist.
+
 Kies de editie die past bij de omgeving waarin je JustVoxel installeert:
 
 - **JustVoxel VM** voor virtuele machines en compatibele gehoste VM-omgevingen

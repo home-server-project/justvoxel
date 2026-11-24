@@ -108,6 +108,8 @@ HWS 增加了物理机支持，包括 UPS/NUT 集成、SMART 和 NVMe 工具、�
 
 [⬇️ 下载 JustVoxel x86_64 ISO](https://sourceforge.net/projects/justvoxel/files/JustVoxel-x86_64.iso/download)
 
+**制作可启动 U 盘：** 使用 [balenaEtcher](https://etcher.balena.io/)、[Rufus](https://rufus.ie/en/)、[Ventoy](https://www.ventoy.net/en/index.html)、[Fedora Media Writer](https://fedoraproject.org/workstation/download/) 或其他支持直接写入磁盘镜像的工具，将 ISO 写入 U 盘。在 Linux 和其他类 Unix 系统上，也可以使用传统的 `dd` 方法。直接将镜像写入 U 盘会清除盘上的所有数据。
+
 根据安装环境选择版本：
 
 - **JustVoxel VM** 适用于虚拟机及兼容的托管虚拟机环境

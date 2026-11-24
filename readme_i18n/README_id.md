@@ -108,6 +108,8 @@ Satu ISO penginstal mendukung kedua edisi JustVoxel.
 
 [⬇️ Unduh ISO JustVoxel x86_64](https://sourceforge.net/projects/justvoxel/files/JustVoxel-x86_64.iso/download)
 
+**Buat drive USB yang dapat digunakan untuk boot** dengan menulis berkas ISO ke drive USB menggunakan [balenaEtcher](https://etcher.balena.io/), [Rufus](https://rufus.ie/en/), [Ventoy](https://www.ventoy.net/en/index.html), [Fedora Media Writer](https://fedoraproject.org/workstation/download/), atau alat lain yang dapat menulis image secara langsung. Di Linux dan sistem lain yang mirip Unix, metode tradisional dengan `dd` juga dapat digunakan. Menulis image langsung ke drive USB akan menghapus seluruh isinya.
+
 Pilih edisi sesuai dengan tempat Anda menginstalnya.
 
 - **JustVoxel VM** untuk mesin virtual dan lingkungan hosting VM yang kompatibel

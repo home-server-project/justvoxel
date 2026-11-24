@@ -108,6 +108,8 @@ Una sola imagen ISO de instalación sirve para ambas ediciones de JustVoxel.
 
 [⬇️ Descargar la ISO de JustVoxel para x86_64](https://sourceforge.net/projects/justvoxel/files/JustVoxel-x86_64.iso/download)
 
+**Crea una memoria USB de arranque:** Graba la imagen ISO en una memoria USB con [balenaEtcher](https://etcher.balena.io/), [Rufus](https://rufus.ie/en/), [Ventoy](https://www.ventoy.net/en/index.html), [Fedora Media Writer](https://fedoraproject.org/workstation/download/) u otra herramienta que permita escribir imágenes directamente en la unidad. En Linux y otros sistemas similares a Unix, también puedes usar el método tradicional con `dd`. Escribir la imagen directamente en la memoria USB borra todo su contenido.
+
 Elige la edición según el equipo donde vayas a instalarla:
 
 - **JustVoxel VM** para máquinas virtuales y entornos compatibles de alojamiento de máquinas virtuales

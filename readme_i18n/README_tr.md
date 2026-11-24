@@ -108,6 +108,8 @@ Tek bir kurulum ISO'su iki JustVoxel sürümünü de destekler.
 
 [⬇️ JustVoxel x86_64 ISO dosyasını indirin](https://sourceforge.net/projects/justvoxel/files/JustVoxel-x86_64.iso/download)
 
+**Önyüklenebilir bir USB bellek hazırlayın:** ISO dosyasını [balenaEtcher](https://etcher.balena.io/), [Rufus](https://rufus.ie/en/), [Ventoy](https://www.ventoy.net/en/index.html), [Fedora Media Writer](https://fedoraproject.org/workstation/download/) veya disk kalıplarını doğrudan yazabilen başka bir araçla USB belleğe yazın. Linux ve diğer Unix benzeri sistemlerde geleneksel `dd` yöntemi de işe yarar. Bir disk kalıbını doğrudan USB belleğe yazmak, bellekteki tüm verileri siler.
+
 Kurulum yapacağınız ortama uygun sürümü seçin:
 
 - **JustVoxel VM** — sanal makineler ve uyumlu sanal makine barındırma ortamları için

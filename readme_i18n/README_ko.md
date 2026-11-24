@@ -108,6 +108,8 @@ HWS는 UPS/NUT 연동, SMART 및 NVMe 도구, 센서, 펌웨어 및 UEFI 제어,
 
 [⬇️ JustVoxel x86_64 ISO 다운로드](https://sourceforge.net/projects/justvoxel/files/JustVoxel-x86_64.iso/download)
 
+**부팅용 USB 만들기:** [balenaEtcher](https://etcher.balena.io/), [Rufus](https://rufus.ie/en/), [Ventoy](https://www.ventoy.net/en/index.html), [Fedora Media Writer](https://fedoraproject.org/workstation/download/) 또는 디스크 이미지를 직접 기록할 수 있는 다른 도구를 사용해 ISO를 USB 드라이브에 기록하세요. Linux 및 기타 유닉스 계열 시스템에서는 `dd`를 사용하는 전통적인 방법도 사용할 수 있습니다. 이미지를 USB 드라이브에 직접 기록하면 드라이브의 모든 데이터가 지워집니다.
+
 설치 환경에 맞는 에디션을 선택하세요.
 
 - 가상 머신 및 호환되는 VM 호스팅 환경에는 **JustVoxel VM**

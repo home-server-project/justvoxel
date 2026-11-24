@@ -108,6 +108,8 @@ Uma única ISO de instalação atende às duas edições do JustVoxel.
 
 [⬇️ Baixe a ISO x86_64 do JustVoxel](https://sourceforge.net/projects/justvoxel/files/JustVoxel-x86_64.iso/download)
 
+**Crie um pendrive inicializável:** Grave a imagem ISO em um pendrive com [balenaEtcher](https://etcher.balena.io/), [Rufus](https://rufus.ie/en/), [Ventoy](https://www.ventoy.net/en/index.html), [Fedora Media Writer](https://fedoraproject.org/workstation/download/) ou outra ferramenta capaz de gravar imagens de disco diretamente. No Linux e em outros sistemas semelhantes ao Unix, o método tradicional com `dd` também funciona. Gravar uma imagem diretamente no pendrive apaga todo o seu conteúdo.
+
 Escolha a edição de acordo com o local de instalação:
 
 - **JustVoxel VM** para máquinas virtuais e ambientes compatíveis de hospedagem de VMs

@@ -108,6 +108,8 @@ Ein gemeinsames Installations-ISO unterstützt beide JustVoxel-Editionen.
 
 [⬇️ JustVoxel-ISO für x86_64 herunterladen](https://sourceforge.net/projects/justvoxel/files/JustVoxel-x86_64.iso/download)
 
+**Erstelle einen bootfähigen USB-Stick:** Schreibe die ISO-Datei mit [balenaEtcher](https://etcher.balena.io/), [Rufus](https://rufus.ie/en/), [Ventoy](https://www.ventoy.net/en/index.html), [Fedora Media Writer](https://fedoraproject.org/workstation/download/) oder einem anderen Tool, das Abbilder direkt schreiben kann, auf einen USB-Stick. Unter Linux und anderen Unix-ähnlichen Systemen funktioniert auch die klassische Methode mit `dd`. Beim direkten Schreiben des Abbilds wird der gesamte Inhalt des USB-Sticks gelöscht.
+
 Wähle die Edition passend zu deiner Umgebung:
 
 - **JustVoxel VM** für virtuelle Maschinen und kompatible gehostete VM-Umgebungen

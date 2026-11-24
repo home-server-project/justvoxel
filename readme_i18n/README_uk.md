@@ -108,6 +108,8 @@ HWS додає підтримку фізичного обладнання: ін�
 
 [⬇️ Завантажити ISO-образ JustVoxel для x86_64](https://sourceforge.net/projects/justvoxel/files/JustVoxel-x86_64.iso/download)
 
+**Створіть завантажувальну флешку:** Запишіть ISO-образ на USB-накопичувач за допомогою [balenaEtcher](https://etcher.balena.io/), [Rufus](https://rufus.ie/en/), [Ventoy](https://www.ventoy.net/en/index.html), [Fedora Media Writer](https://fedoraproject.org/workstation/download/) або іншої програми, яка вміє записувати образи дисків безпосередньо. У Linux та інших Unix-подібних системах також працює традиційний спосіб із `dd`. Прямий запис образу на USB-накопичувач видаляє весь його вміст.
+
 Виберіть редакцію відповідно до місця встановлення:
 
 - **JustVoxel VM** — для віртуальних машин, зокрема в сумісних хостингових середовищах

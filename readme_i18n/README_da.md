@@ -108,6 +108,8 @@ Begge JustVoxel-udgaver bruger samme installations-ISO.
 
 [⬇️ Download JustVoxel x86_64 ISO](https://sourceforge.net/projects/justvoxel/files/JustVoxel-x86_64.iso/download)
 
+**Opret et USB-drev, du kan starte fra:** Skriv ISO-filen til et USB-drev med [balenaEtcher](https://etcher.balena.io/), [Rufus](https://rufus.ie/en/), [Ventoy](https://www.ventoy.net/en/index.html), [Fedora Media Writer](https://fedoraproject.org/workstation/download/) eller et andet værktøj, der kan skrive diskafbildninger direkte. På Linux og andre Unix-lignende systemer kan du også bruge den traditionelle metode med `dd`. Når du skriver en afbildning direkte til et USB-drev, slettes alt på drevet.
+
 Vælg den udgave, der passer til det miljø, du installerer i.
 
 - **JustVoxel VM** til virtuelle maskiner og kompatible hostede VM-miljøer

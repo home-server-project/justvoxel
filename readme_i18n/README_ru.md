@@ -108,6 +108,8 @@ JustVoxel подойдёт семьям, компаниям друзей, неб
 
 [⬇️ Скачать ISO-образ JustVoxel для x86_64](https://sourceforge.net/projects/justvoxel/files/JustVoxel-x86_64.iso/download)
 
+**Создайте загрузочную флешку:** Запишите ISO-образ на USB-накопитель с помощью [balenaEtcher](https://etcher.balena.io/), [Rufus](https://rufus.ie/en/), [Ventoy](https://www.ventoy.net/en/index.html), [Fedora Media Writer](https://fedoraproject.org/workstation/download/) или другой утилиты, которая умеет записывать образы дисков напрямую. В Linux и других Unix-подобных системах также работает традиционный способ с `dd`. Прямая запись образа на USB-накопитель удаляет всё его содержимое.
+
 Выберите редакцию в зависимости от того, куда вы устанавливаете систему:
 
 - **JustVoxel VM** — для виртуальных машин, в том числе на совместимом виртуальном хостинге
