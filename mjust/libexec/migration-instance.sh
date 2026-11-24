@@ -142,8 +142,8 @@ jv_stop_minecraft_adaptive() {
 jv_migration_validate_current() {
     local was_running=no valid=yes
     systemctl is-active --quiet "${JV_INSTANCE_UNIT}" && was_running=yes
-    if ! systemctl start "${JV_INSTANCE_UNIT}"; then
-        if [[ ${was_running} != yes ]]; then systemctl stop "${JV_INSTANCE_UNIT}" || true; fi
+    if ! jv_migration_start_with_maintenance_handoff; then
+        if [[ ${jv_migration_handoff_pending} == no && ${was_running} != yes ]]; then systemctl stop "${JV_INSTANCE_UNIT}" || true; fi
         return 1
     fi
     jv_migration_validate_runtime || valid=no

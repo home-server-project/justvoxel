@@ -5,6 +5,23 @@ readonly JV_MIGRATION_SCHEMA_VERSION=1
 readonly JV_MIGRATION_RUN_ROOT=/run/justvoxel-migration
 readonly JV_MIGRATION_RECOVERY_ROOT=/var/lib/justvoxel/management/migration-recovery
 
+# Create the inode with its final private ownership before writing metadata.
+jv_migration_private_temp() {
+    local tmp
+    tmp="$(mktemp -- "$1")" || return 1
+    if [[ -f ${tmp} && ! -L ${tmp} ]] && chown root:root -- "${tmp}" && chmod 0600 -- "${tmp}"; then
+        printf '%s\n' "${tmp}"
+    else
+        rm -f -- "${tmp}"
+        return 1
+    fi
+}
+
+jv_migration_publish_private() {
+    [[ -f $1 && ! -L $1 && $(stat -c '%u:%g:%a:%h' -- "$1") == 0:0:600:1 ]] || return 1
+    sync -f "$1" && mv -fT -- "$1" "$2" && sync -f "$2"
+}
+
 jv_migration_recovery_key() {
     printf '%s' "$1" | sha256sum | awk '{print $1}'
 }
@@ -15,10 +32,9 @@ jv_migration_register_recovery() {
     [[ -d ${canonical} && ! -L ${canonical} && $(basename -- "${canonical}") == .justvoxel-import-* && -r ${canonical}/state ]] || return 1
     install -d -m0700 -o root -g root "${JV_MIGRATION_RECOVERY_ROOT}"
     key="$(jv_migration_recovery_key "${canonical}")"
-    tmp="$(mktemp "${JV_MIGRATION_RECOVERY_ROOT}/.recovery.XXXXXX")"
-    chmod 0600 "${tmp}"
-    printf '%s\n' "${canonical}" > "${tmp}"
-    mv -f -- "${tmp}" "${JV_MIGRATION_RECOVERY_ROOT}/${key}"
+    tmp="$(jv_migration_private_temp "${JV_MIGRATION_RECOVERY_ROOT}/.recovery.XXXXXX")" || return 1
+    printf '%s\n' "${canonical}" > "${tmp}" || return 1
+    jv_migration_publish_private "${tmp}" "${JV_MIGRATION_RECOVERY_ROOT}/${key}"
 }
 
 jv_migration_clear_recovery() {
@@ -164,17 +180,15 @@ jv_migration_check_import_bedrock_port() {
 
 jv_migration_write_state() {
     local transaction="$1" phase="$2" source="$3" source_type="${4:-unknown}" tmp
-    tmp="${transaction}/.state.tmp"
+    tmp="$(jv_migration_private_temp "${transaction}/.state.XXXXXX")" || return 1
     {
         printf 'instance_id=%q\n' "${JV_INSTANCE_ID:?}"
         printf 'phase=%q\n' "${phase}"
         printf 'source=%q\n' "${source}"
         printf 'source_type=%q\n' "${source_type}"
         printf 'updated_at=%q\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    } > "${tmp}"
-    chmod 0600 "${tmp}"
-    mv -f -- "${tmp}" "${transaction}/state"
-    sync -f "${transaction}/state"
+    } > "${tmp}" || return 1
+    jv_migration_publish_private "${tmp}" "${transaction}/state"
 }
 
 # Portable import never changes appliance storage, backups or firewall ownership.
@@ -182,22 +196,20 @@ jv_migration_runtime_paths() {
     printf '%s\n' "/etc/justvoxel/instances/${JV_INSTANCE_ID:?}/config.json" "/etc/justvoxel/instances/${JV_INSTANCE_ID}/minecraft.env" "/etc/containers/systemd/minecraft-${JV_INSTANCE_ID}.container"
 }
 jv_migration_snapshot_runtime() {
-    local transaction="$1" path
+    local transaction="$1" path tmp
     install -d -m0700 "${transaction}/destination-state"
     while IFS= read -r path; do
         [[ -f ${path} && ! -L ${path} ]] || return 1
         cp -a -- "${path}" "${transaction}/destination-state/$(basename -- "${path}")" || return 1
     done < <(jv_migration_runtime_paths)
+    tmp="$(jv_migration_private_temp "${transaction}/.evidence.XXXXXX")" || return 1
     jq -cn --arg id "${JV_INSTANCE_ID}" --arg data "${DATA_PATH}" --arg tx "${transaction}" \
         --arg config "$(sha256sum "${JV_MIGRATION_INSTANCE_CONFIG}" | awk '{print $1}')" \
         --arg data_identity "$(stat -Lc '%d:%i' "${DATA_PATH}")" \
         --arg staged "$(if [[ -d ${transaction}/staged-server ]]; then jv_migration_source_identity "${transaction}/staged-server"; elif [[ $(basename -- "${transaction}") == .justvoxel-export-* ]]; then printf export; else printf pending; fi)" \
         --arg source "${source_identity:-}" --argjson running "$([[ ${minecraft_was_active} == yes ]] && echo true || echo false)" \
-        '{schema:1,instance_id:$id,data_path:$data,transaction:$tx,config_identity:$config,data_identity:$data_identity,staged_identity:$staged,source_identity:$source,was_running:$running}' > "${transaction}/.evidence.tmp"
-    chmod 0600 "${transaction}/.evidence.tmp"
-    sync -f "${transaction}/.evidence.tmp"
-    mv -f -- "${transaction}/.evidence.tmp" "${transaction}/evidence.json"
-    sync -f "${transaction}/evidence.json"
+        '{schema:1,instance_id:$id,data_path:$data,transaction:$tx,config_identity:$config,data_identity:$data_identity,staged_identity:$staged,source_identity:$source,was_running:$running}' > "${tmp}" || return 1
+    jv_migration_publish_private "${tmp}" "${transaction}/evidence.json"
 }
 jv_migration_validate_evidence() {
     local transaction="$1" id parent
@@ -206,6 +218,11 @@ jv_migration_validate_evidence() {
     case $(basename -- "${transaction}") in .justvoxel-import-*|.justvoxel-export-*) ;; *) return 1 ;; esac
     [[ -d ${transaction} && ! -L ${transaction} && $(realpath -e -- "${transaction}") == "${transaction}" ]] || return 1
     [[ -f ${transaction}/evidence.json && ! -L ${transaction}/evidence.json && $(stat -c '%u:%g:%a' "${transaction}/evidence.json") == 0:0:600 ]] || return 1
+    jv_migration_validate_snapshot_content "${transaction}"
+}
+
+jv_migration_validate_snapshot_content() {
+    local transaction="$1"
     jq -e --arg id "${JV_INSTANCE_ID}" --arg data "${DATA_PATH}" --arg tx "${transaction}" \
         '.schema==1 and .instance_id==$id and .data_path==$data and .transaction==$tx and (.was_running|type=="boolean") and (.data_identity|type=="string") and (.config_identity|test("^[a-f0-9]{64}$")) and (.staged_identity|type=="string")' "${transaction}/evidence.json" >/dev/null || return 1
     [[ $(sed -n 's/^instance_id=//p' "${transaction}/state") == "${JV_INSTANCE_ID}" ]] || return 1
@@ -220,6 +237,75 @@ jv_migration_validate_evidence() {
     [[ $(sha256sum "${transaction}/destination-state/minecraft-${JV_INSTANCE_ID}.container" | awk '{print $1}') == $(jq -r '.quadlet_sha256' "${transaction}/destination-state/config.json") ]] || return 1
     jq -e --arg id "${JV_INSTANCE_ID}" --arg path "${DATA_PATH}" '.runtime.id==$id and .storage.data_path==$path' "${transaction}/destination-state/config.json" >/dev/null
 }
+# The selected parent can predate private instance provisioning. Only the
+# named transaction metadata inherited the service group on affected systems.
+jv_migration_normalize_legacy_evidence() (
+    local transaction="$1" parent snapshot="$1/destination-state" evidence="$1/evidence.json"
+    local portable="$1/portable.json" service_gid file gid phase
+    local -a files=("$1/state") legacy=()
+    exec 8>"${JV_MAINTENANCE_LOCK}" || return 1
+    flock -n 8 || return 1
+    parent="$(dirname -- "${DATA_PATH}")" || return 1
+    [[ ${JV_INSTANCE_ID} =~ ^jv-[a-z0-9]{6,12}$ && ${transaction%/*} == "${parent}" ]] || return 1
+    case ${transaction##*/} in .justvoxel-import-?*|.justvoxel-export-?*) ;; *) return 1 ;; esac
+    [[ -d ${parent} && ! -L ${parent} && $(realpath -e -- "${parent}") == "${parent}" ]] || return 1
+    case $(stat -c '%u:%g:%a' -- "${parent}") in 0:0:700|0:0:755) ;; *) return 1 ;; esac
+    [[ -d ${transaction} && ! -L ${transaction} && $(realpath -e -- "${transaction}") == "${transaction}" ]] || return 1
+    [[ $(stat -c '%u:%g:%a' -- "${transaction}") == 0:0:700 ]] || return 1
+    service_gid="$(getent group justvoxel-web | cut -d: -f3)" || return 1
+    [[ ${service_gid} =~ ^[1-9][0-9]*$ ]] || return 1
+    [[ -d ${snapshot} && ! -L ${snapshot} && $(realpath -e -- "${snapshot}") == "${snapshot}" ]] || return 1
+    case $(stat -c '%u:%g:%a' -- "${snapshot}") in
+        0:0:700) ;;
+        "0:${service_gid}:700") legacy+=("${snapshot}") ;;
+        *) return 1 ;;
+    esac
+    if [[ -e ${portable} || -L ${portable} ]]; then files+=("${portable}"); fi
+    # Publish canonical evidence last so discovery retries interrupted repairs.
+    files+=("${evidence}")
+    for file in "${files[@]}"; do
+        [[ -f ${file} && ! -L ${file} && $(stat -c '%u:%a:%h' -- "${file}") == 0:600:1 ]] || return 1
+        [[ $(stat -c %s -- "${file}") -le 65536 ]] || return 1
+        gid="$(stat -c %g -- "${file}")" || return 1
+        case ${gid} in
+            0) ;;
+            "${service_gid}") legacy+=("${file}") ;;
+            *) return 1 ;;
+        esac
+    done
+    jq -se 'length == 1 and (.[0] |
+        keys == ["config_identity","data_identity","data_path","instance_id","schema","source_identity","staged_identity","transaction","was_running"] and
+        (.data_identity | test("^[0-9]+:[0-9]+$")) and (.source_identity | type=="string"))' "${evidence}" >/dev/null || return 1
+    jv_migration_validate_snapshot_content "${transaction}" || return 1
+    phase="$(sed -n 's/^phase=//p' "${transaction}/state")" || return 1
+    if [[ ${transaction##*/} == .justvoxel-export-* ]]; then
+        [[ ${phase} == exporting ]] || return 1
+    else
+        case ${phase} in
+            staging|prepared|ready-to-switch|switching|imported-active|validating|rollback|critical-rollback|rolled-back|validated) ;;
+            *) return 1 ;;
+        esac
+    fi
+    if [[ -f ${portable} && $(stat -c %g -- "${portable}") == "${service_gid}" ]]; then
+        jq -se --arg id "${JV_INSTANCE_ID}" 'length == 1 and (.[0] |
+            .instance_id == $id and
+            (del(.pufferfish_build) | keys == ["difficulty","enforce_whitelist","game_mode","instance_id",
+                "loader_version","max_players","motd","source_software","version","whitelist"]) and
+            all(.difficulty,.game_mode,.loader_version,.motd,.source_software,.version; type == "string") and
+            all(.whitelist,.enforce_whitelist; type == "boolean") and
+            (.max_players | type == "number" and . > 0 and floor == .) and
+            (has("pufferfish_build") == false or (.pufferfish_build | type == "number" and floor == .)))' "${portable}" >/dev/null || return 1
+    fi
+    for file in "${legacy[@]}"; do
+        chown --from="0:${service_gid}" 0:0 -- "${file}" && sync -f "${file}" || return 1
+    done
+    [[ $(stat -c '%u:%g:%a' -- "${snapshot}") == 0:0:700 ]] || return 1
+    for file in "${files[@]}"; do
+        [[ $(stat -c '%u:%g:%a:%h' -- "${file}") == 0:0:600:1 ]] || return 1
+    done
+    jv_migration_validate_evidence "${transaction}"
+)
+
 jv_migration_restore_runtime() {
     local transaction="$1" path tmp
     jv_migration_validate_evidence "${transaction}" || return 1
@@ -233,6 +319,19 @@ jv_migration_restore_runtime() {
     systemctl daemon-reload || return 1
     jv_migration_load_instance "${JV_INSTANCE_ID}"
 }
+# FD 9 is already locked by the transaction. ExecStartPre needs maintenance
+# itself. Keep cleanup disabled during the handoff, including signal traps.
+jv_migration_handoff_pending=no
+jv_migration_start_with_maintenance_handoff() {
+    local start_rc=0
+    jv_migration_handoff_pending=yes
+    flock -u 9 || return 1
+    systemctl start "${JV_INSTANCE_UNIT}" || start_rc=$?
+    flock -n 9 || { echo 'ERROR: could not reacquire Minecraft maintenance after startup.' >&2; return 1; }
+    jv_migration_handoff_pending=no
+    return "${start_rc}"
+}
+
 # Recovery is idempotent across interruption between either rename and state write.
 jv_migration_recover_selected() {
     local transaction="$1" phase running current_identity
@@ -242,7 +341,7 @@ jv_migration_recover_selected() {
     if [[ $(basename -- "${transaction}") == .justvoxel-export-* ]]; then
         jv_migration_validate_data || return 1
         [[ $(stat -Lc '%d:%i' "${DATA_PATH}") == $(jq -r '.data_identity' "${transaction}/evidence.json") ]] || return 1
-        if [[ ${running} == true ]]; then systemctl start "${JV_INSTANCE_UNIT}" || return 1; jv_migration_validate_runtime || return 1
+        if [[ ${running} == true ]]; then jv_migration_start_with_maintenance_handoff || return 1; jv_migration_validate_runtime || return 1
         elif systemctl is-active --quiet "${JV_INSTANCE_UNIT}"; then return 1; fi
         return 0
     fi
@@ -263,8 +362,8 @@ jv_migration_recover_selected() {
         [[ -d ${DATA_PATH} && ! -L ${DATA_PATH} && $(stat -Lc '%d:%i' "${DATA_PATH}") == $(jq -r '.data_identity' "${transaction}/evidence.json") ]] || return 1
     fi
     jv_migration_restore_runtime "${transaction}" || return 1
-    if ! systemctl start "${JV_INSTANCE_UNIT}"; then
-        if [[ ${running} != true ]]; then systemctl stop "${JV_INSTANCE_UNIT}" || true; fi
+    if ! jv_migration_start_with_maintenance_handoff; then
+        if [[ ${jv_migration_handoff_pending} == no && ${running} != true ]]; then systemctl stop "${JV_INSTANCE_UNIT}" || true; fi
         return 1
     fi
     local valid=yes

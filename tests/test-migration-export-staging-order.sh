@@ -33,7 +33,7 @@ done
 if grep -Fq 'migration-export-backend "$destination"' "${txn}"; then
     fail 'Agent export backend still writes the cold bundle directly to the final target'
 fi
-grep -Fq 'systemctl start "${JV_INSTANCE_UNIT}"' "${txn}" || fail 'Export transaction no longer restarts Minecraft after cold capture'
+[[ $(grep -c jv_migration_start_with_maintenance_handoff "${txn}") == 2 ]] || fail 'Export transaction no longer restarts Minecraft after cold capture'
 grep -Fq 'jv_migration_validate_runtime' "${txn}" || fail 'Export transaction no longer validates Minecraft before final transfer'
 grep -Fq 'staged_size=' "${txn}" || fail 'Export transaction does not measure the completed local bundle before transfer'
 grep -Fq 'jv_migration_available_bytes "$target_root"' "${txn}" || fail 'Export target free space is not rechecked before final transfer'

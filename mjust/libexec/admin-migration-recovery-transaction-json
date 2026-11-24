@@ -20,6 +20,7 @@ printf '%s\n' '{"event":"progress","state":"validating","stage":"recovery_prefli
 exec 9>"${JV_MAINTENANCE_LOCK}"
 flock -n 9 || { echo 'Another Minecraft maintenance operation is active.' >&2; exit 1; }
 jv_migration_validate_evidence "${transaction}" || exit 1
+[[ $(cat "${transaction}/state" "${transaction}/evidence.json" | sha256sum | awk '{print $1}') == "${expected_identity}" ]] || { echo "recovery state changed before execution" >&2; exit 1; }
 if [[ ${phase} == validated ]]; then
     jv_migration_validate_current >&2
 else

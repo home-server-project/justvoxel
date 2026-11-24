@@ -73,6 +73,9 @@ available_bytes="$(jv_migration_available_bytes "${repo_root}")" || fail 'migrat
     podman() { [[ $1 == image ]]; }
     bootc() { return 1; }
     install() { mkdir -p -- "${@: -1}"; }
+    if (( EUID != 0 )); then
+        chown() { [[ $1 == root:root && -f ${3} && ${3} == "${fixture}/run/"* ]]; }
+    fi
     fixture_run="$fixture/run"
     server_reported='' geyser_reported=''
     sed -n '/^# Reinspect after the cold stop/,/^partial="/{ /^partial="/!p; }' "${exporter}" |
@@ -109,6 +112,41 @@ available_bytes="$(jv_migration_available_bytes "${repo_root}")" || fail 'migrat
 api_planner="${repo_root}/mjust/libexec/admin-migration-import-plan-json"
 source_planner="${repo_root}/mjust/libexec/migration-import-plan-source.sh"
 destination_planner="${repo_root}/mjust/libexec/migration-import-plan-destination.sh"
+# Exercise the production planner through its staging-space check, before
+# transaction creation. Only the appliance's root ownership is simulated.
+(
+    fixture="$(mktemp -d)"
+    trap 'rm -rf -- "${fixture}"' EXIT
+    wrapper="${fixture}/minecraft-instances/jv-abcdef"
+    DATA_PATH="${wrapper}/data"
+    mkdir -p -- "${DATA_PATH}" "${fixture}/source"
+    sed 's|/usr/libexec/justvoxel/mjust/migration-archive|fixture_archive|g' "${source_planner}" > "${fixture}/planner.sh"
+    fixture_archive() { echo '{"expandedBytes":1,"nativeBundle":false}'; }
+    jv_migration_validate_source_name() { :; }
+    jv_migration_source_identity() { echo fixture; }
+    jv_migration_validate_data() { :; }
+    jv_restore_validate_data_layout() { :; }
+    stat() {
+        if [[ $* == "-c %u:%g:%a -- ${wrapper}" ]]; then
+            command stat -c '0:0:%a' -- "${wrapper}"
+        else
+            command stat "$@"
+        fi
+    }
+    jv_migration_require_staging_space() {
+        [[ $1 == "${wrapper}" ]] || exit 2
+        exit 42
+    }
+    for mode in 700 755; do
+        chmod "${mode}" -- "${wrapper}"
+        result=0
+        (source "${fixture}/planner.sh" "${fixture}/source") || result=$?
+        expected=42
+        [[ ${mode} == 700 ]] || expected=1
+        [[ ${result} == "${expected}" && $(command stat -c '%a' -- "${wrapper}") == "${mode}" ]] ||
+            fail "Import planner changed or incorrectly validated wrapper mode ${mode}"
+    done
+)
 (
     source "${common}"
     server_supports_plugins paper || fail 'Paper must support plugins'
@@ -398,6 +436,22 @@ if grep -Fq 'postplan=' "${repo_root}/mjust/libexec/admin-migration-import-trans
 if grep -Fq 'jv_migration_source_identity "${JV_MIGRATION_SOURCE}"' "${repo_root}/mjust/libexec/migration-import-activate.sh"; then fail 'Import activation must not re-read the original source after staging'; fi
 grep -Fq 'jv_migration_api_result "${preactivation_outcome}" pre-activation' "${repo_root}/mjust/libexec/migration-import-common.sh" || fail 'Import backend does not report bounded pre-activation failure directly'
 activation="${repo_root}/mjust/libexec/migration-import-activate.sh"
+grep -Fq 'jv_migration_start_with_maintenance_handoff' "${activation}" || fail 'Import startup bypassed handoff'
+grep -Fq 'if jv_migration_start_with_maintenance_handoff' "${repo_root}/mjust/libexec/migration-import-common.sh" || fail 'preactivation restart bypassed handoff'
+grep -Fq 'flock -w 5 9' "${repo_root}/mjust/libexec/instance-crossplay-start" || fail 'ExecStartPre maintenance exclusion missing'
+preflight_line="$(grep -n '^/usr/libexec/justvoxel/management-agent instance-version-migration-preflight ' "${activation}" | cut -d: -f1)"
+for marker in 'final_players=' 'jv_stop_minecraft_adaptive ' 'live_modified=yes' 'jv_migration_activate_data ' 'instance-version-publish '; do
+    line="$(grep -nF "${marker}" "${activation}" | head -n1 | cut -d: -f1)"
+    (( preflight_line > 0 && preflight_line < line )) || fail "publication preflight must precede ${marker}"
+done
+for writer in migration-import-common.sh migration-import-plan-destination.sh migration-export-backend; do
+    grep -Fq 'jv_migration_private_temp' "${repo_root}/mjust/libexec/${writer}" || fail "private metadata bypass in ${writer}"
+done
+for target in '${transaction}/state' '${transaction}/evidence.json' '${JV_MIGRATION_RECOVERY_ROOT}/${key}'; do
+    grep -Fq 'jv_migration_publish_private "${tmp}" "'"${target}"'"' "${migration_common}" || fail "private publication bypass for ${target}"
+done
+grep -Fq 'jv_migration_publish_private "${portable_tmp}" "${transaction}/portable.json"' "${repo_root}/mjust/libexec/migration-import-plan-destination.sh" || fail 'portable settings publication bypass'
+grep -Fq 'jv_migration_publish_private "${tmp}" "${result_file}"' "${repo_root}/mjust/libexec/migration-import-common.sh" || fail 'result publication bypass'
 [[ $(grep -c '="$(jv_migration_online_count)"' "${activation}") == 2 ]] || fail 'Import needs shared initial and final player checks'
 if grep -Fq 'rcon-cli' "${activation}"; then fail 'generic activation depends on Java RCON'; fi
 grep -Fq 'jv_migration_validate_runtime "${source_version}"' "${activation}" || fail 'Import does not verify the concrete source version'
@@ -498,16 +552,45 @@ grep -Fq 'if [[ ${minecraft_was_active} != yes ]]; then systemctl stop "${JV_INS
     chmod 0600 "${fixture}/runtime/"*
     jv_migration_runtime_paths() { printf '%s\n' "${JV_MIGRATION_INSTANCE_CONFIG}" "${fixture}/runtime/minecraft.env" "${fixture}/runtime/minecraft-${JV_INSTANCE_ID}.container"; }
     jv_migration_load_instance() { [[ $1 == jv-aaaaaa ]]; }
-    jv_migration_validate_runtime() { printf 'validate %s\n' "${JV_INSTANCE_ID}" >> "${fixture}/calls"; }
-    # Private evidence ownership is simulated independently of the test runner UID.
-    stat() { if [[ $1 == -c && $2 == '%u:%g:%a' ]]; then printf '0:0:600\n'; else command stat "$@"; fi; }
+    jv_migration_validate_runtime() {
+        if flock -n "${JV_MAINTENANCE_LOCK}" true; then fail 'validated without reacquiring maintenance'; fi
+        printf 'validate %s\n' "${JV_INSTANCE_ID}" >> "${fixture}/calls"
+    }
+    # Unprivileged source checks model only the appliance account mapping.
+    # Root test environments exercise the actual inode ownership transitions.
+    if (( EUID != 0 )); then
+        chown() { [[ $1 == root:root && -f ${3} && ${3} == "${fixture}/"* ]]; }
+        stat() {
+            case "${2}" in
+                %u:%g:%a|%u:%g:%a:%h)
+                    command stat -c "${2//%u:%g/0:0}" -- "${@: -1}" ;;
+                *) command stat "$@" ;;
+            esac
+        }
+    else
+        chown root:root -- "${fixture}/runtime/"*
+    fi
+    JV_MAINTENANCE_LOCK="${fixture}/maintenance.lock"
     systemctl() {
+        if [[ $1 == start ]]; then
+            # Independent open description, as used by the real ExecStartPre.
+            exec 7>"${JV_MAINTENANCE_LOCK}"
+            flock -n 7 || return 1
+            [[ ${start_fault:-} == contended ]] || exec 7>&-
+            [[ ${start_fault:-} != failed ]] || return 1
+        fi
         printf '%s\n' "$*" >> "${fixture}/calls"
         [[ $* == 'daemon-reload' || $* == *"${JV_INSTANCE_UNIT}" ]] || fail 'rollback targeted a sibling unit'
     }
     for minecraft_was_active in yes no; do
         transaction="$(dirname -- "${DATA_PATH}")/.justvoxel-import-${minecraft_was_active}"
         mkdir -m0700 "${transaction}"
+        if (( EUID == 0 )); then
+            # Simulate files inheriting the service GID regardless of runner GID.
+            chmod 0700 "${transaction%/*}"
+            chgrp 12345 "${transaction}"
+            chmod g+s "${transaction}"
+        fi
         mkdir "${transaction}/staged-server"
         printf imported > "${transaction}/staged-server/world"
         source_identity=external-without-justvoxel-id
@@ -515,7 +598,150 @@ grep -Fq 'if [[ ${minecraft_was_active} != yes ]]; then systemctl stop "${JV_INS
         jv_migration_write_state "${transaction}" switching external paper
         jv_migration_activate_data "${transaction}" "${DATA_PATH}" "${transaction}/staged-server" yes
         [[ $(cat "${DATA_PATH}/world") == imported ]] || fail 'selected data was not activated'
+        if (( EUID == 0 )); then
+            # Model NSS on an appliance without requiring a host service account.
+            service_gid=12345
+            getent() { [[ $* == 'group justvoxel-web' ]] && echo 'justvoxel-web:x:12345:'; }
+            evidence="${transaction}/evidence.json"
+            chown 0:0 -- "${transaction}"
+            chmod g-s "${transaction}"
+            for file in "${evidence}" "${transaction}/state"; do
+                [[ $(stat -c '%u:%g:%a' "${file}") == 0:0:600 ]] || fail 'metadata was not published privately'
+                chown "0:${service_gid}" -- "${file}"
+            done
+            parent="${transaction%/*}"
+            snapshot="${transaction}/destination-state"
+            portable="${transaction}/portable.json"
+            chown 0:0 -- "${parent}"
+            chmod 0755 "${parent}"
+            chown "0:${service_gid}" -- "${snapshot}"
+            chmod =700 "${snapshot}"
+            jq -cn --arg id "${JV_INSTANCE_ID}" '{instance_id:$id,game_mode:"survival",difficulty:"easy",
+                whitelist:false,enforce_whitelist:false,max_players:20,motd:"fixture",source_software:"vanilla",
+                version:"1.21",loader_version:""}' > "${portable}"
+            chmod 0600 "${portable}"
+            chown "0:${service_gid}" -- "${portable}"
+            if jv_migration_validate_evidence "${transaction}"; then fail 'legacy group passed canonical validation'; fi
+            mv "${evidence}" "${transaction}/original"
+            reject_legacy() {
+                if jv_migration_normalize_legacy_evidence "${transaction}"; then fail "accepted $1"; fi
+                [[ $(stat -c %g "${transaction}/original") == "${service_gid}" ]] || fail 'changed unrelated inode'
+            }
+            reject_legacy 'unknown metadata filename'
+            ln -s original "${evidence}"
+            reject_legacy symlink
+            rm "${evidence}"
+            mkdir "${evidence}"
+            reject_legacy directory
+            rmdir "${evidence}"
+            cp -p "${transaction}/original" "${evidence}"
+            for identity in "1:${service_gid}" '0:12346'; do
+                chown "${identity}" "${evidence}"
+                reject_legacy 'unexpected owner or group'
+            done
+            chown "0:${service_gid}" "${evidence}"
+            chmod 0640 "${evidence}"
+            reject_legacy mode
+            chmod 0600 "${evidence}"
+            for filter in '.instance_id="jv-bbbbbb"' '.data_path="/wrong"' '.transaction="/wrong"' '.config_identity=("0"*64)'; do
+                jq "${filter}" "${transaction}/original" > "${evidence}"
+                reject_legacy 'mismatched evidence'
+            done
+            printf '{' > "${evidence}"
+            reject_legacy 'malformed evidence'
+            truncate -s 65537 "${evidence}"
+            reject_legacy 'oversized evidence'
+            cp -p "${transaction}/original" "${evidence}"
+            if DATA_PATH="${sibling}" jv_migration_normalize_legacy_evidence "${transaction}"; then fail 'accepted sibling path'; fi
+            for mode in 0775 0777; do
+                chmod "${mode}" "${parent}"
+                reject_legacy "parent mode ${mode}"
+            done
+            chmod 0755 "${parent}"
+            for owner in 1:0 "0:${service_gid}"; do
+                chown "${owner}" "${parent}"
+                reject_legacy "parent ownership ${owner}"
+            done
+            chown 0:0 "${parent}"
+            chown "0:${service_gid}" "${transaction}"
+            reject_legacy 'transaction group'
+            chown 0:0 "${transaction}"
+            chown 0:12346 "${snapshot}"
+            reject_legacy 'snapshot group'
+            chown "0:${service_gid}" "${snapshot}"
+            for file in "${snapshot}" "${transaction}/state" "${portable}"; do
+                mv "${file}" "${file}.saved"
+                ln -s "${file}.saved" "${file}"
+                reject_legacy "symlink ${file##*/}"
+                rm "${file}"
+                mv "${file}.saved" "${file}"
+            done
+            cp -p "${portable}" "${portable}.saved"
+            printf '{' > "${portable}"
+            reject_legacy 'malformed portable JSON'
+            jq '.instance_id="jv-bbbbbb"' "${portable}.saved" > "${portable}"
+            reject_legacy 'foreign portable instance'
+            cp -p "${portable}.saved" "${portable}"
+            for file in "${snapshot}" "${transaction}/state" "${portable}" "${evidence}"; do
+                [[ $(stat -c %g "${file}") == "${service_gid}" ]] || fail 'rejected repair changed ownership'
+            done
+            # Run the real entry points with the fixture runtime and registry.
+            helpers="${repo_root}/mjust/libexec"
+            recovery_json() (
+                source <(sed '/^source /d; /^require_root$/d' "${helpers}/admin-migration-recovery-json") "$@"
+            )
+            selected=(--instance "${JV_INSTANCE_ID}")
+            discovered="$(recovery_json "${selected[@]}" discover)"
+            jq -e --arg tx "${transaction}" 'any(.transactions[]; .transaction==$tx and
+                .mode!="needs_attention" and .finalizable==true)' <<< "${discovered}" >/dev/null || fail 'legacy discovery unavailable'
+            [[ $(stat -c '%u:%g:%a' "${parent}") == 0:0:755 ]] || fail 'legacy parent changed'
+            for file in "${transaction}" "${snapshot}"; do
+                [[ $(stat -c '%u:%g:%a' "${file}") == 0:0:700 ]] || fail 'incorrect directory metadata'
+            done
+            for file in "${evidence}" "${transaction}/state" "${portable}"; do
+                [[ $(stat -c '%u:%g:%a' "${file}") == 0:0:600 ]] || fail 'incorrect private metadata'
+            done
+            jv_migration_validate_evidence "${transaction}" || fail 'normalized evidence failed validation'
+            jv_migration_normalize_legacy_evidence "${transaction}" || fail 'legacy repair was not idempotent'
+            request="$(jq -cn --arg tx "${transaction}" '{transaction:$tx}')"
+            plan="$(recovery_json "${selected[@]}" plan <<< "${request}")"
+            identity="$(jq -er 'select(.ok and .normalized.finalizable) | .context.state_identity' <<< "${plan}")"
+            if [[ ${minecraft_was_active} == yes ]]; then
+                apply_request="$(jq -c --arg id "${identity}" '. + {state_identity:$id}' <<< "${request}")"
+                recovery_apply() (
+                    source <(sed -e '/^source /d; /^require_root$/d' \
+                        -e 's|/usr/libexec/justvoxel/mjust/admin-migration-recovery-json |recovery_json |' \
+                        -e 's|${JV_MIGRATION_RECOVERY_ROOT}|${fixture}/registry|g' \
+                        "${helpers}/admin-migration-recovery-transaction-json") "${selected[@]}"
+                )
+                # Keep every registry operation under the temporary fixture.
+                jv_migration_clear_recovery() { rm -f -- "${fixture}/registry/$(jv_migration_recovery_key "$1")"; }
+                mkdir "${fixture}/registry"
+                touch "${fixture}/registry/$(jv_migration_recovery_key "${transaction}")"
+                printf changed > "${fixture}/runtime/minecraft.env"
+                set +e
+                for start_fault in failed contended; do
+                    (recovery_apply <<< "${apply_request}")
+                    failed_status=$?
+                    [[ ${failed_status} != 0 && -f ${transaction}/evidence.json ]] || fail "lost recovery on ${start_fault} start"
+                done
+                unset start_fault
+                (jv_migration_validate_runtime() { return 1; }; recovery_apply <<< "${apply_request}")
+                failed_status=$?
+                set -e
+                [[ ${failed_status} != 0 && -d ${transaction} ]] || fail 'failed validation lost recovery'
+                cmp "${snapshot}/minecraft.env" "${fixture}/runtime/minecraft.env" || fail 'runtime was not restored'
+                recovery_apply <<< "${apply_request}"
+                [[ ! -e ${transaction} && $(cat "${DATA_PATH}/world") == old &&
+                   $(cat "${sibling}/world") == sibling ]] || fail 'selected recovery did not finalize'
+                continue
+            fi
+        fi
+        exec 9>"${JV_MAINTENANCE_LOCK}"
+        flock -n 9 || fail 'could not take initial maintenance lock'
+        if flock -n "${JV_MAINTENANCE_LOCK}" true; then fail 'fixture lacks initial exclusion'; fi
         jv_migration_recover_selected "${transaction}" || fail 'selected rollback failed'
+        if flock -n "${JV_MAINTENANCE_LOCK}" true; then fail 'rollback returned without maintenance'; fi
         [[ $(cat "${DATA_PATH}/world") == old && $(cat "${sibling}/world") == sibling ]] || fail 'rollback changed sibling data'
         [[ $(cat "${transaction}/failed-import/world") == imported ]] || fail 'failed imported data was lost'
         if [[ ${minecraft_was_active} == no ]]; then
@@ -530,5 +756,6 @@ grep -Fq 'if [[ ${minecraft_was_active} != yes ]]; then systemctl stop "${JV_INS
         [[ $(wc -l < "${fixture}/calls") == "${before}" ]] || fail 'foreign recovery touched runtime'
         jq 'del(.instance_id)' "${transaction}/valid-evidence" > "${transaction}/evidence.json"
         if jv_migration_recover_selected "${transaction}"; then fail 'old recovery evidence guessed a destination'; fi
+        exec 9>&-
     done
 )

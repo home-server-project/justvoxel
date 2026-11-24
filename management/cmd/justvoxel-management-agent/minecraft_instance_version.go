@@ -11,6 +11,11 @@ import (
 
 type reviewedMigrationInstanceKey struct{}
 
+type reviewedMigrationInstance struct {
+	id        string
+	preflight bool
+}
+
 type instanceVersionKey struct{}
 type instanceVersionSelectionKey struct{}
 
@@ -76,8 +81,12 @@ func instanceVersionCommand(ctx context.Context, args []string) error {
 			return errInstanceID
 		}
 		return instanceMaintenanceColdBackup(ctx, id)
-	case "instance-version-publish":
+	case "instance-version-publish", "instance-version-migration-preflight":
 		migration := len(args) == 9 && args[7] == "--migration"
+		preflight := args[0] == "instance-version-migration-preflight"
+		if preflight && !migration {
+			return errInstanceID
+		}
 		if (len(args) != 7 && !migration) || (args[6] != "" && !operationFingerprintPattern.MatchString(args[6])) || !validSetupServerType(args[2]) || !imageTagInputPattern.MatchString(args[3]) || !(instanceRuntimeVersionPattern.MatchString(args[4]) || migration && args[2] == "bedrock" && bedrockVersionPattern.MatchString(args[4])) || (!containerOnly && args[5] != "recommended" && args[5] != "latest" && args[5] != "pinned") {
 			return errInstanceID
 		}
@@ -104,7 +113,7 @@ func instanceVersionCommand(ctx context.Context, args []string) error {
 			if args[2] != previous.Runtime.Software || args[3] != previous.Runtime.ImageTag || args[6] != previous.Runtime.ImageDigest || args[5] != "pinned" || next.Runtime.VersionPolicy != "pinned" || args[4] != next.Runtime.Version {
 				return errInstanceRecovery
 			}
-			ctx = context.WithValue(ctx, reviewedMigrationInstanceKey{}, id)
+			ctx = context.WithValue(ctx, reviewedMigrationInstanceKey{}, reviewedMigrationInstance{id: id, preflight: preflight})
 		} else {
 			next.Runtime.PreserveContent = os.Getenv("JUSTVOXEL_SWITCH_PRESERVE_CONTENT") == "yes"
 		}

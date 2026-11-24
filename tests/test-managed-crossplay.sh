@@ -97,11 +97,34 @@ readonly JV_INSTANCE_ID=jv-fixture1
 GAME_MODE=survival DIFFICULTY=normal WHITELIST_ENABLED=yes ENFORCE_WHITELIST=yes MAX_PLAYERS=10 MOTD=Fixture
 transaction="${fixture_dir}/import-transaction"
 mkdir -p "${transaction}"
+if (( EUID != 0 )); then
+    # Model appliance ownership only for the portable metadata temporary file.
+    chown() {
+        if [[ $# == 3 && $1 == root:root && $2 == -- &&
+              $3 == "${transaction}/.portable."?????? && ${3##*/} == .portable.?????? &&
+              -f $3 && ! -L $3 ]]; then
+            return 0
+        fi
+        command chown "$@"
+    }
+    stat() {
+        if [[ $# == 4 && $1 == -c && $2 == '%u:%g:%a:%h' && $3 == -- &&
+              $4 == "${transaction}/.portable."?????? && ${4##*/} == .portable.?????? &&
+              -f $4 && ! -L $4 ]]; then
+            command stat -c '0:0:%a:%h' -- "$4"
+        else
+            command stat "$@"
+        fi
+    }
+fi
+source "${repo_root}/mjust/libexec/migration-common.sh"
 source <(sed -n '/^source_geyser=/,/^# The destination/p' "${repo_root}/mjust/libexec/migration-import-plan-destination.sh" | sed '$d')
 [[ ${BEDROCK_ENABLED} == yes && ${BEDROCK_MANAGED_PLUGINS} == yes ]]
 jq -e --arg id "${JV_INSTANCE_ID}" '.instance_id == $id and .game_mode == "survival" and .whitelist == true' "${transaction}/portable.json" >/dev/null
+if (( EUID != 0 )); then
+    unset -f chown stat
+fi
 # Staged normalization preserves imported configuration/key content except port.
-source "${repo_root}/mjust/libexec/migration-common.sh"
 printf 'online-mode=true\nserver-port=12345\n' > "${DATA_PATH}/server.properties"
 printf 'bedrock:\n  port: 20000\nauth-type: floodgate\ncustom-setting: preserve\n' > "${DATA_PATH}/plugins/Geyser-Spigot/config.yml"
 jv_migration_normalize_staged_runtime_files "${DATA_PATH}" yes

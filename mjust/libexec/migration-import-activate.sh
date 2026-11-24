@@ -38,6 +38,10 @@ fi
 jv_migration_snapshot_runtime "${transaction}" "${old_java}" "${old_bedrock_enabled}" "${old_bedrock}" "${JAVA_PORT}" "${BEDROCK_ENABLED}" "${BEDROCK_PORT}"
 jv_migration_write_state "${transaction}" ready-to-switch "${JV_MIGRATION_SOURCE}" "${source_class}"
 
+jv_migration_validate_evidence "${transaction}" || { echo 'ERROR: destination runtime snapshot validation failed.' >&2; exit 1; }
+migration_args=("${JV_INSTANCE_ID}" "${MINECRAFT_SERVER_TYPE}" "${MINECRAFT_IMAGE_TAG}" "${source_version}" pinned "${JV_INSTANCE_IMAGE_DIGEST}" --migration "${transaction}")
+/usr/libexec/justvoxel/management-agent instance-version-migration-preflight "${migration_args[@]}"
+
 if [[ ${configured} == yes && ${minecraft_was_active} == yes ]]; then
     echo 'Final player check immediately before graceful stop.'
     final_players="$(jv_migration_online_count)" || { echo 'ERROR: player state became unknown. Import cancelled before live data changed.' >&2; exit 1; }
@@ -95,10 +99,10 @@ jv_migration_write_state "${transaction}" imported-active "${JV_MIGRATION_SOURCE
 
 # Publish only the reviewed version using the existing selected-instance backend.
 # The transaction retains the original selected runtime for rollback.
-/usr/libexec/justvoxel/management-agent instance-version-publish "${JV_INSTANCE_ID}" "${MINECRAFT_SERVER_TYPE}" "${MINECRAFT_IMAGE_TAG}" "${source_version}" pinned "${JV_INSTANCE_IMAGE_DIGEST}" --migration "${transaction}"
+/usr/libexec/justvoxel/management-agent instance-version-publish "${migration_args[@]}"
 jv_migration_load_instance "${JV_INSTANCE_ID}"
 echo 'Starting imported Minecraft server.'
-systemctl start "${JV_INSTANCE_UNIT}"
+jv_migration_start_with_maintenance_handoff
 echo 'Validating the imported Minecraft server.'
 jv_migration_write_state "${transaction}" validating "${JV_MIGRATION_SOURCE}" "${source_class}"
 jv_migration_validate_runtime "${source_version}"

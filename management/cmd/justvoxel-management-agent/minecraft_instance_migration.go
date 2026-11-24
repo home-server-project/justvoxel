@@ -7,7 +7,7 @@ import (
 
 // The portable data contract may replace Minecraft settings; the selected
 // destination retains identity, ports, limits, boot policy and backup ownership.
-// This is consumed only by the root version publisher after cold data activation.
+// This is consumed by the root publication preflight and the final publisher.
 func (b *instanceRuntimeBackend) migrationPortableSettings(previous instanceRuntimeRecord, transaction string) (instanceRuntimeRecord, error) {
 	next := previous
 	if filepath.Dir(transaction) != filepath.Dir(previous.Storage.DataPath) || !strings.HasPrefix(filepath.Base(transaction), ".justvoxel-import-") {
@@ -15,7 +15,7 @@ func (b *instanceRuntimeBackend) migrationPortableSettings(previous instanceRunt
 	}
 	data, err := b.readPrivate(filepath.Join(transaction, "evidence.json"))
 	if err != nil {
-		return next, err
+		return next, instanceRuntimeFailure("Migration evidence private-file validation failed.")
 	}
 	var evidence struct {
 		Schema         int    `json:"schema"`
@@ -34,11 +34,11 @@ func (b *instanceRuntimeBackend) migrationPortableSettings(previous instanceRunt
 	dir, _, _ := b.paths(previous.Runtime.ID)
 	config, err := b.readPrivate(filepath.Join(dir, "config.json"))
 	if err != nil || instanceHash(config) != evidence.ConfigIdentity {
-		return next, errInstanceRecovery
+		return next, instanceRuntimeFailure("Destination runtime snapshot validation failed.")
 	}
 	data, err = b.readPrivate(filepath.Join(transaction, "portable.json"))
 	if err != nil {
-		return next, err
+		return next, instanceRuntimeFailure("Migration portable settings private-file validation failed.")
 	}
 	var portable struct {
 		InstanceID       string `json:"instance_id"`

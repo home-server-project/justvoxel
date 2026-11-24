@@ -43,6 +43,7 @@ set +e
     }
 
     # shellcheck disable=SC1090
+    source "${repo_root}/mjust/libexec/migration-common.sh"
     source "${repo_root}/mjust/libexec/migration-import-common.sh"
 
     # Stand in for extraction/read failure while staging.

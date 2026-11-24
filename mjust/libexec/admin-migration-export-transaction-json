@@ -36,6 +36,10 @@ emit_result() {
 cleanup() {
     local rc=$? safe=yes
     trap - EXIT INT TERM
+    if [[ ${jv_migration_handoff_pending} == yes ]]; then
+        emit_result needs_attention 'Minecraft maintenance ownership could not be confirmed. Export recovery state was retained.'
+        exit 0
+    fi
 
     if [[ -n "$destination" && -f "$destination.partial" ]]; then
         rm -f -- "$destination.partial" || safe=no
@@ -45,12 +49,17 @@ cleanup() {
     fi
 
     if [[ "$restart_required" == yes && ${JV_MIGRATION_STOP_REQUESTED:-no} == yes ]]; then
-        if systemctl start "${JV_INSTANCE_UNIT}" >/dev/null 2>&1 \
+        if jv_migration_start_with_maintenance_handoff >/dev/null 2>&1 \
             && jv_migration_validate_runtime >/dev/null 2>&1; then
             restart_required=no
         else
             safe=no
         fi
+    fi
+
+    if [[ ${jv_migration_handoff_pending} == yes ]]; then
+        emit_result needs_attention 'Minecraft maintenance ownership could not be confirmed. Export recovery state was retained.'
+        exit 0
     fi
 
     if [[ "$transport_started" == yes ]]; then
@@ -275,7 +284,7 @@ JV_MIGRATION_EXPORT_GEYSER_REPORTED="$geyser_reported" \
 
 if [[ "$restart_required" == yes ]]; then
     emit_progress running minecraft_restart 'Restarting Minecraft immediately after the local cold export.'
-    systemctl start "${JV_INSTANCE_UNIT}"
+    jv_migration_start_with_maintenance_handoff
     restart_required=no
     emit_progress verifying minecraft_runtime 'Validating Minecraft before final export transfer.'
     jv_migration_validate_runtime >/dev/null

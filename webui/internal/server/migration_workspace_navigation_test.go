@@ -312,7 +312,7 @@ func TestMigrationWorkspaceImportAttentionActionsAndResolvedNavigation(t *testin
 					}
 					if state == "succeeded" {
 						dashboardLink := regexp.MustCompile(`<a\b[^>]*\bid="server-migration-dashboard-link"[^>]*>Open dashboard</a>`).FindString(body)
-						if !migrationMarkupHasURL(dashboardLink, "/", "", "", "") || hiddenAttribute.MatchString(dashboardLink) {
+						if !strings.Contains(dashboardLink, "data-migration-open-dashboard") || !migrationMarkupHasURL(dashboardLink, "/", "", "", "") || hiddenAttribute.MatchString(dashboardLink) {
 							t.Fatalf("succeeded progress missing visible dashboard action: %s", body)
 						}
 					}
@@ -504,7 +504,7 @@ func TestMigrationWorkspaceExportTerminalDoneAndLogLinks(t *testing.T) {
 				t.Fatalf("progress = %d: %s", page.Code, body)
 			}
 			done := doneAnchor.FindString(body)
-			if done == "" || !migrationMarkupHasURL(done, "/", "migration", "export", "") || hiddenAttribute.MatchString(done) == (state == "succeeded") {
+			if strings.Contains(done, "data-migration-open-dashboard") || !migrationMarkupHasURL(done, "/", "migration", "export", "") || hiddenAttribute.MatchString(done) == (state == "succeeded") {
 				t.Fatalf("Export Done action incorrect for %s: %s", state, done)
 			}
 			if strings.Contains(body, ">Open dashboard</a>") {

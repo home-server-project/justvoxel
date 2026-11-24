@@ -2981,6 +2981,15 @@ if (migrationOpen && migrationDialog) {
         return;
       }
       const destination = new URL(href, window.location.href);
+      if (link.hasAttribute("data-migration-open-dashboard")) {
+        event.preventDefault();
+        const server = destination.searchParams.get("server");
+        if (globalThis.justVoxelSelectServer(server, "minecraft", "", false)) {
+          window.history.replaceState(window.history.state, "", destination);
+          workspaceWindow?.close();
+        }
+        return;
+      }
       if (destination.origin === window.location.origin && destination.pathname === "/" && destination.searchParams.get("workspace") === "migration") {
         event.preventDefault();
         migrationSubmitController?.abort();

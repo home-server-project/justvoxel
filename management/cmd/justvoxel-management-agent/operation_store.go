@@ -815,6 +815,9 @@ func (s *operationStore) beginSetup(planFingerprint string, instanceSetup ...boo
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if s.currentMigrationID != "" {
+		return operationJournal{}, false, errSetupOperationBusy
+	}
 	if s.currentMinecraftResetID != "" {
 		return operationJournal{}, false, errMinecraftResetOperationBusy
 	}
@@ -869,6 +872,9 @@ func (s *operationStore) beginRestore(planFingerprint string) (operationJournal,
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if s.currentMigrationID != "" {
+		return operationJournal{}, false, errRestoreOperationBusy
+	}
 	if s.currentMinecraftResetID != "" {
 		return operationJournal{}, false, errMinecraftResetOperationBusy
 	}
@@ -974,6 +980,9 @@ func (s *operationStore) beginMigrationExport(instanceID, planFingerprint string
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if s.currentSetupID != "" || s.currentRestoreID != "" || s.currentDataMigrationID != "" {
+		return operationJournal{}, false, errMigrationOperationBusy
+	}
 	if s.currentMinecraftResetID != "" {
 		return operationJournal{}, false, errMinecraftResetOperationBusy
 	}
@@ -1026,6 +1035,9 @@ func (s *operationStore) beginMigrationImport(instanceID, planFingerprint string
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if s.currentSetupID != "" || s.currentRestoreID != "" || s.currentDataMigrationID != "" {
+		return operationJournal{}, false, errMigrationOperationBusy
+	}
 	if s.currentMinecraftResetID != "" {
 		return operationJournal{}, false, errMinecraftResetOperationBusy
 	}
@@ -1071,6 +1083,38 @@ func (s *operationStore) beginMigrationImport(instanceID, planFingerprint string
 	return journal, true, nil
 }
 
+// Only a freshly verified Recovery Apply can requeue its observed attention journal.
+func (s *operationStore) retryMigrationRecovery(observed operationJournal, fingerprint string) (operationJournal, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, ok := s.operations[s.currentMigrationID]
+	if !ok || !s.migrationLockHeld || current.OperationID != observed.OperationID ||
+		current.OperationType != operationTypeMigrationRecovery || current.InstanceID != observed.InstanceID ||
+		!instanceIDPattern.MatchString(current.InstanceID) || !operationFingerprintPattern.MatchString(fingerprint) {
+		return operationJournal{}, false, errMigrationOperationBusy
+	}
+	if current.State != operationNeedsAttention {
+		if current.PlanFingerprint == fingerprint {
+			return current, false, nil
+		}
+		return operationJournal{}, false, errMigrationOperationBusy
+	}
+	if observed.State != operationNeedsAttention || observed.UpdatedAt != current.UpdatedAt {
+		return operationJournal{}, false, errMigrationOperationBusy
+	}
+	current.PlanFingerprint = fingerprint
+	current.State = operationQueued
+	current.Stage = "recovery_retry"
+	current.Status = "Reviewed server migration recovery retry queued."
+	current.UpdatedAt = s.now().UTC().Format(time.RFC3339Nano)
+	current.FinishedAt = ""
+	if err := s.persist(current); err != nil {
+		return operationJournal{}, false, err
+	}
+	s.operations[current.OperationID] = current
+	return current, true, nil
+}
+
 func (s *operationStore) beginMigrationRecovery(instanceID, planFingerprint string) (operationJournal, bool, error) {
 	if !instanceIDPattern.MatchString(instanceID) || !operationFingerprintPattern.MatchString(planFingerprint) {
 		return operationJournal{}, false, errors.New("invalid server migration recovery plan fingerprint")
@@ -1079,6 +1123,9 @@ func (s *operationStore) beginMigrationRecovery(instanceID, planFingerprint stri
 	defer s.mu.Unlock()
 
 	var handedOff *operationJournal
+	if s.currentSetupID != "" || s.currentRestoreID != "" || s.currentDataMigrationID != "" {
+		return operationJournal{}, false, errMigrationOperationBusy
+	}
 	if s.currentMinecraftResetID != "" {
 		return operationJournal{}, false, errMinecraftResetOperationBusy
 	}

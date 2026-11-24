@@ -168,7 +168,7 @@ func main() {
 			fatal("The staged update could not be prepared. Reboot was cancelled: %v", err)
 		}
 
-	case "instance-version-publish", "instance-version-backup", "instance-container-publish", "instance-switch-content-verify":
+	case "instance-version-publish", "instance-version-migration-preflight", "instance-version-backup", "instance-container-publish", "instance-switch-content-verify":
 		if err := instanceVersionCommand(context.Background(), args); err != nil {
 			fatal("instance version operation: %v", err)
 		}

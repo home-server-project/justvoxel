@@ -64,7 +64,10 @@ jv_restore_validate_data_layout "${DATA_PATH}"
 had_existing_data=yes
 
 data_parent="$(dirname -- "${DATA_PATH}")"
-install -d -m0755 -o root -g root "${data_parent}"
+[[ $(stat -c '%u:%g:%a' -- "${data_parent}") == 0:0:700 ]] || {
+    echo 'ERROR: selected instance directory must be owned by root:root with mode 0700.' >&2
+    exit 1
+}
 stale="$(find "${data_parent}" -maxdepth 1 -type d -name '.justvoxel-import-*' -print -quit 2>/dev/null || true)"
 if [[ -n ${stale} ]]; then
     echo 'ERROR: an earlier JustVoxel import transaction still exists.' >&2

@@ -87,7 +87,14 @@ jv_migration_load_instance() {
 # Model appliance root ownership only for caller-owned fixture files. Real
 # file types, symlinks, permissions, hashes and instance evidence remain checked.
 readonly JV_TEST_MIGRATION_ROOT="${tmp}"
+if (( EUID != 0 )); then
+    chown() { [[ $1 == root:root && -f ${3} && ${3} == "${JV_TEST_MIGRATION_ROOT}/"* ]]; }
+fi
 stat() {
+    if [[ $2 == '%u:%g:%a:%h' && ${@: -1} == "${JV_TEST_MIGRATION_ROOT}/"* ]]; then
+        command stat -c '0:0:%a:%h' -- "${@: -1}"
+        return
+    fi
     if [[ $# == 3 && $1 == -c && $2 == '%u:%g:%a' && $3 == "${JV_TEST_MIGRATION_ROOT}/"* ]]; then
         [[ $(command stat -c '%u:%g' "$3") == "$(id -u):$(id -g)" ]] || return 1
         printf '0:0:%s\n' "$(command stat -c '%a' "$3")"
@@ -117,7 +124,7 @@ mv "${runtime_tx}/foreign" "${runtime_tx}/evidence.json"
 chmod 0600 "${runtime_tx}/evidence.json"
 if jv_migration_restore_runtime "${runtime_tx}"; then fail 'foreign instance evidence accepted'; fi
 [[ -f ${runtime_tx}/destination-state/config.json ]] || fail 'rejected recovery evidence was discarded'
-unset -f stat
+unset -f stat chown
 PATH="${old_path}"; export PATH
 
 # Temporary mount and SMB credential cleanup.

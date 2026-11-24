@@ -11,13 +11,28 @@ shift 2
 configured=yes
 data_parent="$(dirname -- "${DATA_PATH}")"
 collect_transactions() { find "${data_parent}" -maxdepth 1 -type d \( -name '.justvoxel-import-*' -o -name '.justvoxel-export-*' \) -print 2>/dev/null | sort -u; }
+# An earlier repair could leave canonical evidence beside legacy metadata.
+canonical_recovery_evidence() {
+    local transaction="$1" file
+    local -a files=("${transaction}/state")
+    if [[ -e ${transaction}/portable.json || -L ${transaction}/portable.json ]]; then
+        files+=("${transaction}/portable.json")
+    fi
+    [[ -d ${transaction}/destination-state && ! -L ${transaction}/destination-state &&
+       $(stat -c '%u:%g:%a' -- "${transaction}/destination-state") == 0:0:700 ]] || return 1
+    for file in "${files[@]}"; do
+        [[ -f ${file} && ! -L ${file} && $(stat -c '%u:%g:%a:%h' -- "${file}") == 0:0:600:1 ]] || return 1
+    done
+    jv_migration_validate_evidence "${transaction}"
+}
 summary_json() {
     local transaction="$1" phase source_type updated_at mode=selected-instance finalizable=false
     [[ $(dirname -- "${transaction}") == "${data_parent}" && -d ${transaction} && ! -L ${transaction} && -r ${transaction}/state ]] || return 1
+    [[ -f ${transaction}/state && ! -L ${transaction}/state && $(stat -c %s -- "${transaction}/state") -le 65536 ]] || return 1
     phase="$(sed -n 's/^phase=//p' "${transaction}/state" | head -n1)"
     source_type="$(sed -n 's/^source_type=//p' "${transaction}/state" | head -n1)"
     updated_at="$(sed -n 's/^updated_at=//p' "${transaction}/state" | head -n1)"
-    if jv_migration_validate_evidence "${transaction}"; then
+    if canonical_recovery_evidence "${transaction}" || jv_migration_normalize_legacy_evidence "${transaction}"; then
         case "${phase}" in staging|prepared|ready-to-switch|switching|imported-active|validating|rollback|rolled-back|critical-rollback|validated|exporting) finalizable=true ;; esac
     else
         mode=needs_attention

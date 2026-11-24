@@ -679,9 +679,18 @@ func (b *instanceRuntimeBackend) applyVersion(ctx context.Context, previous inst
 	if err = b.storage(ctx, "preflight", next); err != nil {
 		return err
 	}
-	reviewedMigration := maintenance && ctx.Value(reviewedMigrationInstanceKey{}) == id && previous.Runtime.Software == next.Runtime.Software
+	migration, _ := ctx.Value(reviewedMigrationInstanceKey{}).(reviewedMigrationInstance)
+	reviewedMigration := maintenance && migration.id == id && previous.Runtime.Software == next.Runtime.Software
 	if !reviewedMigration && (previous.Runtime.Software == "bedrock" || next.Runtime.Software == "bedrock") && (previous.Runtime.Software != next.Runtime.Software || previous.Runtime.Version != next.Runtime.Version) {
 		return instanceRuntimeFailure("Bedrock software/version conversion is not supported")
+	}
+	// The destination can still own its live ports during migration preflight.
+	// Recheck the candidate and acquire stopped-only resources at publication.
+	if migration.preflight {
+		if !reviewedMigration {
+			return errInstanceRecovery
+		}
+		return b.validateSoftware(ctx, next.Runtime)
 	}
 	// Full configuration changes are stopped-only; boot preference is independent.
 	state, err := b.observe(ctx, id)

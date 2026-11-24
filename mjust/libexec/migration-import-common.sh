@@ -5,10 +5,9 @@ jv_migration_api_result() {
     [[ ${JV_MIGRATION_API_MODE:-0} == 1 && -n ${result_file} ]] || return 0
     case "${result_file}" in "${JV_MIGRATION_RUN_ROOT}/"*) ;; *) echo 'ERROR: invalid Management API Import result path.' >&2; return 1 ;; esac
     install -d -m0700 -o root -g root "${JV_MIGRATION_RUN_ROOT}"
-    tmp="${result_file}.tmp.$"
-    jq -cn --arg outcome "${outcome}" --arg phase "${phase}" --arg transaction "${recovery_transaction}" --arg status "${status}"         '{outcome:$outcome,phase:$phase,transaction:$transaction,status:$status}' > "${tmp}"
-    chmod 0600 "${tmp}"
-    mv -f -- "${tmp}" "${result_file}"
+    tmp="$(jv_migration_private_temp "${result_file}.tmp.XXXXXX")" || return 1
+    jq -cn --arg outcome "${outcome}" --arg phase "${phase}" --arg transaction "${recovery_transaction}" --arg status "${status}"         '{outcome:$outcome,phase:$phase,transaction:$transaction,status:$status}' > "${tmp}" || return 1
+    jv_migration_publish_private "${tmp}" "${result_file}"
 }
 rollback_import() {
     rollback_attempted=yes
@@ -20,6 +19,7 @@ rollback_import() {
         jv_migration_api_result rolled_back rolled-back "${transaction}" 'Import failed; the selected destination instance was restored and validated.'
         return 0
     fi
+    [[ ${jv_migration_handoff_pending} == no ]] || return 1
     jv_migration_write_state "${transaction}" critical-rollback "${JV_MIGRATION_SOURCE:-unknown}" "${source_class}" || true
     jv_migration_register_recovery "${transaction}" || true
     jv_migration_api_result needs_attention critical-rollback "${transaction}" 'Import rollback requires recovery of the selected destination instance.' || true
@@ -30,20 +30,23 @@ on_exit() {
     local rc=$? preactivation_outcome=rolled_back
     local preactivation_status='Server migration Import stopped before live activation; no Minecraft data was changed.'
     trap - EXIT INT TERM
+    [[ ${jv_migration_handoff_pending} == no ]] || exit 1
     if (( rc != 0 )); then
         if [[ ${live_modified} == yes && ${validated} != yes && -n ${transaction:-} && -d ${transaction} ]]; then
             rollback_import || true
         elif [[ ${minecraft_stopped_by_import} == yes && ${live_modified} != yes && ${minecraft_was_active} == yes ]]; then
             echo 'Import failed before live data changed; restarting the previously running Minecraft server.' >&2
-            if systemctl start "${JV_INSTANCE_UNIT}" >/dev/null 2>&1; then
+            if jv_migration_start_with_maintenance_handoff >/dev/null 2>&1; then
                 minecraft_stopped_by_import=no
             else
+                [[ ${jv_migration_handoff_pending} == no ]] || exit 1
                 jv_migration_register_recovery "${transaction}" || true
                 preactivation_outcome=needs_attention
                 preactivation_status='Server migration Import failed before activation, but the previously running Minecraft server could not be restarted automatically.'
             fi
         fi
     fi
+    [[ ${jv_migration_handoff_pending} == no ]] || exit 1
     # Staging created before live activation is disposable. Preserve transaction
     # evidence only after a rollback attempt or a critical/live-state failure.
     if [[ ${preactivation_outcome} != needs_attention && ${live_modified} != yes && ${rollback_attempted} != yes && -n ${transaction:-} && -d ${transaction} ]]; then

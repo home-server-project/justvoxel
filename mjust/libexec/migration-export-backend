@@ -28,13 +28,15 @@ removable_owned=no
 cleanup() {
     local rc=$?
     trap - EXIT INT TERM
+    [[ ${jv_migration_handoff_pending} == no ]] || exit 1
     if [[ -n ${manifest_tmp} ]]; then rm -f -- "${manifest_tmp}" || rc=1; fi
     if [[ -n ${partial:-} && -f ${partial} ]]; then
         rm -f -- "${partial}" || true
     fi
     if [[ ${restart_required} == yes ]]; then
         echo 'Restarting Minecraft after interrupted/failed export.' >&2
-        systemctl start "${JV_INSTANCE_UNIT}" || rc=1
+        jv_migration_start_with_maintenance_handoff || rc=1
+        [[ ${jv_migration_handoff_pending} == no ]] || exit 1
         restart_required=no
     fi
     if [[ ${transport_started} == yes ]]; then
@@ -112,6 +114,8 @@ server_reported="${JV_MIGRATION_EXPORT_SERVER_REPORTED:-}"
 geyser_reported="${JV_MIGRATION_EXPORT_GEYSER_REPORTED:-}"
 plugins_reported=''
 if systemctl is-active --quiet "${JV_INSTANCE_UNIT}"; then
+    # The transaction owns restart and already confirmed its cold stop.
+    [[ ${JV_MIGRATION_EXPORT_MAINTENANCE_LOCK_HELD:-0} != 1 ]] || { echo "ERROR: selected instance resumed before cold export." >&2; exit 1; }
     was_active=yes
     if server_supports_plugins; then
         server_reported="$(podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli 'version' 2>/dev/null | head -n1 || true)"
@@ -176,8 +180,7 @@ if jq -e '.apiVersion == "org.containers.bootc/v1"' >/dev/null 2>&1 <<< "${bootc
 fi
 
 install -d -m0700 -o root -g root "${JV_MIGRATION_RUN_ROOT}"
-manifest_tmp="$(mktemp "${JV_MIGRATION_RUN_ROOT}/manifest.XXXXXX.json")"
-chmod 0600 "${manifest_tmp}"
+manifest_tmp="$(jv_migration_private_temp "${JV_MIGRATION_RUN_ROOT}/manifest.XXXXXX.json")"
 
 created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 bundle_id="$(cat /proc/sys/kernel/random/uuid)"
@@ -297,7 +300,7 @@ manifest_tmp=''
 
 if [[ ${restart_required} == yes ]]; then
     echo 'Starting Minecraft.'
-    systemctl start "${JV_INSTANCE_UNIT}"
+    jv_migration_start_with_maintenance_handoff
     restart_required=no
     if [[ ${MINECRAFT_SERVER_TYPE} == bedrock ]]; then
         jv_migration_validate_runtime

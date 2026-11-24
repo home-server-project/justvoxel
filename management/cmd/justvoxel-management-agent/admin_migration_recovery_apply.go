@@ -53,7 +53,8 @@ func (s *server) adminMigrationRecoveryApply(w http.ResponseWriter, r *http.Requ
 		writeMigrationRecoveryApplyFailure(w, http.StatusInternalServerError, "operation_status_failed", "current server migration operation could not be read")
 		return
 	}
-	if current != nil {
+	retry := current != nil && current.OperationType == operationTypeMigrationRecovery && current.InstanceID == r.PathValue("id") && current.State == operationNeedsAttention
+	if current != nil && !retry {
 		if current.OperationType == operationTypeMigrationRecovery && current.InstanceID == r.PathValue("id") && current.PlanFingerprint == request.PlanFingerprint {
 			writeJSON(w, http.StatusOK, adminMigrationRecoveryApplyResponse{OK: true, Created: false, Operation: current})
 			return
@@ -76,11 +77,18 @@ func (s *server) adminMigrationRecoveryApply(w http.ResponseWriter, r *http.Requ
 		writeMigrationRecoveryApplyFailure(w, http.StatusConflict, "stale_plan", "the reviewed migration recovery state changed; review recovery again")
 		return
 	}
-	if helper.Context == nil || helper.Context.StateIdentity == "" {
+	if helper.Normalized == nil || !helper.Normalized.Finalizable || helper.Normalized.Transaction != request.Transaction ||
+		helper.Context == nil || !operationFingerprintPattern.MatchString("sha256:"+helper.Context.StateIdentity) {
 		writeMigrationRecoveryApplyFailure(w, http.StatusInternalServerError, "invalid_plan", "migration recovery planning returned incomplete execution data")
 		return
 	}
-	operation, created, err := s.operations.beginMigrationRecovery(r.PathValue("id"), request.PlanFingerprint)
+	var operation operationJournal
+	var startWorker bool
+	if retry {
+		operation, startWorker, err = s.operations.retryMigrationRecovery(*current, fingerprint)
+	} else {
+		operation, startWorker, err = s.operations.beginMigrationRecovery(r.PathValue("id"), fingerprint)
+	}
 	if err != nil {
 		if errors.Is(err, errMigrationOperationBusy) || errors.Is(err, errMigrationLockBusy) {
 			writeMigrationRecoveryApplyFailure(w, http.StatusConflict, "migration_busy", "another server migration operation is already active")
@@ -89,15 +97,15 @@ func (s *server) adminMigrationRecoveryApply(w http.ResponseWriter, r *http.Requ
 		writeMigrationRecoveryApplyFailure(w, http.StatusInternalServerError, "operation_create_failed", "migration recovery operation could not be created")
 		return
 	}
-	if s.store != nil {
+	if startWorker && s.store != nil {
 		_ = s.store.recordAuditEvent(actor, "migration_recovery", request.Transaction, true, "Migration recovery finalization accepted")
 	}
 	status := http.StatusAccepted
-	if !created {
+	if !startWorker {
 		status = http.StatusOK
 	}
-	writeJSON(w, status, adminMigrationRecoveryApplyResponse{OK: true, Created: created, Operation: &operation})
-	if created {
+	writeJSON(w, status, adminMigrationRecoveryApplyResponse{OK: true, Created: startWorker && !retry, Operation: &operation})
+	if startWorker {
 		startMigrationRecoveryWorker(s, operation.OperationID, migrationRecoveryExecutionPlan{Transaction: request.Transaction, StateIdentity: helper.Context.StateIdentity})
 	}
 }
