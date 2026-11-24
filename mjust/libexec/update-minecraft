@@ -22,7 +22,18 @@ image="${JV_INSTANCE_IMAGE_REF}"
 latest_mc=''
 game_state='moving'
 
-if [[ ${MINECRAFT_VERSION_MODE} == pinned ]]; then
+plan=''
+if [[ ${MINECRAFT_SERVER_TYPE} == leaf ]]; then
+    plan="$(/usr/libexec/justvoxel/mjust/api-client GET "/v1/minecraft/instances/${instance_id}/version/status")" || exit 1
+    jq -e --arg id "${instance_id}" '.instance_id == $id and .server_type == "leaf" and .server_supported and
+        (.stack_state == "up_to_date" or .stack_state == "updates_available")' <<< "${plan}" >/dev/null || {
+        jq -r '.reason' <<< "${plan}" >&2
+        exit 1
+    }
+    latest_mc="$(jq -er .selected_candidate <<< "${plan}")"
+    game_state=current
+    if jq -e '.minecraft_state == "updates_available"' <<< "${plan}" >/dev/null; then game_state=update_available; fi
+elif [[ ${MINECRAFT_VERSION_MODE} == pinned ]]; then
     latest_mc="$(resolve_recommended_server_version || true)"
     game_state="$(jv_game_version_state "${MINECRAFT_VERSION_MODE}" "${MINECRAFT_VERSION}" "${latest_mc}")"
 fi
@@ -84,7 +95,8 @@ else
     echo 'Running container: Running normally; maintenance may select a newer image'
 fi
 
-if [[ ${image_state} == current && ${game_state} != update_available ]]; then
+if [[ ${image_state} == current && ${game_state} != update_available ]] &&
+    { [[ -z ${plan} ]] || ! jq -e .update_available <<< "${plan}" >/dev/null; }; then
     echo
     echo 'No update is needed.'
     exit 0
@@ -99,7 +111,9 @@ esac
 echo
 
 echo 'Opening maintenance details and safety checks...'
-plan="$(/usr/libexec/justvoxel/mjust/api-client GET "/v1/minecraft/instances/${instance_id}/version/status")" || exit 1
+if [[ -z ${plan} ]]; then
+    plan="$(/usr/libexec/justvoxel/mjust/api-client GET "/v1/minecraft/instances/${instance_id}/version/status")" || exit 1
+fi
 jq -e --arg id "${instance_id}" '.instance_id == $id and .update_available and .stack_state == "updates_available" and (.plan_fingerprint | type == "string")' <<<"${plan}" >/dev/null || { echo 'No verified server update is available.'; exit 1; }
 confirm 'Create a cold backup and apply the reviewed Minecraft update?' || { echo 'Update cancelled.'; exit 0; }
 players=false

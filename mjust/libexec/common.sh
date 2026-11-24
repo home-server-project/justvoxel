@@ -567,26 +567,64 @@ pufferfish_build_metadata() {
             unique | select(length == 1) | {game:.[0],pufferfish_build:$number}'
 }
 
-# Return the exact verified Leaf build, retaining its upstream channel for advice.
-leaf_build_metadata() {
-    local version="$1" metadata build
-    [[ ${version} =~ ^[0-9]+[.][0-9]+([.][0-9]+)?$ ]] || return 1
-    metadata="$(curl --connect-timeout 3 --max-time 12 -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" \
-        "https://api.leafmc.one/v2/projects/leaf/versions/${version}")" || return 1
-    build="$(jq -er --arg version "${version}" '
-        select(.project_id == "leaf" and .version == $version) |
-        .builds | select(type == "array" and length > 0 and
-            all(.[]; type == "number" and . > 0 and floor == .)) | max' <<< "${metadata}")" || return 1
-    curl --connect-timeout 3 --max-time 12 -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" \
-        "https://api.leafmc.one/v2/projects/leaf/versions/${version}/builds/${build}" |
-        jq -e --arg version "${version}" --argjson build "${build}" '
-            select(.project_id == "leaf" and .version == $version and .build == $build and
-                (.channel == "default" or .channel == "stable" or .channel == "experimental")) |
-            . as $metadata |
-            .downloads | select(type == "object") | to_entries |
-            map(.value | select(.name == ("leaf-" + $version + "-" + ($build | tostring) + ".jar"))) |
-            select(length == 1 and (.[0].sha256 | type == "string" and test("^[a-fA-F0-9]{64}$"))) |
-            $metadata'
+setup_java_image() {
+    if [[ $1 =~ ^1\.(20\.[56]|21(\.([0-9]|1[01]))?)$ ]]; then printf java21
+    elif [[ $1 =~ ^26\.[1-9][0-9]*(\.(0|[1-9][0-9]*))?$ ]]; then printf java25
+    else return 1; fi
+}
+
+# Validate the published asset before a version enters any policy or picker.
+leaf_release_catalog() {
+    local record page=1 response count releases='[]' games records game image
+    games="$(vanilla_metadata | jq -ce '[.versions[] | select(.type == "release") | .id]')" || return 1
+    while :; do
+        response="$(curl --connect-timeout 3 --max-time 12 -fsS -H "User-Agent: ${JV_PAPER_USER_AGENT}" \
+            "https://api.github.com/repos/Winds-Studio/Leaf/releases?per_page=100&page=${page}")" || return 1
+        count="$(jq -er 'select(type == "array") | length' <<< "${response}")" || return 1
+        records="$(jq -c --argjson games "${games}" '
+            [ .[] | try (
+                select(.draft == false and (.assets | type == "array") and (.prerelease | type == "boolean") and (.body | type == "string")) |
+                . as $release |
+                (.tag_name | capture("^ver-(?<game>[1-9][0-9]*[.](0|[1-9][0-9]*)([.](0|[1-9][0-9]*))?)\\z").game) as $game |
+                select($games | index($game)) |
+                [.assets[] | select(.name | startswith("leaf-" + $game + "-") and endswith(".jar"))] |
+                select(length == 1) | .[0] |
+                select(.state == "uploaded" and (.digest | test("^sha256:[a-f0-9]{64}\\z"))) |
+                select(.browser_download_url == ("https://github.com/Winds-Studio/Leaf/releases/download/" + $release.tag_name + "/" + .name)) |
+                (.name | ltrimstr("leaf-" + $game + "-") | capture("^(?<build>[1-9][0-9]*)[.]jar\\z").build) as $build |
+                ($release.body | split("Checksums") | select(length == 2) | last | ascii_downcase) as $notes |
+                (.digest | ltrimstr("sha256:")) as $hash |
+                # The release workflow publishes one table for the exact uploaded JAR.
+                ($notes | split("\n") | map(select(startswith("|")) |
+                    split("|") | map(gsub("[`*[:space:]]"; "")))) as $table |
+                select(($table | first) == ["","",.name,""] and
+                    ([$table[] | select(.[1] == "sha256")] == [["","sha256",$hash,""]])) |
+                {game:$game,build:$build,digest:.digest,channel:(
+                    if $notes | test("this version of leaf is unsupported|no longer supported") then "UNSUPPORTED"
+                    elif $release.prerelease or ($notes | test("early dev|only for testing|experimental build|do not use in .*production")) then "TESTING"
+                    elif ($notes | test("\\[!(warning|caution|important)\\]")) or
+                         ($notes | split($hash) | last | test("[a-z0-9]")) then empty
+                    else "PRODUCTION" end)}
+            ) catch empty ]' <<< "${response}")" || return 1
+        releases="$(jq -c --argjson more "${records}" '. + $more' <<< "${releases}")" || return 1
+        (( count == 100 )) || break
+        ((page++))
+    done
+    records="$(jq -cr 'group_by(.game) | map(select(length == 1) | first) |
+        sort_by(.game | split(".") | map(tonumber)) | reverse[]' <<< "${releases}")" || return 1
+    while IFS= read -r record; do
+        [[ -n ${record} ]] || continue
+        game="$(jq -r .game <<< "${record}")"
+        image="$(setup_java_image "${game}")" || continue
+        jq -c --arg image "${image}" '. + {image:$image,loader:""}' <<< "${record}"
+    done <<< "${records}" | jq -sc '.'
+}
+
+leaf_select_release() {
+    jq -ce --arg policy "$1" --arg version "$2" '
+        map(select(if $policy == "recommended" then .channel == "PRODUCTION"
+                   elif $policy == "latest" then true
+                   elif $policy == "pinned" then .game == $version else false end)) | first // empty'
 }
 
 # Verify the artifact that the runtime will actually select. Paper compatibility
@@ -600,7 +638,7 @@ paper_fork_version_available() {
             resolved="$(pufferfish_build_metadata "${branch}" "${MINECRAFT_PUFFERFISH_BUILD:-}")" || return 1
             jq -e --arg game "${version}" '.game == $game' <<< "${resolved}" >/dev/null
             ;;
-        leaf) leaf_build_metadata "${version}" >/dev/null ;;
+        leaf) leaf_release_catalog | leaf_select_release pinned "${version}" >/dev/null ;;
         *) return 1 ;;
     esac
 }
@@ -625,8 +663,12 @@ java_server_version_available() {
     esac
     # Loader metadata can describe profiles independently of Mojang releases.
     # Require the exact game release as well as the exact implementation pair.
+    if [[ ${software} == leaf ]]; then
+        [[ -z ${loader} ]] && paper_fork_version_available leaf "${version}"
+        return
+    fi
     mojang_release_available "${version}" || return 1
-    if [[ ${software} == pufferfish || ${software} == leaf ]]; then
+    if [[ ${software} == pufferfish ]]; then
         [[ -z ${loader} ]] && paper_fork_version_available "${software}" "${version}"
         return
     fi
@@ -709,6 +751,10 @@ resolve_setup_loader() {
 
 resolve_setup_java_runtime() {
     local software="$1" policy="$2" specific="$3" game loader image releases branches branch discovered metadata reason pufferfish="{}"
+    if [[ ${software} == leaf ]]; then
+        leaf_release_catalog | leaf_select_release "${policy}" "${specific}"
+        return
+    fi
     case "${policy}" in recommended|pinned) ;; *) return 1 ;; esac
     if [[ ${policy} == pinned ]]; then
         [[ ${specific} =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || return 1
@@ -734,12 +780,6 @@ resolve_setup_java_runtime() {
                     break
                 done <<< "${branches}"
                 ;;
-            leaf)
-                releases="$(curl --connect-timeout 3 --max-time 12 -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" https://api.leafmc.one/v2/projects/leaf |
-                    jq -er 'select(.project_id == "leaf") | .versions |
-                        map(select(type == "string" and test("^[0-9]+[.][0-9]+([.][0-9]+)?$"))) |
-                        unique | sort_by(split(".") | map(tonumber)) | reverse[]')" || return 1
-                ;;
             fabric|neoforge)
                 releases="$(vanilla_metadata | jq -er '.versions[] | select(.type == "release") | .id')" || return 1
                 ;;
@@ -747,9 +787,7 @@ resolve_setup_java_runtime() {
         esac
     fi
     while IFS= read -r game; do
-        if [[ ${game} =~ ^1\.(20\.[56]|21(\.([0-9]|1[01]))?)$ ]]; then image=java21
-        elif [[ ${game} =~ ^26\.[1-9][0-9]*(\.(0|[1-9][0-9]*))?$ ]]; then image=java25
-        else continue; fi
+        image="$(setup_java_image "${game}")" || continue
         [[ ${software} != spigot ]] || image+=-jdk
         loader="$(resolve_setup_loader "${software}" "${game}")" || continue
         validate_java_server_selection "${software}" pinned "${game}" "${loader}" "${image}" || continue
@@ -764,12 +802,6 @@ resolve_setup_java_runtime() {
             java_server_version_available "${software}" "${game}" "${loader}" || continue
         fi
         reason=''
-        if [[ ${software} == leaf ]]; then
-            metadata="$(leaf_build_metadata "${game}")" || continue
-            if jq -e '(.channel // "" | ascii_downcase) == "experimental"' <<< "${metadata}" >/dev/null; then
-                reason='Leaf labels this build Experimental. It is available for setup.'
-            fi
-        fi
         jq -cn --arg game "${game}" --arg loader "${loader}" --arg image "${image}" --arg reason "${reason}" --argjson fork "${pufferfish}" '{game:$game,loader:$loader,image:$image,reason:$reason} + $fork'
         return
     done <<< "${releases}"
@@ -815,12 +847,14 @@ resolve_latest_server_version() {
     case "${MINECRAFT_SERVER_TYPE-paper}" in
         paper) resolve_latest_available_paper_version ;;
         purpur) purpur_metadata | jq -er '.versions | sort_by(split(".") | map(tonumber)) | last' ;;
-        vanilla|pufferfish|leaf) resolve_recommended_server_version ;;
+        leaf) resolve_setup_java_runtime leaf latest '' | jq -er .game ;;
+        vanilla|pufferfish) resolve_recommended_server_version ;;
         *) return 1 ;;
     esac
 }
 server_version_channel() {
-    if [[ ${MINECRAFT_SERVER_TYPE-paper} == paper ]]; then paper_version_build_channel "$1"; else server_version_available "$1" && printf RELEASE; fi
+    if [[ ${MINECRAFT_SERVER_TYPE-paper} == leaf ]]; then resolve_setup_java_runtime leaf pinned "$1" | jq -er .channel
+    elif [[ ${MINECRAFT_SERVER_TYPE-paper} == paper ]]; then paper_version_build_channel "$1"; else server_version_available "$1" && printf RELEASE; fi
 }
 
 render_runtime_files() {

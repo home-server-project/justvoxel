@@ -130,7 +130,7 @@
         </section>
         <section class="setup-version-column" aria-label="{{t "ui.96bede3bff29"}}">
         <label class="setup-field">{{t "ui.96bede3bff29"}}<select id="version-policy" name="version_policy"><option value="recommended" {{if eq .Minecraft.VersionPolicy "recommended"}}selected{{end}}>{{t "ui.d70604e84304"}}</option><option value="latest" {{if eq .Minecraft.VersionPolicy "latest"}}selected{{end}}>{{t "ui.8730d3c2022a"}}</option><option value="pinned" {{if eq .Minecraft.VersionPolicy "pinned"}}selected{{end}}>{{t "ui.c36f2cb11a3a"}}</option></select></label>
-        <label id="specific-version-field" class="setup-field setup-field-wide" {{if ne .Minecraft.VersionPolicy "pinned"}}hidden{{end}}>{{t "ui.2afcc6f66692"}}<input id="minecraft-version" name="version" value="{{.Minecraft.Version}}" autocomplete="off"><span class="field-help">{{t "ui.aa89056e0d85"}}</span></label>
+        <label id="specific-version-field" class="setup-field setup-field-wide" {{if ne .Minecraft.VersionPolicy "pinned"}}hidden{{end}}>{{t "ui.2afcc6f66692"}}{{if eq .Minecraft.ServerType "leaf"}}<select id="minecraft-version" name="version" data-version="{{.Minecraft.Version}}"></select>{{else}}<input id="minecraft-version" name="version" value="{{.Minecraft.Version}}" autocomplete="off">{{end}}<span class="field-help">{{t "ui.aa89056e0d85"}}</span></label>
         </section>
         {{end}}
       </div>

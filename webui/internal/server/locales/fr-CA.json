@@ -1,4 +1,7 @@
 {
+  "leaf.production": "Production",
+  "leaf.testing": "Test / développement préliminaire",
+  "leaf.no_production": "Aucune version de production de Leaf avec un environnement d’exécution compatible n’a pu être vérifiée.",
   "reset.confirm_sign_in_password": "Confirmez avec le mot de passe que vous utilisez pour vous connecter à l’interface Web.",
   "role.invalid_web_user": "Choisissez Administrateur de l’interface Web, Opérateur ou Observateur.",
   "role.webui_admin": "Administrateur de l’interface Web",

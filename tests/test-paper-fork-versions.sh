@@ -39,41 +39,34 @@ curl() {
                 unsafe) printf '%s' '{"result":"SUCCESS","number":39,"artifacts":[{"fileName":"pufferfish-paperclip-1.21.10-R0.1-SNAPSHOT-mojmap.jar","relativePath":"../pufferfish-paperclip-1.21.10-R0.1-SNAPSHOT-mojmap.jar"}]}' ;;
                 *) printf '%s' '{"result":"SUCCESS","number":39,"artifacts":[{"fileName":"pufferfish-paperclip-1.21.10-R0.1-SNAPSHOT-mojmap.jar","relativePath":"build/libs/pufferfish-paperclip-1.21.10-R0.1-SNAPSHOT-mojmap.jar"}]}' ;;
             esac ;;
-        https://api.leafmc.one/v2/projects/leaf)
-            printf '%s' '{"project_id":"leaf","versions":["1.21.11","26.3"]}' ;;
-        https://api.leafmc.one/v2/projects/leaf/versions/26.3|https://api.leafmc.one/v2/projects/leaf/versions/1.21.11)
-            local version="${*: -1}" build=13
-            version="${version##*/}"
-            [[ ${version} != 1.21.11 ]] || build=179
-            jq -cn --arg version "${version}" --argjson build "${build}" --arg fixture "${fixture}" '
-                {project_id:"leaf",version:$version,builds:[$build]} |
-                if $fixture == "empty" then .builds=[]
-                elif $fixture == "mismatch" then .version="wrong"
-                elif $fixture == "string-build" then .builds=["13"]
-                elif $fixture == "fractional-build" then .builds=[13.5]
-                elif $fixture == "zero-build" then .builds=[0] else . end' ;;
-        https://api.leafmc.one/v2/projects/leaf/versions/26.3/builds/13|https://api.leafmc.one/v2/projects/leaf/versions/1.21.11/builds/179)
-            local path="${*: -1}" version build channel=experimental
-            build="${path##*/}"
-            version="${path%/builds/*}"; version="${version##*/}"
-            [[ ${version} != 1.21.11 ]] || channel=default
-            jq -cn --arg version "${version}" --argjson build "${build}" --arg channel "${channel}" --arg fixture "${fixture}" '
-                {project_id:"leaf",version:$version,build:$build,channel:$channel,
-                 downloads:{application:{name:("leaf-" + $version + "-" + ($build|tostring) + ".jar"),sha256:("a" * 64)}}} |
-                if $fixture == "failed" then .version="wrong"
-                elif $fixture == "unsafe" then .downloads.application.sha256="invalid"
-                elif $fixture == "wrong-artifact" then .downloads.application.name="leaf-wrong.jar"
-                elif $fixture == "keyed-download" then .downloads={server:.downloads.application}
-                elif $fixture == "duplicate-download" then .downloads.server=.downloads.application
-                elif $fixture == "wrong-build" then .build=999
-                elif $fixture == "wrong-project" then .project_id="other"
-                elif $fixture == "missing-hash" then del(.downloads.application.sha256)
-                elif $fixture == "unknown-channel" then .channel="unknown" else . end' ;;
+        'https://api.github.com/repos/Winds-Studio/Leaf/releases?per_page=100&page=1')
+            jq -cn --arg fixture "${fixture}" '
+                ["1.21.8","1.21.11","26.3","1.21.10"] | map(. as $game |
+                    ("leaf-" + $game + "-17.jar") as $jar |
+                    ("a"*64) as $hash |
+                    {tag_name:("ver-"+$game), draft:false, prerelease:false,
+                     assets:[{name:$jar,state:"uploaded",digest:("sha256:"+$hash),
+                         browser_download_url:("https://github.com/Winds-Studio/Leaf/releases/download/ver-"+$game+"/"+$jar)}],
+                     body:("### 🔒 Checksums\n| | " + $jar + " |\n|---|---|\n| SHA256 | " + $hash + " |" +
+                         (if $game == "26.3" then "\n> [!WARNING]\n> This is the early dev build, only for testing usage."
+                          elif $game == "1.21.10" then "\n> [!CAUTION]\n> This version of Leaf is unsupported."
+                          else "" end))} |
+                    if $fixture == "empty" then empty
+                    elif $fixture == "failed" then .draft=true
+                    elif $fixture == "unsafe" then .assets[0].digest="invalid"
+                    elif $fixture == "mismatch" then .tag_name += "/unsafe"
+                    elif $fixture == "wrong-artifact" then .assets[0].name="other.jar"
+                    elif $fixture == "duplicate-download" then .assets += .assets
+                    elif $fixture == "wrong-project" then .assets[0].browser_download_url="https://example.invalid/file"
+                    elif $fixture == "missing-hash" then del(.assets[0].digest)
+                    elif $fixture == "wrong-hash" then .assets[0].digest=("sha256:"+("b"*64))
+                    elif $fixture == "unknown-channel" then .body |= (split("\n>") | first) + "\n> [!WARNING]\n> Unknown"
+                    elif $fixture == "no-production" then .prerelease=true else . end)' ;;
         *) return 22 ;; # No unlisted upstream/version may acquire invented builds.
     esac
 }
 for software in pufferfish leaf; do
-    version=26.3 image=java25
+    version=1.21.11 image=java21
     [[ ${software} != pufferfish ]] || { version=1.21.10; image=java21; }
     validate_server_type "${software}"
     server_supports_bukkit_plugins "${software}"
@@ -97,8 +90,11 @@ for software in pufferfish leaf; do
     reject resolve_setup_java_runtime "${software}" pinned 1.21.9
     MINECRAFT_SERVER_TYPE=${software}
     [[ $(resolve_recommended_server_version) == "${version}" ]]
-    [[ $(resolve_latest_server_version) == "${version}" ]]
-    [[ $(server_version_channel "${version}") == RELEASE ]]
+    if [[ ${software} == leaf ]]; then
+        [[ $(resolve_latest_server_version) == 26.3 && $(server_version_channel "${version}") == PRODUCTION ]]
+    else
+        [[ $(resolve_latest_server_version) == "${version}" && $(server_version_channel "${version}") == RELEASE ]]
+    fi
     for other in paper purpur pufferfish leaf; do
         server_allows_in_place_switch "${software}" "${other}"
         server_allows_in_place_switch "${other}" "${software}"
@@ -114,17 +110,19 @@ for software in pufferfish leaf; do
 done
 fixture=valid
 reject java_server_version_available pufferfish 1.21.8 # artifact proves 1.21.10 only
-for fixture in mismatch wrong-artifact duplicate-download wrong-build wrong-project missing-hash unknown-channel string-build fractional-build zero-build; do
+for fixture in mismatch wrong-artifact duplicate-download wrong-project missing-hash wrong-hash unknown-channel; do
     reject java_server_version_available leaf 26.3
     reject resolve_setup_java_runtime leaf recommended ''
 done
 fixture=valid
-selected="$(resolve_setup_java_runtime leaf recommended '')"
-jq -e '.game == "26.3" and (.reason | contains("Experimental"))' <<< "${selected}" >/dev/null
-specific="$(resolve_setup_java_runtime leaf pinned 1.21.11)"
-jq -e '.game == "1.21.11" and .reason == ""' <<< "${specific}" >/dev/null
-specific="$(resolve_setup_java_runtime leaf pinned 26.3)"
-jq -e '.game == "26.3" and .loader == "" and (.reason | contains("Experimental"))' <<< "${specific}" >/dev/null
+catalog="$(leaf_release_catalog)"
+jq -e 'map(.game) == ["26.3","1.21.11","1.21.10","1.21.8"]' <<< "${catalog}" >/dev/null
+jq -e '.game == "1.21.11" and .channel == "PRODUCTION"' <<< "$(resolve_setup_java_runtime leaf recommended '')" >/dev/null
+jq -e '.game == "26.3" and .channel == "TESTING" and .image == "java25"' <<< "$(resolve_setup_java_runtime leaf latest '')" >/dev/null
+jq -e '.channel == "UNSUPPORTED"' <<< "$(resolve_setup_java_runtime leaf pinned 1.21.10)" >/dev/null
+fixture=no-production
+reject resolve_setup_java_runtime leaf recommended ''
+fixture=valid
 specific="$(resolve_setup_java_runtime pufferfish pinned 1.21.10)"
 jq -e '.game == "1.21.10" and .pufferfish_build == 39' <<< "${specific}" >/dev/null
 MINECRAFT_PUFFERFISH_BUILD=39 java_server_version_available pufferfish 1.21.10
@@ -143,12 +141,6 @@ for fixture in reobf both; do
     selected="$(resolve_setup_java_runtime pufferfish recommended '')"
     jq -e '.game == "1.21.10" and .pufferfish_build == 39' <<< "${selected}" >/dev/null
 done
-
-# Leaf v2 download records retain exact identity and SHA-256 independently of
-# their map key. Experimental remains visible and uses the supported Java image.
-fixture=keyed-download
-selected="$(resolve_setup_java_runtime leaf recommended '')"
-jq -e '.game == "26.3" and .image == "java25" and (.reason | contains("Leaf labels this build Experimental. It is available for setup."))' <<< "${selected}" >/dev/null
 
 fixture=no-jobs
 reject resolve_setup_java_runtime pufferfish recommended ''

@@ -232,9 +232,11 @@ resolve_setup_java_runtime() {
         fabric) jq -cn --arg game "${game}" '{game:$game,loader:"0.19.5",image:"java25"}' ;;
         neoforge) jq -cn --arg game "${game}" --arg loader "${game}.0.99" '{game:$game,loader:$loader,image:"java25"}' ;;
         spigot|pufferfish) jq -cn --arg game "${game}" '{game:$game,loader:"",image:"java25"}' ;;
-        leaf) jq -cn --arg game "${game}" '{game:$game,loader:"",image:"java25",reason:"Leaf labels this build Experimental. It is available for setup."}' ;;
         *) return 1 ;;
     esac
+}
+leaf_release_catalog() {
+    printf '%s' '[{"game":"26.3","image":"java25","loader":"","channel":"TESTING"},{"game":"26.2","image":"java25","loader":"","channel":"PRODUCTION"}]'
 }
 jv_crossplay_mod_compatible() {
     printf '%s\n' "$*" >> "${DATA_PATH}.crossplay-checks"
@@ -277,14 +279,17 @@ for software in fabric neoforge; do
         [[ ! -e ${DATA_PATH}.crossplay-checks ]]
     done
 done
-preview="$(bash "${fixture_dir}/status" --server-type leaf recommended '' no)"
-jq -e '.selected_candidate == "26.3" and .candidate_channel == "RELEASE" and .server_supported and (.reason | contains("Experimental"))' <<< "${preview}" >/dev/null
+preview="$(GEYSER_VERSION='' bash "${fixture_dir}/status" --server-type leaf recommended '' no)"
+jq -e '.selected_candidate == "26.2" and .candidate_channel == "PRODUCTION" and .server_supported' <<< "${preview}" >/dev/null
+preview="$(GEYSER_VERSION=26.3 bash "${fixture_dir}/status" --server-type leaf recommended '' yes)"
+jq -e '.selected_candidate == "26.2" and .geyser_supported_version == "26.3" and (.crossplay_compatible | not)' <<< "${preview}" >/dev/null
+preview="$(GEYSER_VERSION=26.3 bash "${fixture_dir}/status" --server-type leaf latest '' yes)"
+jq -e '.selected_candidate == "26.3" and .candidate_channel == "TESTING" and .crossplay_compatible and (.leaf_versions | length == 2)' <<< "${preview}" >/dev/null
 
-for software in pufferfish leaf; do
+for software in pufferfish; do
     for game in "${STABLE_VERSION}" "${NEWEST_VERSION}"; do
         preview="$(FIXTURE_GAME="${game}" bash "${fixture_dir}/status" --server-type "${software}" latest '' no)"
         jq -e --arg game "${game}" '.selected_candidate == $game and .server_supported and .candidate_channel == "RELEASE" and .image_tag == "java25" and .loader_version == ""' <<< "${preview}" >/dev/null
-        if [[ ${software} == leaf ]]; then jq -e '.reason | contains("Experimental")' <<< "${preview}" >/dev/null; fi
     done
 done
 
@@ -295,7 +300,9 @@ for software in fabric neoforge spigot pufferfish leaf; do
     for geyser in 26.2 ''; do
         for enabled in no yes; do
             preview="$(GEYSER_VERSION="${geyser}" bash "${fixture_dir}/status" --server-type "${software}" pinned 26.3 "${enabled}")"
-            jq -e --arg geyser "${geyser}" '.selected_candidate == "26.3" and .server_supported and .geyser_supported_version == $geyser and (.crossplay_compatible | not)' <<< "${preview}" >/dev/null
+            expected_geyser="${geyser}"
+            if [[ ${software} == leaf && ${enabled} == no ]]; then expected_geyser=''; fi
+            jq -e --arg geyser "${expected_geyser}" '.selected_candidate == "26.3" and .server_supported and .geyser_supported_version == $geyser and (.crossplay_compatible | not)' <<< "${preview}" >/dev/null
             [[ ! -e ${DATA_PATH}.crossplay-checks ]]
         done
     done

@@ -177,18 +177,18 @@ func TestAdvancedJavaSoftwareCanContinueWithoutCrossplay(t *testing.T) {
 			if setupNeedsExactRuntime(software) && software != "spigot" && software != "pufferfish" && software != "leaf" {
 				loader = "0.18.0"
 			}
-			game, reason := "1.21.8", ""
+			game, channel := "1.21.8", "RELEASE"
 			switch software {
 			case "pufferfish":
 				game = "1.21.10"
 			case "leaf":
-				game, reason = "26.3", "Leaf labels this build Experimental. It is available for setup."
+				game, channel = "1.21.11", "PRODUCTION"
 			case "fabric":
 				game, loader = "26.3", "0.19.5"
 			case "neoforge":
 				game, loader = "26.3", "26.3.0.99"
 			}
-			preview := &exactSetupPreviewAPI{addServerTestAPI: base, status: api.AdminVersionStatus{SelectedCandidate: game, CandidateChannel: "RELEASE", Reason: reason, ImageTag: setupRuntimeImage(software, game), LoaderVersion: loader}}
+			preview := &exactSetupPreviewAPI{addServerTestAPI: base, status: api.AdminVersionStatus{SelectedCandidate: game, CandidateChannel: channel, ImageTag: setupRuntimeImage(software, game), LoaderVersion: loader}}
 			if software == "pufferfish" {
 				preview.status.PufferfishBuild = 39
 			}

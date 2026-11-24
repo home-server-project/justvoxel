@@ -1,4 +1,7 @@
 {
+  "leaf.production": "Produkcyjna",
+  "leaf.testing": "Testowa / wczesny etap rozwoju",
+  "leaf.no_production": "Nie udało się potwierdzić produkcyjnej wersji Leaf ze zgodnym środowiskiem uruchomieniowym.",
   "reset.confirm_sign_in_password": "Potwierdź hasłem używanym do logowania się do interfejsu WWW.",
   "role.invalid_web_user": "Wybierz administratora interfejsu WWW, operatora lub obserwatora.",
   "role.webui_admin": "Administrator interfejsu WWW",

@@ -750,9 +750,21 @@ func TestSetupVersionPreviewPresentationContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := string(script)
+	_, renderer, found := strings.Cut(source, "const channelLabel =")
+	channelMap, _, hasRenderer := strings.Cut(renderer, "const show =")
+	if !found || !hasRenderer {
+		t.Fatal("version preview channel labels missing")
+	}
+	for _, want := range []string{
+		`PRODUCTION: "Production"`, `TESTING: "Testing / early development"`, `UNSUPPORTED: "Unsupported"`,
+		`STABLE: "Stable"`, `BETA: "Beta"`, `ALPHA: "Alpha"`, `RELEASE: "Release"`,
+	} {
+		if !strings.Contains(channelMap, want) {
+			t.Fatalf("version preview channel label missing %q", want)
+		}
+	}
 	for _, want := range []string{
 		`"setup-version-candidate"`, `policy === "recommended" ? "Recommended"`,
-		`{ STABLE: "Stable", BETA: "Beta", ALPHA: "Alpha", RELEASE: "Release" }`,
 		`channelLabel(status.candidate_channel)`, `Minecraft build classification:`,
 		`"setup-version-explanation"`, `const summary = make("div", "notice " + (status.selected_candidate ? "success" : "warning") + " setup-version-panel", "");`,
 		`status.crossplay_compatible ? "success" : "warning"`,
@@ -760,7 +772,7 @@ func TestSetupVersionPreviewPresentationContract(t *testing.T) {
 		`Bedrock cross-play is supported for Minecraft`, `Selected Minecraft ${selected} is available as Java-only.`,
 		`Managed cross-play currently supports Minecraft ${supported}`,
 		`next.disabled = !status.selected_candidate || (crossplayEnabled && !status.crossplay_compatible);`,
-		`if (policy === "pinned" && !version)`,
+		`if (policy === "pinned" && !version && form.dataset.serverType !== "leaf")`,
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("version preview contract missing %q", want)

@@ -223,3 +223,23 @@ sed -n '/^validate_minecraft_image_tag() {/,/^resolve_latest_itzg_release() {/p'
         if validate_minecraft_image_tag "${invalid}"; then echo 'Registry/deprecation validation bypassed' >&2; exit 1; fi
     done
 )
+
+# Use the same catalog snapshot for an existing instance and a setup preview.
+cat >> "${fixture_dir}/common.sh" <<'STUB'
+leaf_release_catalog() {
+    printf '%s' '[{"game":"26.3","channel":"TESTING","image":"java25"},{"game":"26.2","channel":"PRODUCTION","image":"java25"}]'
+}
+STUB
+config="${fixture_dir}/instances/jv-aaaaaa/config.json"
+leaf_config="$(jq '.runtime.software="leaf" | .runtime.image_tag="java25"' "${config}")"
+printf '%s\n' "${leaf_config}" > "${config}"
+for policy in recommended latest pinned; do
+    args=("${policy}" 26.3)
+    preview="$(GEYSER_SUPPORT=26.3 bash "${fixture_dir}/status" --server-type leaf "${args[@]}" yes)"
+    status="$(GEYSER_SUPPORT=26.3 bash "${fixture_dir}/status" --instance jv-aaaaaa "${args[@]}")"
+    jq -e --argjson preview "${preview}" '
+        .selected_candidate == $preview.selected_candidate and .selected_candidate != "" and
+        .candidate_channel == $preview.candidate_channel and .leaf_versions == $preview.leaf_versions and
+        .crossplay_compatible == $preview.crossplay_compatible and
+        (if .policy == "recommended" then .stack_state == "unavailable" else .update_available end)' <<< "${status}" >/dev/null
+done

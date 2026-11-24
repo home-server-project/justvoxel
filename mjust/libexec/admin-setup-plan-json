@@ -370,13 +370,13 @@ fi
 requested_bedrock_enabled="${bedrock_enabled}"
 geyser_supported_version=''
 bedrock_compatibility_version=''
-if [[ ${requested_bedrock_enabled} == true ]]; then
+if [[ ${requested_bedrock_enabled} == true && ${MINECRAFT_SERVER_TYPE} != leaf ]]; then
     geyser_supported_version="$(resolve_geyser_supported_java_version || true)"
 fi
 
 case "${version_policy}" in
     recommended)
-        if [[ ${requested_bedrock_enabled} == true ]]; then
+        if [[ ${MINECRAFT_SERVER_TYPE} != leaf && ${requested_bedrock_enabled} == true ]]; then
             if [[ -z ${geyser_supported_version} ]] || ! server_version_recommended_available "${geyser_supported_version}"; then
                 json_error 'Could not confirm a stable Minecraft version for Bedrock players.' upstream_unavailable
                 exit 0
@@ -422,6 +422,9 @@ if [[ ${requested_bedrock_enabled} == true && ( ${MINECRAFT_SERVER_TYPE} == fabr
 fi
 
 if [[ ${requested_bedrock_enabled} == true ]]; then
+    if [[ ${MINECRAFT_SERVER_TYPE} == leaf ]]; then
+        geyser_supported_version="$(resolve_geyser_supported_java_version || true)"
+    fi
     if [[ -z ${geyser_supported_version} || -z ${bedrock_compatibility_version} ]]; then
         json_error 'Bedrock compatibility could not be confirmed. Try again, or turn off Bedrock to continue.' upstream_unavailable
         exit 0

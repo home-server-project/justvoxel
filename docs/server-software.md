@@ -23,6 +23,12 @@ exact game/loader pair using the existing upstream artifact verifier. The draft
 carries these pins through Review/Create. No manual loader control is needed.
 New server types use a pinned runtime; this does not enable ongoing game updates.
 
+Leaf Setup and Version use verified JARs from the official Winds-Studio/Leaf
+GitHub releases. Recommended selects the newest production Minecraft version.
+Latest selects the numerically newest verified version, including early
+development builds. Specific lists verified versions with their Leaf status.
+Bedrock compatibility is checked against the selected Minecraft version.
+
 Simple Setup enables managed cross-play only when compatibility is proven for its
 exact runtime. Missing cross-play evidence leaves Java setup available with
 cross-play disabled. Advanced Setup validates an enabled cross-play choice
@@ -31,7 +37,8 @@ NeoForge require exact platform compatibility; Forge, Quilt and Vanilla are Java
 only. Existing storage, backup and port safety remain authoritative.
 
 Advanced Setup shows the current managed cross-play Minecraft version even with
-cross-play off. Other valid Minecraft selections remain available as Java-only;
+cross-play off for other Java software. Leaf checks compatibility when cross-play
+is enabled. Other valid Minecraft selections remain available as Java-only;
 Latest and Specific are never silently downgraded. Existing Recommended automatic
 cross-play fallback remains unchanged. If current Geyser metadata cannot be
 verified, Java-only setup remains available. Fabric and NeoForge previews resolve

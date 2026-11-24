@@ -46,6 +46,11 @@ type AdminVersionStatus struct {
 	GeyserSupportedVersion    string `json:"geyser_supported_version"`
 	CrossplayCompatible       bool   `json:"crossplay_compatible"`
 	Reason                    string `json:"reason"`
+
+	LeafVersions []struct {
+		Game    string `json:"game"`
+		Channel string `json:"channel"`
+	} `json:"leaf_versions,omitempty"`
 }
 
 func (c *Client) AdminSetupVersionPreview(ctx context.Context, session, policy, version string, bedrock bool, serverType string) (AdminVersionStatus, error) {

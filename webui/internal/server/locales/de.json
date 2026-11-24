@@ -1,4 +1,7 @@
 {
+  "leaf.production": "Produktion",
+  "leaf.testing": "Test / frühe Entwicklung",
+  "leaf.no_production": "Es konnte keine Leaf-Produktionsversion mit kompatibler Laufzeit bestätigt werden.",
   "reset.confirm_sign_in_password": "Bestätigen Sie mit dem Passwort, mit dem Sie sich an der Weboberfläche anmelden.",
   "role.invalid_web_user": "Wählen Sie WebUI-Administrator, Operator oder Betrachter.",
   "role.webui_admin": "WebUI-Administrator",

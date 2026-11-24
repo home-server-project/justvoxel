@@ -154,7 +154,7 @@ if (versionPolicy && versionInput && specificVersionField) {
   const next = form?.querySelector('button[name="direction"][value="next"]');
   let sequence = 0;
   let timer;
-  const channelLabel = (channel) => ({ STABLE: jvT("ui.90ee305714d7"), BETA: jvT("ui.703390318bd5"), ALPHA: jvT("ui.b1a96dd646bc"), RELEASE: jvT("ui.e020e3c67bd0") })[channel] || channel || jvT("ui.ca1844969742");
+  const channelLabel = (channel) => ({ PRODUCTION: jvT("leaf.production"), TESTING: jvT("leaf.testing"), UNSUPPORTED: jvT("ui.54324658e2eb"), STABLE: jvT("ui.90ee305714d7"), BETA: jvT("ui.703390318bd5"), ALPHA: jvT("ui.b1a96dd646bc"), RELEASE: jvT("ui.e020e3c67bd0") })[channel] || channel || jvT("ui.ca1844969742");
   const show = (status, policy) => {
     const make = (tag, className, value) => {
       const node = document.createElement(tag);
@@ -164,11 +164,21 @@ if (versionPolicy && versionInput && specificVersionField) {
     };
     const toggle = form.querySelector("[data-bedrock-toggle]");
     const software = form.dataset?.serverType;
+    let reason = status.reason;
+    if (software === "leaf") {
+      const selected = versionInput.value || versionInput.dataset?.version || "";
+      versionInput.replaceChildren(new Option("", ""), ...(status.leaf_versions || []).map(
+        item => new Option(item.game + " - " + channelLabel(item.channel), item.game)));
+      versionInput.value = selected;
+      delete versionInput.dataset.version;
+      if (!status.selected_candidate && policy === "recommended") reason = jvT("leaf.no_production");
+      if (["TESTING", "UNSUPPORTED"].includes(status.candidate_channel)) reason = channelLabel(status.candidate_channel);
+    }
     const javaOnly = ["vanilla", "forge", "quilt"].includes(software);
     const incompatible = !!status.selected_candidate && status.managed_crossplay_available === true && status.crossplay_compatible === false;
-    const crossplayEnabled = status.crossplay_enabled && !javaOnly && !incompatible;
+    const crossplayEnabled = status.crossplay_enabled && !javaOnly && (!incompatible || software === "leaf");
     if (toggle) {
-      toggle.disabled = javaOnly || incompatible;
+      toggle.disabled = javaOnly || (incompatible && software !== "leaf");
       if (toggle.disabled) toggle.checked = false;
     }
     const summary = make("div", "notice " + (status.selected_candidate ? "success" : "warning") + " setup-version-panel", "");
@@ -177,11 +187,11 @@ if (versionPolicy && versionInput && specificVersionField) {
       summary.append(make("strong", "setup-version-candidate", status.selected_candidate));
       summary.append(make("span", "setup-version-note", jvT("ui.f8105739960e", {v0: (channelLabel(status.candidate_channel))})));
     } else {
-      summary.append(make("p", "setup-version-explanation", status.reason || jvT("ui.6cd62188f456")));
+      summary.append(make("p", "setup-version-explanation", reason || jvT("ui.6cd62188f456")));
     }
     preview.replaceChildren(summary);
-    if (status.selected_candidate && status.reason && (!crossplayEnabled || status.crossplay_compatible)) {
-      preview.append(make("div", "notice warning setup-version-panel setup-version-explanation", status.reason));
+    if (status.selected_candidate && reason && (!crossplayEnabled || status.crossplay_compatible || (software === "leaf" && ["TESTING", "UNSUPPORTED"].includes(status.candidate_channel)))) {
+      preview.append(make("div", "notice warning setup-version-panel setup-version-explanation", reason));
     }
     const compatibility = make("div", "notice " + (!crossplayEnabled || status.crossplay_compatible ? "success" : "warning") + " setup-version-compatibility", "");
     const supported = status.geyser_supported_version;
@@ -191,6 +201,8 @@ if (versionPolicy && versionInput && specificVersionField) {
       message = jvT("ui.869dd17f477a");
     } else if (crossplayEnabled && status.crossplay_compatible) {
       message = jvT("ui.a4582db875ce", {v0: (selected)});
+    } else if (software === "leaf" && !status.crossplay_enabled && selected) {
+      message = jvT("ui.8e590792a1f3").trim();
     } else if (!supported) {
       message = jvT("ui.a8522a0e572f");
     } else {
@@ -201,7 +213,7 @@ if (versionPolicy && versionInput && specificVersionField) {
         const runtime = software === "fabric" ? "Fabric" : software === "neoforge" ? "NeoForge" : "";
         message += runtime ? jvT("ui.d50bb83fdfbd", {v0: (runtime)}) : jvT("ui.8e590792a1f3");
       } else {
-        message += " " + (status.reason || jvT("ui.3a1f60bff938"));
+        message += " " + (reason || jvT("ui.3a1f60bff938"));
       }
     }
     compatibility.append(make("p", "", message));
@@ -226,8 +238,8 @@ if (versionPolicy && versionInput && specificVersionField) {
     next.disabled = true;
     showNotice(jvT("ui.c193a42f50aa"));
     const policy = versionPolicy.value;
-    const version = policy === "pinned" ? versionInput.value.trim() : "";
-    if (policy === "pinned" && !version) { showNotice(jvT("ui.77012c65b90d"), "warning"); return; }
+    const version = policy === "pinned" ? (versionInput.value || versionInput.dataset?.version || "").trim() : "";
+    if (policy === "pinned" && !version && form.dataset.serverType !== "leaf") { showNotice(jvT("ui.77012c65b90d"), "warning"); return; }
     try {
       const response = await fetch((form?.dataset.versionPreviewUrl || "/setup/version-preview") + "?" + new URLSearchParams({ policy, version, bedrock_enabled: form?.querySelector("[data-bedrock-toggle]")?.checked ? "on" : "off" }), { credentials: "same-origin", cache: "no-store" });
       if (!response.ok) throw new Error();

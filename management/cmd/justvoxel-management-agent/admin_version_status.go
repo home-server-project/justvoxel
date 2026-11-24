@@ -48,6 +48,11 @@ type adminVersionStatus struct {
 	GeyserSupportedVersion    string `json:"geyser_supported_version"`
 	CrossplayCompatible       bool   `json:"crossplay_compatible"`
 	Reason                    string `json:"reason"`
+
+	LeafVersions []struct {
+		Game    string `json:"game"`
+		Channel string `json:"channel"`
+	} `json:"leaf_versions,omitempty"`
 }
 
 var versionInputPattern = regexp.MustCompile(`^[0-9A-Za-z._-]+$`)

@@ -105,6 +105,9 @@ func (a *App) resolveSetupRuntime(ctx context.Context, session string, draft *se
 		bedrock = false
 	}
 	status, err := client.AdminSetupVersionPreview(ctx, session, draft.Minecraft.VersionPolicy, draft.Minecraft.Version, bedrock, draft.Minecraft.ServerType)
+	if err == nil && status.SelectedCandidate == "" && draft.Minecraft.ServerType == "leaf" && draft.Minecraft.VersionPolicy == "recommended" {
+		return errors.New(uiText("leaf.no_production"))
+	}
 	if err != nil || status.SelectedCandidate == "" {
 		return errors.New(uiText("ui.149789b66d59"))
 	}

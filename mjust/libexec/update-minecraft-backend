@@ -91,6 +91,10 @@ case "${stack_state}" in
     *) echo 'ERROR: compatible server update information is unavailable; Minecraft was left untouched.' >&2; exit 1 ;;
 esac
 latest_mc="$(jq -r '.selected_candidate' <<< "${stack_plan}")"
+if [[ ${target_server_type} == leaf ]]; then
+    target_image_tag="$(jq -er .image_tag <<< "${stack_plan}")"
+    image="${JV_MINECRAFT_IMAGE_REPO}:${target_image_tag}"
+fi
 if [[ ${switch_exact} == yes ]]; then
     [[ ${target_policy} == pinned && ${target_version} == "${latest_mc}" && ${latest_mc} == "$(jq -r '.installed' <<< "${stack_plan}")" ]] || { echo 'ERROR: Switch must preserve the exact installed Minecraft version; review again.' >&2; exit 1; }
 fi

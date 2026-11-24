@@ -1,4 +1,7 @@
 {
+  "leaf.production": "生产版本",
+  "leaf.testing": "测试 / 早期开发",
+  "leaf.no_production": "无法验证具有兼容运行环境的 Leaf 生产版本。",
   "reset.confirm_sign_in_password": "请输入用于登录网页界面的密码以确认。",
   "role.invalid_web_user": "请选择网页界面管理员、操作员或查看者。",
   "role.webui_admin": "网页界面管理员",

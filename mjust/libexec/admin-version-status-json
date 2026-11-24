@@ -93,14 +93,24 @@ if (( $# == 3 )) && [[ ${target_type} == bedrock ]]; then
     jq -n --arg candidate "${candidate}" '{server_type:"bedrock",selected_candidate:$candidate,candidate_channel:"RELEASE",image_tag:"stable",server_supported:($candidate != ""),crossplay_enabled:false,managed_crossplay_available:false}'
     exit 0
 fi
-# New Java types have setup-time exact resolution, never a moving update policy.
+leaf_versions='[]'
+leaf_release='{}'
+if [[ ${target_type} == leaf ]]; then
+    catalog="$(leaf_release_catalog || printf '[]')"
+    leaf_versions="$(jq -c 'map({game,channel})' <<< "${catalog}")"
+    leaf_version="${2:-}"
+    if [[ -z ${1:-} ]]; then leaf_version="${MINECRAFT_VERSION:-}"; fi
+    leaf_release="$(leaf_select_release "${1:-${MINECRAFT_VERSION_MODE:-recommended}}" "${leaf_version}" <<< "${catalog}" || printf '{}')"
+fi
+# Setup returns an exact Java release and runtime.
 if (( $# == 3 )) && [[ ${target_type} != paper && ${target_type} != purpur && ${target_type} != vanilla ]]; then
     runtime_policy="$1"
-    # Latest uses the same verified upstream selection as Recommended for these forks.
+    # Pufferfish publishes one verified recommendation.
     case "${target_type}:${runtime_policy}" in
-        pufferfish:latest|leaf:latest) runtime_policy=recommended ;;
+        pufferfish:latest) runtime_policy=recommended ;;
     esac
-    resolved="$(resolve_setup_java_runtime "${target_type}" "${runtime_policy}" "$2" || true)"
+    if [[ ${target_type} == leaf ]]; then resolved="${leaf_release}"
+    else resolved="$(resolve_setup_java_runtime "${target_type}" "${runtime_policy}" "$2" || true)"; fi
     [[ -n ${resolved} ]] || resolved='{}'
     candidate="$(jq -r '.game // empty' <<< "${resolved}")"
     loader="$(jq -r '.loader // empty' <<< "${resolved}")"
@@ -109,13 +119,18 @@ if (( $# == 3 )) && [[ ${target_type} != paper && ${target_type} != purpur && ${
     available=false
     geyser=''
     case "${target_type}" in
-        spigot|pufferfish|leaf|fabric|neoforge) geyser="$(resolve_geyser_supported_java_version || true)" ;;
+        leaf) if [[ -n ${candidate} && $3 == yes ]]; then geyser="$(resolve_geyser_supported_java_version || true)"; fi ;;
+        spigot|pufferfish|fabric|neoforge) geyser="$(resolve_geyser_supported_java_version || true)" ;;
     esac
     reason="$(jq -r '.reason // empty' <<< "${resolved}")"
     if [[ -n ${candidate} ]]; then
         if [[ ${target_type} == spigot || ${target_type} == pufferfish || ${target_type} == leaf ]]; then
             available=true
-            if [[ -n ${geyser} ]] && server_crossplay_version_compatible "${candidate}" "${geyser}"; then compatible=true; fi
+            if [[ -n ${geyser} ]] && server_crossplay_version_compatible "${candidate}" "${geyser}"; then
+                compatible=true
+            elif [[ ${target_type} == leaf && $3 == yes && -n ${geyser} ]]; then
+                reason="Released cross-play supports Minecraft ${geyser}. The selected Minecraft ${candidate} is not compatible."
+            fi
         elif [[ ${target_type} == fabric || ${target_type} == neoforge ]]; then
             # A Java preview must never download managed cross-play artifacts.
             # Only an explicit cross-play request proves that independent capability.
@@ -130,16 +145,24 @@ if (( $# == 3 )) && [[ ${target_type} != paper && ${target_type} != purpur && ${
                 else reason='Managed cross-play compatibility could not be proven for this exact Minecraft and loader version. Java setup is available.'; fi
             fi
         fi
+    elif [[ ${target_type} == leaf && $1 == recommended ]]; then
+        reason='No production Leaf release with a compatible runtime could be verified.'
     else reason='An exact stable Minecraft release and compatible runtime could not be verified. Try again or choose a supported Specific version.'; fi
-    jq -n --argjson resolved "${resolved}" --arg server_type "${target_type}" --arg candidate "${candidate}" --arg loader "${loader}" --arg image "${image}" --arg geyser "${geyser}" --arg reason "${reason}" \
+    jq -n --argjson leaf_versions "${leaf_versions}" --argjson resolved "${resolved}" --arg server_type "${target_type}" --arg candidate "${candidate}" --arg loader "${loader}" --arg image "${image}" --arg geyser "${geyser}" --arg reason "${reason}" \
         --argjson compatible "${compatible}" --argjson available "${available}" --argjson enabled "$([[ $3 == yes ]] && printf true || printf false)" \
-        '{server_type:$server_type,selected_candidate:$candidate,candidate_channel:"RELEASE",loader_version:$loader,image_tag:$image,geyser_supported_version:$geyser,reason:$reason,server_supported:($candidate != ""),managed_crossplay_available:$available,crossplay_compatible:$compatible,crossplay_enabled:$enabled} + ($resolved | with_entries(select(.key == "pufferfish_build")))'
+        '{server_type:$server_type,selected_candidate:$candidate,candidate_channel:(if $server_type == "leaf" then $resolved.channel // "" else "RELEASE" end),leaf_versions:$leaf_versions,loader_version:$loader,image_tag:$image,geyser_supported_version:$geyser,reason:$reason,server_supported:($candidate != ""),managed_crossplay_available:$available,crossplay_compatible:$compatible,crossplay_enabled:$enabled} + ($resolved | with_entries(select(.key == "pufferfish_build")))'
     exit 0
 fi
-available="$(resolve_latest_server_version || true)"
-available_channel=''
-[[ -z ${available} ]] || available_channel="$(server_version_channel "${available}" || true)"
-recommended="$(resolve_recommended_server_version || true)"
+if [[ ${target_type} == leaf ]]; then
+    available="$(jq -r '.[0].game // empty' <<< "${catalog}")"
+    available_channel="$(jq -r '.[0].channel // empty' <<< "${catalog}")"
+    recommended="$(leaf_select_release recommended '' <<< "${catalog}" | jq -r .game || true)"
+else
+    available="$(resolve_latest_server_version || true)"
+    available_channel=''
+    [[ -z ${available} ]] || available_channel="$(server_version_channel "${available}" || true)"
+    recommended="$(resolve_recommended_server_version || true)"
+fi
 candidate=''
 policy="${1:-${MINECRAFT_VERSION_MODE:-recommended}}"
 specific="${2:-${MINECRAFT_VERSION:-}}"
@@ -155,10 +178,12 @@ crossplay_compatible=false
 reason=''
 if [[ ${bedrock} == yes ]]; then
     if (( $# != 3 )); then geyser_version="$(resolve_geyser_supported_java_version || true)"; fi
-    if [[ -n ${geyser_version} ]] && server_version_recommended_available "${geyser_version}"; then
-        recommended="${geyser_version}"
-    else
-        recommended=''
+    if [[ ${target_type} != leaf ]]; then
+        if [[ -n ${geyser_version} ]] && server_version_recommended_available "${geyser_version}"; then
+            recommended="${geyser_version}"
+        else
+            recommended=''
+        fi
     fi
 fi
 case "${policy}" in
@@ -170,7 +195,17 @@ case "${policy}" in
         fi
         ;;
 esac
-[[ -z ${candidate} ]] || candidate_channel="$(server_version_channel "${candidate}" || true)"
+if [[ ${target_type} == leaf ]]; then
+    candidate="$(jq -r '.game // empty' <<< "${leaf_release}")"
+    candidate_channel="$(jq -r '.channel // empty' <<< "${leaf_release}")"
+    if [[ -n ${candidate} && ${target_image_tag} == "${configured_image_tag}" && ${target_image_tag} =~ ^java(21|25)$ ]]; then
+        target_image_tag="$(jq -r .image <<< "${leaf_release}")"
+        MINECRAFT_IMAGE_TAG="${target_image_tag}"
+        [[ ${target_image_tag} == "${configured_image_tag}" ]] || channel_changed=true
+    elif [[ -n ${candidate} && ${target_image_tag} =~ ^java(21|25)$ && ${target_image_tag} != "$(jq -r .image <<< "${leaf_release}")" ]]; then
+        candidate_channel=''
+    fi
+else [[ -z ${candidate} ]] || candidate_channel="$(server_version_channel "${candidate}" || true)"; fi
 if [[ -n ${candidate_channel} && ( ${policy} != recommended || ${bedrock} != yes || ${candidate_channel} == STABLE || ${target_type} != paper ) ]]; then
     server_supported=true
 else
@@ -182,7 +217,7 @@ if [[ ${bedrock} == yes ]]; then
         reason='Geyser/Floodgate compatibility could not be confirmed.'
     elif [[ -n ${candidate} ]] && server_crossplay_version_compatible "${candidate}" "${geyser_version}"; then
         crossplay_compatible=true
-        if [[ -n ${available} && ${available} != "${recommended}" ]]; then
+        if [[ ${target_type} != leaf && -n ${available} && ${available} != "${recommended}" ]]; then
             reason="Minecraft ${available} is available, but released cross-play support is not ready yet. No action is needed."
         fi
     elif [[ -n ${candidate} ]]; then
@@ -260,7 +295,7 @@ else
             ${floodgate_state} == updates_available || ${image_state} == updates_available ]]; then
         stack_state=updates_available
         [[ ${installed} == "${candidate}" ]] || minecraft_state=updates_available
-    elif [[ ${bedrock} == yes && ${available} != "${recommended}" && ${policy} == recommended ]]; then
+    elif [[ ${target_type} != leaf && ${bedrock} == yes && ${available} != "${recommended}" && ${policy} == recommended ]]; then
         stack_state=waiting_for_compatibility
     fi
     if [[ ${stack_state} == updates_available && ${reason} == *'No action is needed.' ]]; then
@@ -288,16 +323,16 @@ fi
 fingerprint=''
 if (( $# != 3 )); then
     fingerprint="sha256:$(jq -cn --arg server_type "${target_type}" --arg configured_type "${configured_type}" --arg candidate "${candidate}" --arg policy "${policy}" \
-        --arg configured "${MINECRAFT_VERSION:-}" --arg bedrock "${bedrock}" \
+        --argjson leaf "${leaf_release}" --arg configured "${MINECRAFT_VERSION:-}" --arg bedrock "${bedrock}" \
         --arg configured_tag "${configured_image_tag}" --arg proposed_tag "${target_image_tag}" \
         --arg current_image "${current_image}" --arg local_digest "${local_digest}" --arg local_id "${local_id}" \
         --arg running_id "${running_id}" --arg service_state "${service_state}" \
         --arg config_identity "$(sha256sum "/etc/justvoxel/instances/${JV_INSTANCE_ID}/config.json" | cut -d ' ' -f1)" \
         --arg data_path "${DATA_PATH:-}" --arg image "$(minecraft_image_ref)" --arg digest "${remote_digest}" \
         --arg installed "${installed}" --argjson geyser "${geyser_metadata}" --argjson floodgate "${floodgate_metadata}" \
-        '[$server_type,$configured_type,$candidate,$policy,$configured,$bedrock,$data_path,$image,$digest,$installed,$geyser,$floodgate,$configured_tag,$proposed_tag,$current_image,$local_digest,$local_id,$running_id,$service_state,$config_identity]' | sha256sum | cut -d ' ' -f1)"
+        '[$server_type,$configured_type,$candidate,$policy,$configured,$bedrock,$data_path,$image,$digest,$installed,$geyser,$floodgate,$configured_tag,$proposed_tag,$current_image,$local_digest,$local_id,$running_id,$service_state,$config_identity] + (if $server_type == "leaf" then [$leaf] else [] end)' | sha256sum | cut -d ' ' -f1)"
 fi
-jq -n --arg server_type "${target_type}" --arg server_software "$(server_software_display_name)" \
+jq -n --argjson leaf_versions "${leaf_versions}" --arg server_type "${target_type}" --arg server_software "$(server_software_display_name)" \
     --arg viaversion_state "$(server_supports_viaversion && printf managed_automatically || printf not_applicable)" \
     --arg installed "${installed}" --arg available "${available}" \
     --arg recommended "${recommended}" --arg candidate "${candidate}" \
@@ -314,7 +349,7 @@ jq -n --arg server_type "${target_type}" --arg server_software "$(server_softwar
     --argjson geyser_artifact "${geyser_metadata}" --argjson floodgate_artifact "${floodgate_metadata}" \
     --arg managed_image_digest "${remote_digest}" --arg image_state "${image_state}" --arg fingerprint "${fingerprint}" \
     --argjson crossplay_enabled "$([[ ${bedrock} == yes ]] && printf true || printf false)" \
-    '{configured_server_type:$configured_server_type,configured_image_tag:$configured_image_tag,runtime_update_required:$runtime_update_required,server_type:$server_type,server_software:$server_software,installed:$installed,available:$available,available_channel:$available_channel,recommended:$recommended,selected_candidate:$candidate,candidate_channel:$candidate_channel,image_tag:$image_tag,policy:$policy,configured_version:$configured_version,
+    '{leaf_versions:$leaf_versions,configured_server_type:$configured_server_type,configured_image_tag:$configured_image_tag,runtime_update_required:$runtime_update_required,server_type:$server_type,server_software:$server_software,installed:$installed,available:$available,available_channel:$available_channel,recommended:$recommended,selected_candidate:$candidate,candidate_channel:$candidate_channel,image_tag:$image_tag,policy:$policy,configured_version:$configured_version,
       managed_image_digest:$managed_image_digest,managed_artifacts:{geyser:$geyser_artifact,floodgate:$floodgate_artifact},update_available:($stack_state == "updates_available"),stack_state:$stack_state,minecraft_state:$minecraft_state,
       geyser_state:$geyser_state,floodgate_state:$floodgate_state,viaversion_state:$viaversion_state,image_state:$image_state,plan_fingerprint:$fingerprint,server_supported:$server_supported,paper_supported:($server_supported and $server_type == "paper"),
       managed_crossplay_available:$managed_crossplay_available,crossplay_enabled:$crossplay_enabled,geyser_supported_version:$geyser_version,crossplay_compatible:$crossplay_compatible,reason:$reason}'

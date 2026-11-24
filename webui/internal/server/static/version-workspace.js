@@ -28,7 +28,7 @@ if (versionLauncher && versionDialog) {
   };
   const statusURL = (policy = "", version = "", server_type = "", image_tag = "") => "/api/version/workspace/status?" + new URLSearchParams({ policy, version, server_type, image_tag });
   const policyLabel = (policy) => ({ recommended: jvT("ui.d70604e84304"), latest: jvT("ui.8730d3c2022a"), pinned: jvT("ui.c36f2cb11a3a") })[policy] || jvT("ui.b764cdc0eab7");
-  const releaseLabel = (channel) => ({ STABLE: jvT("ui.90ee305714d7"), BETA: jvT("ui.703390318bd5"), ALPHA: jvT("ui.b1a96dd646bc"), RELEASE: jvT("ui.e020e3c67bd0") })[channel] || jvT("ui.a90d2f735a49");
+  const releaseLabel = (channel) => ({ PRODUCTION: jvT("leaf.production"), TESTING: jvT("leaf.testing"), UNSUPPORTED: jvT("ui.54324658e2eb"), STABLE: jvT("ui.90ee305714d7"), BETA: jvT("ui.703390318bd5"), ALPHA: jvT("ui.b1a96dd646bc"), RELEASE: jvT("ui.e020e3c67bd0") })[channel] || jvT("ui.a90d2f735a49");
   const line = (label, value) => {
     const row = document.createElement("div");
     const name = document.createElement("span");
@@ -254,7 +254,7 @@ if (versionLauncher && versionDialog) {
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       state.textContent = jvT("ui.089810a04644");
-      const channel = form.elements.channel?.value || minecraft.image_tag || "stable";
+      const channel = form.elements.channel?.value || form.dataset.runtimeImage || minecraft.image_tag || "stable";
       const imageTag = channel === "custom" ? form.elements.custom_tag.value.trim() : channel;
       const policy = form.elements.policy?.value || minecraft.version_mode || "pinned";
       const version = policy === "pinned" ? (form.elements.version?.value.trim() || minecraft.version || "") : "";
@@ -693,6 +693,18 @@ if (versionLauncher && versionDialog) {
         const policyPanel = card(jvT("ui.d6299af88c6c"));
         const form = document.createElement("form");
         form.innerHTML = `<div class="version-status-grid" data-version-preview></div><div class="version-selection-row"><label data-version-select><select name="policy" aria-label="${jvH("ui.dd167905de0d")}"><option value="recommended">${jvH("ui.d70604e84304")}</option><option value="latest">${jvH("ui.8730d3c2022a")}</option><option value="pinned">${jvH("ui.c36f2cb11a3a")}</option></select></label><button type="submit">${jvH("ui.6a47708f4e14")}</button></div><label data-version-specific>${jvH("ui.eda536a544fd")}<input name="version" autocomplete="off"></label>`;
+        const updateLeafOptions = (select, versions) => {
+          const selected = select.value;
+          select.replaceChildren(new Option("", ""), ...(versions || []).map(
+            item => new Option(item.game + " - " + releaseLabel(item.channel), item.game)));
+          select.value = selected;
+        };
+        if (status.server_type === "leaf") {
+          const select = document.createElement("select");
+          select.name = "version";
+          updateLeafOptions(select, status.leaf_versions);
+          form.elements.version.replaceWith(select);
+        }
         form.elements.policy.value = ["recommended", "latest", "pinned"].includes(minecraft.version_mode) ? minecraft.version_mode : "recommended";
         form.elements.version.value = minecraft.version === "LATEST" ? "" : minecraft.version || "";
         let previewSequence = 0;
@@ -710,6 +722,18 @@ if (versionLauncher && versionDialog) {
             await settleSelectChange();
             if (!preview.isConnected || previewTicket !== previewSequence) return;
             preview.replaceChildren(line(jvT("ui.edf73927136a"), candidate.available ? `${candidate.available} · ${releaseLabel(candidate.available_channel)}` : jvT("ui.ca1844969742")), line(policy === "latest" ? jvT("ui.cf1d521078ca") : jvT("ui.a504aecbe3a4"), candidate.selected_candidate), line(jvT("ui.a2f670a61d4d"), candidate.candidate_channel ? releaseLabel(candidate.candidate_channel) : jvT("ui.b764cdc0eab7")), line("Geyser/Floodgate", candidate.crossplay_enabled ? candidate.crossplay_compatible ? jvT("ui.53dacc76f111", {v0: (candidate.selected_candidate)}) : jvT("ui.8b6f0c63e3fb") : jvT("ui.0ef3eea6c57d")));
+            if (candidate.server_type === "leaf") {
+              updateLeafOptions(form.elements.version, candidate.leaf_versions);
+              form.dataset.runtimeImage = candidate.image_tag || "";
+              const warning = !candidate.selected_candidate && policy === "recommended" ? jvT("leaf.no_production")
+                : ["TESTING", "UNSUPPORTED"].includes(candidate.candidate_channel) ? releaseLabel(candidate.candidate_channel) : "";
+              if (warning) {
+                const notice = document.createElement("p");
+                notice.className = "notice warning";
+                notice.textContent = warning;
+                preview.appendChild(notice);
+              }
+            }
           } catch (_) {
             await settleSelectChange();
             if (preview.isConnected && previewTicket === previewSequence) preview.textContent = jvT("ui.86231411354e");
