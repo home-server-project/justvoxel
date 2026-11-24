@@ -120,8 +120,11 @@ func TestNetworkRouterCatalogReferences(t *testing.T) {
 		t.Fatal("Router catalog references missing")
 	}
 	examplePhrases := map[string]string{
-		"en": "for example", "fr-CA": "par exemple", "de": "zum Beispiel", "pl": "na przykład",
-		"pt-BR": "por exemplo", "es-419": "por ejemplo", "uk": "наприклад", "ru": "например", "zh-Hans": "例如",
+		"en": "for example", "fr-CA": "par exemple", "fr-FR": "par exemple", "de": "zum Beispiel",
+		"pl": "na przykład", "pt-BR": "por exemplo", "es-419": "por ejemplo", "es-ES": "por ejemplo",
+		"it": "ad esempio", "nl": "bijvoorbeeld", "sv": "exempelvis", "nb": "for eksempel",
+		"da": "f.eks.", "tr": "Örneğin", "id": "misalnya", "uk": "наприклад", "ru": "например",
+		"zh-Hans": "例如", "zh-Hant": "例如", "ja": "例：", "ko": "예를 들어",
 	}
 	if len(examplePhrases) != len(supportedLocales) {
 		t.Fatal("Router guide example wording must cover every supported locale")
@@ -141,10 +144,14 @@ func TestNetworkRouterCatalogReferences(t *testing.T) {
 			t.Errorf("%s router user help missing allowed address placeholder", locale)
 		}
 		phrase := examplePhrases[locale]
-		if phrase == "" || !strings.Contains(catalogs[locale]["network.router.group_help"], phrase+" jv") {
+		separator := " "
+		if locale == "ja" {
+			separator = "" // The Japanese catalog places the name directly after the full-width colon.
+		}
+		if phrase == "" || !strings.Contains(catalogs[locale]["network.router.group_help"], phrase+separator+"jv") {
 			t.Errorf("%s router group help must present jv as an example", locale)
 		}
-		if phrase == "" || !strings.Contains(catalogs[locale]["network.router.user_help"], phrase+" justvoxel") {
+		if phrase == "" || !strings.Contains(catalogs[locale]["network.router.user_help"], phrase+separator+"justvoxel") {
 			t.Errorf("%s router user help must present justvoxel as an example", locale)
 		}
 	}

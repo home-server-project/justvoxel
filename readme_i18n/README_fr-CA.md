@@ -5,14 +5,30 @@
 <p align="center">
   <a href="../README.md">English</a> •
   <a href="README_fr-CA.md">Français (Canada)</a> •
+  <a href="README_fr-FR.md">Français (France)</a> •
   <a href="README_de.md">Deutsch</a> •
   <a href="README_pl.md">Polski</a> •
   <a href="README_pt-BR.md">Português (Brasil)</a> •
   <a href="README_es-419.md">Español (Latinoamérica)</a> •
+  <a href="README_es-ES.md">Español (España)</a> •
+  <a href="README_it.md">Italiano</a> •
+  <a href="README_nl.md">Nederlands</a> •
+  <a href="README_sv.md">Svenska</a> •
+  <a href="README_nb.md">Norsk Bokmål</a> •
+  <a href="README_da.md">Dansk</a> •
+  <a href="README_tr.md">Türkçe</a> •
+  <a href="README_id.md">Bahasa Indonesia</a> •
   <a href="README_uk.md">Українська</a> •
   <a href="README_ru.md">Русский</a> •
-  <a href="README_zh-Hans.md">简体中文</a>
+  <a href="README_zh-Hans.md">简体中文</a> •
+  <a href="README_zh-Hant.md">繁體中文</a> •
+  <a href="README_ja.md">日本語</a> •
+  <a href="README_ko.md">한국어</a>
 </p>
+
+<!-- justvoxel-translation-notice -->
+
+> **À propos de la traduction :** Cette traduction de JustVoxel a été réalisée à partir du texte anglais de référence avec l’aide de l’IA. Si vous repérez une formulation inexacte, peu claire ou peu naturelle, veuillez proposer une correction en ouvrant un [ticket sur GitHub](https://github.com/home-server-project/justvoxel/issues) ou en soumettant une [demande de modification](https://github.com/home-server-project/justvoxel/pulls).
 
 <p align="center">
   <strong>Vos serveurs Minecraft. Votre propre matériel, un serveur dédié loué ou une machine virtuelle hébergée. Un seul centre de contrôle.</strong>

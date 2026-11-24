@@ -5,14 +5,30 @@
 <p align="center">
   <a href="README.md">English</a> •
   <a href="readme_i18n/README_fr-CA.md">Français (Canada)</a> •
+  <a href="readme_i18n/README_fr-FR.md">Français (France)</a> •
   <a href="readme_i18n/README_de.md">Deutsch</a> •
   <a href="readme_i18n/README_pl.md">Polski</a> •
   <a href="readme_i18n/README_pt-BR.md">Português (Brasil)</a> •
   <a href="readme_i18n/README_es-419.md">Español (Latinoamérica)</a> •
+  <a href="readme_i18n/README_es-ES.md">Español (España)</a> •
+  <a href="readme_i18n/README_it.md">Italiano</a> •
+  <a href="readme_i18n/README_nl.md">Nederlands</a> •
+  <a href="readme_i18n/README_sv.md">Svenska</a> •
+  <a href="readme_i18n/README_nb.md">Norsk Bokmål</a> •
+  <a href="readme_i18n/README_da.md">Dansk</a> •
+  <a href="readme_i18n/README_tr.md">Türkçe</a> •
+  <a href="readme_i18n/README_id.md">Bahasa Indonesia</a> •
   <a href="readme_i18n/README_uk.md">Українська</a> •
   <a href="readme_i18n/README_ru.md">Русский</a> •
-  <a href="readme_i18n/README_zh-Hans.md">简体中文</a>
+  <a href="readme_i18n/README_zh-Hans.md">简体中文</a> •
+  <a href="readme_i18n/README_zh-Hant.md">繁體中文</a> •
+  <a href="readme_i18n/README_ja.md">日本語</a> •
+  <a href="readme_i18n/README_ko.md">한국어</a>
 </p>
+
+<!-- justvoxel-translation-notice -->
+
+> **Translation notice:** Localized JustVoxel documentation is translated from the canonical English text with AI assistance. If you find an inaccurate, unclear, or unnatural translation, please submit a [GitHub issue](https://github.com/home-server-project/justvoxel/issues) or [pull request](https://github.com/home-server-project/justvoxel/pulls) with the correction.
 
 <p align="center">
   <strong>Your Minecraft servers. Your own hardware, rented dedicated server, or hosted VM. One Control Center.</strong>

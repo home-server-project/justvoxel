@@ -88,16 +88,21 @@ func TestWebUILanguageSelection(t *testing.T) {
 		})
 	}
 	for _, tc := range []struct{ accept, want string }{
-		{"en-GB", "en"}, {"fr-CA", "fr-CA"}, {"fr", "fr-CA"}, {"fr-FR", "fr-CA"},
+		{"en-GB", "en"},
+		{"fr", "fr-CA"}, {"fr-CA", "fr-CA"}, {"fr-CA-x-example", "fr-CA"},
+		{"fr-FR", "fr-FR"}, {"fr-FR-x-example", "fr-FR"}, {"fr-BE", "fr-CA"},
 		{"de", "de"}, {"de-DE", "de"}, {"pl-PL", "pl"}, {"uk-UA", "uk"}, {"ru-RU", "ru"},
 		{"pt-BR", "pt-BR"}, {"pt", "pt-BR"}, {"pt-PT", "pt-BR"},
-		{"es-419", "es-419"}, {"es-MX", "es-419"}, {"es-AR", "es-419"},
+		{"es", "es-419"}, {"es-419", "es-419"}, {"es-MX", "es-419"}, {"es-AR", "es-419"},
+		{"es-CO", "es-419"}, {"es-CL", "es-419"}, {"es-ES", "es-ES"}, {"es-ES-x-example", "es-ES"},
 		{"zh", "zh-Hans"}, {"zh-Hans", "zh-Hans"}, {"zh-Hans-CN", "zh-Hans"},
 		{"zh-CN", "zh-Hans"}, {"zh-SG", "zh-Hans"},
-		{"zh-Hant", "en"}, {"zh-Hant-CN", "en"}, {"zh-TW", "en"}, {"zh-HK", "en"}, {"zh-MO", "en"},
-		{"ja", "en"}, {"ko", "en"},
-		{"zh-TW,en;q=0.8", "en"}, {"zh-Hant,de;q=0.8", "de"},
-		{"ja,de;q=0.8", "de"}, {"ko,fr-CA;q=0.8", "fr-CA"},
+		{"zh-Hant", "zh-Hant"}, {"zh-Hant-CN", "zh-Hant"}, {"zh-TW", "zh-Hant"},
+		{"zh-HK", "zh-Hant"}, {"zh-MO", "zh-Hant"}, {"zh-MY", "en"},
+		{"it-IT", "it"}, {"nl-NL", "nl"}, {"sv-SE", "sv"}, {"nb-NO", "nb"}, {"no-NO", "nb"},
+		{"da-DK", "da"}, {"tr-TR", "tr"}, {"id-ID", "id"}, {"ja-JP", "ja"}, {"ko-KR", "ko"},
+		{"nn-NO", "en"}, {"nn-NO,da-DK;q=0.7,nb-NO;q=0.5", "da"},
+		{"es-MX;q=0.4,nn-NO;q=0.9,zh-TW;q=0.7,fr-FR;q=0.6", "zh-Hant"},
 		{"de;q=0.4,pl;q=0.7,zh-Hans;q=0.9", "zh-Hans"}, {"uk;q=0.8,ru;q=0.8", "uk"},
 		{"en;q=0.4,fr-CA;q=0.9", "fr-CA"}, {"fr;q=0,en;q=1", "en"},
 		{"fr;q=bogus", "en"}, {"fr;q=NaN", "en"}, {"de,pt;q=1.01", "en"},
@@ -111,13 +116,16 @@ func TestWebUILanguageSelection(t *testing.T) {
 			}
 		})
 	}
-	for _, alias := range []string{"invalid", "fr-ca", "fr", "de-DE", "pl-PL", "pt", "es-MX", "uk-UA", "ru-RU", "zh", "zh-CN", "zh-hans", "zh-Hant", "ja", "ko"} {
+	for _, alias := range []string{
+		"invalid", "fr-ca", "fr-fr", "fr", "de-DE", "pl-PL", "pt", "es", "es-MX", "es-es",
+		"uk-UA", "ru-RU", "zh", "zh-CN", "zh-hans", "zh-hant", "zh-TW", "no", "no-NO", "nn-NO", "ja-JP", "ko-KR",
+	} {
 		t.Run("invalid cookie/"+alias, func(t *testing.T) {
 			r := httptest.NewRequest("GET", "/login", nil)
-			r.Header.Set("Accept-Language", "fr-CA")
+			r.Header.Set("Accept-Language", "de")
 			r.AddCookie(&http.Cookie{Name: languageCookie, Value: alias})
-			if got := requestLocale(r); got != "en" || supportedLocale(alias) {
-				t.Fatalf("invalid cookie %q: got %s", alias, got)
+			if got := requestLocale(r); got != "de" || supportedLocale(alias) {
+				t.Fatalf("invalid cookie %q: got %s, want browser locale de", alias, got)
 			}
 		})
 	}
@@ -185,8 +193,8 @@ func assertLanguageDialog(t *testing.T, body, locale, returnPath string) {
 			t.Fatalf("language dialog missing %q", want)
 		}
 	}
-	if strings.Count(dialog, "<select") != 1 || strings.Count(dialog, "<option") != 9 || strings.Count(dialog, " selected") != 1 {
-		t.Fatal("language picker must have one select, nine options and one selected locale")
+	if strings.Count(dialog, "<select") != 1 || strings.Count(dialog, "<option") != 21 || strings.Count(dialog, " selected") != 1 {
+		t.Fatal("language picker must have one select, 21 options and one selected locale")
 	}
 	selector := regexp.MustCompile(`(?s)<select [^>]*>.*?</select>`).FindString(dialog)
 	if strings.Contains(selector, "<hr") {
@@ -198,11 +206,16 @@ func assertLanguageDialog(t *testing.T, body, locale, returnPath string) {
 		options      []languageOption
 	}{
 		{"language.latin", "Latin", []languageOption{
-			{"en", "English"}, {"fr-CA", "Français (Canada)"}, {"de", "Deutsch"},
-			{"pl", "Polski"}, {"pt-BR", "Português (Brasil)"}, {"es-419", "Español (Latinoamérica)"},
+			{"en", "English"}, {"fr-CA", "Français (Canada)"}, {"fr-FR", "Français (France)"},
+			{"de", "Deutsch"}, {"pl", "Polski"}, {"pt-BR", "Português (Brasil)"},
+			{"es-419", "Español (Latinoamérica)"}, {"es-ES", "Español (España)"},
+			{"it", "Italiano"}, {"nl", "Nederlands"}, {"sv", "Svenska"}, {"nb", "Norsk Bokmål"},
+			{"da", "Dansk"}, {"tr", "Türkçe"}, {"id", "Bahasa Indonesia"},
 		}},
 		{"language.cyrillic", "Cyrillic", []languageOption{{"uk", "Українська"}, {"ru", "Русский"}}},
-		{"language.eastasian", "East Asian", []languageOption{{"zh-Hans", "简体中文"}}},
+		{"language.eastasian", "East Asian", []languageOption{
+			{"zh-Hans", "简体中文"}, {"zh-Hant", "繁體中文"}, {"ja", "日本語"}, {"ko", "한국어"},
+		}},
 	}
 	if len(groups) != len(wantGroups) || strings.Count(dialog, "<optgroup") != len(wantGroups) {
 		t.Fatal("language picker must have exactly three optgroups")
@@ -229,11 +242,6 @@ func assertLanguageDialog(t *testing.T, body, locale, returnPath string) {
 			if options[j] != want {
 				t.Fatalf("language option got %q, want %q", options[j], want)
 			}
-		}
-	}
-	for _, excluded := range []string{`value="ja"`, `value="ko"`, `value="zh-Hant"`, "日本語", "한국어", "Japanese", "Korean", "繁體中文"} {
-		if strings.Contains(dialog, excluded) {
-			t.Fatalf("unsupported language in dialog: %q", excluded)
 		}
 	}
 	actions := regexp.MustCompile(`(?s)<div class="action-row">(.*?)</div>`).FindString(dialog)
@@ -424,7 +432,7 @@ func TestLanguagePreferenceBeforeLoginAndSafeReturn(t *testing.T) {
 				t.Fatalf("valid manual locale %q rejected", locale)
 			}
 		}
-		for _, alias := range []string{"fr", "de-DE", "pt", "es-MX", "zh-CN", "zh-hans", "zh-Hant", "ja", "ko"} {
+		for _, alias := range []string{"fr", "fr-fr", "de-DE", "pt", "es", "es-MX", "zh-CN", "zh-hans", "zh-hant", "zh-TW", "no", "ja-JP", "ko-KR"} {
 			form := url.Values{"language": {alias}}
 			request := httptest.NewRequest("POST", "/language", strings.NewReader(form.Encode()))
 			request.Header.Set("Content-Type", "application/x-www-form-urlencoded")

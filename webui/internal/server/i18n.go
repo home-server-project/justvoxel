@@ -29,10 +29,19 @@ var languageGroups = []languageGroup{
 	{"language.latin", []languageOption{
 		{"en", "English"},
 		{"fr-CA", "Français (Canada)"},
+		{"fr-FR", "Français (France)"},
 		{"de", "Deutsch"},
 		{"pl", "Polski"},
 		{"pt-BR", "Português (Brasil)"},
 		{"es-419", "Español (Latinoamérica)"},
+		{"es-ES", "Español (España)"},
+		{"it", "Italiano"},
+		{"nl", "Nederlands"},
+		{"sv", "Svenska"},
+		{"nb", "Norsk Bokmål"},
+		{"da", "Dansk"},
+		{"tr", "Türkçe"},
+		{"id", "Bahasa Indonesia"},
 	}},
 	{"language.cyrillic", []languageOption{
 		{"uk", "Українська"},
@@ -40,6 +49,9 @@ var languageGroups = []languageGroup{
 	}},
 	{"language.eastasian", []languageOption{
 		{"zh-Hans", "简体中文"},
+		{"zh-Hant", "繁體中文"},
+		{"ja", "日本語"},
+		{"ko", "한국어"},
 	}},
 }
 
@@ -139,11 +151,35 @@ func supportedLocale(value string) bool {
 }
 
 func browserLocale(tag string) string {
-	primary, _, _ := strings.Cut(tag, "-")
-	// Chinese needs a script or region check before matching the primary language.
-	if primary == "zh" && tag != "zh" && tag != "zh-cn" && tag != "zh-sg" &&
-		tag != "zh-hans" && !strings.HasPrefix(tag, "zh-hans-") {
+	primary, rest, _ := strings.Cut(tag, "-")
+	firstSubtag, _, _ := strings.Cut(rest, "-")
+	switch primary {
+	case "fr":
+		if firstSubtag == "fr" {
+			return "fr-FR"
+		}
+		return "fr-CA"
+	case "es":
+		if firstSubtag == "es" {
+			return "es-ES"
+		}
+		return "es-419"
+	case "zh":
+		switch firstSubtag {
+		case "hans":
+			return "zh-Hans"
+		case "hant":
+			return "zh-Hant"
+		}
+		switch tag {
+		case "zh", "zh-cn", "zh-sg":
+			return "zh-Hans"
+		case "zh-tw", "zh-hk", "zh-mo":
+			return "zh-Hant"
+		}
 		return ""
+	case "nb", "no":
+		return "nb"
 	}
 	for _, locale := range supportedLocales {
 		language, _, _ := strings.Cut(locale, "-")
@@ -155,11 +191,8 @@ func browserLocale(tag string) string {
 }
 
 func requestLocale(r *http.Request) string {
-	if cookie, err := r.Cookie(languageCookie); err == nil {
-		if supportedLocale(cookie.Value) {
-			return cookie.Value
-		}
-		return "en"
+	if cookie, err := r.Cookie(languageCookie); err == nil && supportedLocale(cookie.Value) {
+		return cookie.Value
 	}
 	type preference struct {
 		tag     string

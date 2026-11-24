@@ -23,6 +23,7 @@ func TestPublicREADMELanguages(t *testing.T) {
 		}
 	}
 	paragraphs := regexp.MustCompile(`(?s)<p align="center">(.*?)</p>`)
+	const noticeMarker = "<!-- justvoxel-translation-notice -->"
 	for _, locale := range supportedLocales {
 		t.Run(locale, func(t *testing.T) {
 			path := files[locale]
@@ -30,7 +31,12 @@ func TestPublicREADMELanguages(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, paragraph := range paragraphs.FindAllString(string(data), -1) {
+			content := string(data)
+			if count := strings.Count(content, noticeMarker); count != 1 {
+				t.Fatalf("found %d translation notice markers, want 1", count)
+			}
+			for _, bounds := range paragraphs.FindAllStringIndex(content, -1) {
+				paragraph := content[bounds[0]:bounds[1]]
 				complete := true
 				for _, group := range languageGroups {
 					for _, option := range group.Options {
@@ -45,6 +51,20 @@ func TestPublicREADMELanguages(t *testing.T) {
 					}
 				}
 				if complete {
+					afterNavigator := strings.TrimLeft(content[bounds[1]:], "\n\r")
+					afterMarker, found := strings.CutPrefix(afterNavigator, noticeMarker+"\n")
+					if !found {
+						t.Fatal("missing translation notice marker directly below centered navigator")
+					}
+					notice, _, _ := strings.Cut(strings.TrimLeft(afterMarker, "\n\r"), "\n\n")
+					for _, url := range []string{
+						"https://github.com/home-server-project/justvoxel/issues",
+						"https://github.com/home-server-project/justvoxel/pulls",
+					} {
+						if !strings.Contains(notice, url) {
+							t.Errorf("translation notice missing %s", url)
+						}
+					}
 					return
 				}
 			}

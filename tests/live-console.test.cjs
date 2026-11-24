@@ -243,7 +243,7 @@ test('shared setup progress template retains recovery and one existing execution
   assert.match(template, /action="\/setup\/recover"/);
   assert.match(setup, /needsAttention && \["storage_rollback", "runtime_rollback"\]/);
   assert.match(setup, /if \(startOverForm\) startOverForm.hidden = !rolledBack/);
-  assert.match(setup, /dashboardLink\?\.addEventListener\("click", \(\) => window.JustVoxelLiveConsole.close\(\)\)/);
+  assert.match(setup, /^  dashboardLink\?\.addEventListener\("click", \(event\) => \{\n    window\.JustVoxelLiveConsole\.close\(\);\n    if \(window\.name === "justvoxel-add-server" && consoleState === "succeeded"\) \{\n      const opener = window\.opener;/m);
   assert.match(setup, /if \(!finished\) window.setTimeout\(poll, 2500\)/);
   assert.doesNotMatch(consoleCode, /readWorkspaceWindowState/);
 });
