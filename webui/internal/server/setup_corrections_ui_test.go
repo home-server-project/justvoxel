@@ -34,7 +34,7 @@ const preview = { replaceChildren(...nodes) { this.children = nodes; }, append(.
 const next = { disabled: true };
 const toggle = { disabled: false, checked: true };
 const form = { dataset: { serverType: "paper" }, querySelector: () => toggle };
-let versionInput = { value: "1.21.8" };
+let versionInput = { value: "47.4" };
 class Option {
   constructor(text, value) {
     this.text = text;
@@ -44,20 +44,20 @@ class Option {
 ` + source[start:start+end] + `
 const flatten = (node) => [node.textContent || "", ...(node.children || []).flatMap(flatten)];
 const text = () => flatten(preview).join(" ");
-const fixture = { selected_candidate: "1.21.8", available: "1.21.8", candidate_channel: "RELEASE",
-  geyser_supported_version: "1.21.8", crossplay_enabled: true, crossplay_compatible: true };
+const selected = "47.6.2", alternative = "47.8";
+const fixture = { selected_candidate: selected, candidate_channel: "RELEASE",
+  managed_crossplay_available: true, crossplay_enabled: true, crossplay_compatible: true };
 for (const policy of ["recommended", "latest", "pinned"]) {
-  show({ ...fixture, leaf_versions: [{ game: "1.21.9", channel: "PRODUCTION" }] }, policy);
-  assert.deepEqual(versionInput, { value: "1.21.8" });
+  show(fixture, policy);
+  assert.deepEqual(versionInput, { value: "47.4" });
   assert.equal(next.disabled, false);
+  assert.equal(toggle.disabled, false);
+  assert.equal(toggle.checked, true);
   assert.equal(preview.children.length, 2);
   assert.equal(preview.children[0].className, "notice success setup-version-panel");
   assert.equal(preview.children[1].className, "notice success setup-version-compatibility");
   assert(text().includes("Minecraft build classification: Release"));
-  assert(text().includes("Bedrock cross-play is supported for Minecraft 1.21.8."));
-  assert(!text().includes("channel"));
-  assert(!text().includes("follows"));
-  assert.equal(preview.children[0].children.filter(n => n.textContent === "1.21.8").length, 1);
+  assert(text().includes("Bedrock cross-play is supported for Minecraft " + selected + "."));
 }
 show({ ...fixture, reason: "Publisher advisory for this build.", crossplay_enabled: false }, "recommended");
 assert.equal(next.disabled, false);
@@ -65,81 +65,41 @@ assert.equal(preview.children[1].className, "notice warning setup-version-panel 
 assert(text().includes("Publisher advisory for this build."));
 show({ ...fixture, candidate_channel: "BETA" }, "recommended");
 assert(text().includes("Minecraft build classification: Beta"));
-for (const policy of ["latest", "pinned"]) {
-  show({ ...fixture, selected_candidate: "1.22.3", crossplay_compatible: false, geyser_supported_version: "1.22.2" }, policy);
-  assert.equal(next.disabled, true);
-  assert.equal(preview.children.length, 2);
-  assert.equal(preview.children[0].className, "notice success setup-version-panel");
-  assert.equal(preview.children[1].className, "notice warning setup-version-compatibility");
-  assert(text().includes("1.22.3"));
-  assert(text().includes("Managed cross-play currently supports Minecraft 1.22.2."));
-  assert(text().includes("Selected Minecraft 1.22.3 is available as Java-only."));
-  assert(text().includes("Choose Recommended, select a compatible Specific version, or disable Bedrock cross-play."));
-}
-show({ ...fixture, crossplay_enabled: false, crossplay_compatible: false }, "pinned");
-assert.equal(next.disabled, false);
-assert.equal(preview.children.length, 2);
-for (const policy of ["recommended", "latest", "pinned"]) {
-  for (const candidate of ["", undefined]) {
-    for (const compatible of [true, false]) {
-      show({ ...fixture, selected_candidate: candidate, reason: "No build found", crossplay_enabled: false, crossplay_compatible: compatible }, policy);
-      assert.equal(next.disabled, true);
-      assert.equal(preview.children.length, 2);
-      assert.equal(preview.children[0].className, "notice warning setup-version-panel");
-      assert(text().includes("Managed cross-play currently supports Minecraft 1.21.8."));
-      assert(!preview.children[0].children.some(n => n.className === "setup-version-candidate"));
-      assert(text().includes("No build found"));
-    }
-  }
-}
-for (const software of ["paper", "purpur", "spigot", "pufferfish", "fabric", "neoforge"]) {
+for (const software of ["paper", "purpur", "spigot", "pufferfish", "leaf", "fabric", "neoforge"]) {
   form.dataset.serverType = software;
-  const modded = ["fabric", "neoforge"].includes(software);
+  versionInput = { value: selected, dataset: {}, replaceChildren() {} };
   for (const policy of ["recommended", "latest", "pinned"]) {
-    for (const enabled of [false, true]) {
-      const status = { ...fixture, selected_candidate: "1.21.11", geyser_supported_version: "26.3", crossplay_enabled: enabled, crossplay_compatible: false, managed_crossplay_available: !modded };
-      toggle.checked = enabled;
-      const before = JSON.stringify(status);
-      show(status, policy);
-      assert.equal(JSON.stringify(status), before);
-      assert.equal(next.disabled, enabled && modded);
-      assert.equal(toggle.disabled, !modded);
-      assert.equal(toggle.checked, enabled && modded);
-      assert(text().includes("Managed cross-play currently supports Minecraft " + status.geyser_supported_version + ". Selected Minecraft " + status.selected_candidate + " is available as Java-only."));
-      assert.equal(preview.children.length, 2);
-    }
-  }
-  show({ ...fixture, managed_crossplay_available: !modded, crossplay_enabled: false }, "pinned");
-  assert.equal(toggle.disabled, false);
-  assert.equal(next.disabled, false);
-  assert(text().includes(modded ? ("verify this exact " + (software === "fabric" ? "Fabric" : "NeoForge") + " runtime") : "Enable Bedrock cross-play if wanted."));
-  for (const enabled of [false, true]) {
-    show({ ...fixture, geyser_supported_version: "", crossplay_enabled: enabled, crossplay_compatible: false }, "pinned");
-    assert.equal(next.disabled, enabled);
-    assert(text().includes("Current managed cross-play Minecraft version could not be verified. Java setup is available."));
-  }
-  if (modded) {
-    toggle.checked = true;
-    const failed = { ...fixture, managed_crossplay_available: false, crossplay_compatible: false, reason: "Exact publisher proof failed." };
-    const before = JSON.stringify(failed);
-    show(failed, "pinned");
-    assert.equal(JSON.stringify(failed), before);
+    const status = Object.freeze({ ...fixture, crossplay_enabled: false, crossplay_compatible: false });
+    show(status, policy);
+    assert.equal(toggle.disabled, false, software);
+    assert.equal(toggle.checked, false, software);
+    assert.equal(next.disabled, false, software);
+    assert.equal(preview.children[1].className, "notice success setup-version-compatibility");
+    assert(text().includes("Enable Bedrock cross-play if wanted."));
+    assert(!text().includes("could not be confirmed"));
+    const requested = Object.freeze({ ...status, crossplay_enabled: true, crossplay_supported_version: alternative });
+    show(requested, policy);
+    assert.equal(toggle.disabled, false, software);
+    assert.equal(toggle.checked, true, software);
+    assert.equal(next.disabled, true, software);
+    assert.equal(versionInput.value, selected, software);
+    assert.equal(preview.children[1].className, "notice warning setup-version-compatibility");
+    assert(text().includes("Managed cross-play compatibility could not be confirmed. Disable cross-play to continue with Java setup."));
+    assert(text().includes("Verified Cross-play version: Minecraft " + alternative + "."));
+    assert(!text().includes("Choose Recommended"));
+    show({ ...requested, crossplay_supported_version: "", geyser_supported_version: "47.9" }, policy);
     assert.equal(toggle.checked, true);
-    assert.equal(toggle.disabled, false);
     assert.equal(next.disabled, true);
-    assert.equal(text().split("Exact publisher proof failed.").length, 2);
-    assert.equal(preview.children.length, 2);
-    toggle.checked = false;
-    show({ ...failed, crossplay_enabled: false, reason: "" }, "pinned");
-    assert.equal(next.disabled, false);
-    show({ ...fixture, managed_crossplay_available: true }, "pinned");
-    assert.equal(toggle.disabled, false);
+    assert(!text().includes("47.9"));
+    assert(!text().includes("Verified Cross-play version"));
+    show(status, policy);
+    assert.equal(toggle.checked, false);
     assert.equal(next.disabled, false);
   }
 }
 for (const software of ["vanilla", "forge", "quilt"]) {
   form.dataset.serverType = software;
-  show({ ...fixture, crossplay_enabled: false }, "pinned");
+  show({ ...fixture, managed_crossplay_available: false, crossplay_compatible: false }, "pinned");
   assert.equal(toggle.disabled, true);
   assert.equal(toggle.checked, false);
   assert(text().includes("This software supports Java only."));
@@ -155,7 +115,7 @@ form.dataset.serverType = "leaf";
 versionInput = {
   options: [],
   selectedIndex: -1,
-  dataset: { version: "1.21.9" },
+  dataset: { version: "47.5" },
   get value() { return this.options[this.selectedIndex]?.value ?? ""; },
   set value(value) { this.selectedIndex = this.options.findIndex(option => option.value === value); },
   replaceChildren(...options) {
@@ -164,40 +124,40 @@ versionInput = {
   }
 };
 const leaf = {
-  selected_candidate: "1.21.9", candidate_channel: "PRODUCTION", crossplay_enabled: false,
+  selected_candidate: "47.5", candidate_channel: "PRODUCTION", crossplay_enabled: false,
   crossplay_compatible: false, managed_crossplay_available: true, reason: "Verified publisher build.",
   leaf_versions: [
-    { game: "1.21.10", channel: "TESTING" },
-    { game: "1.21.9", channel: "PRODUCTION" },
-    { game: "1.21.8", channel: "UNSUPPORTED" }
+    { game: "47.6", channel: "TESTING" },
+    { game: "47.5", channel: "PRODUCTION" },
+    { game: "47.4", channel: "UNSUPPORTED" }
   ]
 };
 show(leaf, "pinned");
 assert.deepEqual(versionInput.options.map(({ value, text }) => [value, text]), [
   ["", ""],
-  ["1.21.10", "1.21.10 - Testing / early development"],
-  ["1.21.9", "1.21.9 - Production"],
-  ["1.21.8", "1.21.8 - Unsupported"]
+  ["47.6", "47.6 - Testing / early development"],
+  ["47.5", "47.5 - Production"],
+  ["47.4", "47.4 - Unsupported"]
 ]);
-assert.equal(versionInput.value, "1.21.9");
+assert.equal(versionInput.value, "47.5");
 assert.equal(versionInput.dataset.version, undefined);
 assert.equal(next.disabled, false);
 assert(text().includes("Minecraft build classification: Production"));
 assert(text().includes("Verified publisher build."));
 assert(text().includes("Enable Bedrock cross-play if wanted."));
 
-versionInput.value = "1.21.10";
-const refreshed = { ...leaf, selected_candidate: "1.21.10", candidate_channel: "TESTING", leaf_versions: leaf.leaf_versions.slice(0, 2) };
+versionInput.value = "47.6";
+const refreshed = { ...leaf, selected_candidate: "47.6", candidate_channel: "TESTING", leaf_versions: leaf.leaf_versions.slice(0, 2) };
 const beforeRefresh = JSON.stringify(refreshed);
 show(refreshed, "pinned");
 assert.equal(JSON.stringify(refreshed), beforeRefresh);
-assert.deepEqual(versionInput.options.map(option => option.value), ["", "1.21.10", "1.21.9"]);
-assert.equal(versionInput.value, "1.21.10");
+assert.deepEqual(versionInput.options.map(option => option.value), ["", "47.6", "47.5"]);
+assert.equal(versionInput.value, "47.6");
 assert.equal(preview.children[1].className, "notice warning setup-version-panel setup-version-explanation");
 assert.equal(preview.children[1].textContent, "Testing / early development");
 assert.equal(next.disabled, false);
 
-const unsupported = { ...leaf, selected_candidate: "1.21.8", candidate_channel: "UNSUPPORTED" };
+const unsupported = { ...leaf, selected_candidate: "47.4", candidate_channel: "UNSUPPORTED" };
 const beforeUnsupported = JSON.stringify(unsupported);
 show(unsupported, "pinned");
 assert.equal(JSON.stringify(unsupported), beforeUnsupported);
@@ -213,17 +173,16 @@ assert.equal(preview.children[0].className, "notice warning setup-version-panel"
 assert(preview.children[0].children.some(node => node.textContent === "No production Leaf release with a compatible runtime could be verified."));
 
 toggle.checked = true;
-show({ ...refreshed, crossplay_enabled: true, geyser_supported_version: "1.21.9" }, "latest");
+show({ ...refreshed, crossplay_enabled: true, crossplay_supported_version: leaf.selected_candidate }, "latest");
 assert.equal(toggle.disabled, false);
 assert.equal(toggle.checked, true);
 assert.equal(next.disabled, true);
 assert.equal(preview.children[1].textContent, "Testing / early development");
 assert.equal(preview.children[2].className, "notice warning setup-version-compatibility");
-assert(text().includes("Managed cross-play currently supports Minecraft 1.21.9. Selected Minecraft 1.21.10 is available as Java-only."));
-assert(text().includes("Choose Recommended, select a compatible Specific version, or disable Bedrock cross-play."));
+assert(text().includes("Verified Cross-play version: Minecraft " + leaf.selected_candidate + "."));
 show({ ...leaf, crossplay_enabled: true }, "pinned");
 assert.equal(next.disabled, true);
-assert(text().includes("Current managed cross-play Minecraft version could not be verified. Java setup is available."));
+assert(text().includes("Managed cross-play compatibility could not be confirmed."));
 `
 	cmd := nodeTestCommand()
 	cmd.Stdin = strings.NewReader(program)

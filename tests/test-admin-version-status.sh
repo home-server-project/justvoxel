@@ -27,8 +27,9 @@ jv_crossplay_metadata() {
 }
 jv_crossplay_artifact_state() { printf '%s' "${COMPONENT_STATE:-up_to_date}"; }
 STUB
-# Copy the real compatibility wrapper; its Paper metadata dependency is stubbed above.
-sed -n '/^server_crossplay_version_compatible() {/,/^}/p' "${repo_root}/mjust/libexec/common.sh" >> "${fixture_dir}/common.sh"
+# Copy the real compatibility helpers; publisher metadata is stubbed.
+sed -n '/^jv_setup_crossplay_compatible() {/,/^paper_version_has_stable_build() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/common.sh"
+printf '%s\n' 'jv_crossplay_viaversion_supports() { return 1; }' >> "${fixture_dir}/common.sh"
 sed -n '/^validate_server_type() {/,/^render_runtime_files() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/common.sh"
 sed -e "s|^source /usr/libexec/justvoxel/mjust/common.sh$|source ${fixture_dir}/common.sh|" \
     -e '\|^source /usr/libexec/justvoxel/mjust/managed-crossplay.sh$|d' \
@@ -120,7 +121,7 @@ grep -Fxq "podman image inspect docker.io/itzg/minecraft-server:stable --format 
 [[ $(wc -l < "${RUNTIME_CALLS}") == 4 ]]
 : > "${RUNTIME_CALLS}"
 preview="$(bash "${fixture_dir}/status" recommended '' yes)"
-jq -e '.installed == "" and .selected_candidate == "26.2" and .stack_state == "not_applicable"' <<< "${preview}" >/dev/null
+jq -e '.installed == "" and .selected_candidate == "26.3" and .stack_state == "not_applicable"' <<< "${preview}" >/dev/null
 [[ ! -s ${RUNTIME_CALLS} ]]
 
 recommended="$(bash "${fixture_dir}/status" --instance jv-aaaaaa recommended)"
@@ -156,10 +157,10 @@ jq -e '.recommended == "26.3" and .selected_candidate == "26.3" and .geyser_stat
 
 # First-run preview remains usable with no installed game or managed binaries,
 # and with local image/component checks deliberately unavailable.
-preview="$(COMPONENT_STATE=unavailable IMAGE_STATE=unavailable bash "${fixture_dir}/status" recommended '' yes)"
+preview="$(PAPER_STABLE=26.2 COMPONENT_STATE=unavailable IMAGE_STATE=unavailable bash "${fixture_dir}/status" recommended '' yes)"
 jq -e '.installed == "" and .recommended == "26.2" and .selected_candidate == "26.2" and .crossplay_compatible and .paper_supported and .stack_state == "not_applicable" and (.reason | contains("Server update information could not be verified") | not)' <<< "${preview}" >/dev/null
 preview_incompatible="$(COMPONENT_STATE=unavailable IMAGE_STATE=unavailable bash "${fixture_dir}/status" pinned 26.3 yes)"
-jq -e '.selected_candidate == "26.3" and (.crossplay_compatible | not) and .stack_state == "not_applicable" and (.reason | contains("not compatible"))' <<< "${preview_incompatible}" >/dev/null
+jq -e '.selected_candidate == "26.3" and (.crossplay_compatible | not) and .stack_state == "not_applicable" and (.reason | contains("could not be confirmed"))' <<< "${preview_incompatible}" >/dev/null
 
 cat >> "${fixture_dir}/common.sh" <<'STUB'
 curl() {
@@ -174,7 +175,8 @@ purpur="$(MINECRAFT_SERVER_TYPE=purpur bash "${fixture_dir}/status" recommended 
 jq -e '.server_type == "purpur" and .server_software == "Purpur" and .recommended == "26.2" and .available == "26.3" and .server_supported and .crossplay_compatible and (.paper_supported | not)' <<< "${purpur}" >/dev/null
 vanilla="$(MINECRAFT_SERVER_TYPE=vanilla BEDROCK_ENABLED=no bash "${fixture_dir}/status" latest '' no)"
 jq -e '.server_software == "Vanilla" and .selected_candidate == "26.3" and .server_supported and .viaversion_state == "not_applicable" and (.crossplay_enabled | not)' <<< "${vanilla}" >/dev/null
-if MINECRAFT_SERVER_TYPE=vanilla BEDROCK_ENABLED=no bash "${fixture_dir}/status" recommended '' yes; then echo 'Vanilla Bedrock preview accepted' >&2; exit 1; fi
+preview="$(MINECRAFT_SERVER_TYPE=vanilla BEDROCK_ENABLED=no bash "${fixture_dir}/status" recommended '' yes)"
+jq -e '.server_supported and .crossplay_enabled and (.managed_crossplay_available | not) and (.crossplay_compatible | not)' <<< "${preview}" >/dev/null
 
 # A software-only change is actionable, and its review cannot authorize a different target.
 printf 'Starting minecraft server version 26.2\n' > "${DATA_PATH}/logs/latest.log"

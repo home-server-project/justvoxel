@@ -124,6 +124,7 @@
   "plugins.recovery.was_running": "Minecraft bu işlemden önce çalışıyordu ve şu anda durmuş durumda.",
   "plugins.recovery.was_stopped": "Minecraft bu işlemden önce durmuştu ve şu anda çalışıyor.",
   "plugins.recovery.players": "Çevrimiçi oyuncu sayısı: {count}. Minecraft durdurulursa oyuncular uyarıldıktan sonra bağlantıları kesilir.",
+  "setup.crossplay_supported_version": "Çapraz oyun için doğrulanmış sürüm: Minecraft {v0}.",
   "ui.00017020a2b9": "Minecraft'ı kapat",
   "ui.0014c7e7704f": "Sistem güncellemesi durumu yükleniyor…",
   "ui.001c794ce986": "Canlı Konsolu kapat",

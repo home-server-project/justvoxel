@@ -463,7 +463,7 @@ var gatewayPublicFields = func() map[string]bool {
 		configured_image_tag configured_server_type configured_version confirm_destructive confirm_players
 		confirmation confirmation_required connected connection_id connection_state connectivity container_memory
 		context cooldown_seconds count countdown_seconds created createdAt created_at created_device
-		crossplay_compatible crossplay_enabled current current_mount_point current_software current_version cursor
+		crossplay_compatible crossplay_enabled crossplay_supported_version current current_mount_point current_software current_version cursor
 		data_action data_bytes data_destination data_identity data_path data_source date_published defaults
 		delete_after_export dependencies dependency_type description destination destination_available
 		destination_identity destination_kind destructive destructive_confirmation_required device devices dhcp

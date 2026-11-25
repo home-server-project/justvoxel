@@ -49,21 +49,26 @@ func TestSetupVersionPreviewUsesAdministratorAndExplicitBedrockChoice(t *testing
 	called := false
 	runSetupVersionPreview = func(_ context.Context, policy, version, bedrock, serverType string) ([]byte, error) {
 		called = true
-		if policy != "pinned" || version != "1.21.8" || bedrock != "yes" {
+		if policy != "pinned" || version != "47.4.2" || bedrock != "yes" {
 			t.Fatalf("unexpected preview request: %q %q %q", policy, version, bedrock)
 		}
-		return []byte(`{"selected_candidate":"1.21.8","candidate_channel":"ALPHA","paper_supported":true}`), nil
+		return []byte(`{"selected_candidate":"47.4.2","candidate_channel":"ALPHA","paper_supported":true,"managed_crossplay_available":true,"crossplay_enabled":true,"crossplay_compatible":false,"crossplay_supported_version":"47.2"}`), nil
 	}
 	viewer := surfaceTestServer(t, roleViewer)
 	rr := httptest.NewRecorder()
-	viewer.adminSetupVersionPreview(rr, surfaceRequest(http.MethodGet, "/v1/admin/setup/version-preview?policy=pinned&version=1.21.8&bedrock=yes", ""))
+	viewer.adminSetupVersionPreview(rr, surfaceRequest(http.MethodGet, "/v1/admin/setup/version-preview?policy=pinned&version=47.4.2&bedrock=yes", ""))
 	if rr.Code != http.StatusForbidden || called {
 		t.Fatalf("viewer: %d, helper=%v", rr.Code, called)
 	}
 	admin := surfaceTestServer(t, roleAdministrator)
 	rr = httptest.NewRecorder()
-	admin.adminSetupVersionPreview(rr, surfaceRequest(http.MethodGet, "/v1/admin/setup/version-preview?policy=pinned&version=1.21.8&bedrock=yes", ""))
-	if rr.Code != http.StatusOK || !called || !strings.Contains(rr.Body.String(), `"candidate_channel":"ALPHA"`) {
+	admin.adminSetupVersionPreview(rr, surfaceRequest(http.MethodGet, "/v1/admin/setup/version-preview?policy=pinned&version=47.4.2&bedrock=yes", ""))
+	if rr.Code != http.StatusOK || !called {
+		t.Fatalf("preview: %d %s", rr.Code, rr.Body.String())
+	}
+	var status adminVersionStatus
+	if err := json.Unmarshal(rr.Body.Bytes(), &status); err != nil || status.CandidateChannel != "ALPHA" ||
+		!status.ManagedCrossplayAvailable || !status.CrossplayEnabled || status.CrossplayCompatible || status.CrossplaySupportedVersion == nil || *status.CrossplaySupportedVersion != "47.2" {
 		t.Fatalf("preview: %d %s", rr.Code, rr.Body.String())
 	}
 }

@@ -139,7 +139,7 @@ const versionInput = {...node(), value: "", dataset: {}};
 const context = {document: {createElement: node}, preview, next, form, versionInput, Option: function(text, value) {Object.assign(this, {text,value});}};
 vm.createContext(context);
 vm.runInContext(source + "globalThis.render = show;", context);
-const status = {selected_candidate: "26.3", candidate_channel: "TESTING", crossplay_enabled: false, leaf_versions: [{game:"26.3",channel:"TESTING"}]};
+const status = {selected_candidate: "26.3", candidate_channel: "TESTING", managed_crossplay_available: true, crossplay_enabled: false, leaf_versions: [{game:"26.3",channel:"TESTING"}]};
 context.render(status, "latest");
 assert.equal(versionInput.children[1].text, "26.3 - Testing / early development");
 assert.equal(next.disabled, false);

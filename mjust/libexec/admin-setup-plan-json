@@ -368,31 +368,16 @@ else
 fi
 
 requested_bedrock_enabled="${bedrock_enabled}"
-geyser_supported_version=''
-bedrock_compatibility_version=''
-if [[ ${requested_bedrock_enabled} == true && ${MINECRAFT_SERVER_TYPE} != leaf ]]; then
-    geyser_supported_version="$(resolve_geyser_supported_java_version || true)"
-fi
-
+selected_version="${version}"
 case "${version_policy}" in
     recommended)
-        if [[ ${MINECRAFT_SERVER_TYPE} != leaf && ${requested_bedrock_enabled} == true ]]; then
-            if [[ -z ${geyser_supported_version} ]] || ! server_version_recommended_available "${geyser_supported_version}"; then
-                json_error 'Could not confirm a stable Minecraft version for Bedrock players.' upstream_unavailable
-                exit 0
-            fi
-            version="${geyser_supported_version}"
-        else
-            version="$(resolve_recommended_server_version || true)"
-        fi
+        version="$(resolve_recommended_server_version || true)"
         [[ -n ${version} ]] || { json_error 'Could not resolve a recommended Minecraft server version.' upstream_unavailable; exit 0; }
-        bedrock_compatibility_version="${version}"
         resolved_version_policy=recommended
         ;;
     latest)
         version="$(resolve_latest_server_version || true)"
         [[ -n ${version} ]] || { json_error 'Could not resolve the newest available Minecraft server version.' upstream_unavailable; exit 0; }
-        bedrock_compatibility_version="${version}"
         resolved_version_policy=latest
         ;;
     pinned)
@@ -404,7 +389,6 @@ case "${version_policy}" in
             json_error 'The selected server software did not confirm a released/usable build for that Minecraft version.' invalid_minecraft
             exit 0
         fi
-        bedrock_compatibility_version="${version}"
         resolved_version_policy=pinned
         ;;
     *)
@@ -413,23 +397,19 @@ case "${version_policy}" in
         ;;
 esac
 
-if [[ ${requested_bedrock_enabled} == true && ( ${MINECRAFT_SERVER_TYPE} == fabric || ${MINECRAFT_SERVER_TYPE} == neoforge ) ]]; then
-    source /usr/libexec/justvoxel/mjust/managed-crossplay.sh
-    if ! jv_crossplay_mod_compatible "${MINECRAFT_SERVER_TYPE}" "${version}" "${MINECRAFT_LOADER_VERSION}"; then
-        json_error 'Current platform cross-play compatibility could not be proven for the exact Minecraft and loader versions.' bedrock_version_unsupported
+if [[ ${requested_bedrock_enabled} == true ]]; then
+    if [[ -n ${selected_version} && ${selected_version} != "${version}" ]]; then
+        json_error 'The resolved Minecraft release does not match the selected release.' bedrock_version_unsupported
         exit 0
     fi
-fi
-
-if [[ ${requested_bedrock_enabled} == true ]]; then
-    if [[ ${MINECRAFT_SERVER_TYPE} == leaf ]]; then
-        geyser_supported_version="$(resolve_geyser_supported_java_version || true)"
-    fi
-    if [[ -z ${geyser_supported_version} || -z ${bedrock_compatibility_version} ]]; then
+    geyser_supported_version="$(resolve_geyser_supported_java_version || true)"
+    if [[ -z ${geyser_supported_version} ]]; then
         json_error 'Bedrock compatibility could not be confirmed. Try again, or turn off Bedrock to continue.' upstream_unavailable
         exit 0
-    elif ! server_crossplay_version_compatible "${bedrock_compatibility_version}" "${geyser_supported_version}"; then
-        json_error "Minecraft ${bedrock_compatibility_version} is not currently compatible with Bedrock cross-play. Bedrock supports ${geyser_supported_version}. Choose Recommended, choose a compatible Specific version, or turn off Bedrock to continue." bedrock_version_unsupported
+    fi
+    source /usr/libexec/justvoxel/mjust/managed-crossplay.sh
+    if ! jv_setup_crossplay_compatible "${MINECRAFT_SERVER_TYPE}" "${version}" "${MINECRAFT_LOADER_VERSION}" "${geyser_supported_version}"; then
+        json_error 'Managed cross-play compatibility could not be confirmed. Disable cross-play to continue with Java setup.' bedrock_version_unsupported
         exit 0
     fi
 fi

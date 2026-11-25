@@ -164,6 +164,40 @@ func TestVersionValidationPreservesDraftOnRefresh(t *testing.T) {
 	}
 }
 
+func TestCrossplayKeepsVerifiedReleaseForReview(t *testing.T) {
+	const game = "47.4.2"
+	for _, policy := range []string{"recommended", "latest"} {
+		t.Run(policy, func(t *testing.T) {
+			client := &setupPreviewClient{fakeDiscoveryAPI: setupWizardClient(), status: api.AdminVersionStatus{
+				SelectedCandidate: game, ManagedCrossplayAvailable: true, CrossplayCompatible: true,
+			}}
+			app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer setupDrafts.delete(app, "session-token")
+			startSetup(t, app)
+			_ = saveServerStep(t, app, validServerValues())
+			values := validConnectionValues()
+			values.Set("version_policy", policy)
+			values.Set("version", "")
+			values.Set("bedrock_enabled", "on")
+			rr := saveConnectionsStep(t, app, values)
+			if rr.Code != http.StatusSeeOther {
+				t.Fatalf("connections: %d %s", rr.Code, rr.Body.String())
+			}
+			draft, _ := setupDrafts.get(app, "session-token")
+			request, err := setupPlanRequestFromDraft(draft)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !request.Server.BedrockEnabled || request.Minecraft.VersionPolicy != policy || request.Minecraft.Version != game {
+				t.Fatalf("Review lost the checked selection: %+v", request.Minecraft)
+			}
+		})
+	}
+}
+
 func TestVersionPreviewUsesCurrentCrossplayWithoutChangingDraft(t *testing.T) {
 	client := &setupPreviewClient{fakeDiscoveryAPI: setupWizardClient(), status: api.AdminVersionStatus{SelectedCandidate: "1.21.8", CrossplayCompatible: true}}
 	app, err := New(client, Config{Version: "test", ManagementAPI: "v1"})

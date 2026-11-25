@@ -124,6 +124,7 @@
   "plugins.recovery.was_running": "작업 전에는 Minecraft가 실행 중이었지만 현재는 중지되어 있습니다.",
   "plugins.recovery.was_stopped": "작업 전에는 Minecraft가 중지되어 있었지만 현재는 실행 중입니다.",
   "plugins.recovery.players": "접속 중인 플레이어가 {count}명 있습니다. Minecraft를 중지하면 경고 후 접속이 끊깁니다.",
+  "setup.crossplay_supported_version": "크로스플레이 호환성이 확인된 버전: Minecraft {v0}.",
   "ui.00017020a2b9": "Minecraft 닫기",
   "ui.0014c7e7704f": "시스템 업데이트 상태를 불러오는 중…",
   "ui.001c794ce986": "실시간 콘솔 닫기",

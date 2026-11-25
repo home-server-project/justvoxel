@@ -124,6 +124,7 @@
   "plugins.recovery.was_running": "Minecraft lief vor diesem Vorgang, ist aber derzeit gestoppt.",
   "plugins.recovery.was_stopped": "Minecraft war vor diesem Vorgang gestoppt, läuft aber derzeit.",
   "plugins.recovery.players": "Spieler online ({count}). Beim Stoppen von Minecraft wird ihre Verbindung nach einer Warnung getrennt.",
+  "setup.crossplay_supported_version": "Für Cross-play bestätigte Version: Minecraft {v0}.",
   "ui.00017020a2b9": "Minecraft schließen",
   "ui.0014c7e7704f": "Status der Systemupdates wird geladen …",
   "ui.001c794ce986": "Live-Konsole schließen",

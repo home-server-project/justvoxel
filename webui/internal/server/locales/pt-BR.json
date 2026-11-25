@@ -124,6 +124,7 @@
   "plugins.recovery.was_running": "O Minecraft estava em execução antes dessa operação, mas está parado no momento.",
   "plugins.recovery.was_stopped": "O Minecraft estava parado antes dessa operação, mas está em execução no momento.",
   "plugins.recovery.players": "Jogadores online ({count}). Ao parar o Minecraft, eles serão desconectados após um aviso.",
+  "setup.crossplay_supported_version": "Versão verificada para jogo multiplataforma: Minecraft {v0}.",
   "ui.00017020a2b9": "Fechar o Minecraft",
   "ui.0014c7e7704f": "Carregando status da atualização do sistema…",
   "ui.001c794ce986": "Fechar console em tempo real",

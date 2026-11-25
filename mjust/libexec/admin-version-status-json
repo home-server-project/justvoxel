@@ -53,7 +53,7 @@ if [[ ${switch_preview} == yes ]]; then
     # that capability uses Java, without touching any installed executable.
     case "${target_type}" in paper|purpur|pufferfish|leaf|fabric|neoforge) ;; *) BEDROCK_ENABLED=no ;; esac
 fi
-validate_server_capabilities || exit 1
+if (( $# != 3 )) || [[ ${target_type} == bedrock ]]; then validate_server_capabilities || exit 1; fi
 software_changed=false
 [[ ${configured_type} == "${target_type}" ]] || software_changed=true
 channel_changed=false
@@ -102,55 +102,117 @@ if [[ ${target_type} == leaf ]]; then
     if [[ -z ${1:-} ]]; then leaf_version="${MINECRAFT_VERSION:-}"; fi
     leaf_release="$(leaf_select_release "${1:-${MINECRAFT_VERSION_MODE:-recommended}}" "${leaf_version}" <<< "${catalog}" || printf '{}')"
 fi
-# Setup returns an exact Java release and runtime.
-if (( $# == 3 )) && [[ ${target_type} != paper && ${target_type} != purpur && ${target_type} != vanilla ]]; then
-    runtime_policy="$1"
-    # Pufferfish publishes one verified recommendation.
-    case "${target_type}:${runtime_policy}" in
-        pufferfish:latest) runtime_policy=recommended ;;
+# Setup resolves the Java selection independently of the cross-play request.
+if (( $# == 3 )); then
+    policy="$1"
+    resolved='{}'
+    recommended=''
+    latest=''
+    latest_channel=''
+    case "${target_type}" in
+        paper|purpur|vanilla)
+            recommended="$(resolve_recommended_server_version || true)"
+            latest="$(resolve_latest_server_version || true)"
+            [[ -z ${latest} ]] || latest_channel="$(server_version_channel "${latest}" || true)"
+            candidate=''
+            case "${policy}" in
+                recommended) candidate="${recommended}" ;;
+                latest) candidate="${latest}" ;;
+                pinned) [[ $2 == LATEST ]] || candidate="$2" ;;
+            esac
+            channel=''
+            [[ -z ${candidate} ]] || channel="$(server_version_channel "${candidate}" || true)"
+            if [[ -n ${channel} ]]; then
+                resolved="$(jq -cn --arg game "${candidate}" --arg channel "${channel}" --arg image "${target_image_tag}" '{game:$game,channel:$channel,image:$image}')"
+            fi
+            ;;
+        leaf) resolved="${leaf_release}" ;;
+        *)
+            runtime_policy="${policy}"
+            # Pufferfish publishes one verified recommendation.
+            if [[ ${target_type}:${policy} == pufferfish:latest ]]; then runtime_policy=recommended; fi
+            resolved="$(resolve_setup_java_runtime "${target_type}" "${runtime_policy}" "$2" || printf '{}')"
+            ;;
     esac
-    if [[ ${target_type} == leaf ]]; then resolved="${leaf_release}"
-    else resolved="$(resolve_setup_java_runtime "${target_type}" "${runtime_policy}" "$2" || true)"; fi
-    [[ -n ${resolved} ]] || resolved='{}'
     candidate="$(jq -r '.game // empty' <<< "${resolved}")"
     loader="$(jq -r '.loader // empty' <<< "${resolved}")"
     image="$(jq -r '.image // empty' <<< "${resolved}")"
-    compatible=false
-    available=false
-    geyser=''
-    case "${target_type}" in
-        leaf) if [[ -n ${candidate} && $3 == yes ]]; then geyser="$(resolve_geyser_supported_java_version || true)"; fi ;;
-        spigot|pufferfish|fabric|neoforge) geyser="$(resolve_geyser_supported_java_version || true)" ;;
-    esac
+    channel="$(jq -r 'if .game then .channel // "RELEASE" else "" end' <<< "${resolved}")"
     reason="$(jq -r '.reason // empty' <<< "${resolved}")"
-    if [[ -n ${candidate} ]]; then
-        if [[ ${target_type} == spigot || ${target_type} == pufferfish || ${target_type} == leaf ]]; then
-            available=true
-            if [[ -n ${geyser} ]] && server_crossplay_version_compatible "${candidate}" "${geyser}"; then
-                compatible=true
-            elif [[ ${target_type} == leaf && $3 == yes && -n ${geyser} ]]; then
-                reason="Released cross-play supports Minecraft ${geyser}. The selected Minecraft ${candidate} is not compatible."
-            fi
-        elif [[ ${target_type} == fabric || ${target_type} == neoforge ]]; then
-            # A Java preview must never download managed cross-play artifacts.
-            # Only an explicit cross-play request proves that independent capability.
-            if [[ $3 == yes ]]; then
-                if [[ -z ${geyser} ]]; then
-                    reason='Current managed cross-play Minecraft version could not be verified. Java setup is available.'
-                elif [[ ${candidate} != "${geyser}" ]]; then
-                    reason="Managed cross-play currently supports Minecraft ${geyser}. Selected Minecraft ${candidate} is available as Java-only."
-                elif jv_crossplay_mod_compatible "${target_type}" "${candidate}" "${loader}"; then
-                    available=true
-                    compatible=true
-                else reason='Managed cross-play compatibility could not be proven for this exact Minecraft and loader version. Java setup is available.'; fi
-            fi
-        fi
-    elif [[ ${target_type} == leaf && $1 == recommended ]]; then
+    if [[ -z ${candidate} && ${target_type} == leaf && ${policy} == recommended ]]; then
         reason='No production Leaf release with a compatible runtime could be verified.'
-    else reason='An exact stable Minecraft release and compatible runtime could not be verified. Try again or choose a supported Specific version.'; fi
-    jq -n --argjson leaf_versions "${leaf_versions}" --argjson resolved "${resolved}" --arg server_type "${target_type}" --arg candidate "${candidate}" --arg loader "${loader}" --arg image "${image}" --arg geyser "${geyser}" --arg reason "${reason}" \
-        --argjson compatible "${compatible}" --argjson available "${available}" --argjson enabled "$([[ $3 == yes ]] && printf true || printf false)" \
-        '{server_type:$server_type,selected_candidate:$candidate,candidate_channel:(if $server_type == "leaf" then $resolved.channel // "" else "RELEASE" end),leaf_versions:$leaf_versions,loader_version:$loader,image_tag:$image,geyser_supported_version:$geyser,reason:$reason,server_supported:($candidate != ""),managed_crossplay_available:$available,crossplay_compatible:$compatible,crossplay_enabled:$enabled} + ($resolved | with_entries(select(.key == "pufferfish_build")))'
+    fi
+
+    managed=false
+    enabled=false
+    compatible=false
+    supported_version=''
+    geyser=''
+    [[ $3 != yes ]] || enabled=true
+    if server_supports_managed_crossplay "${target_type}"; then
+        managed=true
+        if [[ ${enabled} == true ]]; then
+            geyser="$(resolve_geyser_supported_java_version || true)"
+        fi
+    fi
+    if [[ -n ${geyser} ]] && jv_setup_crossplay_compatible "${target_type}" "${candidate}" "${loader}" "${geyser}"; then
+        compatible=true
+    elif [[ -n ${geyser} ]]; then
+        # Prefer the software's own recommendations. The Geyser target is
+        # useful guidance only after a publisher resolver verifies that runtime.
+        case "${target_type}" in
+            leaf)
+                suggestions="$(jq -r --arg selected "${candidate}" '
+                    (map(select(.channel == "PRODUCTION"))[:1] + .)
+                    | map(select(.game != $selected and .channel != "UNSUPPORTED"))
+                    | .[].game' <<< "${catalog}")"
+                ;;
+            paper|purpur) suggestions="$(printf '%s\n' "${recommended}" "${latest}" "${geyser}")" ;;
+            spigot|pufferfish)
+                if [[ ${policy} == pinned ]]; then
+                    recommended="$(resolve_setup_java_runtime "${target_type}" recommended '' | jq -r .game || true)"
+                fi
+                suggestions="$(printf '%s\n' "${recommended}" "${geyser}")"
+                ;;
+            *) suggestions="${geyser}" ;;
+        esac
+        while IFS= read -r suggestion; do
+            [[ -n ${suggestion} && ${suggestion} != "${candidate}" ]] || continue
+            suggestion_loader=''
+            case "${target_type}" in
+                leaf) ;; # Already verified by the Leaf catalog.
+                paper|purpur) server_version_available "${suggestion}" || continue ;;
+                *)
+                    alternative="$(resolve_setup_java_runtime "${target_type}" pinned "${suggestion}" || true)"
+                    [[ -n ${alternative} ]] || continue
+                    [[ $(jq -r '.game // empty' <<< "${alternative}") == "${suggestion}" ]] || continue
+                    suggestion_loader="$(jq -r '.loader // empty' <<< "${alternative}")"
+                    ;;
+            esac
+            if jv_setup_crossplay_compatible "${target_type}" "${suggestion}" "${suggestion_loader}" "${geyser}"; then
+                supported_version="${suggestion}"
+                break
+            fi
+        done <<< "$(awk '!seen[$0]++' <<< "${suggestions}")"
+    fi
+    if [[ ${managed} == true && ${enabled} == true && ${compatible} == false && -n ${candidate} ]]; then
+        reason='Managed cross-play compatibility could not be confirmed. Disable cross-play to continue with Java setup.'
+    fi
+    jq -n --argjson resolved "${resolved}" --argjson leaf_versions "${leaf_versions}" --arg server_type "${target_type}" \
+        --arg software "$(server_software_display_name "${target_type}")" \
+        --arg viaversion_state "$(server_supports_viaversion "${target_type}" && printf managed_automatically || printf not_applicable)" \
+        --arg configured_type "${configured_type}" --arg configured_tag "${configured_image_tag}" --arg configured_version "${MINECRAFT_VERSION:-}" \
+        --arg candidate "${candidate}" --arg channel "${channel}" --arg loader "${loader}" --arg image "${image}" \
+        --arg recommended "${recommended}" --arg latest "${latest}" --arg latest_channel "${latest_channel}" --arg policy "${policy}" \
+        --arg geyser "${geyser}" --arg supported_version "${supported_version}" --arg reason "${reason}" \
+        --argjson compatible "${compatible}" --argjson managed "${managed}" --argjson enabled "${enabled}" \
+        '{server_type:$server_type,server_software:$software,selected_candidate:$candidate,candidate_channel:$channel,leaf_versions:$leaf_versions,loader_version:$loader,image_tag:$image,
+          configured_server_type:$configured_type,configured_image_tag:$configured_tag,configured_version:$configured_version,viaversion_state:$viaversion_state,
+          recommended:$recommended,available:$latest,available_channel:$latest_channel,policy:$policy,installed:"",plan_fingerprint:"",
+          stack_state:"not_applicable",minecraft_state:"not_applicable",image_state:"not_applicable",geyser_state:"not_applicable",floodgate_state:"not_applicable",update_available:false,
+          geyser_supported_version:$geyser,crossplay_supported_version:$supported_version,reason:$reason,server_supported:($candidate != ""),
+          paper_supported:($candidate != "" and $server_type == "paper"),managed_crossplay_available:$managed,crossplay_compatible:$compatible,crossplay_enabled:$enabled}
+          + ($resolved | with_entries(select(.key == "pufferfish_build")))'
     exit 0
 fi
 if [[ ${target_type} == leaf ]]; then
@@ -170,14 +232,10 @@ bedrock="${3:-${BEDROCK_ENABLED:-no}}"
 candidate_channel=''
 server_supported=false
 geyser_version=''
-# Setup discovery is informational even when cross-play is off.
-if (( $# == 3 )) && [[ ${target_type} == paper || ${target_type} == purpur ]]; then
-    geyser_version="$(resolve_geyser_supported_java_version || true)"
-fi
 crossplay_compatible=false
 reason=''
 if [[ ${bedrock} == yes ]]; then
-    if (( $# != 3 )); then geyser_version="$(resolve_geyser_supported_java_version || true)"; fi
+    geyser_version="$(resolve_geyser_supported_java_version || true)"
     if [[ ${target_type} != leaf ]]; then
         if [[ -n ${geyser_version} ]] && server_version_recommended_available "${geyser_version}"; then
             recommended="${geyser_version}"
@@ -277,33 +335,25 @@ if (( $# != 3 )); then
         fi
     fi
 fi
-if (( $# == 3 )); then
-    stack_state=not_applicable
-    minecraft_state=not_applicable
-    image_state=not_applicable
-    geyser_state=not_applicable
-    floodgate_state=not_applicable
-else
-    minecraft_state=up_to_date
-    stack_state=up_to_date
-    if [[ -z ${installed} || -z ${candidate} || -z ${available} || ${image_state} == unavailable ||
-          ${geyser_state} == unavailable || ${floodgate_state} == unavailable ||
-          ( ${bedrock} == yes && ${crossplay_compatible} != true ) ]]; then
-        stack_state=unavailable
-        minecraft_state=unavailable
-    elif [[ ${channel_changed} == true || ${software_changed} == true || ${installed} != "${candidate}" || ${geyser_state} == updates_available ||
-            ${floodgate_state} == updates_available || ${image_state} == updates_available ]]; then
-        stack_state=updates_available
-        [[ ${installed} == "${candidate}" ]] || minecraft_state=updates_available
-    elif [[ ${target_type} != leaf && ${bedrock} == yes && ${available} != "${recommended}" && ${policy} == recommended ]]; then
-        stack_state=waiting_for_compatibility
-    fi
-    if [[ ${stack_state} == updates_available && ${reason} == *'No action is needed.' ]]; then
-        reason="Minecraft ${available} is waiting for released cross-play support. Compatible server updates are ready to review."
-    fi
-    if [[ ${stack_state} == unavailable && ( -z ${reason} || ${reason} == *'No action is needed.' ) ]]; then
-        reason='Server update information could not be verified. Try again later.'
-    fi
+minecraft_state=up_to_date
+stack_state=up_to_date
+if [[ -z ${installed} || -z ${candidate} || -z ${available} || ${image_state} == unavailable ||
+      ${geyser_state} == unavailable || ${floodgate_state} == unavailable ||
+      ( ${bedrock} == yes && ${crossplay_compatible} != true ) ]]; then
+    stack_state=unavailable
+    minecraft_state=unavailable
+elif [[ ${channel_changed} == true || ${software_changed} == true || ${installed} != "${candidate}" || ${geyser_state} == updates_available ||
+        ${floodgate_state} == updates_available || ${image_state} == updates_available ]]; then
+    stack_state=updates_available
+    [[ ${installed} == "${candidate}" ]] || minecraft_state=updates_available
+elif [[ ${target_type} != leaf && ${bedrock} == yes && ${available} != "${recommended}" && ${policy} == recommended ]]; then
+    stack_state=waiting_for_compatibility
+fi
+if [[ ${stack_state} == updates_available && ${reason} == *'No action is needed.' ]]; then
+    reason="Minecraft ${available} is waiting for released cross-play support. Compatible server updates are ready to review."
+fi
+if [[ ${stack_state} == unavailable && ( -z ${reason} || ${reason} == *'No action is needed.' ) ]]; then
+    reason='Server update information could not be verified. Try again later.'
 fi
 if (( $# != 3 )) && [[ ${stack_state} == up_to_date ]] &&
     [[ ${policy} != "${MINECRAFT_VERSION_MODE:-pinned}" || ( ${policy} == pinned && ${candidate} != "${MINECRAFT_VERSION:-}" ) ]]; then

@@ -491,7 +491,7 @@ func (a *App) setupWizardSaveConnections(w http.ResponseWriter, r *http.Request)
 		a.renderSetupWizard(w, identity, draft, csrfFromRequest(r), err.Error())
 		return
 	}
-	if draft.Minecraft.VersionPolicy != "pinned" {
+	if draft.Minecraft.VersionPolicy != "pinned" && (!draft.Server.BedrockEnabled || setupNeedsExactRuntime(draft.Minecraft.ServerType)) {
 		draft.Minecraft.Version = ""
 	}
 	draft.Minecraft.VersionComplete = true

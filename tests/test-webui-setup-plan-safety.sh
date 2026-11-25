@@ -85,13 +85,11 @@ if bedrock_crossplay_supports_version 26.3 26.2; then
 fi
 
 grep -Fq 'resolve_geyser_supported_java_version' "${helper}"
-grep -Fq 'version="${geyser_supported_version}"' "${helper}"
 if grep -Fq 'bedrock_enabled=false' "${helper}"; then
     echo 'Setup planner must not silently turn off Bedrock.' >&2
     exit 1
 fi
-grep -Fq 'server_crossplay_version_compatible "${bedrock_compatibility_version}" "${geyser_supported_version}"' "${helper}"
-grep -Fq 'json_error "Minecraft ${bedrock_compatibility_version} is not currently compatible' "${helper}"
+grep -Fq 'jv_setup_crossplay_compatible "${MINECRAFT_SERVER_TYPE}" "${version}" "${MINECRAFT_LOADER_VERSION}" "${geyser_supported_version}"' "${helper}"
 grep -Fq 'bedrock_version_unsupported' "${helper}"
 
 # shellcheck disable=SC1091

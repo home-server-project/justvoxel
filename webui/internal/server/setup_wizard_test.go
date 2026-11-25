@@ -769,8 +769,8 @@ func TestSetupVersionPreviewPresentationContract(t *testing.T) {
 		`"setup-version-explanation"`, `const summary = make("div", "notice " + (status.selected_candidate ? "success" : "warning") + " setup-version-panel", "");`,
 		`status.crossplay_compatible ? "success" : "warning"`,
 		`preview.replaceChildren(summary);`,
-		`Bedrock cross-play is supported for Minecraft`, `Selected Minecraft ${selected} is available as Java-only.`,
-		`Managed cross-play currently supports Minecraft ${supported}`,
+		`Bedrock cross-play is supported for Minecraft`, `Verified Cross-play version: Minecraft ${supported}`,
+		`Managed cross-play compatibility could not be confirmed.`,
 		`next.disabled = !status.selected_candidate || (crossplayEnabled && !status.crossplay_compatible);`,
 		`if (policy === "pinned" && !version && form.dataset.serverType !== "leaf")`,
 	} {

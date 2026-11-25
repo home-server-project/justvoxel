@@ -124,6 +124,7 @@
   "plugins.recovery.was_running": "Minecraft 在此操作前正在執行，目前已停止。",
   "plugins.recovery.was_stopped": "Minecraft 在此操作前已停止，目前正在執行。",
   "plugins.recovery.players": "線上玩家（{count}）。停止 Minecraft 時，系統會先通知玩家，再中斷連線。",
+  "setup.crossplay_supported_version": "已驗證支援跨平台遊玩的版本：Minecraft {v0}。",
   "ui.00017020a2b9": "關閉 Minecraft",
   "ui.0014c7e7704f": "正在載入系統更新狀態…",
   "ui.001c794ce986": "關閉即時主控台",

@@ -124,6 +124,7 @@
   "plugins.recovery.was_running": "Minecraft era in esecuzione prima di questa operazione e ora è fermo.",
   "plugins.recovery.was_stopped": "Minecraft era fermo prima di questa operazione e ora è in esecuzione.",
   "plugins.recovery.players": "Giocatori online ({count}). Se arresti Minecraft, riceveranno un avviso prima di essere disconnessi.",
+  "setup.crossplay_supported_version": "Versione verificata per il gioco multipiattaforma: Minecraft {v0}.",
   "ui.00017020a2b9": "Chiudi Minecraft",
   "ui.0014c7e7704f": "Caricamento dello stato degli aggiornamenti di sistema…",
   "ui.001c794ce986": "Chiudi console in tempo reale",

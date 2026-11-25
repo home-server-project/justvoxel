@@ -124,6 +124,7 @@
   "plugins.recovery.was_running": "Minecraft kørte før denne handling, men er nu stoppet.",
   "plugins.recovery.was_stopped": "Minecraft var stoppet før denne handling, men kører nu.",
   "plugins.recovery.players": "Spillere online ({count}). Hvis du stopper Minecraft, får de en advarsel, før forbindelsen afbrydes.",
+  "setup.crossplay_supported_version": "Verificeret version til Cross-play: Minecraft {v0}.",
   "ui.00017020a2b9": "Luk Minecraft",
   "ui.0014c7e7704f": "Indlæser status for systemopdatering…",
   "ui.001c794ce986": "Luk livekonsollen",

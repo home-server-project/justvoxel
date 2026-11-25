@@ -422,13 +422,53 @@ geyser_supported_java_version_from_json() {
 
 resolve_geyser_supported_java_version() {
     local metadata
-    metadata="$(curl -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" "${JV_GEYSER_VERSIONS_URL}" 2>/dev/null)" || return 1
+    metadata="$(curl --connect-timeout 3 --max-time 8 -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" "${JV_GEYSER_VERSIONS_URL}" 2>/dev/null)" || return 1
     geyser_supported_java_version_from_json "${metadata}"
 }
 
 bedrock_crossplay_supports_version() {
     local minecraft_version="$1" geyser_java_version="$2"
     [[ -n ${minecraft_version} && -n ${geyser_java_version} && ${minecraft_version} == "${geyser_java_version}" ]]
+}
+
+jv_crossplay_viaversion_supports() {
+    local game="$1" geyser="$2" metadata project=P1OZGk5p
+    [[ ${game} =~ ^[0-9]+[.][0-9]+([.][0-9]+)?$ && ${geyser} =~ ^[0-9]+[.][0-9]+([.][0-9]+)?$ ]] || return 1
+    metadata="$(curl --connect-timeout 3 --max-time 6 --max-filesize 2097152 -fsS --get \
+        -H "User-Agent: ${JV_PAPER_USER_AGENT}" \
+        --data-urlencode 'loaders=["paper"]' --data-urlencode "game_versions=[\"${game}\"]" \
+        --data-urlencode 'include_changelog=false' \
+        "https://api.modrinth.com/v2/project/${project}/version" 2>/dev/null)" || return 1
+    jq -es --arg project "${project}" --arg game "${game}" --arg geyser "${geyser}" '
+        def strings: type == "array" and all(.[]; type == "string");
+        length == 1 and (.[0] | type == "array" and
+            all(.[]; type == "object" and .project_id == $project and
+                (.status | type == "string") and (.version_type | type == "string") and
+                (.game_versions | strings) and (.loaders | strings) and (.files | type == "array")) and
+            any(.[]; .status == "listed" and .version_type == "release" and
+                (.game_versions | index($game) != null and index($geyser) != null) and
+                (.loaders | index("paper") != null) and
+                any(.files[]; type == "object" and .primary == true and
+                    (.filename | type == "string" and endswith(".jar")) and
+                    (.size | type == "number" and . > 0) and
+                    (.url | type == "string" and startswith("https://cdn.modrinth.com/data/" + $project + "/")))))
+    ' <<< "${metadata}" >/dev/null 2>&1
+}
+
+# Setup verifies the chosen runtime against one current Geyser target. Keep
+# the installed-instance Version/Switch update policy independent.
+jv_setup_crossplay_compatible() {
+    local software="$1" game="$2" loader="$3" geyser="$4"
+    [[ -n ${game} && -n ${geyser} ]] && server_supports_managed_crossplay "${software}" || return 1
+    if server_supports_viaversion "${software}"; then
+        bedrock_crossplay_supports_version "${game}" "${geyser}" && return 0
+        [[ ${game} =~ ^[0-9]+[.][0-9]+([.][0-9]+)?$ ]] || return 1
+        [[ $(printf '%s\n' "${game}" "${geyser}" | sort -V | tail -n1) == "${geyser}" ]] &&
+            jv_crossplay_viaversion_supports "${game}" "${geyser}"
+    else
+        bedrock_crossplay_supports_version "${game}" "${geyser}" && [[ -n ${loader} ]] &&
+            jv_crossplay_mod_compatible "${software}" "${game}" "${loader}"
+    fi
 }
 
 server_crossplay_version_compatible() {

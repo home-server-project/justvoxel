@@ -36,16 +36,18 @@ separately; disabling it permits a valid Java server to continue. Fabric and
 NeoForge require exact platform compatibility; Forge, Quilt and Vanilla are Java
 only. Existing storage, backup and port safety remain authoritative.
 
-Advanced Setup shows the current managed cross-play Minecraft version even with
-cross-play off for other Java software. Leaf checks compatibility when cross-play
-is enabled. Other valid Minecraft selections remain available as Java-only;
-Latest and Specific are never silently downgraded. Existing Recommended automatic
-cross-play fallback remains unchanged. If current Geyser metadata cannot be
-verified, Java-only setup remains available. Fabric and NeoForge previews resolve
-the exact Java runtime without downloading cross-play artifacts. Enabling their
-cross-play toggle verifies the exact runtime and managed artifacts; failed proof
-keeps the toggle enabled and checked and blocks Continue until compatibility is
-proven or the user disables cross-play.
+Advanced Setup makes Cross-play available for a valid Java selection on software
+with a managed Cross-play path. Enabling it checks the selected release against
+the current published Geyser Java target. Paper, Purpur, Pufferfish, Leaf, and
+Spigot can use the current target directly. Older releases can use managed
+ViaVersion when Modrinth lists a usable Paper-compatible ViaVersion release
+covering both the selected Minecraft version and the current Geyser target.
+
+Fabric and NeoForge are verified independently for the exact Minecraft and
+loader versions against the managed mod artifacts. If verification fails, Setup
+shows a verified compatible release for the chosen software when one is
+available. Users can choose that release or turn Cross-play off to continue
+with their original Java selection.
 
 | Software | Plugins & Mods workspace | Managed Bedrock cross-play |
 | --- | --- | --- |

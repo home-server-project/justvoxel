@@ -124,6 +124,7 @@
   "plugins.recovery.was_running": "この操作の前に稼働していた Minecraft が、現在は停止しています。",
   "plugins.recovery.was_stopped": "この操作の前に停止していた Minecraft が、現在は稼働しています。",
   "plugins.recovery.players": "オンラインのプレイヤー（{count} 人）。Minecraft を停止すると、警告の表示後にプレイヤーの接続が切断されます。",
+  "setup.crossplay_supported_version": "クロスプレイ対応を確認したバージョン：Minecraft {v0}。",
   "ui.00017020a2b9": "Minecraft を閉じる",
   "ui.0014c7e7704f": "システム更新の状況を読み込み中…",
   "ui.001c794ce986": "ライブコンソールを閉じる",

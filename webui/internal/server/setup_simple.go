@@ -145,6 +145,9 @@ func (a *App) resolveSetupRuntime(ctx context.Context, session string, draft *se
 	draft.Server.BedrockEnabled = bedrock
 	if automaticCrossplay || setupNeedsExactRuntime(draft.Minecraft.ServerType) {
 		draft.Minecraft.ResolvedVersion = status.SelectedCandidate
+	} else if bedrock {
+		// Review verifies the same release while preserving its update policy.
+		draft.Minecraft.Version = status.SelectedCandidate
 	}
 	return nil
 }

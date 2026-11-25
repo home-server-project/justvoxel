@@ -49,6 +49,8 @@ type adminVersionStatus struct {
 	CrossplayCompatible       bool   `json:"crossplay_compatible"`
 	Reason                    string `json:"reason"`
 
+	CrossplaySupportedVersion *string `json:"crossplay_supported_version,omitempty"`
+
 	LeafVersions []struct {
 		Game    string `json:"game"`
 		Channel string `json:"channel"`

@@ -174,15 +174,14 @@ if (versionPolicy && versionInput && specificVersionField) {
       if (!status.selected_candidate && policy === "recommended") reason = jvT("leaf.no_production");
       if (["TESTING", "UNSUPPORTED"].includes(status.candidate_channel)) reason = channelLabel(status.candidate_channel);
     }
-    const javaOnly = ["vanilla", "forge", "quilt"].includes(software);
-    const incompatible = !!status.selected_candidate && status.managed_crossplay_available === true && status.crossplay_compatible === false;
-    const crossplayEnabled = status.crossplay_enabled && !javaOnly && (!incompatible || software === "leaf");
+    const managed = status.managed_crossplay_available === true;
+    const crossplayEnabled = managed && status.crossplay_enabled === true;
     if (toggle) {
-      toggle.disabled = javaOnly || (incompatible && software !== "leaf");
-      if (toggle.disabled) toggle.checked = false;
+      toggle.disabled = !managed || (!status.selected_candidate && !crossplayEnabled);
+      toggle.checked = crossplayEnabled;
     }
     const summary = make("div", "notice " + (status.selected_candidate ? "success" : "warning") + " setup-version-panel", "");
-    summary.append(make("span", "setup-version-kicker", policy === "recommended" ? "Recommended" : policy === "latest" ? jvT("ui.8730d3c2022a") : jvT("ui.0b85c4d8a4ba")));
+    summary.append(make("span", "setup-version-kicker", policy === "recommended" ? jvT("ui.d70604e84304") : policy === "latest" ? jvT("ui.8730d3c2022a") : jvT("ui.0b85c4d8a4ba")));
     if (status.selected_candidate) {
       summary.append(make("strong", "setup-version-candidate", status.selected_candidate));
       summary.append(make("span", "setup-version-note", jvT("ui.f8105739960e", {v0: (channelLabel(status.candidate_channel))})));
@@ -194,30 +193,20 @@ if (versionPolicy && versionInput && specificVersionField) {
       preview.append(make("div", "notice warning setup-version-panel setup-version-explanation", reason));
     }
     const compatibility = make("div", "notice " + (!crossplayEnabled || status.crossplay_compatible ? "success" : "warning") + " setup-version-compatibility", "");
-    const supported = status.geyser_supported_version;
     const selected = status.selected_candidate;
-    let message;
-    if (javaOnly) {
-      message = jvT("ui.869dd17f477a");
+    const supported = status.crossplay_supported_version;
+    if (!managed) {
+      compatibility.append(make("p", "", jvT("ui.869dd17f477a")));
     } else if (crossplayEnabled && status.crossplay_compatible) {
-      message = jvT("ui.a4582db875ce", {v0: (selected)});
-    } else if (software === "leaf" && !status.crossplay_enabled && selected) {
-      message = jvT("ui.8e590792a1f3").trim();
-    } else if (!supported) {
-      message = jvT("ui.a8522a0e572f");
+      compatibility.append(make("p", "", jvT("ui.a4582db875ce", {v0: (selected)})));
+    } else if (crossplayEnabled) {
+      compatibility.append(make("p", "", jvT("ui.b3f2d3d83df9")));
+      if (supported) compatibility.append(make("p", "", jvT("setup.crossplay_supported_version", {v0: (supported)})));
+    } else if (selected) {
+      compatibility.append(make("p", "", jvT("ui.8e590792a1f3").trim()));
     } else {
-      message = jvT("ui.463ab0c37dc9", {v0: (supported)});
-      if (selected && selected !== supported) {
-        message += jvT("ui.371159f2be05", {v0: (selected)});
-      } else if (!crossplayEnabled) {
-        const runtime = software === "fabric" ? "Fabric" : software === "neoforge" ? "NeoForge" : "";
-        message += runtime ? jvT("ui.d50bb83fdfbd", {v0: (runtime)}) : jvT("ui.8e590792a1f3");
-      } else {
-        message += " " + (reason || jvT("ui.3a1f60bff938"));
-      }
+      compatibility.append(make("p", "", jvT("ui.921968d62cc1")));
     }
-    compatibility.append(make("p", "", message));
-    if (crossplayEnabled && !status.crossplay_compatible) compatibility.append(make("p", "", jvT("ui.c144eefdf05c")));
     preview.append(compatibility);
     next.disabled = !status.selected_candidate || (crossplayEnabled && !status.crossplay_compatible);
   };

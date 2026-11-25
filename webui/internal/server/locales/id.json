@@ -124,6 +124,7 @@
   "plugins.recovery.was_running": "Minecraft berjalan sebelum operasi ini, tetapi saat ini berhenti.",
   "plugins.recovery.was_stopped": "Minecraft berhenti sebelum operasi ini, tetapi saat ini berjalan.",
   "plugins.recovery.players": "Pemain online ({count}). Menghentikan Minecraft akan memutus koneksi mereka setelah peringatan.",
+  "setup.crossplay_supported_version": "Versi yang terverifikasi untuk lintas platform: Minecraft {v0}.",
   "ui.00017020a2b9": "Tutup Minecraft",
   "ui.0014c7e7704f": "Memuat status pembaruan sistem…",
   "ui.001c794ce986": "Tutup Konsol Langsung",

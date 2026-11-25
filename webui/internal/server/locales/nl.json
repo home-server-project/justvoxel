@@ -124,6 +124,7 @@
   "plugins.recovery.was_running": "Minecraft draaide vóór deze bewerking, maar staat nu stil.",
   "plugins.recovery.was_stopped": "Minecraft was vóór deze bewerking gestopt, maar draait nu.",
   "plugins.recovery.players": "Spelers online ({count}). Als je Minecraft stopt, worden ze na een waarschuwing losgekoppeld.",
+  "setup.crossplay_supported_version": "Geverifieerde versie voor cross-play: Minecraft {v0}.",
   "ui.00017020a2b9": "Minecraft sluiten",
   "ui.0014c7e7704f": "Status van systeemupdates laden…",
   "ui.001c794ce986": "Liveconsole sluiten",

@@ -124,6 +124,7 @@
   "plugins.recovery.was_running": "До цієї операції Minecraft працював, а зараз його зупинено.",
   "plugins.recovery.was_stopped": "До цієї операції Minecraft був зупинений, а зараз працює.",
   "plugins.recovery.players": "Гравці онлайн ({count}). Після попередження їх буде від’єднано під час зупинки Minecraft.",
+  "setup.crossplay_supported_version": "Версія з підтвердженою підтримкою кросплатформної гри: Minecraft {v0}.",
   "ui.00017020a2b9": "Закрити Minecraft",
   "ui.0014c7e7704f": "Завантаження стану оновлення системи…",
   "ui.001c794ce986": "Закрити інтерактивну консоль",
