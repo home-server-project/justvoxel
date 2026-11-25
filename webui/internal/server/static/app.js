@@ -2584,11 +2584,11 @@ if (migrationOpen && migrationDialog) {
   const initialMigrationTab = migrationRequested ? migrationDestination.get("tab") : "";
   let currentTab = Object.hasOwn(tabURLs, initialMigrationTab) ? initialMigrationTab : "export";
   let currentURL = tabURLs[currentTab];
-  let loadSequence = 0;
   let migrationSourceSMBPassword = "";
   let migrationExportSMBPassword = "";
   let migrationLoadController = null;
   let migrationSubmitController = null;
+  let migrationBusyOwner = null;
 
   const updateMigrationLocation = (tab = "", operation = "") => {
     const destination = new URL(globalThis.justVoxelSelectedURL("/?workspace=migration", "migration"), window.location.href);
@@ -2600,7 +2600,8 @@ if (migrationOpen && migrationDialog) {
     }
   };
 
-  const setMigrationBusy = (message = "", kind = "busy") => {
+  const setMigrationBusy = (message = "", kind = "busy", owner = null) => {
+    migrationBusyOwner = owner;
     if (state) {
       state.textContent = message;
       state.classList.remove("is-busy", "is-error", "is-info");
@@ -2609,15 +2610,20 @@ if (migrationOpen && migrationDialog) {
     migrationDialog.classList.toggle("is-busy", Boolean(message) && kind === "busy");
   };
 
+  const clearMigrationBusy = (owner) => {
+    if (migrationBusyOwner === owner) setMigrationBusy("");
+  };
+
   const abortMigrationRequests = () => {
     migrationLoadController?.abort();
     migrationSubmitController?.abort();
     migrationLoadController = null;
     migrationSubmitController = null;
+    if (refreshButton) refreshButton.disabled = false;
     setMigrationBusy("");
   };
 
-  const requestMigrationSMBPassword = (purpose) => new Promise((resolve) => {
+  const requestMigrationSMBPassword = (purpose, signal) => new Promise((resolve) => {
     const dialog = document.createElement("dialog");
     dialog.className = "system-action-dialog";
     dialog.setAttribute("aria-label", jvT("ui.c144fd7c3b42"));
@@ -2652,13 +2658,16 @@ if (migrationOpen && migrationDialog) {
     initializeSharedWebUIControls(dialog);
 
     const finish = (value) => {
+      signal.removeEventListener("abort", abort);
       window.removeEventListener("justvoxel:server-selection-changed", detach);
       input.value = "";
       if (dialog.open) dialog.close();
       dialog.remove();
       resolve(value);
     };
+    const abort = () => finish(null);
     const detach = (event) => { if (event.detail?.workspace === "migration") finish(null); };
+    signal.addEventListener("abort", abort, { once: true });
     window.addEventListener("justvoxel:server-selection-changed", detach);
     cancel.addEventListener("click", () => finish(null), { once: true });
     dialog.addEventListener("cancel", (event) => {
@@ -2740,7 +2749,8 @@ if (migrationOpen && migrationDialog) {
     return shell.querySelector("[data-migration-workspace-root]");
   };
 
-  const handleMigrationAuth = async (response) => {
+  const handleMigrationAuth = async (response, isCurrent) => {
+    if (!isCurrent()) return true;
     if (response.redirected) {
       const target = new URL(response.url);
       if (target.pathname === "/login" || target.pathname === "/password") {
@@ -2754,6 +2764,7 @@ if (migrationOpen && migrationDialog) {
     }
     if (response.status === 403) {
       const message = await response.clone().text();
+      if (!isCurrent()) return true;
       if (jvC(message).toLowerCase().includes("password change")) {
         window.location.assign("/password");
         return true;
@@ -2801,6 +2812,8 @@ if (migrationOpen && migrationDialog) {
       }
     }
     content.replaceChildren(root);
+    const isCurrentRoot = () => migrationDialog.open && root.parentElement === content &&
+      selection === globalThis.justVoxelSelectionGeneration.migration;
 
     const attachFailedResetRecovery = async () => {
       if (!root.textContent.includes("Full Factory Reset")) return;
@@ -2813,9 +2826,9 @@ if (migrationOpen && migrationDialog) {
           headers: { Accept: "application/json" },
           cache: "no-store",
         });
-        if (await handleMigrationAuth(statusResponse) || !statusResponse.ok) return;
+        if (await handleMigrationAuth(statusResponse, isCurrentRoot) || !statusResponse.ok) return;
         const status = await statusResponse.json();
-        if (selection !== globalThis.justVoxelSelectionGeneration.migration) return;
+        if (!isCurrentRoot()) return;
         const operation = status?.operation;
         if (!operation || operation.operation_type !== "factory_reset" || operation.state !== "needs_attention") return;
 
@@ -2837,7 +2850,7 @@ if (migrationOpen && migrationDialog) {
 
         button.addEventListener("click", async () => {
           button.disabled = true;
-          setMigrationBusy(jvT("ui.5bf7125616a4"));
+          setMigrationBusy(jvT("ui.5bf7125616a4"), "busy", button);
           const body = new URLSearchParams({
             csrf,
             operation_id: operation.operation_id,
@@ -2854,16 +2867,18 @@ if (migrationOpen && migrationDialog) {
               body: body.toString(),
               cache: "no-store",
             });
-            if (await handleMigrationAuth(response)) return;
+            if (await handleMigrationAuth(response, isCurrentRoot)) return;
             const result = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(result.error || jvT("ui.7cfc47e3f260"));
-            if (selection !== globalThis.justVoxelSelectionGeneration.migration) return;
+            if (!isCurrentRoot()) return;
             setMigrationBusy(jvT("ui.ca7e73d1bf34"), "info");
             await loadMigration(tabURLs[currentTab]);
           } catch (error) {
-            if (selection !== globalThis.justVoxelSelectionGeneration.migration) return;
-            button.disabled = false;
+            if (error?.name === "AbortError" || !isCurrentRoot()) return;
             setMigrationBusy(error?.message || jvT("ui.7cfc47e3f260"), "error");
+          } finally {
+            clearMigrationBusy(button);
+            button.disabled = false;
           }
         });
       } catch (_) {
@@ -2879,13 +2894,14 @@ if (migrationOpen && migrationDialog) {
       if (action.origin !== window.location.origin || !action.pathname.startsWith("/workspace/migration")) return;
 
       event.preventDefault();
+      const submitter = event.submitter;
+      if (!isCurrentRoot() || submitter?.disabled) return;
       migrationSubmitController?.abort();
       const submitController = new AbortController();
       migrationSubmitController = submitController;
-      const submitter = event.submitter;
+      const isCurrentSubmit = () => migrationSubmitController === submitController && isCurrentRoot();
       if (submitter) submitter.disabled = true;
       const isReview = action.pathname.endsWith("/review");
-      setMigrationBusy(isReview ? jvT("ui.e0fd374cce36") : jvT("ui.e447c6e994b8"));
 
       try {
         const body = new URLSearchParams();
@@ -2894,13 +2910,8 @@ if (migrationOpen && migrationDialog) {
         const exportKind = body.get("kind") || "";
         if (sourceKind === "smb") {
           if (!migrationSourceSMBPassword) {
-            const password = await requestMigrationSMBPassword("import");
-            if (selection !== globalThis.justVoxelSelectionGeneration.migration) return;
-            if (password === null) {
-              if (submitter) submitter.disabled = false;
-              setMigrationBusy("");
-              return;
-            }
+            const password = await requestMigrationSMBPassword("import", submitController.signal);
+            if (password === null || !isCurrentSubmit()) return;
             migrationSourceSMBPassword = password;
           }
           body.set("source_smb_password", migrationSourceSMBPassword);
@@ -2909,21 +2920,17 @@ if (migrationOpen && migrationDialog) {
           body.delete("source_smb_password");
         }
 
+        setMigrationBusy(isReview ? jvT("ui.e0fd374cce36") : jvT("ui.e447c6e994b8"), "busy", submitController);
         if (exportKind === "smb" && action.pathname.endsWith("/export/apply")) {
           if (!migrationExportSMBPassword) {
-            const password = await requestMigrationSMBPassword("export");
-            if (selection !== globalThis.justVoxelSelectionGeneration.migration) return;
-            if (password === null) {
-              if (submitter) submitter.disabled = false;
-              setMigrationBusy("");
-              return;
-            }
+            const password = await requestMigrationSMBPassword("export", submitController.signal);
+            if (password === null || !isCurrentSubmit()) return;
             migrationExportSMBPassword = password;
           }
           body.set("smb_password", migrationExportSMBPassword);
         }
         form.querySelectorAll('input[name="source_smb_password"],input[name="smb_password"]').forEach((input) => { input.value = ""; });
-        if (selection !== globalThis.justVoxelSelectionGeneration.migration) return;
+        if (!isCurrentSubmit()) return;
         const migrationActionURL = globalThis.justVoxelSelectedURL(action.pathname + action.search, "migration");
         const sendMigration = () => fetch(migrationActionURL, {
           method: (form.method || "POST").toUpperCase(),
@@ -2939,12 +2946,11 @@ if (migrationOpen && migrationDialog) {
           signal: submitController.signal,
         });
         const response = await sendMigration();
-        if (selection !== globalThis.justVoxelSelectionGeneration.migration) return;
-        if (await handleMigrationAuth(response)) return;
+        if (await handleMigrationAuth(response, isCurrentSubmit) || !isCurrentSubmit()) return;
         if (response.status === 403) throw new Error(jvT("ui.2d3d0b30bde9"));
 
         const responseMarkup = await response.text();
-        if (selection !== globalThis.justVoxelSelectionGeneration.migration) return;
+        if (!isCurrentSubmit()) return;
         if (!response.ok && !responseMarkup.includes("data-migration-workspace-root")) {
           const detail = responseMarkup.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
           throw new Error(detail || jvT("ui.23d3fe85833f", {v0: (response.status)}));
@@ -2961,12 +2967,12 @@ if (migrationOpen && migrationDialog) {
           migrationSourceSMBPassword = "";
           migrationExportSMBPassword = "";
         }
-        setMigrationBusy("");
       } catch (error) {
-        if (error?.name === "AbortError" || selection !== globalThis.justVoxelSelectionGeneration.migration) return;
-        if (submitter && submitter.isConnected) submitter.disabled = false;
+        if (error?.name === "AbortError" || !isCurrentSubmit()) return;
         setMigrationBusy(error?.message || jvT("ui.db7aa31acc6c"), "error");
       } finally {
+        clearMigrationBusy(submitController);
+        if (submitter) submitter.disabled = false;
         if (migrationSubmitController === submitController) migrationSubmitController = null;
       }
     });
@@ -3023,15 +3029,18 @@ if (migrationOpen && migrationDialog) {
 
   const loadMigration = async (url = currentURL, preserveLocation = false) => {
     if (globalThis.justVoxelSelectionReady) await globalThis.justVoxelSelectionReady;
+    if (!migrationDialog.open) return;
     const selection = globalThis.justVoxelSelectionGeneration.migration;
-    const sequence = ++loadSequence;
     migrationLoadController?.abort();
     const loadController = new AbortController();
     migrationLoadController = loadController;
-    setMigrationBusy(jvT("ui.32b3e138ccff"));
+    const isCurrentLoad = () => migrationLoadController === loadController && migrationDialog.open &&
+      selection === globalThis.justVoxelSelectionGeneration.migration;
+    setMigrationBusy(jvT("ui.32b3e138ccff"), "busy", loadController);
     if (refreshButton) refreshButton.disabled = true;
     try {
       await ensureMigrationAssets();
+      if (!isCurrentLoad()) return;
       const response = await fetch(globalThis.justVoxelSelectedURL(url, "migration"), {
         method: "GET",
         credentials: "same-origin",
@@ -3040,8 +3049,7 @@ if (migrationOpen && migrationDialog) {
         redirect: "follow",
         signal: loadController.signal,
       });
-      if (sequence !== loadSequence || selection !== globalThis.justVoxelSelectionGeneration.migration) return;
-      if (await handleMigrationAuth(response)) return;
+      if (await handleMigrationAuth(response, isCurrentLoad) || !isCurrentLoad()) return;
       if (response.status === 403) throw new Error(jvT("ui.2d3d0b30bde9"));
       if (!response.ok) throw new Error(jvT("ui.9418a8c7b777"));
 
@@ -3051,33 +3059,38 @@ if (migrationOpen && migrationDialog) {
         return;
       }
       const markup = await response.text();
-      if (sequence !== loadSequence || selection !== globalThis.justVoxelSelectionGeneration.migration) return;
+      if (!isCurrentLoad()) return;
       renderMigrationMarkup(markup, finalURL.href, preserveLocation);
-      setMigrationBusy("");
     } catch (error) {
-      if (error?.name === "AbortError" || sequence !== loadSequence || selection !== globalThis.justVoxelSelectionGeneration.migration) return;
+      if (error?.name === "AbortError" || !isCurrentLoad()) return;
       if (content) content.replaceChildren();
       setMigrationBusy(error?.message || jvT("ui.9418a8c7b777"));
       state?.classList.remove("is-busy");
       migrationDialog.classList.remove("is-busy");
     } finally {
-      if (migrationLoadController === loadController) migrationLoadController = null;
-      if ((sequence === loadSequence && selection === globalThis.justVoxelSelectionGeneration.migration) && refreshButton) refreshButton.disabled = false;
+      clearMigrationBusy(loadController);
+      if (migrationLoadController === loadController) {
+        migrationLoadController = null;
+        if (refreshButton) refreshButton.disabled = false;
+      }
     }
   };
 
   const loadMigrationEntry = async () => {
     if (globalThis.justVoxelSelectionReady) await globalThis.justVoxelSelectionReady;
+    if (!migrationDialog.open) return;
     syncMigrationTabs();
     const selection = globalThis.justVoxelSelectionGeneration.migration;
-    const sequence = ++loadSequence;
     migrationLoadController?.abort();
     const loadController = new AbortController();
     migrationLoadController = loadController;
-    setMigrationBusy(jvT("ui.32b3e138ccff"));
+    const isCurrentLoad = () => migrationLoadController === loadController && migrationDialog.open &&
+      selection === globalThis.justVoxelSelectionGeneration.migration;
+    setMigrationBusy(jvT("ui.32b3e138ccff"), "busy", loadController);
     if (refreshButton) refreshButton.disabled = true;
     try {
       await ensureMigrationAssets();
+      if (!isCurrentLoad()) return;
       const response = await fetch(globalThis.justVoxelSelectedURL("/workspace/migration", "migration"), {
         method: "GET",
         credentials: "same-origin",
@@ -3086,22 +3099,19 @@ if (migrationOpen && migrationDialog) {
         redirect: "follow",
         signal: loadController.signal,
       });
-      if (sequence !== loadSequence || selection !== globalThis.justVoxelSelectionGeneration.migration) return;
-      if (await handleMigrationAuth(response)) return;
+      if (await handleMigrationAuth(response, isCurrentLoad) || !isCurrentLoad()) return;
       if (response.status === 403) throw new Error(jvT("ui.2d3d0b30bde9"));
       if (!response.ok) throw new Error(jvT("ui.9418a8c7b777"));
       const finalURL = new URL(response.url, window.location.href);
-      if (sequence !== loadSequence || selection !== globalThis.justVoxelSelectionGeneration.migration) return;
 
       if (finalURL.pathname !== "/workspace/migration") {
         const markup = await response.text();
-        if (sequence !== loadSequence || selection !== globalThis.justVoxelSelectionGeneration.migration) return;
+        if (!isCurrentLoad()) return;
         renderMigrationMarkup(markup, finalURL.href);
-        setMigrationBusy("");
         return;
       }
       const entryMarkup = await response.text();
-      if (sequence !== loadSequence || selection !== globalThis.justVoxelSelectionGeneration.migration) return;
+      if (!isCurrentLoad()) return;
       const entryRoot = extractMigrationRoot(entryMarkup);
       if (entryRoot) {
         syncMigrationRecoveryAvailability(entryRoot);
@@ -3114,21 +3124,25 @@ if (migrationOpen && migrationDialog) {
       }
       await loadMigration(tabURLs[currentTab]);
     } catch (error) {
-      if (error?.name === "AbortError" || sequence !== loadSequence || selection !== globalThis.justVoxelSelectionGeneration.migration) return;
+      if (error?.name === "AbortError" || !isCurrentLoad()) return;
       if (content) content.replaceChildren();
       setMigrationBusy(error?.message || jvT("ui.9418a8c7b777"));
       state?.classList.remove("is-busy");
       migrationDialog.classList.remove("is-busy");
     } finally {
-      if (migrationLoadController === loadController) migrationLoadController = null;
-      if ((sequence === loadSequence && selection === globalThis.justVoxelSelectionGeneration.migration) && refreshButton) refreshButton.disabled = false;
+      clearMigrationBusy(loadController);
+      if (migrationLoadController === loadController) {
+        migrationLoadController = null;
+        if (refreshButton) refreshButton.disabled = false;
+      }
     }
   };
 
   window.addEventListener("justvoxel:server-selection-changed", (event) => {
     if (event.detail?.workspace !== "migration") return;
-    ++loadSequence;
     migrationLoadController?.abort();
+    migrationLoadController = null;
+    if (refreshButton) refreshButton.disabled = false;
     // Do not abort an already submitted operation; only detach its presentation.
     migrationSubmitController = null;
     migrationSourceSMBPassword = "";

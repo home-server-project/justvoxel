@@ -191,8 +191,15 @@ func TestMigrationWorkspaceApplyRedirectRendersCanonicalProgress(t *testing.T) {
 	submission := js[submit : submit+click]
 	responseText := strings.Index(submission, `const responseMarkup = await response.text();`)
 	renderResponse := strings.Index(submission, `renderMigrationMarkup(responseMarkup, response.url || action.pathname);`)
-	if responseText < 0 || renderResponse <= responseText || !strings.Contains(submission[responseText:renderResponse], `if (selection !== globalThis.justVoxelSelectionGeneration.migration) return;`) {
+	if responseText < 0 || renderResponse <= responseText || !strings.Contains(submission[responseText:renderResponse], `if (!isCurrentSubmit()) return;`) {
 		t.Fatal("Migration submission must reject old-server responses before rendering canonical progress")
+	}
+	if !strings.Contains(submission[:responseText], `const isCurrentSubmit = () => migrationSubmitController === submitController && isCurrentRoot();`) {
+		t.Fatal("Migration submission guard must require the active submit controller and current root")
+	}
+	rootGuard := regexp.MustCompile(`const isCurrentRoot = \(\) => migrationDialog\.open && root\.parentElement === content &&\s+selection === globalThis\.justVoxelSelectionGeneration\.migration;`)
+	if !strings.Contains(js[render:submit], `const selection = globalThis.justVoxelSelectionGeneration.migration;`) || !rootGuard.MatchString(js[render:submit]) {
+		t.Fatal("Migration root guard must check the selection generation captured when rendering the root")
 	}
 	locationStart := strings.Index(js, "const updateMigrationLocation =")
 	locationEnd := strings.Index(js, "const setMigrationBusy =")

@@ -50,6 +50,7 @@ for workflow in \
     ! grep -Fq 'Fetch and verify exact WebUI release' "${workflow}"
 done
 
-node --test "${repo_root}/tests/version-workspace.test.cjs" "${repo_root}/tests/webui-rc-batch.test.cjs" "${repo_root}/tests/how-to-connect.test.cjs" "${repo_root}/tests/server-migration-switch.test.cjs"
+node --test "${repo_root}/tests/version-workspace.test.cjs" "${repo_root}/tests/webui-rc-batch.test.cjs" "${repo_root}/tests/how-to-connect.test.cjs" "${repo_root}/tests/server-migration-switch.test.cjs" \
+    "${repo_root}/tests/server-migration-import.test.cjs"
 
 echo 'JustVoxel WebUI source and local artifact checks passed.'
