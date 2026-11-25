@@ -75,8 +75,27 @@ jv_migration_players_json() {
 # These migration-local interruption functions preserve the established bounded
 # countdown while targeting only the immutable selected unit/container.
 jv_player_list_raw() { podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli list; }
+jv_migration_instance_terminally_stopped() {
+    local state container_state exists_rc=0
+    state="$(systemctl show --property=ActiveState --value "${JV_INSTANCE_UNIT}" 2>/dev/null)" || return 1
+    case "${state}" in
+        inactive|failed) ;;
+        *) return 1 ;;
+    esac
+
+    if container_state="$(podman inspect --type container --format '{{.State.Status}}' "${JV_INSTANCE_CONTAINER}" 2>/dev/null)"; then
+        case "${container_state}" in
+            exited|stopped|created) return 0 ;;
+            *) return 1 ;;
+        esac
+    fi
+    # Quadlet can remove the container on stop. Only exit 1 proves absence.
+    podman container exists "${JV_INSTANCE_CONTAINER}" >/dev/null 2>&1 || exists_rc=$?
+    [[ ${exists_rc} == 1 ]]
+}
 jv_minecraft_still_running() {
-    systemctl is-active --quiet "${JV_INSTANCE_UNIT}" || [[ $(podman inspect --format '{{.State.Running}}' "${JV_INSTANCE_CONTAINER}" 2>/dev/null) == true ]]
+    # Keep waiting through non-terminal states and observation failures.
+    ! jv_migration_instance_terminally_stopped
 }
 jv_minecraft_announce_shutdown() { podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli "say Server shutting down in $1 seconds" >/dev/null; }
 jv_begin_minecraft_stop() {

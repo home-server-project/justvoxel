@@ -87,6 +87,11 @@ if [[ ${configured} == yes && ${minecraft_was_active} == yes ]]; then
 fi
 
 if [[ ${configured} == yes ]]; then jv_migration_validate_data; fi
+if [[ ${configured} == yes && ${minecraft_stopped_by_import} == yes ]] &&
+    ! jv_migration_instance_terminally_stopped; then
+    echo 'ERROR: The selected Minecraft instance did not finish stopping. Live data was not changed.' >&2
+    exit 1
+fi
 jv_migration_write_state "${transaction}" switching "${JV_MIGRATION_SOURCE}" "${source_class}"
 live_modified=yes
 echo 'Activating staged Minecraft data.'

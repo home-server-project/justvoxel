@@ -531,6 +531,150 @@ grep -Fq 'instance_id:$id' "${migration_common}" || fail 'missing durable instan
 grep -Fq '.instance_id==$id' "${migration_common}" || fail 'recovery does not bind evidence to selected instance'
 grep -Fq 'if [[ ${minecraft_was_active} != yes ]]; then systemctl stop "${JV_INSTANCE_UNIT}"; fi' "${activation}" || fail 'stopped Import destination remains running'
 
+# Exercise the selected stop proof, real shutdown wait, and Import activation.
+(
+    fixture="$(mktemp -d)"
+    trap 'rm -rf -- "${fixture}"' EXIT
+    helpers="${repo_root}/mjust/libexec"
+    JV_MINECRAFT_STOP_TIMEOUT_SECONDS=1
+    source "${helpers}/interrupt-safety.sh"
+    source <(sed '/^source /d' "${helpers}/migration-instance.sh")
+    JV_INSTANCE_ID=jv-aaaaaa
+    JV_INSTANCE_UNIT="minecraft-${JV_INSTANCE_ID}.service"
+    JV_INSTANCE_CONTAINER="minecraft-${JV_INSTANCE_ID}"
+    service_state=inactive fixture_container_state=exited fixture_container_exists_rc=0
+    calls="${fixture}/proof-calls"
+    systemctl() {
+        printf 'systemctl %s\n' "$*" >> "${calls}"
+        case "$*" in
+            "show --property=ActiveState --value minecraft-jv-aaaaaa.service")
+                if [[ ${service_state} == query-failed ]]; then echo inactive; return 1; fi
+                printf '%s\n' "${service_state}" ;;
+            'is-active --quiet minecraft-jv-aaaaaa.service') [[ ${service_state} == active ]] ;;
+            '--no-block stop minecraft-jv-aaaaaa.service') service_state=deactivating; fixture_container_state=exited ;;
+            'start minecraft-jv-aaaaaa.service')
+                flock -n "${JV_MAINTENANCE_LOCK}" true || fail 'start ran with maintenance still held'
+                printf 'start with live_modified=%s\n' "${live_modified}" >> "${calls}" ;;
+            *) fail "unexpected systemctl call: $*" ;;
+        esac
+    }
+    podman() {
+        printf 'podman %s\n' "$*" >> "${calls}"
+        case "$*" in
+            'inspect --type container --format {{.State.Status}} minecraft-jv-aaaaaa')
+                [[ ${fixture_container_state} != unavailable ]] || return 125
+                printf '%s\n' "${fixture_container_state}" ;;
+            'container exists minecraft-jv-aaaaaa') return "${fixture_container_exists_rc}" ;;
+            'kill --signal SIGUSR1 minecraft-jv-aaaaaa') return 0 ;;
+            *) fail "unexpected Podman call: $*" ;;
+        esac
+    }
+    sleep() {
+        [[ $1 == 1 ]] || fail "unexpected shutdown wait: $1"
+        echo waited >> "${calls}"
+        if [[ ${finish_stop:-no} == yes ]]; then service_state=inactive; fi
+    }
+
+    for service_state in active activating deactivating reloading unknown '' query-failed; do
+        if jv_migration_instance_terminally_stopped; then fail "accepted unit state: ${service_state}"; fi
+    done
+    for service_state in inactive failed; do
+        for fixture_container_state in exited stopped created; do
+            jv_migration_instance_terminally_stopped || fail "rejected ${service_state} with ${fixture_container_state} container"
+        done
+        for fixture_container_state in running paused stopping unknown unavailable; do
+            if jv_migration_instance_terminally_stopped; then fail "accepted ${service_state}/${fixture_container_state}"; fi
+        done
+    done
+    service_state=inactive fixture_container_state=unavailable fixture_container_exists_rc=125
+    if jv_migration_instance_terminally_stopped; then fail 'container lookup failure proved absence'; fi
+    fixture_container_exists_rc=1
+    jv_migration_instance_terminally_stopped || fail 'confirmed container removal was rejected'
+
+    sed -e 's|/usr/libexec/justvoxel/management-agent |mock_agent |' \
+        -e 's/^jv_migration_activate_data /record_activation /' "${activation}" > "${fixture}/activate.sh"
+    run_stop_import() (
+        set -e
+        local case_dir="$1" stop_outcome="$2" assertion_state="$3"
+        calls="${case_dir}/calls"
+        service_state=active fixture_container_state=running fixture_container_exists_rc=0 finish_stop="${stop_outcome}"
+        configured=yes minecraft_was_active=no minecraft_stopped_by_import=no players_override=no
+        live_modified=no validated=no rollback_attempted=no transport_started=no had_existing_data=yes
+        JV_MAINTENANCE_LOCK="${case_dir}/lock"
+        JV_MIGRATION_API_MODE=1 JV_MIGRATION_API_IMPORT_CONFIRMED=yes
+        JV_MIGRATION_INSTANCE_CONFIG="${case_dir}/config.json"
+        JV_MIGRATION_SOURCE=fixture source_class=paper source_version=26.2
+        MINECRAFT_SERVER_TYPE=paper MINECRAFT_IMAGE_TAG=stable JV_INSTANCE_IMAGE_DIGEST=''
+        JAVA_PORT=25565 BEDROCK_ENABLED=no BEDROCK_PORT=19132
+        old_java=25565 old_bedrock_enabled=no old_bedrock=19132
+        MINECRAFT_UID=1000 MINECRAFT_GID=1000 plugin_count=0
+        DATA_PATH="${case_dir}/live"
+        transaction="${case_dir}/transaction"
+        staged_server="${transaction}/staged-server"
+        mkdir -p "${DATA_PATH}" "${staged_server}"
+        printf old > "${DATA_PATH}/world"
+        printf imported > "${staged_server}/world"
+        printf '{}' > "${JV_MIGRATION_INSTANCE_CONFIG}"
+        JV_MIGRATION_API_CONFIG_IDENTITY="$(sha256sum "${JV_MIGRATION_INSTANCE_CONFIG}" | awk '{print $1}')"
+        jv_migration_online_count() { echo 0; }
+        jv_migration_snapshot_runtime() { :; }
+        jv_migration_validate_evidence() { :; }
+        jv_migration_validate_data() { service_state="${assertion_state}"; }
+        jv_migration_write_state() { printf 'phase %s\n' "$2" >> "${calls}"; }
+        mock_agent() {
+            [[ $2 == jv-aaaaaa ]] || fail "publication targeted a sibling: $2"
+            printf '%s\n' "$1" >> "${calls}"
+        }
+        record_activation() {
+            printf 'activate with live_modified=%s\n' "${live_modified}" >> "${calls}"
+            jv_migration_activate_data "$@"
+        }
+        chown() { :; }
+        jv_migration_load_instance() { [[ $1 == jv-aaaaaa ]]; }
+        jv_migration_validate_runtime() { :; }
+        source "${helpers}/migration-import-common.sh"
+        jv_migration_api_result() { printf 'result %s %s\n' "$1" "$2" >> "${calls}"; }
+        rollback_import() { fail 'entered live rollback during stop fixture'; }
+        jv_migration_register_recovery() { fail 'unexpected recovery registration during stop fixture'; }
+        source "${fixture}/activate.sh"
+    )
+
+    for failure in none timeout deactivating query-failed; do
+        case_dir="${fixture}/${failure}"
+        finish_stop=yes assertion_state=inactive
+        case "${failure}" in
+            timeout) finish_stop=no ;;
+            deactivating|query-failed) assertion_state="${failure}" ;;
+        esac
+        set +e
+        run_stop_import "${case_dir}" "${finish_stop}" "${assertion_state}" > "${fixture}/${failure}.log" 2>&1
+        rc=$?
+        set -e
+        grep -Fxq 'systemctl --no-block stop minecraft-jv-aaaaaa.service' "${case_dir}/calls" || fail 'Import missed selected stop'
+        [[ $(grep -cFx waited "${case_dir}/calls") == 1 ]] || fail 'Import did not wait through deactivation within its timeout'
+        if [[ ${failure} == none ]]; then
+            [[ ${rc} == 0 && $(cat "${case_dir}/live/world") == imported ]] || fail 'terminal stop did not allow activation'
+            grep -Fxq 'activate with live_modified=yes' "${case_dir}/calls" || fail 'activation was not marked live'
+            grep -Fxq 'instance-version-publish' "${case_dir}/calls" || fail 'terminal stop did not allow publication'
+        else
+            [[ ${rc} == 1 && $(cat "${case_dir}/live/world") == old && ! -e ${case_dir}/transaction ]] ||
+                fail "failed stop changed live data or stranded staging: ${failure}"
+            if grep -Eq '^(activate with live_modified=|phase switching$|instance-version-publish$)' "${case_dir}/calls"; then
+                fail "failed stop entered live activation: ${failure}"
+            fi
+            grep -Fxq 'start with live_modified=no' "${case_dir}/calls" || fail 'pre-activation failure did not restart destination'
+            grep -Fxq 'result rolled_back pre-activation' "${case_dir}/calls" || fail 'stop failure bypassed pre-activation cleanup'
+            if [[ ${failure} != timeout ]]; then
+                grep -Fq 'selected Minecraft instance did not finish stopping' "${fixture}/${failure}.log" ||
+                    fail "missing pre-activation stop error: ${failure}"
+            fi
+        fi
+        if grep -E '^(systemctl|podman) ' "${case_dir}/calls" | grep -Ev ' minecraft-jv-aaaaaa(\.service)?$'; then
+            fail 'Import targeted another instance'
+        fi
+    done
+)
+
 # Exercise the real rename/rollback implementation with two isolated destinations.
 # Runtime commands are mocks; no host services, container engine or live paths run.
 (

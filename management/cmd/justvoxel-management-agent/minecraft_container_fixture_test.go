@@ -93,10 +93,12 @@ podman(){
    if [[ $5 == *Digest* ]];then printf '%s' "$FIXTURE_OLD";else printf old-id;fi
   fi;;
  inspect)
-  if [[ $2 == --format ]]; then format=$3; container=$4; else container=$2; [[ $3 == --format ]] || return 94; format=$4; fi
+  if [[ $2 == --type && $3 == container && $4 == --format ]]; then format=$5; container=$6
+  elif [[ $2 == --format ]]; then format=$3; container=$4; else container=$2; [[ $3 == --format ]] || return 94; format=$4; fi
   [[ $container == minecraft-jv-a1b2c3 ]] || return 94
   case "$format" in
    '{{.State.Running}}') [[ -n $(cat "$FIXTURE_ROOT/running") ]] && printf true || printf false;;
+   '{{.State.Status}}') [[ -n $(cat "$FIXTURE_ROOT/running") ]] && printf running || printf exited;;
    '{{.Image}}') [[ -n $(cat "$FIXTURE_ROOT/running") ]] || return 1; cat "$FIXTURE_ROOT/running";;
    *) return 94;;esac;;
  exec) [[ $2 == minecraft-jv-a1b2c3 && $3 == rcon-cli && -n $(cat "$FIXTURE_ROOT/running") ]] || return 1; cat "$FIXTURE_ROOT/players";;
