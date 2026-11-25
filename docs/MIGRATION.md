@@ -412,7 +412,9 @@ Original server restored and validated.
 
 JustVoxel automatically finalizes a verified rollback and keeps the Import
 result and diagnostic log. A later Import can also finalize an older rolled-back
-transaction after verifying its recovery evidence and the restored destination.
+transaction after verifying its retained recovery evidence and destination
+snapshot. This cleanup leaves the current Minecraft data, configuration, and
+service state untouched.
 If Minecraft was restored and validated but cleanup did not finish, the Import
 requires attention. Use Migration Recovery to finish cleanup before starting
 another Import.

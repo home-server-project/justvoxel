@@ -841,8 +841,12 @@ grep -Fq 'if [[ ${minecraft_was_active} != yes ]]; then systemctl stop "${JV_INS
         discovered="$(recovery_json "${selected[@]}" discover)"
         jq -e --arg tx "${transaction}" 'any(.transactions[]; .transaction==$tx and .phase=="rolled-back" and .finalizable)' \
             <<< "${discovered}" >/dev/null || fail 'cleanup failure is missing from guided Recovery'
+        before="$(wc -l < "${fixture}/calls")"
         expect_import_preflight 1
-        [[ -f ${registry_entry} ]] || fail 'blocked Import lost the recovery registry entry'
+        [[ -d ${transaction} && -f ${registry_entry} && $(cat "${registry_entry}") == "${transaction}" ]] ||
+            fail 'blocked Import lost retained recovery state'
+        [[ $(cat "${fixture}/service-state") == inactive && $(wc -l < "${fixture}/calls") == "${before}" ]] ||
+            fail 'failed stale cleanup made runtime or service calls'
 
         request="$(jq -cn --arg tx "${transaction}" '{transaction:$tx}')"
         plan="$(recovery_json "${selected[@]}" plan <<< "${request}")"
@@ -854,7 +858,9 @@ grep -Fq 'if [[ ${minecraft_was_active} != yes ]]; then systemctl stop "${JV_INS
         expect_import_preflight 42
     )
 
+    minecraft_was_active=yes
     stage_lifecycle_import critical
+    mkdir "${transaction}/staging-source"
     if runtime_validation_fails=yes run_lifecycle_rollback; then fail 'invalid rollback reported success'; fi
     [[ -d ${transaction} && -f ${registry_entry} ]] || fail 'critical rollback lost recovery evidence'
     discovered="$(recovery_json --instance "${JV_INSTANCE_ID}" discover)"
@@ -869,6 +875,12 @@ grep -Fq 'if [[ ${minecraft_was_active} != yes ]]; then systemctl stop "${JV_INS
         exec 9>"${JV_MAINTENANCE_LOCK}"
         flock -n 9 && jv_migration_recover_selected "${transaction}"
     ) || fail 'could not prepare stale rolled-back transaction'
+    grep -Fxq 'phase=rolled-back' "${transaction}/state" || fail 'rollback did not reach terminal state'
+    [[ ! -e ${transaction}/pre-import && ! -L ${transaction}/pre-import &&
+       -d ${transaction}/failed-import && -d ${transaction}/staging-source &&
+       ! -e ${transaction}/staged-server && $(cat "${fixture}/service-state") == active ]] ||
+        fail 'retained rollback did not have the expected restored state'
+    before="$(wc -l < "${fixture}/calls")"
     (
         exec 8>"${JV_MAINTENANCE_LOCK}"
         flock -n 8 || fail 'could not lock maintenance for contention check'
@@ -880,29 +892,76 @@ grep -Fq 'if [[ ${minecraft_was_active} != yes ]]; then systemctl stop "${JV_INS
     expect_import_preflight 1
     [[ -f ${transaction}/evidence.json && -f ${registry_entry} ]] || fail 'ambiguous state lost recovery evidence'
     cp -p "${fixture}/valid-state" "${transaction}/state"
+    printf 'malformed\n' >> "${transaction}/state"
+    expect_import_preflight 1
+    sed 's/^source=recovery$/source=fixture/' "${fixture}/valid-state" > "${transaction}/state"
+    expect_import_preflight 1
+    sed 's/^source_type=recovery$/source_type=paper/' "${fixture}/valid-state" > "${transaction}/state"
+    expect_import_preflight 1
+    sed 's/^instance_id=.*/instance_id=jv-bbbbbb/' "${fixture}/valid-state" > "${transaction}/state"
+    expect_import_preflight 1
+    cp -p "${fixture}/valid-state" "${transaction}/state"
     cp -p "${transaction}/evidence.json" "${fixture}/valid-evidence"
     jq '.instance_id="jv-bbbbbb"' "${fixture}/valid-evidence" > "${transaction}/evidence.json"
     expect_import_preflight 1
     [[ -f ${transaction}/evidence.json && -f ${registry_entry} ]] || fail 'removed foreign transaction or registry entry'
+    jq '.data_identity="invalid"' "${fixture}/valid-evidence" > "${transaction}/evidence.json"
+    expect_import_preflight 1
     cp -p "${fixture}/valid-evidence" "${transaction}/evidence.json"
-    mv "${DATA_PATH}" "${data_parent}/saved-data"
-    mkdir "${DATA_PATH}"
+    snapshot="${transaction}/destination-state"
+    cp -p "${snapshot}/minecraft.env" "${fixture}/valid-snapshot-env"
+    printf corrupt > "${snapshot}/minecraft.env"
     expect_import_preflight 1
-    rmdir "${DATA_PATH}"
-    mv "${data_parent}/saved-data" "${DATA_PATH}"
-    printf changed > "${fixture}/runtime/minecraft.env"
+    cp -p "${fixture}/valid-snapshot-env" "${snapshot}/minecraft.env"
+    mkdir "${transaction}/pre-import"
     expect_import_preflight 1
-    cp -p "${transaction}/destination-state/minecraft.env" "${fixture}/runtime/minecraft.env"
-    runtime_validation_fails=yes expect_import_preflight 1
-    [[ -d ${transaction} && -f ${registry_entry} && $(cat "${fixture}/service-state") == inactive ]] ||
-        fail 'failed stale validation lost recovery or changed the stopped state'
+    rmdir "${transaction}/pre-import"
+    ln -s "${sibling}" "${transaction}/staged-server"
+    expect_import_preflight 1
+    rm "${transaction}/staged-server"
+
+    # A legitimate configuration change after rollback keeps the live data inode.
+    jq '.runtime.motd="Changed after rollback"' "${JV_MIGRATION_INSTANCE_CONFIG}" > "${fixture}/changed-config"
+    cat "${fixture}/changed-config" > "${JV_MIGRATION_INSTANCE_CONFIG}"
+    if cmp -s "${JV_MIGRATION_INSTANCE_CONFIG}" "${snapshot}/config.json"; then fail 'live config still matches snapshot'; fi
+    jv_migration_validate_evidence "${transaction}" || fail 'historical evidence became invalid after the live config change'
+    data_identity="$(stat -Lc '%d:%i' -- "${DATA_PATH}")"
+    [[ ${data_identity} == "$(jq -r '.data_identity' "${transaction}/evidence.json")" ]] ||
+        fail 'VM regression fixture did not keep the restored data directory'
 
     sibling_transaction="${sibling%/*}/${transaction##*/}"
     mkdir "${sibling_transaction}"
     printf sibling > "${sibling_transaction}/state"
     expect_import_preflight 42
-    [[ ! -e ${transaction} && ! -e ${registry_entry} && $(cat "${fixture}/service-state") == inactive ]] ||
-        fail 'validated stale rollback still blocks Import or changed the stopped state'
+    [[ ! -e ${transaction} && ! -e ${registry_entry} ]] || fail 'terminal rollback still blocks Import'
+    cmp -s "${fixture}/changed-config" "${JV_MIGRATION_INSTANCE_CONFIG}" || fail 'stale cleanup overwrote live config'
+    [[ $(stat -Lc '%d:%i' -- "${DATA_PATH}") == "${data_identity}" && $(cat "${DATA_PATH}/world") == old ]] ||
+        fail 'stale cleanup changed live data'
+    [[ $(cat "${fixture}/service-state") == active && $(wc -l < "${fixture}/calls") == "${before}" ]] ||
+        fail 'stale cleanup made runtime or service calls'
     [[ $(cat "${sibling_transaction}/state") == sibling && $(cat "${sibling}/world") == sibling ]] ||
         fail 'stale cleanup touched a sibling instance'
+
+    # A later operation can also replace the data directory and stop the server.
+    stage_lifecycle_import replaced-data
+    jv_migration_register_recovery "${transaction}"
+    (
+        exec 9>"${JV_MAINTENANCE_LOCK}"
+        flock -n 9 && jv_migration_recover_selected "${transaction}"
+    ) || fail 'could not prepare rollback before replacing live data'
+    mv "${DATA_PATH}" "${data_parent}/saved-data"
+    mkdir "${DATA_PATH}"
+    printf replacement > "${DATA_PATH}/world"
+    printf 'inactive\n' > "${fixture}/service-state"
+    data_identity="$(stat -Lc '%d:%i' -- "${DATA_PATH}")"
+    [[ ${data_identity} != "$(jq -r '.data_identity' "${transaction}/evidence.json")" ]] ||
+        fail 'fixture did not replace the live data directory'
+    jv_migration_validate_evidence "${transaction}" || fail 'data replacement invalidated historical evidence'
+    before="$(wc -l < "${fixture}/calls")"
+    expect_import_preflight 42
+    [[ ! -e ${transaction} && ! -e ${registry_entry} &&
+       $(stat -Lc '%d:%i' -- "${DATA_PATH}") == "${data_identity}" && $(cat "${DATA_PATH}/world") == replacement ]] ||
+        fail 'terminal cleanup did not preserve the replacement data directory'
+    [[ $(cat "${fixture}/service-state") == inactive && $(wc -l < "${fixture}/calls") == "${before}" ]] ||
+        fail 'terminal cleanup changed the later stopped state or made runtime calls'
 )

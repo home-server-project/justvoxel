@@ -10,10 +10,9 @@ jv_migration_api_result() {
     jv_migration_publish_private "${tmp}" "${result_file}"
 }
 
-# With maintenance held, prove that the terminal transaction describes the
-# live destination and that no pre-import safety copy still needs recovery.
-jv_migration_check_restored_import() {
-    local retained="$1" path running state data_identity
+# Validate the private rollback record and its historical destination snapshot.
+jv_migration_validate_rolled_back_import_evidence() {
+    local retained="$1" path
     [[ ${retained##*/} == .justvoxel-import-?* ]] || return 1
     [[ -d ${retained} && ! -L ${retained} && $(stat -c '%u:%g:%a' -- "${retained}") == 0:0:700 ]] || return 1
     for path in "${retained}/state" "${retained}/evidence.json"; do
@@ -23,7 +22,14 @@ jv_migration_check_restored_import() {
     [[ -d ${retained}/destination-state && ! -L ${retained}/destination-state &&
         $(stat -c '%u:%g:%a' -- "${retained}/destination-state") == 0:0:700 ]] || return 1
     jv_migration_validate_evidence "${retained}" || return 1
-    [[ ! -e ${retained}/pre-import && ! -L ${retained}/pre-import && -d ${DATA_PATH} && ! -L ${DATA_PATH} ]] || return 1
+    [[ ! -e ${retained}/pre-import && ! -L ${retained}/pre-import ]]
+}
+
+# After a fresh rollback, verify that the live destination was restored.
+jv_migration_check_fresh_rollback() {
+    local retained="$1" path running state data_identity
+    jv_migration_validate_rolled_back_import_evidence "${retained}" || return 1
+    [[ -d ${DATA_PATH} && ! -L ${DATA_PATH} ]] || return 1
     jv_migration_validate_data || return 1
     data_identity="$(stat -Lc '%d:%i' -- "${DATA_PATH}")" || return 1
     [[ ${data_identity} == "$(jq -r '.data_identity' "${retained}/evidence.json")" ]] || return 1
@@ -36,7 +42,8 @@ jv_migration_check_restored_import() {
     [[ ${running} == true && ${state} == active || ${running} == false && ${state} == inactive ]]
 }
 
-# Call only after verifying the restored destination with maintenance held.
+# Call only after verifying a fresh rollback or a retained terminal record,
+# with maintenance held.
 jv_migration_finalize_rolled_back_import() {
     local retained="$1"
     # Keep the recovery evidence intact while removing the staged and failed data.
@@ -67,18 +74,37 @@ jv_migration_check_earlier_imports() {
     done
 }
 
+# A durable terminal record proves Recovery already validated the rollback.
+# The retained snapshot is authoritative only for the historical transaction.
+jv_migration_validate_retained_rollback() {
+    local retained="$1" path symlink
+    jv_migration_validate_rolled_back_import_evidence "${retained}" || return 1
+    # Require the recovery writer's fields in order, with an optional timestamp.
+    awk -v id="${JV_INSTANCE_ID}" '
+        NR == 1 && $0 == "instance_id=" id { next }
+        NR == 2 && $0 == "phase=rolled-back" { next }
+        NR == 3 && $0 == "source=recovery" { next }
+        NR == 4 && $0 == "source_type=recovery" { next }
+        NR == 5 &&
+            /^updated_at=[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/ { next }
+        { invalid = 1 }
+        END { exit (invalid || NR < 4) }
+    ' "${retained}/state" || return 1
+    jq -se 'length == 1 and (.[0].data_identity | test("^[0-9]+:[0-9]+$"))' \
+        "${retained}/evidence.json" >/dev/null || return 1
+    for path in "${retained}/staging-source" "${retained}/staged-server" "${retained}/failed-import"; do
+        [[ ! -e ${path} || -d ${path} ]] || return 1
+    done
+    # Staged server payloads can contain supported links. Only inspect the
+    # transaction and snapshot entries, which must never be symlinks.
+    symlink="$(find "${retained}" "${retained}/destination-state" -maxdepth 1 -type l -print -quit)" || return 1
+    [[ -z ${symlink} ]]
+}
+
 jv_migration_finalize_earlier_import() {
     local retained="$1"
     flock -n 9 || return 1
-    jv_migration_check_restored_import "${retained}" || return 1
-    if [[ $(jq -r '.was_running' "${retained}/evidence.json") == true ]]; then
-        jv_migration_validate_runtime >&2 || return 1
-    else
-        # Reuse Recovery's validation start and restore the stopped state.
-        jv_migration_validate_current >&2 || return 1
-    fi
-    # Startup validation may have handed the lock to ExecStartPre.
-    jv_migration_check_restored_import "${retained}" || return 1
+    jv_migration_validate_retained_rollback "${retained}" || return 1
     jv_migration_finalize_rolled_back_import "${retained}"
 }
 
@@ -87,7 +113,7 @@ rollback_import() {
     rollback_attempted=yes
     echo 'Import did not validate. Restoring the selected destination instance.' >&2
     if jv_migration_write_state "${transaction}" rollback "${JV_MIGRATION_SOURCE:-unknown}" "${source_class}" &&
-        jv_migration_recover_selected "${transaction}" && jv_migration_check_restored_import "${transaction}"; then
+        jv_migration_recover_selected "${transaction}" && jv_migration_check_fresh_rollback "${transaction}"; then
         live_modified=no
         if ! jv_migration_finalize_rolled_back_import "${transaction}"; then
             echo "WARNING: ${cleanup_status}" >&2
