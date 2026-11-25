@@ -2588,6 +2588,7 @@ if (migrationOpen && migrationDialog) {
   let migrationExportSMBPassword = "";
   let migrationLoadController = null;
   let migrationSubmitController = null;
+  let migrationRootSelection = null;
   let migrationBusyOwner = null;
 
   const updateMigrationLocation = (tab = "", operation = "") => {
@@ -2623,7 +2624,7 @@ if (migrationOpen && migrationDialog) {
     setMigrationBusy("");
   };
 
-  const requestMigrationSMBPassword = (purpose, signal) => new Promise((resolve) => {
+  const requestMigrationSMBPassword = (purpose, serverId, signal) => new Promise((resolve) => {
     const dialog = document.createElement("dialog");
     dialog.className = "system-action-dialog";
     dialog.setAttribute("aria-label", jvT("ui.c144fd7c3b42"));
@@ -2666,7 +2667,11 @@ if (migrationOpen && migrationDialog) {
       resolve(value);
     };
     const abort = () => finish(null);
-    const detach = (event) => { if (event.detail?.workspace === "migration") finish(null); };
+    const detach = (event) => {
+      if (event.detail?.workspace !== "migration") return;
+      const selectedServer = event.detail.serverId;
+      if (!validServerID(selectedServer) || selectedServer !== serverId) finish(null);
+    };
     signal.addEventListener("abort", abort, { once: true });
     window.addEventListener("justvoxel:server-selection-changed", detach);
     cancel.addEventListener("click", () => finish(null), { once: true });
@@ -2781,10 +2786,10 @@ if (migrationOpen && migrationDialog) {
   };
 
   const renderMigrationMarkup = (markup, responseURL, preserveLocation = false) => {
-    const selection = globalThis.justVoxelSelectionGeneration.migration;
     if (!content) throw new Error(jvT("ui.189db47cd63c"));
     const root = extractMigrationRoot(markup);
     if (!root) throw new Error(jvT("ui.e83f2f640a25"));
+    const selection = { root, generation: globalThis.justVoxelSelectionGeneration.migration };
 
     const renderedURL = new URL(responseURL, window.location.href);
     currentURL = renderedURL.pathname + renderedURL.search;
@@ -2812,8 +2817,9 @@ if (migrationOpen && migrationDialog) {
       }
     }
     content.replaceChildren(root);
+    migrationRootSelection = selection;
     const isCurrentRoot = () => migrationDialog.open && root.parentElement === content &&
-      selection === globalThis.justVoxelSelectionGeneration.migration;
+      migrationRootSelection === selection && selection.generation === globalThis.justVoxelSelectionGeneration.migration;
 
     const attachFailedResetRecovery = async () => {
       if (!root.textContent.includes("Full Factory Reset")) return;
@@ -2910,7 +2916,7 @@ if (migrationOpen && migrationDialog) {
         const exportKind = body.get("kind") || "";
         if (sourceKind === "smb") {
           if (!migrationSourceSMBPassword) {
-            const password = await requestMigrationSMBPassword("import", submitController.signal);
+            const password = await requestMigrationSMBPassword("import", root.dataset.serverId, submitController.signal);
             if (password === null || !isCurrentSubmit()) return;
             migrationSourceSMBPassword = password;
           }
@@ -2923,7 +2929,7 @@ if (migrationOpen && migrationDialog) {
         setMigrationBusy(isReview ? jvT("ui.e0fd374cce36") : jvT("ui.e447c6e994b8"), "busy", submitController);
         if (exportKind === "smb" && action.pathname.endsWith("/export/apply")) {
           if (!migrationExportSMBPassword) {
-            const password = await requestMigrationSMBPassword("export", submitController.signal);
+            const password = await requestMigrationSMBPassword("export", root.dataset.serverId, submitController.signal);
             if (password === null || !isCurrentSubmit()) return;
             migrationExportSMBPassword = password;
           }
@@ -3140,6 +3146,14 @@ if (migrationOpen && migrationDialog) {
 
   window.addEventListener("justvoxel:server-selection-changed", (event) => {
     if (event.detail?.workspace !== "migration") return;
+    const serverId = event.detail.serverId;
+    const selection = migrationRootSelection;
+    if (selection && selection.root.parentElement === content &&
+        validServerID(serverId) && serverId === selection.root.dataset.serverId) {
+      selection.generation = globalThis.justVoxelSelectionGeneration.migration;
+      return;
+    }
+    migrationRootSelection = null;
     migrationLoadController?.abort();
     migrationLoadController = null;
     if (refreshButton) refreshButton.disabled = false;

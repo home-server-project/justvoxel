@@ -197,9 +197,21 @@ func TestMigrationWorkspaceApplyRedirectRendersCanonicalProgress(t *testing.T) {
 	if !strings.Contains(submission[:responseText], `const isCurrentSubmit = () => migrationSubmitController === submitController && isCurrentRoot();`) {
 		t.Fatal("Migration submission guard must require the active submit controller and current root")
 	}
-	rootGuard := regexp.MustCompile(`const isCurrentRoot = \(\) => migrationDialog\.open && root\.parentElement === content &&\s+selection === globalThis\.justVoxelSelectionGeneration\.migration;`)
-	if !strings.Contains(js[render:submit], `const selection = globalThis.justVoxelSelectionGeneration.migration;`) || !rootGuard.MatchString(js[render:submit]) {
-		t.Fatal("Migration root guard must check the selection generation captured when rendering the root")
+	rootGuard := regexp.MustCompile(`content\.replaceChildren\(root\);\s+migrationRootSelection = selection;\s+` +
+		`const isCurrentRoot = \(\) => migrationDialog\.open && root\.parentElement === content &&\s+` +
+		`migrationRootSelection === selection && selection\.generation === globalThis\.justVoxelSelectionGeneration\.migration;`)
+	if !strings.Contains(js[render:submit], `const selection = { root, generation: globalThis.justVoxelSelectionGeneration.migration };`) || !rootGuard.MatchString(js[render:submit]) {
+		t.Fatal("Migration root guard must require ownership of the active root and selection generation")
+	}
+	selectionListener := regexp.MustCompile(`window\.addEventListener\("justvoxel:server-selection-changed", \(event\) => \{\s+` +
+		`if \(event\.detail\?\.workspace !== "migration"\) return;\s+` +
+		`const serverId = event\.detail\.serverId;\s+const selection = migrationRootSelection;\s+` +
+		`if \(selection && selection\.root\.parentElement === content &&\s+` +
+		`validServerID\(serverId\) && serverId === selection\.root\.dataset\.serverId\) \{\s+` +
+		`selection\.generation = globalThis\.justVoxelSelectionGeneration\.migration;\s+return;\s+\}\s+` +
+		`migrationRootSelection = null;`)
+	if !selectionListener.MatchString(js[submit:]) {
+		t.Fatal("Only a valid same-server Migration event may rebase the rendered root. Other Migration selections must detach it.")
 	}
 	locationStart := strings.Index(js, "const updateMigrationLocation =")
 	locationEnd := strings.Index(js, "const setMigrationBusy =")
