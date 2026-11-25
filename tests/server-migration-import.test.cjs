@@ -15,6 +15,7 @@ class Element extends EventTarget {
   constructor() {
     super();
     this.children = [];
+    this.attributes = new Map();
     this.dataset = {};
     this.disabled = false;
     this.textContent = '';
@@ -26,7 +27,13 @@ class Element extends EventTarget {
       toggle: (name, on) => on ? classes.add(name) : classes.delete(name),
     };
   }
-  append(...nodes) { this.children.push(...nodes); nodes.forEach(node => { node.parentElement = this; }); }
+  append(...nodes) {
+    for (const node of nodes) {
+      if (node.parentElement) node.remove();
+      this.children.push(node);
+      node.parentElement = this;
+    }
+  }
   appendChild(node) { this.append(node); }
   replaceChildren(...nodes) { this.children.forEach(node => node.remove()); this.append(...nodes); }
   remove() {
@@ -36,7 +43,8 @@ class Element extends EventTarget {
   }
   querySelector() { return null; }
   querySelectorAll() { return []; }
-  setAttribute() {}
+  setAttribute(name, value) { this.attributes.set(name, value); }
+  getAttribute(name) { return this.attributes.get(name) ?? null; }
   showModal() { this.open = true; }
   close() { this.open = false; }
   focus() {}
@@ -79,6 +87,7 @@ async function fixture(review) {
   const refresh = new Element();
   const requests = [];
   const loads = [];
+  const sharedControlsCalls = [];
   const generation = { migration: 0 };
   migration.querySelector = selector => ({
     '[data-migration-close]': close,
@@ -109,7 +118,10 @@ async function fixture(review) {
       open() { element.open = true; return onOpen(); },
       close() { element.close(); onClose(); },
     }),
-    initializeSharedWebUIControls() {},
+    initializeSharedWebUIControls(root) {
+      sharedControlsCalls.push(root);
+      assert.fail('The transient SMB prompt must skip shared WebUI controls');
+    },
     justVoxelServerSelection: async () => {},
     justVoxelSelectionGeneration: generation,
     justVoxelSelectedURL: url => url,
@@ -151,7 +163,7 @@ async function fixture(review) {
     assert.equal(state.textContent, '');
     assert.equal(refresh.disabled, false);
   };
-  return { first, next, reselected, reviewed, nextReviewed, content, body, credentials, requests, loads, migration, assertIdle,
+  return { first, next, reselected, reviewed, nextReviewed, content, body, credentials, requests, loads, migration, assertIdle, sharedControlsCalls,
     close: () => close.click(),
     invalidate: () => { generation.migration++; },
     changeServer(serverId = next.root.dataset.serverId) {
@@ -166,6 +178,43 @@ async function fixture(review) {
   };
 }
 
+test('the transient SMB password input is ready at attachment and stays in its label', async () => {
+  const f = await fixture();
+  let attachedInput;
+  let attachedLabel;
+  let inputRemovals = 0;
+  const appendChild = f.body.appendChild.bind(f.body);
+  f.body.appendChild = dialog => {
+    const [, , label, actions] = dialog.children[0].children;
+    const [input] = label.children;
+    assert.equal(actions.children.length, 2);
+    assert.equal(input.parentElement, label);
+    assert.equal(input.type, 'password');
+    assert.equal(input.autocomplete, 'off');
+    assert.equal(input.getAttribute('data-bwignore'), 'true');
+    assert.equal(input.getAttribute('data-password-ui'), 'off');
+    attachedInput = input;
+    attachedLabel = label;
+    const remove = input.remove.bind(input);
+    input.remove = () => {
+      inputRemovals++;
+      remove();
+    };
+    appendChild(dialog);
+  };
+
+  const submitted = f.first.submit();
+  await flush();
+  const prompt = f.credentials();
+  assert.equal(prompt.input, attachedInput);
+  assert.equal(prompt.input.parentElement, attachedLabel);
+  prompt.cancel.click();
+  await submitted;
+  assert.equal(inputRemovals, 0);
+  assert.deepEqual(f.sharedControlsCalls, []);
+  assert.equal(f.body.children.length, 0);
+});
+
 test('same-server synchronization preserves the SMB Import prompt and review ownership', async () => {
   let finishReview;
   const f = await fixture(() => new Promise(resolve => { finishReview = resolve; }));
@@ -177,6 +226,7 @@ test('same-server synchronization preserves the SMB Import prompt and review own
   f.changeServer(serverId);
   await flush();
   assert.equal(f.credentials().dialog, prompt.dialog);
+  assert.equal(f.credentials().input, prompt.input);
   assert.equal(prompt.input.value, 'partial-password');
   assert.equal(f.first.submitter.disabled, true);
   assert.equal(f.requests.length, 0);
@@ -235,6 +285,7 @@ test('SMB Import waits for credentials, cancels on server change, and can review
   f.assertIdle();
   assert.equal(f.requests.length, 0);
   assert.equal(f.body.children.length, 0);
+  assert.equal(firstPrompt.dialog.open, false);
   assert.equal(firstPrompt.input.value, '');
   assert.equal(f.first.submitter.disabled, false);
   assert.equal(f.content.children[0], f.next.root);
@@ -276,6 +327,7 @@ for (const [reason, cancel] of [
     f.assertIdle();
     assert.equal(f.requests.length, 0);
     assert.equal(f.body.children.length, 0);
+    assert.equal(prompt.dialog.open, false);
     assert.equal(prompt.input.value, '');
     assert.equal(f.first.submitter.disabled, false);
   });

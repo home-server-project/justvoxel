@@ -2641,6 +2641,8 @@ if (migrationOpen && migrationDialog) {
     const input = document.createElement("input");
     input.type = "password";
     input.autocomplete = "off";
+    input.setAttribute("data-bwignore", "true");
+    input.setAttribute("data-password-ui", "off");
     input.required = true;
     label.appendChild(input);
     const actions = document.createElement("div");
@@ -2655,8 +2657,6 @@ if (migrationOpen && migrationDialog) {
     actions.append(cancel, use);
     shell.append(title, copy, label, actions);
     dialog.appendChild(shell);
-    document.body.appendChild(dialog);
-    initializeSharedWebUIControls(dialog);
 
     const finish = (value) => {
       signal.removeEventListener("abort", abort);
@@ -2692,6 +2692,7 @@ if (migrationOpen && migrationDialog) {
         use.click();
       }
     });
+    document.body.appendChild(dialog);
     dialog.showModal();
     input.focus();
   });
