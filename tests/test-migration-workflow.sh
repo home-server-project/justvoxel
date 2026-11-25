@@ -120,6 +120,7 @@ destination_planner="${repo_root}/mjust/libexec/migration-import-plan-destinatio
     wrapper="${fixture}/minecraft-instances/jv-abcdef"
     DATA_PATH="${wrapper}/data"
     mkdir -p -- "${DATA_PATH}" "${fixture}/source"
+    source <(sed '/^trap on_exit/d' "${repo_root}/mjust/libexec/migration-import-common.sh")
     sed 's|/usr/libexec/justvoxel/mjust/migration-archive|fixture_archive|g' "${source_planner}" > "${fixture}/planner.sh"
     fixture_archive() { echo '{"expandedBytes":1,"nativeBundle":false}'; }
     jv_migration_validate_source_name() { :; }
@@ -535,6 +536,21 @@ grep -Fq 'if [[ ${minecraft_was_active} != yes ]]; then systemctl stop "${JV_INS
 (
     fixture="$(mktemp -d)"
     trap 'rm -rf -- "${fixture}"' EXIT
+    helpers="${repo_root}/mjust/libexec"
+    fixture_registry="${fixture}/registry"
+    fixture_run="${fixture}/run"
+    source <(sed -e '/^readonly /d' -e 's/JV_MIGRATION_RECOVERY_ROOT/fixture_registry/g' "${migration_common}")
+    source <(sed '/^source /d' "${helpers}/migration-instance.sh")
+    source <(sed -e '/^trap on_exit/d' -e 's/JV_MIGRATION_RUN_ROOT/fixture_run/g' "${helpers}/migration-import-common.sh")
+    recovery_json() (
+        source <(sed '/^source /d; /^require_root$/d' "${helpers}/admin-migration-recovery-json") "$@"
+    )
+    recovery_apply() (
+        source <(sed -e '/^source /d; /^require_root$/d' \
+            -e 's|/usr/libexec/justvoxel/mjust/admin-migration-recovery-json |recovery_json |' \
+            -e 's|${JV_MIGRATION_RECOVERY_ROOT}|${fixture_registry}|g' \
+            "${helpers}/admin-migration-recovery-transaction-json") "$@"
+    )
     JV_INSTANCE_ID=jv-aaaaaa
     JV_INSTANCE_UNIT=minecraft-jv-aaaaaa.service
     DATA_PATH="${fixture}/minecraft-instances/${JV_INSTANCE_ID}/data"
@@ -552,14 +568,17 @@ grep -Fq 'if [[ ${minecraft_was_active} != yes ]]; then systemctl stop "${JV_INS
     chmod 0600 "${fixture}/runtime/"*
     jv_migration_runtime_paths() { printf '%s\n' "${JV_MIGRATION_INSTANCE_CONFIG}" "${fixture}/runtime/minecraft.env" "${fixture}/runtime/minecraft-${JV_INSTANCE_ID}.container"; }
     jv_migration_load_instance() { [[ $1 == jv-aaaaaa ]]; }
+    jv_migration_validate_data() { :; }
     jv_migration_validate_runtime() {
         if flock -n "${JV_MAINTENANCE_LOCK}" true; then fail 'validated without reacquiring maintenance'; fi
         printf 'validate %s\n' "${JV_INSTANCE_ID}" >> "${fixture}/calls"
+        [[ ${runtime_validation_fails:-no} == no ]]
     }
     # Unprivileged source checks model only the appliance account mapping.
     # Root test environments exercise the actual inode ownership transitions.
     if (( EUID != 0 )); then
         chown() { [[ $1 == root:root && -f ${3} && ${3} == "${fixture}/"* ]]; }
+        install() { mkdir -m0700 -p -- "${@: -1}"; }
         stat() {
             case "${2}" in
                 %u:%g:%a|%u:%g:%a:%h)
@@ -572,6 +591,7 @@ grep -Fq 'if [[ ${minecraft_was_active} != yes ]]; then systemctl stop "${JV_INS
     fi
     JV_MAINTENANCE_LOCK="${fixture}/maintenance.lock"
     systemctl() {
+        [[ $* == 'daemon-reload' || $* == *"${JV_INSTANCE_UNIT}" ]] || fail 'rollback targeted a sibling unit'
         if [[ $1 == start ]]; then
             # Independent open description, as used by the real ExecStartPre.
             exec 7>"${JV_MAINTENANCE_LOCK}"
@@ -579,8 +599,13 @@ grep -Fq 'if [[ ${minecraft_was_active} != yes ]]; then systemctl stop "${JV_INS
             [[ ${start_fault:-} == contended ]] || exec 7>&-
             [[ ${start_fault:-} != failed ]] || return 1
         fi
+        case "$1" in
+            start) echo active > "${fixture}/service-state" ;;
+            stop) echo inactive > "${fixture}/service-state" ;;
+            show) cat "${fixture}/service-state"; return ;;
+            is-active) [[ $(cat "${fixture}/service-state") == active ]]; return ;;
+        esac
         printf '%s\n' "$*" >> "${fixture}/calls"
-        [[ $* == 'daemon-reload' || $* == *"${JV_INSTANCE_UNIT}" ]] || fail 'rollback targeted a sibling unit'
     }
     for minecraft_was_active in yes no; do
         transaction="$(dirname -- "${DATA_PATH}")/.justvoxel-import-${minecraft_was_active}"
@@ -686,10 +711,6 @@ grep -Fq 'if [[ ${minecraft_was_active} != yes ]]; then systemctl stop "${JV_INS
                 [[ $(stat -c %g "${file}") == "${service_gid}" ]] || fail 'rejected repair changed ownership'
             done
             # Run the real entry points with the fixture runtime and registry.
-            helpers="${repo_root}/mjust/libexec"
-            recovery_json() (
-                source <(sed '/^source /d; /^require_root$/d' "${helpers}/admin-migration-recovery-json") "$@"
-            )
             selected=(--instance "${JV_INSTANCE_ID}")
             discovered="$(recovery_json "${selected[@]}" discover)"
             jq -e --arg tx "${transaction}" 'any(.transactions[]; .transaction==$tx and
@@ -708,30 +729,21 @@ grep -Fq 'if [[ ${minecraft_was_active} != yes ]]; then systemctl stop "${JV_INS
             identity="$(jq -er 'select(.ok and .normalized.finalizable) | .context.state_identity' <<< "${plan}")"
             if [[ ${minecraft_was_active} == yes ]]; then
                 apply_request="$(jq -c --arg id "${identity}" '. + {state_identity:$id}' <<< "${request}")"
-                recovery_apply() (
-                    source <(sed -e '/^source /d; /^require_root$/d' \
-                        -e 's|/usr/libexec/justvoxel/mjust/admin-migration-recovery-json |recovery_json |' \
-                        -e 's|${JV_MIGRATION_RECOVERY_ROOT}|${fixture}/registry|g' \
-                        "${helpers}/admin-migration-recovery-transaction-json") "${selected[@]}"
-                )
-                # Keep every registry operation under the temporary fixture.
-                jv_migration_clear_recovery() { rm -f -- "${fixture}/registry/$(jv_migration_recovery_key "$1")"; }
-                mkdir "${fixture}/registry"
-                touch "${fixture}/registry/$(jv_migration_recovery_key "${transaction}")"
+                jv_migration_register_recovery "${transaction}"
                 printf changed > "${fixture}/runtime/minecraft.env"
                 set +e
                 for start_fault in failed contended; do
-                    (recovery_apply <<< "${apply_request}")
+                    (recovery_apply "${selected[@]}" <<< "${apply_request}")
                     failed_status=$?
                     [[ ${failed_status} != 0 && -f ${transaction}/evidence.json ]] || fail "lost recovery on ${start_fault} start"
                 done
                 unset start_fault
-                (jv_migration_validate_runtime() { return 1; }; recovery_apply <<< "${apply_request}")
+                (jv_migration_validate_runtime() { return 1; }; recovery_apply "${selected[@]}" <<< "${apply_request}")
                 failed_status=$?
                 set -e
                 [[ ${failed_status} != 0 && -d ${transaction} ]] || fail 'failed validation lost recovery'
                 cmp "${snapshot}/minecraft.env" "${fixture}/runtime/minecraft.env" || fail 'runtime was not restored'
-                recovery_apply <<< "${apply_request}"
+                recovery_apply "${selected[@]}" <<< "${apply_request}"
                 [[ ! -e ${transaction} && $(cat "${DATA_PATH}/world") == old &&
                    $(cat "${sibling}/world") == sibling ]] || fail 'selected recovery did not finalize'
                 continue
@@ -757,5 +769,140 @@ grep -Fq 'if [[ ${minecraft_was_active} != yes ]]; then systemctl stop "${JV_INS
         jq 'del(.instance_id)' "${transaction}/valid-evidence" > "${transaction}/evidence.json"
         if jv_migration_recover_selected "${transaction}"; then fail 'old recovery evidence guessed a destination'; fi
         exec 9>&-
+        rm -rf -- "${transaction}"
     done
+
+    data_parent="${DATA_PATH%/*}"
+    chmod 0700 "${data_parent}"
+    mkdir "${fixture}/source"
+    sed 's|/usr/libexec/justvoxel/mjust/migration-archive|fixture_archive|g' "${source_planner}" > "${fixture}/planner.sh"
+    fixture_archive() { echo '{"expandedBytes":1,"nativeBundle":false}'; }
+    jv_restore_validate_data_layout() { :; }
+    jv_migration_require_staging_space() { exit 42; }
+    expect_import_preflight() {
+        local status=0
+        (source "${fixture}/planner.sh" "${fixture}/source") > "${fixture}/preflight.log" 2>&1 || status=$?
+        [[ ${status} == "$1" ]] || fail "unexpected Import preflight status: ${status}"
+        if [[ $1 == 1 ]]; then
+            grep -Fq 'an earlier JustVoxel import transaction still exists' "${fixture}/preflight.log" || fail 'Import block did not identify retained state'
+        fi
+    }
+    stage_lifecycle_import() {
+        transaction="${data_parent}/.justvoxel-import-$1"
+        mkdir -m0700 "${transaction}" "${transaction}/staged-server"
+        printf candidate > "${transaction}/staged-server/world"
+        jv_migration_snapshot_runtime "${transaction}"
+        jv_migration_write_state "${transaction}" switching fixture paper
+        jv_migration_activate_data "${transaction}" "${DATA_PATH}" "${transaction}/staged-server" yes
+        registry_entry="${fixture_registry}/$(jv_migration_recovery_key "${transaction}")"
+    }
+    run_lifecycle_rollback() (
+        exec 9>"${JV_MAINTENANCE_LOCK}"
+        flock -n 9 || fail 'could not lock maintenance for rollback'
+        JV_MIGRATION_API_MODE=1
+        JV_MIGRATION_API_RESULT_FILE="${fixture_run}/result"
+        live_modified=yes
+        source_class=paper
+        rollback_import
+    )
+    for minecraft_was_active in yes no; do
+        stage_lifecycle_import "safe-${minecraft_was_active}"
+        jv_migration_register_recovery "${transaction}"
+        run_lifecycle_rollback || fail 'verified rollback did not finalize'
+        [[ ! -e ${transaction} && ! -e ${registry_entry} && $(cat "${DATA_PATH}/world") == old ]] ||
+            fail 'verified rollback left a transaction, registry record, or imported data'
+        jq -e '.outcome=="rolled_back" and .phase=="rolled-back" and .transaction==""' "${fixture_run}/result" >/dev/null ||
+            fail 'verified rollback lost its operation result'
+        expect_import_preflight 42
+    done
+
+    (
+        stage_lifecycle_import cleanup-failure
+        jv_migration_register_recovery "${transaction}"
+        rm() {
+            if [[ $* == *'--one-file-system'* && ${@: -1} == "${transaction}" ]]; then
+                [[ ! -e ${registry_entry} ]] || fail 'injected failure occurred before registry removal'
+                return 1
+            fi
+            command rm "$@"
+        }
+        before="$(wc -l < "${fixture}/calls")"
+        if run_lifecycle_rollback; then fail 'failed rollback finalization reported success'; fi
+        [[ $(cat "${DATA_PATH}/world") == old && $(cat "${fixture}/service-state") == inactive ]] ||
+            fail 'cleanup failure left the destination unrestored'
+        tail -n "+$((before + 1))" "${fixture}/calls" | grep -Fx "validate ${JV_INSTANCE_ID}" >/dev/null ||
+            fail 'cleanup failure did not exercise rollback validation'
+        jq -e --arg tx "${transaction}" '.outcome=="needs_attention" and .phase=="rolled-back" and .transaction==$tx and
+            (.status | contains("restored and validated") and contains("rollback transaction cleanup did not complete"))' \
+            "${fixture_run}/result" >/dev/null || fail 'cleanup failure lost its operation result'
+        [[ -f ${registry_entry} && $(cat "${registry_entry}") == "${transaction}" ]] ||
+            fail 'cleanup failure lost its recovery registry entry'
+        selected=(--instance "${JV_INSTANCE_ID}")
+        discovered="$(recovery_json "${selected[@]}" discover)"
+        jq -e --arg tx "${transaction}" 'any(.transactions[]; .transaction==$tx and .phase=="rolled-back" and .finalizable)' \
+            <<< "${discovered}" >/dev/null || fail 'cleanup failure is missing from guided Recovery'
+        expect_import_preflight 1
+        [[ -f ${registry_entry} ]] || fail 'blocked Import lost the recovery registry entry'
+
+        request="$(jq -cn --arg tx "${transaction}" '{transaction:$tx}')"
+        plan="$(recovery_json "${selected[@]}" plan <<< "${request}")"
+        identity="$(jq -er 'select(.ok and .normalized.finalizable) | .context.state_identity' <<< "${plan}")"
+        apply_request="$(jq -c --arg id "${identity}" '. + {state_identity:$id}' <<< "${request}")"
+        recovery_apply "${selected[@]}" <<< "${apply_request}"
+        [[ ! -e ${transaction} && ! -e ${registry_entry} && $(cat "${DATA_PATH}/world") == old ]] ||
+            fail 'Recovery did not finalize the retained verified rollback'
+        expect_import_preflight 42
+    )
+
+    stage_lifecycle_import critical
+    if runtime_validation_fails=yes run_lifecycle_rollback; then fail 'invalid rollback reported success'; fi
+    [[ -d ${transaction} && -f ${registry_entry} ]] || fail 'critical rollback lost recovery evidence'
+    discovered="$(recovery_json --instance "${JV_INSTANCE_ID}" discover)"
+    jq -e --arg tx "${transaction}" 'any(.transactions[]; .transaction==$tx and .phase=="critical-rollback" and .finalizable)' <<< "${discovered}" >/dev/null ||
+        fail 'critical rollback is missing from guided Recovery'
+    jq -e '.outcome=="needs_attention"' "${fixture_run}/result" >/dev/null || fail 'critical rollback lost its operation result'
+    expect_import_preflight 1
+
+    # Model a retained transaction from an appliance that verified rollback
+    # and stopped there. Recovery can safely retry after the earlier failure.
+    (
+        exec 9>"${JV_MAINTENANCE_LOCK}"
+        flock -n 9 && jv_migration_recover_selected "${transaction}"
+    ) || fail 'could not prepare stale rolled-back transaction'
+    (
+        exec 8>"${JV_MAINTENANCE_LOCK}"
+        flock -n 8 || fail 'could not lock maintenance for contention check'
+        expect_import_preflight 1
+    )
+    [[ -d ${transaction} && -f ${registry_entry} ]] || fail 'stale cleanup bypassed maintenance'
+    cp -p "${transaction}/state" "${fixture}/valid-state"
+    printf 'phase=rolled-back\n' >> "${transaction}/state"
+    expect_import_preflight 1
+    [[ -f ${transaction}/evidence.json && -f ${registry_entry} ]] || fail 'ambiguous state lost recovery evidence'
+    cp -p "${fixture}/valid-state" "${transaction}/state"
+    cp -p "${transaction}/evidence.json" "${fixture}/valid-evidence"
+    jq '.instance_id="jv-bbbbbb"' "${fixture}/valid-evidence" > "${transaction}/evidence.json"
+    expect_import_preflight 1
+    [[ -f ${transaction}/evidence.json && -f ${registry_entry} ]] || fail 'removed foreign transaction or registry entry'
+    cp -p "${fixture}/valid-evidence" "${transaction}/evidence.json"
+    mv "${DATA_PATH}" "${data_parent}/saved-data"
+    mkdir "${DATA_PATH}"
+    expect_import_preflight 1
+    rmdir "${DATA_PATH}"
+    mv "${data_parent}/saved-data" "${DATA_PATH}"
+    printf changed > "${fixture}/runtime/minecraft.env"
+    expect_import_preflight 1
+    cp -p "${transaction}/destination-state/minecraft.env" "${fixture}/runtime/minecraft.env"
+    runtime_validation_fails=yes expect_import_preflight 1
+    [[ -d ${transaction} && -f ${registry_entry} && $(cat "${fixture}/service-state") == inactive ]] ||
+        fail 'failed stale validation lost recovery or changed the stopped state'
+
+    sibling_transaction="${sibling%/*}/${transaction##*/}"
+    mkdir "${sibling_transaction}"
+    printf sibling > "${sibling_transaction}/state"
+    expect_import_preflight 42
+    [[ ! -e ${transaction} && ! -e ${registry_entry} && $(cat "${fixture}/service-state") == inactive ]] ||
+        fail 'validated stale rollback still blocks Import or changed the stopped state'
+    [[ $(cat "${sibling_transaction}/state") == sibling && $(cat "${sibling}/world") == sibling ]] ||
+        fail 'stale cleanup touched a sibling instance'
 )

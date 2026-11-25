@@ -410,6 +410,13 @@ Import failed.
 Original server restored and validated.
 ```
 
+JustVoxel automatically finalizes a verified rollback and keeps the Import
+result and diagnostic log. A later Import can also finalize an older rolled-back
+transaction after verifying its recovery evidence and the restored destination.
+If Minecraft was restored and validated but cleanup did not finish, the Import
+requires attention. Use Migration Recovery to finish cleanup before starting
+another Import.
+
 If rollback itself cannot be validated, JustVoxel reports a **CRITICAL** state and retains all recovery evidence under the `.justvoxel-import-*` transaction directory. Do not delete that recovery directory until the appliance is recovered.
 
 ## Guided migration recovery

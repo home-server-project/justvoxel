@@ -9,15 +9,96 @@ jv_migration_api_result() {
     jq -cn --arg outcome "${outcome}" --arg phase "${phase}" --arg transaction "${recovery_transaction}" --arg status "${status}"         '{outcome:$outcome,phase:$phase,transaction:$transaction,status:$status}' > "${tmp}" || return 1
     jv_migration_publish_private "${tmp}" "${result_file}"
 }
+
+# With maintenance held, prove that the terminal transaction describes the
+# live destination and that no pre-import safety copy still needs recovery.
+jv_migration_check_restored_import() {
+    local retained="$1" path running state data_identity
+    [[ ${retained##*/} == .justvoxel-import-?* ]] || return 1
+    [[ -d ${retained} && ! -L ${retained} && $(stat -c '%u:%g:%a' -- "${retained}") == 0:0:700 ]] || return 1
+    for path in "${retained}/state" "${retained}/evidence.json"; do
+        [[ -f ${path} && ! -L ${path} && $(stat -c '%u:%g:%a:%h' -- "${path}") == 0:0:600:1 ]] || return 1
+    done
+    [[ $(sed -n 's/^phase=//p' "${retained}/state") == rolled-back ]] || return 1
+    [[ -d ${retained}/destination-state && ! -L ${retained}/destination-state &&
+        $(stat -c '%u:%g:%a' -- "${retained}/destination-state") == 0:0:700 ]] || return 1
+    jv_migration_validate_evidence "${retained}" || return 1
+    [[ ! -e ${retained}/pre-import && ! -L ${retained}/pre-import && -d ${DATA_PATH} && ! -L ${DATA_PATH} ]] || return 1
+    jv_migration_validate_data || return 1
+    data_identity="$(stat -Lc '%d:%i' -- "${DATA_PATH}")" || return 1
+    [[ ${data_identity} == "$(jq -r '.data_identity' "${retained}/evidence.json")" ]] || return 1
+    while IFS= read -r path; do
+        [[ -f ${path} && ! -L ${path} ]] || return 1
+        cmp -s -- "${path}" "${retained}/destination-state/${path##*/}" || return 1
+    done < <(jv_migration_runtime_paths)
+    running="$(jq -r '.was_running' "${retained}/evidence.json")" || return 1
+    state="$(systemctl show --property=ActiveState --value "${JV_INSTANCE_UNIT}")" || return 1
+    [[ ${running} == true && ${state} == active || ${running} == false && ${state} == inactive ]]
+}
+
+# Call only after verifying the restored destination with maintenance held.
+jv_migration_finalize_rolled_back_import() {
+    local retained="$1"
+    # Keep the recovery evidence intact while removing the staged and failed data.
+    if rm -rf --one-file-system --preserve-root=all -- \
+        "${retained}/staging-source" "${retained}/staged-server" "${retained}/failed-import" &&
+        jv_migration_clear_recovery "${retained}" &&
+        rm -rf --one-file-system --preserve-root=all -- "${retained}"; then
+        return 0
+    fi
+    if [[ -d ${retained} ]] && ! jv_migration_register_recovery "${retained}"; then
+        echo "ERROR: could not restore the recovery registry entry for ${retained}" >&2
+    fi
+    return 1
+}
+
+jv_migration_check_earlier_imports() {
+    local parent="$1" retained
+    # Open the maintenance lock only when there is retained state to inspect.
+    for retained in "${parent}"/.justvoxel-import-*; do
+        [[ -e ${retained} || -L ${retained} ]] || continue
+        if ! jv_migration_finalize_earlier_import "${retained}" 9>"${JV_MAINTENANCE_LOCK}"; then
+            echo 'ERROR: an earlier JustVoxel import transaction still exists.' >&2
+            echo "Recovery state: ${retained}" >&2
+            echo 'Use the guided recovery flow before starting another import:' >&2
+            echo '  mjust migration-recover' >&2
+            return 1
+        fi
+    done
+}
+
+jv_migration_finalize_earlier_import() {
+    local retained="$1"
+    flock -n 9 || return 1
+    jv_migration_check_restored_import "${retained}" || return 1
+    if [[ $(jq -r '.was_running' "${retained}/evidence.json") == true ]]; then
+        jv_migration_validate_runtime >&2 || return 1
+    else
+        # Reuse Recovery's validation start and restore the stopped state.
+        jv_migration_validate_current >&2 || return 1
+    fi
+    # Startup validation may have handed the lock to ExecStartPre.
+    jv_migration_check_restored_import "${retained}" || return 1
+    jv_migration_finalize_rolled_back_import "${retained}"
+}
+
 rollback_import() {
+    local cleanup_status='The selected Minecraft destination was restored and validated, but rollback transaction cleanup did not complete. Use Migration Recovery to finish cleanup.'
     rollback_attempted=yes
     echo 'Import did not validate. Restoring the selected destination instance.' >&2
-    jv_migration_write_state "${transaction}" rollback "${JV_MIGRATION_SOURCE:-unknown}" "${source_class}" || return 1
-    if jv_migration_recover_selected "${transaction}"; then
+    if jv_migration_write_state "${transaction}" rollback "${JV_MIGRATION_SOURCE:-unknown}" "${source_class}" &&
+        jv_migration_recover_selected "${transaction}" && jv_migration_check_restored_import "${transaction}"; then
         live_modified=no
-        jv_migration_register_recovery "${transaction}" || return 1
-        jv_migration_api_result rolled_back rolled-back "${transaction}" 'Import failed; the selected destination instance was restored and validated.'
-        return 0
+        if ! jv_migration_finalize_rolled_back_import "${transaction}"; then
+            echo "WARNING: ${cleanup_status}" >&2
+            echo "Recovery state: ${transaction}" >&2
+            jv_migration_api_result needs_attention rolled-back "${transaction}" "${cleanup_status}" ||
+                echo 'ERROR: could not publish the rollback cleanup result.' >&2
+            return 1
+        fi
+        transaction=''
+        jv_migration_api_result rolled_back rolled-back '' 'Import failed; the selected destination instance was restored and validated.'
+        return $?
     fi
     [[ ${jv_migration_handoff_pending} == no ]] || return 1
     jv_migration_write_state "${transaction}" critical-rollback "${JV_MIGRATION_SOURCE:-unknown}" "${source_class}" || true

@@ -68,14 +68,7 @@ data_parent="$(dirname -- "${DATA_PATH}")"
     echo 'ERROR: selected instance directory must be owned by root:root with mode 0700.' >&2
     exit 1
 }
-stale="$(find "${data_parent}" -maxdepth 1 -type d -name '.justvoxel-import-*' -print -quit 2>/dev/null || true)"
-if [[ -n ${stale} ]]; then
-    echo 'ERROR: an earlier JustVoxel import transaction still exists.' >&2
-    echo "Recovery state: ${stale}" >&2
-    echo 'Use the guided recovery flow before starting another import:' >&2
-    echo '  mjust migration-recover' >&2
-    exit 1
-fi
+jv_migration_check_earlier_imports "${data_parent}" || exit 1
 jv_migration_require_staging_space "${data_parent}" "${expanded_bytes}"
 
 transaction="${data_parent}/.justvoxel-import-$(date +%Y%m%d-%H%M%S)-$$"
