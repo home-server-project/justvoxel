@@ -28,8 +28,8 @@ podman() { echo runtime-check >> "${DATA_PATH}.checks"; return 1; }
 jv_crossplay_metadata() { echo runtime-check >> "${DATA_PATH}.checks"; return 1; }
 jv_crossplay_artifact_state() { printf unavailable; }
 EOF
-# Use the real setup compatibility code with fixture publisher responses.
-sed -n '/^jv_crossplay_viaversion_supports() {/,/^server_crossplay_version_compatible() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/common.sh"
+# Use the shared compatibility resolver with fixture publisher responses.
+sed -n '/^jv_crossplay_viaversion_supports() {/,/^paper_version_has_stable_build() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/common.sh"
 sed -n '/^validate_server_type() {/,/^render_runtime_files() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/common.sh"
 sed -e "s|^source /usr/libexec/justvoxel/mjust/common.sh$|source ${fixture_dir}/common.sh|" \
     -e '\|^source /usr/libexec/justvoxel/mjust/managed-crossplay.sh$|d' \
@@ -131,7 +131,7 @@ bedrock_crossplay_supports_version() { [[ $1 == "$2" ]]; }
 normalize_daily_backup_time() { printf '%s' "$1"; }
 daily_backup_schedule_from_time() { printf '*-*-* %s:00' "$1"; }
 EOF
-sed -n '/^jv_crossplay_viaversion_supports() {/,/^server_crossplay_version_compatible() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/planner-common.sh"
+sed -n '/^jv_crossplay_viaversion_supports() {/,/^paper_version_has_stable_build() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/planner-common.sh"
 sed -n '/^validate_server_type() {/,/^render_runtime_files() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/planner-common.sh"
 touch "${fixture_dir}/planner-storage.sh"
 cat > "${fixture_dir}/planner-crossplay.sh" <<'STUB'

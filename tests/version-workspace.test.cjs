@@ -59,7 +59,7 @@ const statusFor = (candidate, extra = {}) => ({
   crossplay_enabled: false, crossplay_compatible: false,
   update_available: true, stack_state: 'updates_available', plan_fingerprint: 'refreshed', ...extra,
 });
-function review(candidate, { changes = [policyChange], online = 0, refreshed = candidate, container = false, planExtra = {} } = {}) {
+function review(candidate, { changes = [policyChange], online = 0, refreshed = candidate, container = false, planExtra = {}, version = '' } = {}) {
   const calls = [];
   const context = vm.createContext({
     location: {origin: 'https://example.test', search: '?server=jv-family1'},
@@ -84,7 +84,7 @@ function review(candidate, { changes = [policyChange], online = 0, refreshed = c
   vm.runInContext(reviewSource + '\nglobalThis.showReview = showReview;', context);
   const root = new Element('div');
   const form = { elements: container ? { channel: {} } : { policy: {} } };
-  context.showReview(root, form, { changes, restart_required: true, ...planExtra }, new URLSearchParams({ version_policy: 'pinned' }), candidate, { online });
+  context.showReview(root, form, { changes, restart_required: true, ...planExtra }, new URLSearchParams({ version_policy: 'pinned', version }), candidate, { online });
   const apply = root.all().find((element) => element.tag === 'button' && ['Apply changes', 'Confirm and apply'].includes(element.textContent));
   const consent = root.all().find((element) => element.tag === 'input');
   return { root, apply, consent, calls, state: context.state };
@@ -129,9 +129,31 @@ test('online players require the existing switch before Apply and pass explicit 
 });
 
 test('cross-play incompatibility blocks Apply and explains how to proceed', () => {
-  const result = review(statusFor('26.3', { crossplay_enabled: true }));
+  const result = review(statusFor('47.4.2', { installed: '47.4.2', crossplay_enabled: true, geyser_supported_version: '47.7' }));
   assert.equal(result.apply, undefined);
   assert.ok(result.root.all().some((element) => element.textContent?.includes('Disable Cross-play first')));
+});
+
+test('a compatible imported pin stays Specific version when applying a Geyser update', async () => {
+  const game = '47.4.2';
+  const minecraft = Object.freeze({ version_mode: 'pinned', version: game });
+  const form = { elements: { policy: {}, version: {} } };
+  const start = source.indexOf('        form.elements.policy.value = ["recommended", "latest", "pinned"]');
+  assert.ok(start >= 0);
+  vm.runInNewContext(source.slice(start, source.indexOf('        let previewSequence', start)), { form, minecraft });
+  assert.match(source, /<option value="pinned">Specific version<\/option>/);
+  assert.equal(form.elements.policy.value, 'pinned');
+  assert.equal(form.elements.version.value, game);
+
+  const result = review(statusFor(game, {
+    installed: game, configured_version: game, policy: 'pinned', crossplay_enabled: true,
+    crossplay_compatible: true, geyser_supported_version: '47.7', geyser_state: 'updates_available',
+  }), { changes: [], version: form.elements.version.value });
+  assert.ok(result.apply);
+  await result.apply.listeners.click();
+  const { body } = result.calls.find((call) => call.url?.endsWith('/update'));
+  assert.equal(body.get('policy'), 'pinned');
+  assert.equal(body.get('version'), game);
 });
 
 test('review Apply never automatically replans or retries', async () => {

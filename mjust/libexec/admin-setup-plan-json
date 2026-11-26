@@ -408,7 +408,7 @@ if [[ ${requested_bedrock_enabled} == true ]]; then
         exit 0
     fi
     source /usr/libexec/justvoxel/mjust/managed-crossplay.sh
-    if ! jv_setup_crossplay_compatible "${MINECRAFT_SERVER_TYPE}" "${version}" "${MINECRAFT_LOADER_VERSION}" "${geyser_supported_version}"; then
+    if ! jv_managed_crossplay_compatible "${MINECRAFT_SERVER_TYPE}" "${version}" "${MINECRAFT_LOADER_VERSION}" "${geyser_supported_version}"; then
         json_error 'Managed cross-play compatibility could not be confirmed. Disable cross-play to continue with Java setup.' bedrock_version_unsupported
         exit 0
     fi

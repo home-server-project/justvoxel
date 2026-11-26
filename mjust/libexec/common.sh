@@ -455,27 +455,19 @@ jv_crossplay_viaversion_supports() {
     ' <<< "${metadata}" >/dev/null 2>&1
 }
 
-# Setup verifies the chosen runtime against one current Geyser target. Keep
-# the installed-instance Version/Switch update policy independent.
-jv_setup_crossplay_compatible() {
+# Verify an exact runtime against the current Geyser Java target.
+jv_managed_crossplay_compatible() {
     local software="$1" game="$2" loader="$3" geyser="$4"
-    [[ -n ${game} && -n ${geyser} ]] && server_supports_managed_crossplay "${software}" || return 1
+    [[ -n ${software} && ${game} =~ ^[0-9]+([.][0-9]+){1,2}$ && ${geyser} =~ ^[0-9]+([.][0-9]+){1,2}$ ]] &&
+        server_supports_managed_crossplay "${software}" || return 1
     if server_supports_viaversion "${software}"; then
         bedrock_crossplay_supports_version "${game}" "${geyser}" && return 0
-        [[ ${game} =~ ^[0-9]+[.][0-9]+([.][0-9]+)?$ ]] || return 1
         [[ $(printf '%s\n' "${game}" "${geyser}" | sort -V | tail -n1) == "${geyser}" ]] &&
             jv_crossplay_viaversion_supports "${game}" "${geyser}"
     else
         bedrock_crossplay_supports_version "${game}" "${geyser}" && [[ -n ${loader} ]] &&
             jv_crossplay_mod_compatible "${software}" "${game}" "${loader}"
     fi
-}
-
-server_crossplay_version_compatible() {
-    if [[ ${MINECRAFT_SERVER_TYPE-paper} != spigot ]]; then bedrock_crossplay_supports_version "$1" "$2"; return; fi
-    [[ $1 =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ && $2 =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || return 1
-    [[ $(printf '%s\n' "$1" "$2" | sort -V | tail -n1) == "$2" ]] &&
-        [[ $(printf '%s\n' 1.20.5 "$1" | sort -V | tail -n1) == "$1" ]]
 }
 
 paper_version_has_stable_build() {
@@ -870,9 +862,6 @@ server_version_available() {
         pufferfish|leaf|spigot|forge|neoforge|fabric|quilt) java_server_version_available "${MINECRAFT_SERVER_TYPE}" "${version}" "${MINECRAFT_LOADER_VERSION:-}" ;;
         *) return 1 ;;
     esac
-}
-server_version_recommended_available() {
-    if [[ ${MINECRAFT_SERVER_TYPE-paper} == paper ]]; then paper_version_has_stable_build "$1"; else server_version_available "$1"; fi
 }
 resolve_recommended_server_version() {
     case "${MINECRAFT_SERVER_TYPE-paper}" in

@@ -104,9 +104,11 @@ for software in pufferfish leaf; do
         reject server_allows_in_place_switch "${other}" "${software}"
         server_allows_in_place_switch "${other}" "${other}"
     done
-    # Paper forks retain Paper's exact Geyser version compatibility check.
-    server_crossplay_version_compatible "${version}" "${version}"
-    reject server_crossplay_version_compatible "${version}" 26.4
+    # The direct target needs no bridge. Without ViaVersion evidence, an older
+    # fork release cannot be marked compatible.
+    jv_managed_crossplay_compatible "${software}" 47.4.2 '' 47.4.2
+    reject jv_managed_crossplay_compatible "${software}" 47.4.2 '' 47.7
+    reject jv_managed_crossplay_compatible "${software}" invalid '' invalid
 done
 fixture=valid
 reject java_server_version_available pufferfish 1.21.8 # artifact proves 1.21.10 only

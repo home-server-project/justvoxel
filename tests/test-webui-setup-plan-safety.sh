@@ -89,7 +89,7 @@ if grep -Fq 'bedrock_enabled=false' "${helper}"; then
     echo 'Setup planner must not silently turn off Bedrock.' >&2
     exit 1
 fi
-grep -Fq 'jv_setup_crossplay_compatible "${MINECRAFT_SERVER_TYPE}" "${version}" "${MINECRAFT_LOADER_VERSION}" "${geyser_supported_version}"' "${helper}"
+grep -Fq 'jv_managed_crossplay_compatible "${MINECRAFT_SERVER_TYPE}" "${version}" "${MINECRAFT_LOADER_VERSION}" "${geyser_supported_version}"' "${helper}"
 grep -Fq 'bedrock_version_unsupported' "${helper}"
 
 # shellcheck disable=SC1091

@@ -6,6 +6,7 @@ trap 'rm -rf -- "${fixture_dir}"' EXIT
 cat > "${fixture_dir}/common.sh" <<'STUB'
 require_root() { :; }
 require_config() { echo "Legacy config loaded" >&2; exit 91; }
+curl() { return 1; }
 resolve_latest_stable_paper_version() { printf '%s' "${PAPER_STABLE:-26.3}"; }
 resolve_latest_available_paper_version() { printf '%s' "${PAPER_AVAILABLE:-26.3}"; }
 resolve_geyser_supported_java_version() { [[ ${GEYSER_SUPPORT:-26.2} != unavailable ]] && printf '%s' "${GEYSER_SUPPORT:-26.2}"; }
@@ -25,11 +26,16 @@ jv_crossplay_metadata() {
     [[ ${COMPONENT_STATE:-up_to_date} != unavailable ]] || return 1
     printf '{"project":"%s","version":"2.99.0","build":19,"artifact":"fixture.jar","sha256":"%064d"}' "$1" 1
 }
-jv_crossplay_artifact_state() { printf '%s' "${COMPONENT_STATE:-up_to_date}"; }
+jv_crossplay_artifact_state() {
+    if [[ $1 == geyser && -n ${GEYSER_COMPONENT_STATE:-} ]]; then
+        printf '%s' "${GEYSER_COMPONENT_STATE}"
+    else
+        printf '%s' "${COMPONENT_STATE:-up_to_date}"
+    fi
+}
 STUB
 # Copy the real compatibility helpers; publisher metadata is stubbed.
-sed -n '/^jv_setup_crossplay_compatible() {/,/^paper_version_has_stable_build() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/common.sh"
-printf '%s\n' 'jv_crossplay_viaversion_supports() { return 1; }' >> "${fixture_dir}/common.sh"
+sed -n '/^jv_crossplay_viaversion_supports() {/,/^paper_version_has_stable_build() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/common.sh"
 sed -n '/^validate_server_type() {/,/^render_runtime_files() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/common.sh"
 sed -e "s|^source /usr/libexec/justvoxel/mjust/common.sh$|source ${fixture_dir}/common.sh|" \
     -e '\|^source /usr/libexec/justvoxel/mjust/managed-crossplay.sh$|d' \
@@ -124,6 +130,7 @@ preview="$(bash "${fixture_dir}/status" recommended '' yes)"
 jq -e '.installed == "" and .selected_candidate == "26.3" and .stack_state == "not_applicable"' <<< "${preview}" >/dev/null
 [[ ! -s ${RUNTIME_CALLS} ]]
 
+export PAPER_STABLE=26.2
 recommended="$(bash "${fixture_dir}/status" --instance jv-aaaaaa recommended)"
 jq -e '.installed == "26.2" and .available == "26.3" and .recommended == "26.2" and
     .selected_candidate == "26.2" and .configured_version == "26.2" and .policy == "recommended" and
@@ -131,8 +138,10 @@ jq -e '.installed == "26.2" and .available == "26.3" and .recommended == "26.2" 
     .minecraft_state == "up_to_date" and .paper_supported and .crossplay_compatible and
     .viaversion_state == "managed_automatically" and
     (.reason | contains("Minecraft 26.3 is available") and contains("released cross-play support") and contains("No action is needed"))' <<< "${recommended}" >/dev/null
-# Released Java support advances dynamically, with no source version switch.
+# The software's recommendation is independent of the Geyser target.
 advanced="$(GEYSER_SUPPORT=26.3 bash "${fixture_dir}/status" --instance jv-aaaaaa recommended)"
+jq -e '.recommended == "26.2" and .selected_candidate == "26.2" and .crossplay_supported_version == "26.3" and .stack_state == "unavailable"' <<< "${advanced}" >/dev/null
+advanced="$(PAPER_STABLE=26.3 GEYSER_SUPPORT=26.3 bash "${fixture_dir}/status" --instance jv-aaaaaa recommended)"
 jq -e '.recommended == "26.3" and .selected_candidate == "26.3" and .stack_state == "updates_available" and .update_available' <<< "${advanced}" >/dev/null
 # Component-only maintenance leaves the game version unchanged.
 components="$(COMPONENT_STATE=updates_available bash "${fixture_dir}/status" --instance jv-aaaaaa recommended)"
@@ -144,7 +153,7 @@ for setting in 'COMPONENT_STATE=unavailable' 'GEYSER_SUPPORT=unavailable' 'IMAGE
     jq -e '.stack_state == "unavailable" and (.update_available | not) and (.reason | contains("No action") | not)' <<< "${unknown}" >/dev/null
 done
 latest="$(bash "${fixture_dir}/status" --instance jv-aaaaaa latest)"
-jq -e '.policy == "latest" and .selected_candidate == "26.3" and .paper_supported and (.crossplay_compatible | not) and (.reason | contains("not compatible"))' <<< "${latest}" >/dev/null
+jq -e '.policy == "latest" and .selected_candidate == "26.3" and .paper_supported and (.crossplay_compatible | not) and (.reason | contains("could not be confirmed"))' <<< "${latest}" >/dev/null
 pinned="$(bash "${fixture_dir}/status" --instance jv-aaaaaa pinned 26.2)"
 jq -e '.policy == "pinned" and .selected_candidate == "26.2" and .paper_supported and .crossplay_compatible' <<< "${pinned}" >/dev/null
 pinned_incompatible="$(bash "${fixture_dir}/status" --instance jv-aaaaaa pinned 26.3)"
@@ -152,7 +161,7 @@ jq -e '.policy == "pinned" and .selected_candidate == "26.3" and (.crossplay_com
 rm "${DATA_PATH}/logs/latest.log"
 unknown="$(bash "${fixture_dir}/status" --instance jv-aaaaaa recommended)"
 jq -e '.installed == "" and .configured_version == "26.2" and (.update_available | not) and .stack_state == "unavailable"' <<< "${unknown}" >/dev/null
-without_crossplay="$(bash "${fixture_dir}/status" recommended '' no)"
+without_crossplay="$(PAPER_STABLE=26.3 bash "${fixture_dir}/status" recommended '' no)"
 jq -e '.recommended == "26.3" and .selected_candidate == "26.3" and .geyser_state == "not_applicable" and .stack_state == "not_applicable"' <<< "${without_crossplay}" >/dev/null
 
 # First-run preview remains usable with no installed game or managed binaries,
@@ -244,4 +253,159 @@ for policy in recommended latest pinned; do
         .candidate_channel == $preview.candidate_channel and .leaf_versions == $preview.leaf_versions and
         .crossplay_compatible == $preview.crossplay_compatible and
         (if .policy == "recommended" then .stack_state == "unavailable" else .update_available end)' <<< "${status}" >/dev/null
+done
+
+# Keep the real committed-instance loader, Version/Switch status, and
+# ViaVersion metadata parser. Stub only publisher and runtime boundaries.
+cat >> "${fixture_dir}/common.sh" <<'STUB'
+JV_PAPER_USER_AGENT=JustVoxel-fixture
+JV_MINECRAFT_IMAGE_REPO=docker.io/itzg/minecraft-server
+fixture_game_available() {
+    [[ $1 == "${OLDER}" || ( $1 == "${TARGET}" && ${TARGET_EXISTS:-yes} == yes ) ]]
+}
+paper_version_build_channel() { fixture_game_available "$1" && printf STABLE; }
+purpur_metadata() {
+    jq -cn --arg older "${OLDER}" --arg target "${TARGET}" --arg exists "${TARGET_EXISTS:-yes}" '
+        {metadata:{current:$older},versions:(if $exists == "yes" then [$older,$target] else [$older] end)}'
+}
+leaf_release_catalog() {
+    jq -cn --arg older "${OLDER}" --arg target "${TARGET}" --arg exists "${TARGET_EXISTS:-yes}" '
+        [if $exists == "yes" then {game:$target,channel:"TESTING",image:"java25"} else empty end,
+         {game:$older,channel:"PRODUCTION",image:"java25"}]'
+}
+java_server_version_available() {
+    fixture_game_available "$2" || return 1
+    case "$1" in
+        pufferfish|spigot) [[ -z $3 ]] ;;
+        fabric|neoforge) [[ $3 == "${FIXTURE_LOADER}" ]] ;;
+        *) return 1 ;;
+    esac
+}
+resolve_setup_java_runtime() {
+    local game="$3" loader=''
+    case "$2" in
+        pinned) ;;
+        recommended) game="${OLDER}" ;;
+        *) return 1 ;;
+    esac
+    fixture_game_available "${game}" || return 1
+    case "$1" in fabric|neoforge) loader="${FIXTURE_LOADER}" ;; esac
+    jq -cn --arg game "${game}" --arg loader "${loader}" '{game:$game,loader:$loader,image:"java25"}'
+}
+jv_crossplay_mod_compatible() {
+    printf '%s\n' "$*" >> "${CROSSPLAY_CALLS}"
+    [[ ${MOD_PROOF:-yes} == yes && $3 == "${FIXTURE_LOADER}" ]]
+}
+curl() {
+    [[ ${*: -1} == https://api.modrinth.com/v2/project/P1OZGk5p/version ]] || return 1
+    printf 'ViaVersion\n' >> "${CROSSPLAY_CALLS}"
+    [[ " $* " == *" game_versions=[\"${OLDER}\"] "* ]] || return 1
+    case "${VIA_MODE:-match}" in
+        offline) return 1 ;;
+        invalid_json) printf '[bad JSON'; return ;;
+        wrong_schema) printf '{"game_versions":[]}'; return ;;
+    esac
+    jq -cn --arg older "${OLDER}" --arg target "${TARGET}" --arg mode "${VIA_MODE:-match}" '
+        [{project_id:"P1OZGk5p",status:"listed",version_type:"release",loaders:["paper"],
+          game_versions:(if $mode == "match" then [$older,$target] else [$older] end),
+          files:[{primary:true,filename:"ViaVersion.jar",size:1234,
+            url:"https://cdn.modrinth.com/data/P1OZGk5p/versions/fixture/ViaVersion.jar"}]}]'
+}
+STUB
+export OLDER=47.4.2 TARGET=47.7 FIXTURE_LOADER=7.8.9 CROSSPLAY_CALLS="${fixture_dir}/crossplay-calls"
+export PAPER_STABLE="${OLDER}" PAPER_AVAILABLE="${TARGET}" GEYSER_SUPPORT="${TARGET}"
+base_config="$(jq -c --arg older "${OLDER}" '.runtime |= (.version=$older | .version_policy="pinned")' "${config}")"
+set_fixture_runtime() {
+    jq -c --arg software "$1" --arg game "$2" --arg loader "${3:-}" '
+        .runtime |= (.software=$software | .version=$game | .loader_version=$loader)' <<< "${base_config}" > "${config}"
+    printf 'Starting minecraft server version %s\n' "$2" > "${DATA_PATH}/logs/latest.log"
+}
+
+for software in paper purpur pufferfish leaf spigot; do
+    set_fixture_runtime "${software}" "${OLDER}"
+    : > "${CROSSPLAY_CALLS}"
+    status="$(bash "${fixture_dir}/status" --instance jv-aaaaaa)"
+    jq -e --arg game "${OLDER}" --arg software "${software}" '
+        .server_type == $software and .policy == "pinned" and
+        .installed == $game and .configured_version == $game and .selected_candidate == $game and
+        .crossplay_enabled and .crossplay_compatible and .server_supported and .crossplay_supported_version == ""' <<< "${status}" >/dev/null
+    [[ $(cat "${CROSSPLAY_CALLS}") == ViaVersion ]]
+    # Spigot has no latest-version catalog in the installed updater.
+    if [[ ${software} != spigot ]]; then
+        jq -e '.stack_state == "up_to_date" and .minecraft_state == "up_to_date"' <<< "${status}" >/dev/null
+    fi
+done
+
+set_fixture_runtime paper "${OLDER}"
+before="$(sha256sum "${config}")"
+components="$(GEYSER_COMPONENT_STATE=updates_available bash "${fixture_dir}/status" --instance jv-aaaaaa)"
+jq -e --arg older "${OLDER}" '
+    .policy == "pinned" and .configured_version == $older and .selected_candidate == $older and
+    .crossplay_compatible and .minecraft_state == "up_to_date" and
+    .stack_state == "updates_available" and .update_available and .runtime_update_required and
+    .geyser_state == "updates_available" and .floodgate_state == "up_to_date" and .reason == ""' <<< "${components}" >/dev/null
+recommended="$(bash "${fixture_dir}/status" --instance jv-aaaaaa recommended)"
+jq -e --arg older "${OLDER}" --arg target "${TARGET}" '
+    .recommended == $older and .selected_candidate == $older and .available == $target and
+    .crossplay_compatible and .reason == ""' <<< "${recommended}" >/dev/null
+for mode in no_match offline invalid_json wrong_schema; do
+    status="$(VIA_MODE="${mode}" bash "${fixture_dir}/status" --instance jv-aaaaaa)"
+    jq -e --arg older "${OLDER}" --arg target "${TARGET}" '
+        .selected_candidate == $older and .crossplay_enabled and (.crossplay_compatible | not) and
+        .stack_state == "unavailable" and .minecraft_state == "unavailable" and (.update_available | not) and
+        .crossplay_supported_version == $target and (.reason | contains("could not be confirmed"))' <<< "${status}" >/dev/null
+done
+for missing in TARGET_EXISTS=no GEYSER_SUPPORT=unavailable; do
+    status="$(env "${missing}" VIA_MODE=no_match bash "${fixture_dir}/status" --instance jv-aaaaaa)"
+    jq -e '(.crossplay_compatible | not) and .crossplay_supported_version == ""' <<< "${status}" >/dev/null
+done
+[[ $(sha256sum "${config}") == "${before}" ]]
+
+for pair in paper:purpur purpur:leaf leaf:paper; do
+    set_fixture_runtime "${pair%:*}" "${OLDER}"
+    target="${pair#*:}"
+    # Paper-family Migration Switch uses the installed Version path.
+    status="$(bash "${fixture_dir}/status" --instance jv-aaaaaa --server-type "${target}" pinned "${OLDER}")"
+    jq -e --arg older "${OLDER}" '
+        .selected_candidate == $older and .installed == $older and .crossplay_enabled and
+        .crossplay_compatible and .stack_state == "updates_available" and .minecraft_state == "up_to_date"' <<< "${status}" >/dev/null
+
+    args=(--instance jv-aaaaaa --switch-preview yes --server-type "${target}" pinned "${OLDER}")
+    compatible="$(bash "${fixture_dir}/status" "${args[@]}")"
+    jq -e --arg older "${OLDER}" --arg type "${target}" '
+        .selected_candidate == $older and .installed == $older and .server_type == $type and .server_supported and
+        .crossplay_enabled and .crossplay_compatible and .crossplay_supported_version == ""' <<< "${compatible}" >/dev/null
+    blocked="$(VIA_MODE=no_match bash "${fixture_dir}/status" "${args[@]}")"
+    jq -e --arg older "${OLDER}" --arg target "${TARGET}" '
+        .selected_candidate == $older and .crossplay_enabled and (.crossplay_compatible | not) and
+        .crossplay_supported_version == $target' <<< "${blocked}" >/dev/null
+    [[ $(jq -r .plan_fingerprint <<< "${compatible}") != "$(jq -r .plan_fingerprint <<< "${blocked}")" ]]
+    blocked="$(VIA_MODE=no_match TARGET_EXISTS=no bash "${fixture_dir}/status" "${args[@]}")"
+    jq -e '(.crossplay_compatible | not) and .crossplay_supported_version == ""' <<< "${blocked}" >/dev/null
+    if bash "${fixture_dir}/status" "${args[@]:0:7}" "${TARGET}"; then
+        echo 'Switch preview accepted a different Minecraft version' >&2
+        exit 1
+    fi
+done
+
+for software in fabric neoforge; do
+    for proof in yes no; do
+        set_fixture_runtime "${software}" "${TARGET}" "${FIXTURE_LOADER}"
+        : > "${CROSSPLAY_CALLS}"
+        status="$(MOD_PROOF="${proof}" bash "${fixture_dir}/status" --instance jv-aaaaaa)"
+        jq -e --arg proof "${proof}" '.crossplay_enabled and .crossplay_compatible == ($proof == "yes")' <<< "${status}" >/dev/null
+        [[ $(cat "${CROSSPLAY_CALLS}") == "${software} ${TARGET} ${FIXTURE_LOADER}" ]]
+
+        : > "${CROSSPLAY_CALLS}"
+        set_fixture_runtime paper "${TARGET}"
+        status="$(MOD_PROOF="${proof}" bash "${fixture_dir}/status" --instance jv-aaaaaa --switch-preview yes --server-type "${software}" pinned "${TARGET}")"
+        jq -e --arg proof "${proof}" --arg loader "${FIXTURE_LOADER}" '
+            .loader_version == $loader and .crossplay_enabled and .crossplay_compatible == ($proof == "yes")' <<< "${status}" >/dev/null
+        [[ $(cat "${CROSSPLAY_CALLS}") == "${software} ${TARGET} ${FIXTURE_LOADER}" ]]
+    done
+    : > "${CROSSPLAY_CALLS}"
+    set_fixture_runtime "${software}" "${OLDER}" "${FIXTURE_LOADER}"
+    status="$(bash "${fixture_dir}/status" --instance jv-aaaaaa)"
+    jq -e --arg target "${TARGET}" '(.crossplay_compatible | not) and .crossplay_supported_version == $target' <<< "${status}" >/dev/null
+    [[ $(cat "${CROSSPLAY_CALLS}") == "${software} ${TARGET} ${FIXTURE_LOADER}" ]]
 done

@@ -43,6 +43,11 @@ Spigot can use the current target directly. Older releases can use managed
 ViaVersion when Modrinth lists a usable Paper-compatible ViaVersion release
 covering both the selected Minecraft version and the current Geyser target.
 
+Minecraft Update → Version and Server Migration → Switch use the same
+compatibility check. Recommended follows the server software's release
+recommendation. Version checks an imported server's configured Specific
+version, and Switch checks the target software at the exact installed version.
+
 Fabric and NeoForge are verified independently for the exact Minecraft and
 loader versions against the managed mod artifacts. If verification fails, Setup
 shows a verified compatible release for the chosen software when one is
