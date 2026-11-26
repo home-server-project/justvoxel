@@ -211,18 +211,18 @@ for path in sorted(set(entries.split(b"\0")) - {b""}):
     else:
         raise SystemExit("Unsupported Management input: " + os.fsdecode(path))
     h.update(mode + b" " + path + b"\0" + hashlib.sha256(content).digest())
-h.update(sys.argv[1].encode() + b"\0management-api=v1\0")
+h.update(sys.argv[1].encode() + b"\0management-api=v1\0development\0")
 print(h.hexdigest())
 HASH_INPUTS
 )"
 agent_cache="${cache_dir}/management/${input_identity}"
 mkdir -p build_artifacts/management
 management_result=rebuilt
-if [[ -s "${agent_cache}/management-agent" && -x "${agent_cache}/management-agent" &&
-      -f "${agent_cache}/management-agent.sha256" ]] &&
-    (cd "${agent_cache}" && sha256sum --status -c management-agent.sha256); then
+if [[ -s "${agent_cache}/management-agent-development" && -x "${agent_cache}/management-agent-development" &&
+      -f "${agent_cache}/management-agent-development.sha256" ]] &&
+    (cd "${agent_cache}" && sha256sum --status -c management-agent-development.sha256); then
     stage 'Reuse validated Management Agent binary'
-    install -m0755 "${agent_cache}/management-agent" build_artifacts/management/management-agent
+    install -m0755 "${agent_cache}/management-agent-development" build_artifacts/management/management-agent-development
     management_result=reused
 else
     stage 'Build and validate Management Agent in the reusable builder'
@@ -237,14 +237,14 @@ else
         -v "${repo_root}/system_files/etc/pam.d/justvoxel:/etc/pam.d/justvoxel:ro" \
         -v "${repo_root}/tests/run-pam-integration-alma.sh:/run-pam-integration-alma.sh:ro" \
         -v "${work_dir}/management:/out" \
-        "${builder}" /bin/bash /repo/build_files/build-management-agent.sh
+        "${builder}" /bin/bash /repo/build_files/build-management-agent.sh development
     assert_base_unchanged
-    sudo chmod 0755 "${work_dir}/management/management-agent"
-    install -m0755 "${work_dir}/management/management-agent" build_artifacts/management/management-agent
+    sudo chmod 0755 "${work_dir}/management/management-agent-development"
+    install -m0755 "${work_dir}/management/management-agent-development" build_artifacts/management/management-agent-development
     mkdir -p "${agent_cache}"
-    install -m0755 build_artifacts/management/management-agent "${agent_cache}/management-agent.tmp"
-    mv "${agent_cache}/management-agent.tmp" "${agent_cache}/management-agent"
-    (cd "${agent_cache}" && sha256sum management-agent >management-agent.sha256)
+    install -m0755 build_artifacts/management/management-agent-development "${agent_cache}/management-agent-development.tmp"
+    mv "${agent_cache}/management-agent-development.tmp" "${agent_cache}/management-agent-development"
+    (cd "${agent_cache}" && sha256sum management-agent-development >management-agent-development.sha256)
 fi
 
 stage 'Build complete JustVoxel development image'

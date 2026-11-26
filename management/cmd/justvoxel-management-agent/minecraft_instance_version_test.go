@@ -171,3 +171,48 @@ func TestContainerPublicationOnlyChangesSelectedDigestWhileRunning(t *testing.T)
 		t.Fatal("image-only publication changed the Minecraft version")
 	}
 }
+
+func TestSwitchPreservedContentSurvivesContainerPublication(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("the appliance publication command requires root")
+	}
+	f := newInstanceActivationFixtureFor(t, "paper", "1.21.4")
+	id := f.configs[0].ID
+	before, err := f.backend.readRecord(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before.Runtime.VersionPolicy = "pinned"
+	before.Runtime.PreserveContent = true
+	dir, _, _ := f.backend.paths(id)
+	if err = f.backend.writeJSON(filepath.Join(dir, "config.json"), before, true); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.apply(id); err != nil {
+		t.Fatal(err)
+	}
+	before, err = f.backend.readRecord(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := "sha256:" + strings.Repeat("b", 64)
+	originalCommand := f.backend.command
+	f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+		if command == "podman" && reflect.DeepEqual(args, []string{"image", "inspect", "docker.io/itzg/minecraft-server@" + digest, "--format", "{{.Digest}}"}) {
+			return []byte(digest), nil
+		}
+		return originalCommand(ctx, command, args...)
+	}
+	oldBackend := instanceRuntimes
+	instanceRuntimes = f.backend
+	t.Cleanup(func() { instanceRuntimes = oldBackend })
+	t.Setenv("JUSTVOXEL_SWITCH_PRESERVE_CONTENT", "")
+	if err = instanceVersionCommand(context.Background(), []string{"instance-container-publish", id, digest}); err != nil {
+		t.Fatal("image-only publication rejected the existing preserve-content setting", err)
+	}
+	after, err := f.backend.readRecord(id)
+	before.Runtime.ImageDigest = digest
+	if err != nil || after.Runtime != before.Runtime || after.EnvironmentSHA256 != before.EnvironmentSHA256 {
+		t.Fatal("image-only publication changed the preserved runtime configuration", err)
+	}
+}

@@ -4,6 +4,23 @@ source /usr/libexec/justvoxel/mjust/common.sh
 source /usr/libexec/justvoxel/mjust/managed-crossplay.sh
 source /usr/libexec/justvoxel/mjust/update-policy.sh
 require_root
+if [[ ${1:-} == matrix-catalog ]]; then
+    [[ $# == 1 ]] || exit 1
+    vanilla_metadata | jq -ce '
+        select(all(.versions[]; (.id | type == "string") and (.type | type == "string"))) |
+        [.versions[] | select(.type == "release") | .id]'
+    exit
+fi
+if [[ ${1:-} == matrix-image ]]; then
+    [[ $# == 2 && ( $2 == java21 || $2 == java25 ) ]] || exit 1
+    jv_remote_platform_digest "${JV_MINECRAFT_IMAGE_REPO}:$2"
+    exit
+fi
+if [[ ${1:-} == matrix-release ]]; then
+    [[ $# == 3 ]] || exit 1
+    resolve_switch_matrix_java_release "$2" "$3"
+    exit
+fi
 instance_args=()
 if [[ ${1:-} == --instance ]]; then
     [[ $# -ge 2 ]] || exit 1

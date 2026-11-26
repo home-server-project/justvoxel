@@ -3,6 +3,7 @@ set -Eeuo pipefail
 source /usr/libexec/justvoxel/mjust/backup-common.sh
 source /usr/libexec/justvoxel/mjust/backup-instance-storage.sh
 source /usr/libexec/justvoxel/mjust/interrupt-safety.sh
+source /usr/libexec/justvoxel/mjust/switch-matrix-reservation.sh
 
 readonly config_file="/etc/justvoxel/minecraft-backup.env"
 readonly restore_exclusion_lock="/run/justvoxel-minecraft-restore-exclusion.lock"
@@ -37,7 +38,7 @@ fi
 # Both acquisitions are nonblocking: an existing backup is never interrupted.
 restore_exclusion_umask=$(umask)
 umask 0077
-exec 8>"${restore_exclusion_lock}"
+exec 8>>"${restore_exclusion_lock}"
 umask "${restore_exclusion_umask}"
 if ! flock -n 8; then
     echo 'ERROR: an independent Minecraft Restore operation is in progress.' >&2
@@ -45,12 +46,10 @@ if ! flock -n 8; then
 fi
 # Descriptor 8 stays open through backup, restart, and the EXIT cleanup.
 
-jv_backup_load_config "${config_file}"
-if [[ ! -d ${minecraft_data_path} ]]; then
-    echo "ERROR: Minecraft data directory does not exist: ${minecraft_data_path}" >&2
+if ! jv_switch_matrix_reservation_clear; then
+    echo 'ERROR: Switch matrix maintenance is reserved.' >&2
     exit 1
 fi
-jv_backup_prepare_write_target
 
 if [[ ${JUSTVOXEL_MAINTENANCE_LOCK_HELD:-0} != 1 ]]; then
     exec 9>"${lock_file}"
@@ -65,6 +64,13 @@ if [[ -e ${setup_marker} ]]; then
     echo 'Skipping backup: first-run setup or rollback is in progress.'
     exit 0
 fi
+
+jv_backup_load_config "${config_file}"
+if [[ ! -d ${minecraft_data_path} ]]; then
+    echo "ERROR: Minecraft data directory does not exist: ${minecraft_data_path}" >&2
+    exit 1
+fi
+jv_backup_prepare_write_target
 
 # Keep the administrator-configured backup root. The ID is only a subfolder.
 # Legacy installations without an identity continue using the backup root.

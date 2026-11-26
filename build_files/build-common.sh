@@ -1,6 +1,11 @@
 #!/usr/bin/bash
 set -ouex pipefail
 
+case "${1:-}" in
+    true|false) expected_switch_matrix="$1" ;;
+    *) echo "ERROR: expected Switch matrix build capability is required." >&2; exit 1 ;;
+esac
+
 source /ctx/build_files/packages.env
 : "${JUSTVOXEL_COMMON_PACKAGES:?JUSTVOXEL_COMMON_PACKAGES must be set}"
 
@@ -97,7 +102,13 @@ install -m0755 /ctx/runtime/justvoxel-remote-access-status /usr/libexec/justvoxe
 install -m0755 /ctx/runtime/justvoxel-motd /usr/libexec/justvoxel/motd
 install -m0755 /ctx/runtime/justvoxel-console-issue /usr/libexec/justvoxel/console-issue-refresh
 install -d -m0755 /usr/libexec/justvoxel/mjust
-install -m0755 /ctx/mjust/libexec/* /usr/libexec/justvoxel/mjust/
+for helper in /ctx/mjust/libexec/*; do
+    mode=0755
+    if [[ "${helper##*/}" == switch-matrix-reservation.sh ]]; then
+        mode=0644
+    fi
+    install -m"${mode}" "${helper}" /usr/libexec/justvoxel/mjust/
+done
 
 if [[ ! -x /ctx/build_artifacts/management/management-agent ]]; then
     echo 'ERROR: verified JustVoxel management agent build artifact is missing.' >&2
@@ -125,7 +136,9 @@ webui_version_output="$(/usr/libexec/justvoxel/justvoxel-webui -version)"
 grep -Fqx "JustVoxel WebUI ${webui_version}" <<<"${webui_version_output}"
 grep -Fqx "source=${webui_source}" <<<"${webui_version_output}"
 grep -Fqx "management-api=${webui_api}" <<<"${webui_version_output}"
-/usr/libexec/justvoxel/management-agent version | grep -Fq 'JustVoxel Management API v1'
+management_version_output="$(/usr/libexec/justvoxel/management-agent version)"
+grep -Fxq 'JustVoxel Management API v1' <<<"${management_version_output}"
+grep -Fxq "Switch matrix=${expected_switch_matrix}" <<<"${management_version_output}"
 
 install -d -m0755 /usr/libexec/justvoxel/health
 install -m0755 /ctx/build_files/validate/common.sh /usr/libexec/justvoxel/health/common

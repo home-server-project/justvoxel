@@ -4,12 +4,17 @@ inputs:
   signing-key:
     description: Private key for publishing a rebuilt package
     required: true
+  mode:
+    description: Management Agent artifacts to include in the signed package
+    default: production
 runs:
   using: composite
   steps:
     - name: Resolve Management package inputs
       id: management-inputs
       shell: bash
+      env:
+        MANAGEMENT_BUILD_MODE: ${{ inputs.mode }}
       run: |
         set -euo pipefail
         base_digest="$(skopeo inspect --authfile "${HOME}/.docker/config.json" --raw "docker://${HOME_SERVER_BASE_IMAGE}" | sha256sum | cut -d ' ' -f 1)"
@@ -50,7 +55,7 @@ runs:
             system_files/usr/lib/systemd/system/justvoxel-system-update-stage.timer \
             system_files/usr/share/justvoxel/filebrowser/config.yaml \
             system_files/usr/lib/tmpfiles.d/justvoxel.conf
-          printf '%s\0' "${base_identity}" 'management-api=v1'
+          printf '%s\0' "${base_identity}" 'management-api=v1' "${MANAGEMENT_BUILD_MODE}"
         } | sha256sum | cut -d ' ' -f 1)"
         echo "identity=${input_identity}" >> "${GITHUB_OUTPUT}"
         echo "base=${base_identity}" >> "${GITHUB_OUTPUT}"
@@ -110,6 +115,7 @@ runs:
       continue-on-error: true
       shell: bash
       env:
+        MANAGEMENT_BUILD_MODE: ${{ inputs.mode }}
         DIGEST: ${{ steps.management-package.outputs.digest }}
       run: |
         bash "${GITHUB_ACTION_PATH}/extract.sh"
@@ -117,6 +123,8 @@ runs:
     - name: Build Management Agent from source
       if: steps.cached.outcome != 'success'
       uses: ./.github/actions/build-management
+      with:
+        mode: ${{ inputs.mode }}
 
     - name: Publish internal Management package
       id: management-push
@@ -159,6 +167,7 @@ runs:
       if: steps.cached.outcome != 'success'
       shell: bash
       env:
+        MANAGEMENT_BUILD_MODE: ${{ inputs.mode }}
         DIGEST: ${{ steps.management-push.outputs.digest }}
       run: |
         bash "${GITHUB_ACTION_PATH}/extract.sh"

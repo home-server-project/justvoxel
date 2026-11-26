@@ -38,13 +38,17 @@ func switchNeedsWorldMove(from, to string) bool {
 // An empty mods folder does not prove that a modded world is Vanilla-safe.
 func switchWorldRisk(from, to string) bool {
 	c, _ := javaServerSoftware(from)
-	return c.ModLoader && (to == "vanilla" || javaServerPaperFamily(to))
+	return c.ModLoader && from != to
+}
+
+func switchRejectsCrossplayPlatform(from, to string, enabled bool) bool {
+	return enabled && javaServerCrossplay(to) && switchCrossplayPlatform(from) != switchCrossplayPlatform(to)
 }
 
 // runtimeAvailable means the exact game release, target loader pin and image
 // have all been verified. layoutVerified is required only for leaving Paper.
 func switchTransitionActions(from, to string, runtimeAvailable, layoutVerified bool, content []switchContent) (convert, clone bool) {
-	if !runtimeAvailable || !switchStructuralPath(from, to) || switchNeedsWorldMove(from, to) && !layoutVerified {
+	if !runtimeAvailable || !switchStructuralPath(from, to) || (switchNeedsWorldMove(from, to) || from == "leaf") && !layoutVerified {
 		return false, false
 	}
 	convert, clone = !switchWorldRisk(from, to), true
@@ -70,20 +74,23 @@ type switchContentKey struct{}
 type switchPufferfishBuildKey struct{}
 
 type minecraftSwitchPlan struct {
-	InstanceID         string             `json:"instance_id"`
-	Current            string             `json:"current"`
-	Target             string             `json:"target"`
-	Version            string             `json:"version"`
-	Convert            bool               `json:"convert"`
-	Clone              bool               `json:"clone"`
-	Reason             string             `json:"reason"`
-	Content            []switchContent    `json:"content"`
-	Warnings           []string           `json:"warnings"`
-	Fingerprint        string             `json:"plan_fingerprint"`
-	Runtime            adminVersionStatus `json:"-"`
-	RuntimeDigest      string             `json:"-"`
-	ContentFingerprint string             `json:"-"`
-	WorldFingerprint   string             `json:"-"`
+	MatrixPolicyBlocked bool                             `json:"-"`
+	MatrixLeafBuild     string                           `json:"-"`
+	InstanceID          string                           `json:"instance_id"`
+	Current             string                           `json:"current"`
+	Target              string                           `json:"target"`
+	Version             string                           `json:"version"`
+	Convert             bool                             `json:"convert"`
+	Clone               bool                             `json:"clone"`
+	Reason              string                           `json:"reason"`
+	Content             []switchContent                  `json:"content"`
+	Warnings            []string                         `json:"warnings"`
+	Fingerprint         string                           `json:"plan_fingerprint"`
+	Runtime             adminVersionStatus               `json:"-"`
+	ManagedArtifacts    map[string]switchManagedArtifact `json:"-"`
+	RuntimeDigest       string                           `json:"-"`
+	ContentFingerprint  string                           `json:"-"`
+	WorldFingerprint    string                           `json:"-"`
 }
 
 func switchUnsupportedReason(from, to string) string {
@@ -144,6 +151,15 @@ func switchContentEvidence(ctx context.Context, record instanceRuntimeRecord, ta
 	inventory := append(plugins, mods...)
 	result := make([]switchContent, 0, len(inventory))
 	hashes := []string{instanceHash(raw)}
+	owned, err := runtimeOwnedModComponents(pluginServerContext{InstanceID: record.Runtime.ID, ServerType: record.Runtime.Software}, data)
+	if err != nil {
+		return nil, "", err
+	}
+	ownedMods := make(map[string]string, len(owned))
+	for _, artifact := range owned {
+		ownedMods[artifact.Filename] = artifact.SHA512
+		hashes = append(hashes, "runtime-owned/"+artifact.Filename+":"+artifact.SHA512)
+	}
 	runtimeProjects := []string{}
 	_, environment, _ := instanceRuntimes.paths(record.Runtime.ID)
 	committed, readErr := instanceRuntimes.readPrivate(environment)
@@ -301,6 +317,10 @@ func switchContentEvidence(ctx context.Context, record instanceRuntimeRecord, ta
 				}
 			}
 		}
+		if kind == "mods" && ownedMods[item.Filename] == hash && hash != "" && record.Runtime.Software != target {
+			evidence.Compatibility, evidence.Reason = "incompatible", "The installed managed cross-play component belongs to the source loader."
+			delete(proofs, index)
+		}
 		if javaServerContentKind(target) != kind {
 			evidence.Compatibility, evidence.Reason = "incompatible", "This executable content is not supported by the target software. Handle it manually in Plugins & Mods."
 			delete(proofs, index)
@@ -408,6 +428,11 @@ func planMinecraftSwitch(ctx context.Context, id, target string) (minecraftSwitc
 		imageTag = selection.ImageTag
 		legacyBuild = selection.PufferfishBuild
 	}
+	if switchRejectsCrossplayPlatform(p.Current, target, record.Runtime.BedrockEnabled) {
+		p.MatrixPolicyBlocked = true
+		p.Reason = "The target requires different managed cross-play artifacts. Switch preserves installed executable files and cannot install a different platform stack."
+		return p, nil
+	}
 	if !legacyRuntime {
 		ctx = context.WithValue(ctx, switchRuntimeKey{}, true)
 	}
@@ -426,16 +451,23 @@ func planMinecraftSwitch(ctx context.Context, id, target string) (minecraftSwitc
 	if json.Unmarshal(raw, &managed) != nil {
 		return p, errInstanceRecovery
 	}
-	if !legacyRuntime {
-		caps, _ := javaServerSoftware(target)
-		if !validPufferfishBuild(target, p.Runtime.PufferfishBuild) || caps.ModLoader && !javaLoaderVersionPattern.MatchString(p.Runtime.LoaderVersion) || validateJavaServerSelection(target, "pinned", p.Version, p.Runtime.LoaderVersion, p.Runtime.ImageTag, p.Runtime.CrossplayEnabled) != nil {
-			p.Reason = "An exact target loader version could not be verified."
-			return p, nil
-		}
-		if record.Runtime.BedrockEnabled && !p.Runtime.CrossplayEnabled {
-			p.Warnings = append(p.Warnings, "The target uses Java connections. Existing cross-play executable files are preserved and must be handled manually in Plugins & Mods.")
-		}
+	if !validPufferfishBuild(target, p.Runtime.PufferfishBuild) ||
+		validateJavaServerSelection(target, "pinned", p.Version, p.Runtime.LoaderVersion, p.Runtime.ImageTag, p.Runtime.CrossplayEnabled) != nil {
+		p.Reason = "An exact target runtime or loader pin could not be verified."
+		return p, nil
 	}
+	if p.Runtime.CrossplayEnabled != (record.Runtime.BedrockEnabled && javaServerCrossplay(target)) {
+		p.Reason = "The target did not return a verified cross-play setting for this exact release."
+		return p, nil
+	}
+	if record.Runtime.BedrockEnabled && !p.Runtime.CrossplayEnabled {
+		p.Warnings = append(p.Warnings, "The target uses Java connections. Existing cross-play executable files are preserved and can be reviewed in Plugins & Mods.")
+	}
+	if target == "pufferfish" && verifySwitchPufferfishCache(record.Storage.DataPath) != nil {
+		p.Reason = "A cached Pufferfish server JAR or an unreadable data directory prevents verifying the exact target build."
+		return p, nil
+	}
+	p.ManagedArtifacts = managed.Artifacts
 	p.RuntimeDigest = managed.Digest
 	if !operationFingerprintPattern.MatchString(p.RuntimeDigest) {
 		p.Reason = "The exact target runtime image could not be verified."
@@ -446,7 +478,18 @@ func planMinecraftSwitch(ctx context.Context, id, target string) (minecraftSwitc
 		p.Reason = "Plugins & Mods inventory could not be verified. Refresh Switch after resolving inventory access."
 		return p, nil
 	}
+	if p.Runtime.CrossplayEnabled {
+		if switchCrossplayPlatform(target) != "spigot" || b.verifySwitchPaperCrossplay(ctx, record, p.ManagedArtifacts) != nil {
+			p.MatrixPolicyBlocked = true
+			p.Reason = "The installed managed cross-play files do not match the reviewed target stack. Switch preserves the installed files."
+			return p, nil
+		}
+	}
 	layoutVerified := true
+	if p.Current == "leaf" && verifySwitchLeafWorld(record.Storage.DataPath) != nil {
+		layoutVerified = false
+		p.Reason = "Leaf world region files could not be verified as Anvil. The target has no reviewed Linear region support."
+	}
 	if switchNeedsWorldMove(p.Current, target) {
 		if moves, layoutErr := inspectSwitchWorld(record.Storage.DataPath, p.Version); layoutErr != nil {
 			layoutVerified = false
@@ -459,6 +502,16 @@ func planMinecraftSwitch(ctx context.Context, id, target string) (minecraftSwitc
 		p.Warnings = append(p.Warnings, "Mod-added blocks, items, entities and other world data may not survive. An empty mods folder does not establish world safety; only a protected experimental clone is available.")
 	}
 	p.Convert, p.Clone = switchTransitionActions(p.Current, target, true, layoutVerified, p.Content)
+	if record.Runtime.BedrockEnabled && !p.Runtime.CrossplayEnabled && javaServerContentKind(p.Current) == "mods" && javaServerContentKind(p.Target) == "mods" {
+		for _, item := range p.Content {
+			if item.Compatibility != "verified" {
+				p.Convert, p.Clone = false, false
+				p.Reason = "Installed mod files could not be verified for the Java-only target loader. Switch preserves those files and will not launch an incompatible stack."
+				break
+			}
+		}
+	}
+	p.MatrixPolicyBlocked = !p.Convert || !p.Clone
 	p.Warnings = append(p.Warnings, "No plugins or mods are removed, disabled, replaced, updated or downloaded by Switch.")
 	if !p.Convert && p.Reason == "" {
 		p.Reason = "Convert is blocked by world safety or incompatible or unverified plugins/mods. Review the named items in Plugins & Mods. An experimental clone preserves the original; its runtime must still pass verification."
@@ -467,7 +520,8 @@ func planMinecraftSwitch(ctx context.Context, id, target string) (minecraftSwitc
 		ID, Target, Version, Runtime, Content, Record, World string
 		Convert, Clone                                       bool
 		PufferfishBuild                                      int `json:",omitempty"`
-	}{id, target, p.Version, p.Runtime.PlanFingerprint, p.ContentFingerprint, instanceHash(mustSwitchJSON(record)), p.WorldFingerprint, p.Convert, p.Clone, p.Runtime.PufferfishBuild})
+		ManagedArtifacts                                     map[string]switchManagedArtifact
+	}{id, target, p.Version, p.Runtime.PlanFingerprint, p.ContentFingerprint, instanceHash(mustSwitchJSON(record)), p.WorldFingerprint, p.Convert, p.Clone, p.Runtime.PufferfishBuild, p.ManagedArtifacts})
 	if err != nil {
 		return p, err
 	}
@@ -646,7 +700,7 @@ func (s *server) minecraftSwitchOperation(w http.ResponseWriter, r *http.Request
 	} else {
 		j = s.operations.latestUnresolvedMinecraftSwitch(id)
 	}
-	if j != nil && (j.InstanceID != id || j.OperationType != operationTypeMinecraftSwitch) {
+	if j != nil && (j.InstanceID != id || j.OperationType != operationTypeMinecraftSwitch || j.MatrixParent != "") {
 		j = nil
 	}
 	response := map[string]any{"operation": j}
@@ -666,13 +720,13 @@ func (s *server) minecraftSwitchOperation(w http.ResponseWriter, r *http.Request
 func (s *operationStore) latestUnresolvedMinecraftSwitch(id string) *operationJournal {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if current, ok := s.operations[s.currentMinecraftResetID]; ok && current.InstanceID == id && current.OperationType == operationTypeMinecraftSwitch && operationIsCurrent(current.State) {
+	if current, ok := s.operations[s.currentMinecraftResetID]; ok && current.InstanceID == id && current.OperationType == operationTypeMinecraftSwitch && current.MatrixParent == "" && operationIsCurrent(current.State) {
 		return &current
 	}
 	var latest *operationJournal
 	var started time.Time
 	for _, j := range s.operations {
-		if j.InstanceID != id || j.OperationType != operationTypeMinecraftSwitch || !operationIsCurrent(j.State) {
+		if j.InstanceID != id || j.OperationType != operationTypeMinecraftSwitch || j.MatrixParent != "" || !operationIsCurrent(j.State) {
 			continue
 		}
 		at, err := time.Parse(time.RFC3339Nano, j.StartedAt)
@@ -683,8 +737,14 @@ func (s *operationStore) latestUnresolvedMinecraftSwitch(id string) *operationJo
 	return latest
 }
 
-func (s *server) runMinecraftSwitch(ctx context.Context, j operationJournal, p minecraftSwitchPlan, r minecraftSwitchRequest) {
+func (s *server) runMinecraftSwitch(ctx context.Context, j operationJournal, p minecraftSwitchPlan, r minecraftSwitchRequest) string {
 	e := minecraftSwitchEvidence{Schema: 1, OperationID: j.OperationID, Source: j.InstanceID, Target: p.Target, Version: p.Version, Action: r.Action, Stage: "validating"}
+	if j.MatrixParent != "" {
+		if !s.operations.authorizeQueuedMatrixSwitch(j) {
+			return "ownership"
+		}
+		ctx = context.WithValue(ctx, switchMatrixChildKey{}, j)
+	}
 	lock, err := acquirePluginMaintenanceLock()
 	source, readErr := instanceRuntimes.readRecord(j.InstanceID)
 	if readErr == nil {
@@ -699,7 +759,7 @@ func (s *server) runMinecraftSwitch(ctx context.Context, j operationJournal, p m
 	if _, transitionErr := s.operations.transition(j.OperationID, operationValidating, "validating", "Revalidating Switch at the same Minecraft version."); transitionErr != nil {
 		_ = lock.Close()
 		s.operations.recordSwitchFailure(e, errors.Join(err, transitionErr))
-		return
+		return "validating"
 	}
 	if lock != nil {
 		if err == nil {
@@ -730,37 +790,30 @@ func (s *server) runMinecraftSwitch(ctx context.Context, j operationJournal, p m
 		if err == nil {
 			var refreshed minecraftSwitchPlan
 			refreshed, err = planMinecraftSwitch(ctx, j.InstanceID, p.Target)
-			if err == nil && (refreshed.Fingerprint != p.Fingerprint || (r.Action == "convert" && !refreshed.Convert)) {
+			if err == nil && (refreshed.Fingerprint != p.Fingerprint || r.Action == "convert" && !refreshed.Convert || r.Action == "clone" && !refreshed.Clone) {
 				err = errInstanceBusy
 			}
 		}
 		if err == nil {
 			_, err = s.operations.transition(j.OperationID, operationRunning, "converting", "Creating a consistent copy or cold backup and verifying the exact target runtime.")
 		}
-		if err == nil && r.Action == "convert" && !(javaServerPaperFamily(p.Current) && javaServerPaperFamily(p.Target)) {
+		if err == nil && r.Action == "convert" {
 			err = s.convertMinecraftSwitch(ctx, &e, p, lock)
-		} else if err == nil && r.Action == "convert" {
-			// The mature worker owns the maintenance flock itself and rechecks the
-			// underlying runtime fingerprint immediately before destructive work.
-			err = lock.Close()
-			if err == nil {
-				worker := context.WithValue(ctx, switchWorkerKey{}, true)
-				worker = context.WithValue(worker, switchPufferfishBuildKey{}, p.Runtime.PufferfishBuild)
-				worker = context.WithValue(worker, switchContentKey{}, p.ContentFingerprint)
-				worker = context.WithValue(worker, instanceVersionKey{}, j.InstanceID)
-				worker = context.WithValue(worker, instanceVersionSelectionKey{}, [2]string{"pinned", p.Version})
-				err = runMinecraftStackUpdate(worker, p.Runtime.PlanFingerprint, true, p.Target, p.Runtime.ImageTag)
-				if err == nil {
-					e.Stage = "complete"
-					err = saveSwitchEvidence(e)
-				}
-			}
 		} else if err == nil {
 			err = s.cloneMinecraftSwitch(ctx, &e, p, lock)
+		}
+		if err == nil && j.MatrixParent != "" {
+			if bindErr := s.operations.finalizeSwitchMatrixChild(ctx, j.MatrixParent, e); bindErr != nil {
+				_ = lock.Close()
+				s.operations.recordSwitchFailure(e, bindErr)
+				_, _ = s.operations.transition(j.OperationID, operationNeedsAttention, "fixture_binding", "Verified Switch fixture ownership could not be finalized. Recovery evidence was preserved.")
+				return "fixture_binding"
+			}
 		}
 		err = errors.Join(err, lock.Close())
 	}
 	if err != nil {
+		failureStage := e.Stage
 		s.operations.recordSwitchFailure(e, err)
 		s.operations.recordSwitchCloneRuntime(e)
 		// Rollback composes the existing creation/restore/runtime recovery paths. It
@@ -768,7 +821,13 @@ func (s *server) runMinecraftSwitch(ctx context.Context, j operationJournal, p m
 		recovered := false
 		if lock != nil && e.SourceRecord != nil {
 			recovery, recoveryCancel := context.WithTimeout(context.Background(), 30*time.Minute)
+			if j.MatrixParent != "" {
+				recovery = context.WithValue(recovery, switchMatrixChildKey{}, j)
+			}
 			recoveryErr := s.recoverMinecraftSwitch(recovery, &e)
+			if recoveryErr == nil && j.MatrixParent != "" {
+				recoveryErr = s.operations.refreshSwitchMatrixFixture(recovery, j.MatrixParent, e, true)
+			}
 			recoveryCancel()
 			s.operations.recordSwitchRecovery(e, recoveryErr)
 			recovered = recoveryErr == nil
@@ -781,12 +840,16 @@ func (s *server) runMinecraftSwitch(ctx context.Context, j operationJournal, p m
 			}
 			_, _ = s.operations.transition(j.OperationID, operationResolved, "resolved", message)
 		}
-		return
+		return failureStage
 	}
 	_, err = s.operations.transition(j.OperationID, operationVerifying, "verifying", "Exact target Minecraft runtime verified.")
 	if err == nil {
-		_, _ = s.operations.transition(j.OperationID, operationSucceeded, "complete", "Switch completed at Minecraft "+p.Version+".")
+		_, err = s.operations.transition(j.OperationID, operationSucceeded, "complete", "Switch completed at Minecraft "+p.Version+".")
 	}
+	if err != nil {
+		return "journal_finalization"
+	}
+	return ""
 }
 
 func (s *server) minecraftSwitchRecover(w http.ResponseWriter, r *http.Request) {

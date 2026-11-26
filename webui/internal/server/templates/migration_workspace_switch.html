@@ -4,6 +4,7 @@
 <span><span class="plugins-badge plugins-badge-disabled migration-switch-status-dot" aria-hidden="true">C</span> Current</span>
 <span><span class="plugins-badge migration-switch-status-dot" aria-hidden="true">N</span> {{t "ui.120d1307d24e"}}</span>
 <span><span class="plugins-badge plugins-badge-enabled migration-switch-status-dot" aria-hidden="true">A</span> {{t "ui.e674447337e8"}}</span>
+<button type="button" data-switch-matrix-run hidden disabled>{{t "switch_matrix.run"}}</button>
 </div>
 <p class="muted">{{t "ui.8e50b76ef001"}}</p>
 <div class="setup-software-groups setup-software-lanes migration-switch-catalogue">
@@ -19,7 +20,8 @@
 </div>
 <div class="migration-switch-content migration-switch-stack">
 <div class="migration-switch-stack" data-switch-operation role="status"></div>
-<p data-switch-state role="status">{{t "ui.e29d2712155f"}}</p>
+<div class="migration-switch-stack" data-switch-matrix-status role="status"></div>
+<p data-switch-state role="status">{{if .ServerID}}{{t "ui.e29d2712155f"}}{{else}}{{t "ui.389e87e83148"}}{{end}}</p>
 <section class="migration-switch-stack" data-switch-review hidden></section>
 </div>
 </div>{{end}}

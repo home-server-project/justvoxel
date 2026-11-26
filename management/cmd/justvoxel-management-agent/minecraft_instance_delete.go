@@ -90,17 +90,9 @@ func (b *instanceRuntimeBackend) requireNoInstanceDelete() error {
 	return nil
 }
 func (b *instanceRuntimeBackend) deleteStorage(ctx context.Context, action string, j instanceDeleteJournal) (string, error) {
-	c, st := j.Record.Runtime, j.Record.Storage
-	if st.DataPath != filepath.Join(st.Root, "minecraft-instances", j.ID, "data") || validateInstanceRuntimePath(st.Root) != nil || validateInstanceRuntimePath(st.DataPath) != nil {
-		return "", errInstanceRecovery
-	}
-	evidence := j.DataIdentity
-	if evidence == "" {
-		evidence = "-"
-	}
-	out, err := b.command(ctx, "nsenter", "--mount=/proc/1/ns/mnt", "--", instanceDeleteHelper, action, j.ID, st.Root, st.DataPath, st.MountPoint, st.UUID, st.Source, strconv.FormatUint(uint64(c.UID), 10), strconv.FormatUint(uint64(c.GID), 10), evidence)
+	out, err := b.instanceDeletionStorage(ctx, action, j)
 	if err != nil {
-		return "", instanceRuntimeFailure("Selected server storage could not be verified or removed. Retry Delete Server.")
+		return "", err
 	}
 	if action == "inspect" {
 		var result struct {
@@ -113,6 +105,22 @@ func (b *instanceRuntimeBackend) deleteStorage(ctx context.Context, action strin
 	}
 	return "", nil
 }
+func (b *instanceRuntimeBackend) instanceDeletionStorage(ctx context.Context, action string, j instanceDeleteJournal) ([]byte, error) {
+	c, st := j.Record.Runtime, j.Record.Storage
+	if st.DataPath != filepath.Join(st.Root, "minecraft-instances", j.ID, "data") || validateInstanceRuntimePath(st.Root) != nil || validateInstanceRuntimePath(st.DataPath) != nil {
+		return nil, errInstanceRecovery
+	}
+	evidence := j.DataIdentity
+	if evidence == "" {
+		evidence = "-"
+	}
+	out, err := b.command(ctx, "nsenter", "--mount=/proc/1/ns/mnt", "--", instanceDeleteHelper, action, j.ID, st.Root, st.DataPath, st.MountPoint, st.UUID, st.Source, strconv.FormatUint(uint64(c.UID), 10), strconv.FormatUint(uint64(c.GID), 10), evidence)
+	if err != nil {
+		return nil, instanceRuntimeFailure("Selected server storage could not be verified or removed. Retry Delete Server.")
+	}
+	return out, nil
+}
+
 func (b *instanceRuntimeBackend) deleteStopped(ctx context.Context, id string, retry bool) error {
 	state, err := b.observeRaw(ctx, id)
 	if err != nil || (state.State != "stopped" && !(retry && state.State == "configured")) {
@@ -148,6 +156,19 @@ func (b *instanceRuntimeBackend) deleteInstance(ctx context.Context, id, name st
 
 // Reset supplies a durable, separate data policy; ordinary Delete always removes data.
 func (b *instanceRuntimeBackend) retireSelectedInstance(ctx context.Context, id, name, resetPolicy string) error {
+	return b.retireSelectedInstanceOwned(ctx, id, name, resetPolicy, "")
+}
+
+func instanceDeleteKnownState(name string) bool {
+	switch name {
+	case "config.json", "minecraft.env", "backup-settings.json", "backup-status.json", "restore-result.json", "backup-restore-result.json", "restore-journal.json":
+		return true
+	default:
+		return false
+	}
+}
+
+func (b *instanceRuntimeBackend) retireSelectedInstanceOwned(ctx context.Context, id, name, resetPolicy, dataIdentity string) error {
 	network, networkErr := networkRead(b)
 	if networkErr != nil {
 		return networkErr
@@ -184,7 +205,7 @@ func (b *instanceRuntimeBackend) retireSelectedInstance(ctx context.Context, id,
 	defer syscall.Flock(int(registry.Fd()), syscall.LOCK_UN)
 	j, err := b.deleteJournal(id)
 	retry := err == nil
-	if retry && j.ResetPolicy != resetPolicy {
+	if retry && (j.ResetPolicy != resetPolicy || dataIdentity != "" && j.DataIdentity != dataIdentity) {
 		return errInstanceRecovery
 	}
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -246,9 +267,7 @@ func (b *instanceRuntimeBackend) retireSelectedInstance(ctx context.Context, id,
 			return e
 		}
 		for _, entry := range entries {
-			switch entry.Name() {
-			case "config.json", "minecraft.env", "backup-settings.json", "backup-status.json", "restore-result.json", "backup-restore-result.json", "restore-journal.json":
-			default:
+			if !instanceDeleteKnownState(entry.Name()) {
 				return errInstanceRecovery
 			}
 		}
@@ -262,6 +281,9 @@ func (b *instanceRuntimeBackend) retireSelectedInstance(ctx context.Context, id,
 		j.DataIdentity, e = b.deleteStorage(ctx, "inspect", j)
 		if e != nil {
 			return e
+		}
+		if dataIdentity != "" && j.DataIdentity != dataIdentity {
+			return errInstanceRecovery
 		}
 		if f, e := b.privateDirectory(b.staging, true); e != nil {
 			return e

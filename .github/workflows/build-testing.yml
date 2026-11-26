@@ -66,6 +66,8 @@ jobs:
 
       - name: Build Management Agent from source
         uses: ./.github/actions/build-management
+        with:
+          mode: development
 
       - name: Build and validate Development
         uses: ./.github/actions/build-dev
@@ -120,6 +122,7 @@ jobs:
         uses: ./.github/actions/prepare-management
         with:
           signing-key: ${{ secrets.SIGNING_SECRET }}
+          mode: both
 
       - name: Build and validate Development
         uses: ./.github/actions/build-dev

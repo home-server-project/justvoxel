@@ -37,11 +37,31 @@ The supported host-management model is bootc. No host-side rpm-ostree layering w
 
 `Containerfile.dev` builds Development (`justvoxel-dev`), the full WebUI and integration showcase. VM and HWS build independently of Development. Their `Containerfile` runs the shared appliance build once in an internal Home Server Base stage with the current checkout’s WebUI binary, release metadata and verified Management Agent. HWS adds the hardware packages and configuration before finalization.
 
+The appliance builds select the Switch matrix capability at compile time.
+The Management Agent built with `justvoxel_dev` includes the in-process
+runner and authenticated execution routes. `Containerfile.dev` installs
+`management-agent-development`. `Containerfile` installs the untagged
+`management-agent` for VM and HWS. Both assembly paths verify the compiled
+capability. The WebUI reads capability from the installed Management Agent.
+
+Run both Management Agent test configurations from the repository root
+using the documented Go toolchain and Management Agent build dependencies.
+
+```sh
+cd management
+CGO_ENABLED=1 go test -mod=readonly ./cmd/justvoxel-management-agent -run '^TestSwitchMatrix'
+CGO_ENABLED=1 go test -mod=readonly -tags justvoxel_dev ./cmd/justvoxel-management-agent -run '^TestSwitchMatrix'
+cd ../webui
+CGO_ENABLED=0 go test -mod=readonly ./internal/server -run '^TestSwitchMatrixWebUIProxyGate$'
+cd ..
+node --test tests/server-migration-switch.test.cjs
+```
+
 ## Testing
 
 PRs targeting `testing` run source checks and compile the Management Agent from source for a development image build. PR validation uses read-only repository access.
 
-Dispatch **Development** from `testing` to publish `ghcr.io/home-server-project/justvoxel-dev:testing`. It reuses the signed `ghcr.io/home-server-project/justvoxel-management-agent:testing` package when the inputs match. Otherwise it rebuilds, signs, and verifies that package.
+Dispatch **Development** from `testing` to publish `ghcr.io/home-server-project/justvoxel-dev:testing`. It reuses the signed `ghcr.io/home-server-project/justvoxel-management-agent:testing` package when the inputs match. Otherwise it rebuilds, signs, and verifies that package. The signed testing package carries both Management Agent variants. Stable packages carry the untagged variant.
 
 Dispatch **Testing** from `testing` to build both products from the checked-out source. Both testing-channel workflows reuse the same internal Management Agent package after verifying the input identity, base digest, API version and exact package digest signature. It publishes `ghcr.io/home-server-project/justvoxel-vm:testing` and `ghcr.io/home-server-project/justvoxel-hws:testing`. Testing builds also publish immutable tags with the build date, short commit, run ID, and attempt.
 

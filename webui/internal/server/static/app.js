@@ -3076,7 +3076,11 @@ if (migrationOpen && migrationDialog) {
   };
 
   const loadMigration = async (url = currentURL, preserveLocation = false) => {
-    if (globalThis.justVoxelSelectionReady) await globalThis.justVoxelSelectionReady;
+    if (globalThis.justVoxelSelectionReady) {
+      await globalThis.justVoxelSelectionReady.catch(error => {
+        if (new URL(url, window.location.href).pathname !== tabURLs.switch) throw error;
+      });
+    }
     if (!migrationDialog.open) return;
     const selection = globalThis.justVoxelSelectionGeneration.migration;
     migrationLoadController?.abort();
@@ -3209,21 +3213,26 @@ if (migrationOpen && migrationDialog) {
     if (migrationDialog.open) void loadMigration(currentURL, true);
   });
 
-  const refreshSelection = () => globalThis.justVoxelServerSelection(migrationDialog.querySelector("[data-server-selector-slot]"), true);
+  const refreshSelection = (allowUnavailable = false) =>
+    globalThis.justVoxelServerSelection(migrationDialog.querySelector("[data-server-selector-slot]"), true)
+      .catch(error => { if (!allowUnavailable) throw error; });
   const workspaceWindow = setupWorkspaceWindow(migrationDialog, {
-    onOpen: () => refreshSelection().then(() => {
-      const destination = new URLSearchParams(window.location.search);
-      const migrationRequested = destination.get("workspace") === "migration";
-      const requestedMigrationOperation = migrationRequested ? destination.get("operation") : "";
-      const requestedMigrationTab = migrationRequested ? destination.get("tab") : "";
-      if (requestedMigrationOperation) return loadMigration("/workspace/migration/progress/" + encodeURIComponent(requestedMigrationOperation));
-      if (requestedMigrationTab === "recovery") {
-        currentTab = requestedMigrationTab;
-        return loadMigration(tabURLs[currentTab]);
+    onOpen: async () => {
+      try {
+        const destination = new URLSearchParams(window.location.search);
+        const migrationRequested = destination.get("workspace") === "migration";
+        const requestedMigrationOperation = migrationRequested ? destination.get("operation") : "";
+        const requestedMigrationTab = migrationRequested ? destination.get("tab") : "";
+        const tab = Object.hasOwn(tabURLs, requestedMigrationTab) ? requestedMigrationTab : currentTab;
+        await refreshSelection(!requestedMigrationOperation && tab === "switch");
+        if (requestedMigrationOperation) return await loadMigration("/workspace/migration/progress/" + encodeURIComponent(requestedMigrationOperation));
+        if (Object.hasOwn(tabURLs, requestedMigrationTab)) currentTab = requestedMigrationTab;
+        if (requestedMigrationTab === "recovery" || currentTab === "switch") return await loadMigration(tabURLs[currentTab]);
+        await loadMigrationEntry();
+      } catch (error) {
+        if (state) state.textContent = error.message;
       }
-      if (Object.hasOwn(tabURLs, requestedMigrationTab)) currentTab = requestedMigrationTab;
-      return loadMigrationEntry();
-    }).catch(error => { if (state) state.textContent = error.message; }),
+    },
     onClose: () => {
       abortMigrationRequests();
       migrationSourceSMBPassword = "";
@@ -3236,7 +3245,7 @@ if (migrationOpen && migrationDialog) {
     workspaceWindow?.open();
   });
   closeButton?.addEventListener("click", () => workspaceWindow?.close());
-  refreshButton?.addEventListener("click", () => refreshSelection().then(() => loadMigration(currentURL)).catch(error => { if (state) state.textContent = error.message; }));
+  refreshButton?.addEventListener("click", () => refreshSelection(currentTab === "switch").then(() => loadMigration(currentURL)).catch(error => { if (state) state.textContent = error.message; }));
   tabs.forEach((button) => {
     button.addEventListener("click", async () => {
       abortMigrationRequests();
@@ -7418,6 +7427,11 @@ if (systemWorkspaceOpen && systemWorkspaceDialog) {
   });
 
   window.JustVoxelSystem = {
+    openMigrationLogs: async (id) => {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id)) return;
+      requestedMigrationLog = { group: "Migration", id };
+      await window.JustVoxelSystem.openTab("logs");
+    },
     openPluginLogs: async (id) => {
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id)) return;
       requestedMigrationLog = { group: jvT("ui.9514b7ff4860"), id };

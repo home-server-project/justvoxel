@@ -82,8 +82,12 @@ func (b *instanceRuntimeBackend) applySwitchRuntime(ctx context.Context, previou
 // archive restore operations. Ordinary Version maintenance is unchanged.
 func (s *server) convertMinecraftSwitch(ctx context.Context, e *minecraftSwitchEvidence, p minecraftSwitchPlan, lock *pluginMaintenanceLock) error {
 	b := instanceRuntimes
-	if !p.Convert || switchWorldRisk(p.Current, p.Target) {
+	if e.SourceRecord == nil || !p.Convert || switchWorldRisk(p.Current, p.Target) {
 		return errInstanceID
+	}
+	next, snapshot, err := b.prepareSwitchTarget(ctx, *e.SourceRecord, p, false)
+	if err != nil {
+		return err
 	}
 	if _, err := b.backupStorage(ctx, "preflight", e.Source); err != nil {
 		return err
@@ -133,11 +137,14 @@ func (s *server) convertMinecraftSwitch(ctx context.Context, e *minecraftSwitchE
 	if added != 1 {
 		return errInstanceRecovery
 	}
+	if _, err = b.inspectSwitchColdArchive(ctx, *e); err != nil {
+		return err
+	}
 	record, err := b.readRecord(e.Source)
 	if err != nil {
 		return err
 	}
-	content, hash, err := switchContentEvidence(ctx, record, p.Target, p.Version)
+	content, hash, err := switchContentEvidence(ctx, record, p.Target, p.Version, p.ManagedArtifacts)
 	if err != nil || hash != p.ContentFingerprint {
 		return instanceRuntimeFailure("Plugins & Mods changed; review Switch again.")
 	}
@@ -146,10 +153,25 @@ func (s *server) convertMinecraftSwitch(ctx context.Context, e *minecraftSwitchE
 			return errInstanceRecovery
 		}
 	}
+	if p.Current == "leaf" {
+		if err = verifySwitchLeafWorld(record.Storage.DataPath); err != nil {
+			return err
+		}
+	}
+	if p.Runtime.CrossplayEnabled {
+		if err = b.verifySwitchPaperCrossplay(ctx, record, p.ManagedArtifacts); err != nil {
+			return err
+		}
+	}
 	if switchNeedsWorldMove(p.Current, p.Target) {
 		moves, layoutErr := inspectSwitchWorld(record.Storage.DataPath, p.Version)
 		if layoutErr != nil || instanceHash(mustSwitchJSON(moves)) != p.WorldFingerprint {
 			return errInstanceRecovery
+		}
+	}
+	if p.Target == "pufferfish" {
+		if err = verifySwitchPufferfishCache(record.Storage.DataPath); err != nil {
+			return err
 		}
 	}
 	// Persist rollback authority BEFORE any target can modify world data.
@@ -162,20 +184,6 @@ func (s *server) convertMinecraftSwitch(ctx context.Context, e *minecraftSwitchE
 			return err
 		}
 	}
-	next := record
-	next.Runtime.Software, next.Runtime.VersionPolicy, next.Runtime.Version = p.Target, "pinned", p.Version
-	next.Runtime.PufferfishBuild = p.Runtime.PufferfishBuild
-	next.Runtime.LoaderVersion, next.Runtime.ImageTag, next.Runtime.ImageDigest = p.Runtime.LoaderVersion, p.Runtime.ImageTag, p.RuntimeDigest
-	next.Runtime.BedrockEnabled = p.Runtime.CrossplayEnabled
-	channel, err := b.command(ctx, instanceRuntimeHelper, "channel", p.Target, p.Version, "pinned")
-	if err != nil {
-		return err
-	}
-	next.Runtime.PaperChannel = strings.TrimSpace(string(channel))
-	snapshot, _, _, err := b.snapshot(ctx)
-	if err != nil {
-		return err
-	}
 	records, err := b.records()
 	if err != nil {
 		return err
@@ -186,11 +194,16 @@ func (s *server) convertMinecraftSwitch(ctx context.Context, e *minecraftSwitchE
 	if err = lock.start(ctx, e.Source); err != nil {
 		return err
 	}
-	if err = verifyPluginRuntime(ctx, e.Source, p.Version); err != nil {
+	if err = verifyPluginRuntimeMode(ctx, e.Source, p.Version, "--switch"); err != nil {
 		return err
 	}
 	if err = b.verifySwitchTargetImage(ctx, e.Source, p); err != nil {
 		return err
+	}
+	if p.Runtime.CrossplayEnabled {
+		if err = b.verifySwitchPaperCrossplay(ctx, next, p.ManagedArtifacts); err != nil {
+			return err
+		}
 	}
 	if !e.OriginallyRunning {
 		if err = b.actionWithWarnings(ctx, e.Source, "stop", true); err != nil {
@@ -213,8 +226,14 @@ func (s *server) convertMinecraftSwitch(ctx context.Context, e *minecraftSwitchE
 
 func (b *instanceRuntimeBackend) verifySwitchTargetImage(ctx context.Context, id string, p minecraftSwitchPlan) error {
 	record, err := b.readRecord(id)
-	if err != nil || record.Runtime.Software != p.Target || record.Runtime.Version != p.Version || record.Runtime.ImageDigest != p.RuntimeDigest {
+	if err != nil || record.Runtime.Software != p.Target || record.Runtime.ID != id || record.Runtime.Version != p.Version || record.Runtime.ImageDigest != p.RuntimeDigest ||
+		record.Runtime.ImageTag != p.Runtime.ImageTag || record.Runtime.LoaderVersion != p.Runtime.LoaderVersion ||
+		record.Runtime.PufferfishBuild != p.Runtime.PufferfishBuild || record.Runtime.BedrockEnabled != p.Runtime.CrossplayEnabled ||
+		!record.Runtime.PreserveContent || record.Runtime.VersionPolicy != "pinned" {
 		return errInstanceRecovery
+	}
+	if err = b.verifyLive(record); err != nil {
+		return err
 	}
 	expected, e1 := b.command(ctx, "podman", "image", "inspect", instanceRuntimeImage(record.Runtime), "--format", "{{.Id}}")
 	actual, e2 := b.command(ctx, "podman", "inspect", "minecraft-"+id, "--format", "{{.Image}}")
@@ -253,10 +272,9 @@ func (s *server) restoreSwitchWorld(ctx context.Context, e *minecraftSwitchEvide
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	out, err := b.restoreStorage(ctx, "plan", e.Source, e.ColdArchive, "", false)
-	var inspection instanceRestoreInspection
-	if err != nil || instanceDecode(out, &inspection) != nil || inspection.Metadata.ID != e.Source || inspection.Metadata.Software != e.SourceRecord.Runtime.Software || inspection.Metadata.Version != e.Version || inspection.Metadata.Archive != e.ColdArchive || inspection.Integrity != "verified" || !instanceSHA256Pattern.MatchString(inspection.Fingerprint) {
-		return errInstanceRecovery
+	inspection, err := b.inspectSwitchColdArchive(ctx, *e)
+	if err != nil {
+		return err
 	}
 	plan := instanceRestorePlan{instanceRestoreInspection: inspection, RuntimeState: "stopped"}
 	if err = s.runInstanceRestore(ctx, e.Source, plan, claim); err != nil {
@@ -264,6 +282,15 @@ func (s *server) restoreSwitchWorld(ctx context.Context, e *minecraftSwitchEvide
 	}
 	e.WorldChanged = false
 	return saveSwitchEvidence(*e)
+}
+
+func (b *instanceRuntimeBackend) inspectSwitchColdArchive(ctx context.Context, e minecraftSwitchEvidence) (instanceRestoreInspection, error) {
+	out, err := b.restoreStorage(ctx, "plan", e.Source, e.ColdArchive, "", false)
+	var inspection instanceRestoreInspection
+	if err != nil || instanceDecode(out, &inspection) != nil || inspection.Metadata.ID != e.Source || inspection.Metadata.Software != e.SourceRecord.Runtime.Software || inspection.Metadata.Version != e.Version || inspection.Metadata.Archive != e.ColdArchive || inspection.Integrity != "verified" || !instanceSHA256Pattern.MatchString(inspection.Fingerprint) {
+		return inspection, instanceRuntimeFailure("The exact-version cold rollback archive could not be verified.")
+	}
+	return inspection, nil
 }
 
 // Only terminal evidence belonging to the journal captured before this Switch,

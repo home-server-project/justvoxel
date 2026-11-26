@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -207,7 +208,7 @@ func TestMigrationRecoveryRetryAfterRestart(t *testing.T) {
 		t.Fatal("nonfinalizable plan admitted", err)
 	}
 	plan.Normalized.Finalizable = true
-	if after, err := store.get(original.OperationID); err != nil || after != before || len(workers) != 0 {
+	if after, err := store.get(original.OperationID); err != nil || !reflect.DeepEqual(after, before) || len(workers) != 0 {
 		t.Fatal("rejected review altered recovery", after, err)
 	}
 	results := make(chan int, 2)

@@ -480,12 +480,49 @@ paper_version_has_stable_build() {
     jq -e 'any(.[]; .channel == "STABLE" and (.downloads."server:default".url // "") != "")' <<< "${builds}" >/dev/null
 }
 
+# Exit 3 requires authoritative absence. Transport errors are unverified.
+java_exact_publisher_response() {
+    local response
+    if [[ ${classify_exact_release:-0} != 1 ]]; then
+        curl "$@"
+        return
+    fi
+    response="$(curl --write-out $'\n%{http_code}' --max-redirs 0 --connect-timeout 5 --max-time 20 "$@")" || {
+        local status=$?
+        [[ ${status} == 22 && ${response##*$'\n'} == 404 ]] && return 3
+        return 1
+    }
+    [[ ${response##*$'\n'} == 200 ]] || return 1
+    printf '%s\n' "${response%$'\n'*}"
+}
+
+java_release_catalog_member() {
+    local catalog result
+    catalog="$(jq -ces 'select(length == 1) | .[0]')" || return 1
+    result="$(jq -er "$@" <<< "${catalog}")" || return 1
+    [[ ${result} == true ]] && return 0
+    # jq -e returns 1 on false, so the queries emit these as strings.
+    [[ ${result} == false ]] && return 3
+    return 1
+}
+
 # Print the release channel of a downloadable Paper server build.
 paper_version_build_channel() {
     local version="$1" builds
     [[ ${version} =~ ^[0-9A-Za-z._-]+$ ]] || return 1
-    builds="$(curl -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" \
-        "https://fill.papermc.io/v3/projects/paper/versions/${version}/builds" 2>/dev/null)" || return 1
+    builds="$(java_exact_publisher_response -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" \
+        "https://fill.papermc.io/v3/projects/paper/versions/${version}/builds" 2>/dev/null)" || return "$?"
+    if [[ ${classify_exact_release:-0} == 1 ]]; then
+        builds="$(jq -ces '
+            select(length == 1) | .[0] |
+            select(type == "array" and all(.[]; type == "object" and
+                (.channel | type == "string" and length > 0) and
+                (.downloads | type == "object") and
+                (if .downloads | has("server:default") then
+                    .downloads."server:default".url | type == "string" and startswith("https://")
+                 else true end)))' <<< "${builds}")" || return 1
+        [[ ${builds} != '[]' ]] || return 3
+    fi
     jq -er '[.[] | select((.downloads."server:default".url // "") != "")]
         | (map(select(.channel == "STABLE")) | .[0]) // .[0]
         | .channel | select(type == "string" and length > 0)' <<< "${builds}" 2>/dev/null
@@ -578,25 +615,25 @@ validate_java_server_selection() {
 
 # Read only safe archived server identities from the last successful Jenkins build.
 pufferfish_build_metadata() {
-    local branch="$1" build="${2:-lastSuccessfulBuild}"
+    local branch="$1" build="${2:-lastSuccessfulBuild}" response
     [[ ${build} == lastSuccessfulBuild || ${build} =~ ^[1-9][0-9]*$ ]] || return 1
     [[ ${branch} =~ ^[0-9]+[.][0-9]+$ ]] || return 1
-    curl --connect-timeout 3 --max-time 12 -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" \
-        "https://ci.pufferfish.host/job/Pufferfish-${branch}/${build}/api/json" |
-        jq -esc --arg build "${build}" '
-            select(length == 1) | .[0] | select(.artifacts | type == "array") |
-            .number as $number | select($build == "lastSuccessfulBuild" or ($number | tostring) == $build) |
-            select(.result == "SUCCESS" and
-                (.number | type == "number" and . > 0 and . <= 2147483647 and floor == .)) |
-            [.artifacts[] | select(.fileName | type == "string") |
-                select(.fileName | test("^pufferfish-paperclip-[0-9]+[.][0-9]+([.][0-9]+)?-R0[.]1-SNAPSHOT-(mojmap|reobf)[.]jar$"))] |
-            select(length > 0 and all(.[]; .fileName as $name |
-                (.relativePath | type == "string" and
-                    test("^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$") and
-                    (split("/") | all(.[]; . != ".." and . != ".")) and
-                    (endswith("/" + $name) or . == $name)))) |
-            map(.fileName | capture("^pufferfish-paperclip-(?<version>[0-9]+[.][0-9]+([.][0-9]+)?)-R0").version) |
-            unique | select(length == 1) | {game:.[0],pufferfish_build:$number}'
+    response="$(java_exact_publisher_response --connect-timeout 3 --max-time 12 -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" \
+        "https://ci.pufferfish.host/job/Pufferfish-${branch}/${build}/api/json")" || return "$?"
+    jq -esc --arg build "${build}" '
+        select(length == 1) | .[0] | select(.artifacts | type == "array") |
+        .number as $number | select($build == "lastSuccessfulBuild" or ($number | tostring) == $build) |
+        select(.result == "SUCCESS" and
+            (.number | type == "number" and . > 0 and . <= 2147483647 and floor == .)) |
+        [.artifacts[] | select(.fileName | type == "string") |
+            select(.fileName | test("^pufferfish-paperclip-[0-9]+[.][0-9]+([.][0-9]+)?-R0[.]1-SNAPSHOT-(mojmap|reobf)[.]jar$"))] |
+        select(length > 0 and all(.[]; .fileName as $name |
+            (.relativePath | type == "string" and
+                test("^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$") and
+                (split("/") | all(.[]; . != ".." and . != ".")) and
+                (endswith("/" + $name) or . == $name)))) |
+        map(.fileName | capture("^pufferfish-paperclip-(?<version>[0-9]+[.][0-9]+([.][0-9]+)?)-R0").version) |
+        unique | select(length == 1) | {game:.[0],pufferfish_build:$number}' <<< "${response}"
 }
 
 setup_java_image() {
@@ -607,12 +644,19 @@ setup_java_image() {
 
 # Validate the published asset before a version enters any policy or picker.
 leaf_release_catalog() {
-    local record page=1 response count releases='[]' games records game image
+    local record page=1 response count releases='[]' games records game image exact_tag=no match
     games="$(vanilla_metadata | jq -ce '[.versions[] | select(.type == "release") | .id]')" || return 1
     while :; do
         response="$(curl --connect-timeout 3 --max-time 12 -fsS -H "User-Agent: ${JV_PAPER_USER_AGENT}" \
             "https://api.github.com/repos/Winds-Studio/Leaf/releases?per_page=100&page=${page}")" || return 1
         count="$(jq -er 'select(type == "array") | length' <<< "${response}")" || return 1
+        if [[ ${classify_exact_release:-0} == 1 ]]; then
+            match="$(jq -er --arg tag "ver-${specific}" '
+                select(all(.[]; type == "object" and (.tag_name | type == "string" and length > 0)
+                    and (.draft | type == "boolean"))) |
+                any(.[]; .tag_name == $tag and .draft == false) | tostring' <<< "${response}")" || return 1
+            [[ ${match} != true ]] || exact_tag=yes
+        fi
         records="$(jq -c --argjson games "${games}" '
             [ .[] | try (
                 select(.draft == false and (.assets | type == "array") and (.prerelease | type == "boolean") and (.body | type == "string")) |
@@ -642,6 +686,9 @@ leaf_release_catalog() {
         (( count == 100 )) || break
         ((page++))
     done
+    if [[ ${classify_exact_release:-0} == 1 && ${exact_tag} == no ]]; then
+        return 3
+    fi
     records="$(jq -cr 'group_by(.game) | map(select(length == 1) | first) |
         sort_by(.game | split(".") | map(tonumber)) | reverse[]' <<< "${releases}")" || return 1
     while IFS= read -r record; do
@@ -679,12 +726,21 @@ paper_fork_version_available() {
 # repository. No release synthesis, third-party jars, or alternate loader.
 mojang_release_available() {
     local version="$1"
+    if [[ ${classify_exact_release:-0} == 1 ]]; then
+        local manifest
+        manifest="$(vanilla_metadata)" || return 1
+        java_release_catalog_member --arg v "${version}" '
+            select(all(.versions[]; type == "object" and (.id | type == "string" and length > 0)
+                and (.type | type == "string" and length > 0))) |
+            any(.versions[]; .id == $v and .type == "release") | tostring' <<< "${manifest}"
+        return
+    fi
     curl --connect-timeout 3 --max-time 8 -fsSL https://piston-meta.mojang.com/mc/game/version_manifest_v2.json | jq -e --arg version "${version}" '
         any(.versions[]; .id == $version and .type == "release")' >/dev/null
 }
 
 java_server_version_available() {
-    local software="$1" version="$2" loader="${3:-}" url coordinate prefix patch digest java_class=65
+    local software="$1" version="$2" loader="${3:-}" url coordinate prefix patch digest response java_class=65
     [[ ${version} =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || return 1
     case "${software}" in
         paper|purpur|vanilla)
@@ -699,7 +755,7 @@ java_server_version_available() {
         [[ -z ${loader} ]] && paper_fork_version_available leaf "${version}"
         return
     fi
-    mojang_release_available "${version}" || return 1
+    mojang_release_available "${version}" || return "$?"
     if [[ ${software} == pufferfish ]]; then
         [[ -z ${loader} ]] && paper_fork_version_available "${software}" "${version}"
         return
@@ -707,9 +763,10 @@ java_server_version_available() {
     if [[ ${software} == spigot ]]; then
         [[ -z ${loader} ]] || return 1
         [[ ${version} != 26.* ]] || java_class=69
-        curl --connect-timeout 3 --max-time 12 -fsSL "https://hub.spigotmc.org/versions/${version}.json" | jq -e --argjson java_class "${java_class}" '
+        response="$(java_exact_publisher_response --connect-timeout 3 --max-time 12 -fsSL "https://hub.spigotmc.org/versions/${version}.json")" || return "$?"
+        jq -e --argjson java_class "${java_class}" '
             (.javaVersions | type == "array" and index($java_class) != null) and
-            ([.refs.BuildData,.refs.Bukkit,.refs.CraftBukkit,.refs.Spigot] | all(.[]; type == "string" and test("^[a-f0-9]{40}$")))' >/dev/null
+            ([.refs.BuildData,.refs.Bukkit,.refs.CraftBukkit,.refs.Spigot] | all(.[]; type == "string" and test("^[a-f0-9]{40}$")))' <<< "${response}" >/dev/null
         return
     fi
     [[ ${#loader} -le 64 && ${loader} =~ ^[0-9]+(\.[0-9]+){1,3}(-[A-Za-z0-9]+([.-][A-Za-z0-9]+)*)?$ ]] || return 1
@@ -739,15 +796,16 @@ java_server_version_available() {
                 url="https://meta.quiltmc.org/v3/versions/loader/${version}/${loader}/server/json"
                 coordinate="org.quiltmc:quilt-loader:${loader}"
             fi
-            curl --connect-timeout 3 --max-time 12 -fsSL "${url}" | jq -e --arg version "${version}" --arg loader "${coordinate}" '
+            response="$(java_exact_publisher_response --connect-timeout 3 --max-time 12 -fsSL "${url}")" || return "$?"
+            jq -e --arg version "${version}" --arg loader "${coordinate}" '
                 .inheritsFrom == $version and
                 (.mainClass | type == "string" and endswith(".KnotServer")) and
-                any(.libraries[]; .name == $loader)' >/dev/null
+                any(.libraries[]; .name == $loader)' <<< "${response}" >/dev/null
             return
             ;;
         *) return 1 ;;
     esac
-    digest="$(curl --connect-timeout 3 --max-time 12 -fsSL "${url}")" || return 1
+    digest="$(java_exact_publisher_response --connect-timeout 3 --max-time 12 -fsSL "${url}")" || return "$?"
     [[ ${digest} =~ ^[a-fA-F0-9]{40}$ ]]
 }
 
@@ -760,8 +818,14 @@ resolve_setup_loader() {
         fabric|quilt)
             local api=https://meta.fabricmc.net/v2
             [[ ${software} != quilt ]] || api=https://meta.quiltmc.org/v3
-            curl --connect-timeout 3 --max-time 8 -fsSL "${api}/versions/loader/${game}" |
-                jq -er --arg software "${software}" '[.[] | .loader | select(if $software == "fabric" then .stable == true else .stable != false end) | .version | select(test("^[0-9]+([.][0-9]+){1,3}$"))][0] // empty'
+            metadata="$(curl --connect-timeout 3 --max-time 8 -fsSL "${api}/versions/loader/${game}")" || return 1
+            if [[ ${classify_exact_release:-0} == 1 ]]; then
+                metadata="$(jq -ces 'select(length == 1) | .[0] | select(type == "array" and
+                    all(.[]; .loader | type == "object" and (.version | type == "string" and length > 0) and
+                        (.stable == null or (.stable | type == "boolean"))))' <<< "${metadata}")" || return 1
+                [[ ${metadata} != '[]' ]] || return 3
+            fi
+            jq -er --arg software "${software}" '[.[] | .loader | select(if $software == "fabric" then .stable == true else .stable != false end) | .version | select(test("^[0-9]+([.][0-9]+){1,3}$"))][0] // empty' <<< "${metadata}"
             ;;
         forge)
             curl --connect-timeout 3 --max-time 8 -fsSL https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json |
@@ -774,17 +838,44 @@ resolve_setup_loader() {
                 prefix="${BASH_REMATCH[1]}.${BASH_REMATCH[3]:-0}."
             else return 1; fi
             metadata="$(curl --connect-timeout 3 --max-time 8 -fsSL https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml)" || return 1
-            printf '%s\n' "${metadata}" | sed 's/<version>/\n<version>/g' | sed -n 's/.*<version>\([0-9][0-9.]*\)<\/version>.*/\1/p' |
-                jq -Rrs --arg prefix "${prefix}" 'split("\n") | map(select(startswith($prefix) and test("^[0-9]+([.][0-9]+){2,3}$"))) | sort_by(split(".") | map(tonumber)) | last // empty'
+            if [[ ${classify_exact_release:-0} == 1 ]]; then
+                metadata="$(python3 -c '
+import re, sys, xml.etree.ElementTree as xml
+raw = sys.stdin.read(4 * 1024 * 1024 + 1)
+if len(raw) > 4 * 1024 * 1024 or "<!" in raw:
+    sys.exit(1)
+try:
+    root = xml.fromstring(raw)
+except xml.ParseError:
+    sys.exit(1)
+catalogs = root.findall("./versioning/versions")
+if root.tag != "metadata" or len(catalogs) != 1 or not len(catalogs[0]):
+    sys.exit(1)
+versions = []
+for element in catalogs[0]:
+    if element.tag != "version" or len(element) or not re.fullmatch(r"[0-9]+(?:[.][0-9]+){1,3}(?:-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*)?", element.text or ""):
+        sys.exit(1)
+    versions.append(element.text)
+matched = [version for version in versions if version.startswith(sys.argv[1])]
+if not matched:
+    sys.exit(3)
+print("\n".join(matched))
+' "${prefix}" <<< "${metadata}")" || return "$?"
+            else
+                metadata="$(printf '%s\n' "${metadata}" | sed 's/<version>/\n<version>/g' | sed -n 's/.*<version>\([0-9][0-9.]*\)<\/version>.*/\1/p')" || return 1
+            fi
+            jq -Rrs --arg prefix "${prefix}" 'split("\n") | map(select(startswith($prefix) and test("^[0-9]+([.][0-9]+){2,3}$"))) |
+                sort_by(split(".") | map(tonumber)) | last // empty' <<< "${metadata}"
             ;;
         *) return 1 ;;
     esac
 }
 
 resolve_setup_java_runtime() {
-    local software="$1" policy="$2" specific="$3" game loader image releases branches branch discovered metadata reason pufferfish="{}"
+    local software="$1" policy="$2" specific="$3" game loader image releases branches branch discovered metadata reason catalog outcome pufferfish="{}"
     if [[ ${software} == leaf ]]; then
-        leaf_release_catalog | leaf_select_release "${policy}" "${specific}"
+        catalog="$(leaf_release_catalog)" || return "$?"
+        leaf_select_release "${policy}" "${specific}" <<< "${catalog}"
         return
     fi
     case "${policy}" in recommended|pinned) ;; *) return 1 ;; esac
@@ -821,23 +912,60 @@ resolve_setup_java_runtime() {
     while IFS= read -r game; do
         image="$(setup_java_image "${game}")" || continue
         [[ ${software} != spigot ]] || image+=-jdk
-        loader="$(resolve_setup_loader "${software}" "${game}")" || continue
+        if [[ ${classify_exact_release:-0} == 1 ]]; then
+            case "${software}" in
+                paper|purpur|vanilla) ;;
+                *) mojang_release_available "${game}" || return "$?" ;;
+            esac
+        fi
+        loader="$(resolve_setup_loader "${software}" "${game}")" || {
+            outcome=$?
+            [[ ${classify_exact_release:-0} != 1 ]] || return "${outcome}"
+            continue
+        }
         validate_java_server_selection "${software}" pinned "${game}" "${loader}" "${image}" || continue
         if [[ ${software} == pufferfish ]]; then
             if [[ ${policy} == pinned ]]; then
                 branch="$(cut -d. -f1,2 <<< "${game}")"
-                pufferfish="$(pufferfish_build_metadata "${branch}")" || continue
+                pufferfish="$(pufferfish_build_metadata "${branch}")" || {
+                    outcome=$?
+                    [[ ${classify_exact_release:-0} != 1 ]] || return "${outcome}"
+                    continue
+                }
                 jq -e --arg game "${game}" '.game == $game' <<< "${pufferfish}" >/dev/null || continue
                 mojang_release_available "${game}" || continue
             fi
         else
-            java_server_version_available "${software}" "${game}" "${loader}" || continue
+            java_server_version_available "${software}" "${game}" "${loader}" || {
+                outcome=$?
+                if [[ ${classify_exact_release:-0} == 1 ]]; then
+                    [[ -z ${loader} ]] || return 1
+                    return "${outcome}"
+                fi
+                continue
+            }
         fi
         reason=''
         jq -cn --arg game "${game}" --arg loader "${loader}" --arg image "${image}" --arg reason "${reason}" --argjson fork "${pufferfish}" '{game:$game,loader:$loader,image:$image,reason:$reason} + $fork'
         return
     done <<< "${releases}"
     return 1
+}
+
+# Machine-readable contract for the matrix. Ordinary Setup still receives the
+# existing resolver result and ordinary Version keeps its boolean contract.
+resolve_switch_matrix_java_release() {
+    local classify_exact_release=1 resolved outcome
+    if resolved="$(resolve_setup_java_runtime "$1" pinned "$2")"; then
+        jq -cn --argjson runtime "${resolved}" '{outcome:"AVAILABLE",runtime:$runtime}'
+    else
+        outcome=$?
+        if (( outcome == 3 )); then
+            printf '%s\n' '{"outcome":"UNSUPPORTED"}'
+        else
+            printf '%s\n' '{"outcome":"UNVERIFIED"}'
+        fi
+    fi
 }
 
 purpur_metadata() {
@@ -855,6 +983,17 @@ vanilla_metadata() {
 server_version_available() {
     local version="$1"
     [[ ${version} =~ ^[0-9A-Za-z._-]+$ ]] || return 1
+    if [[ ${classify_exact_release:-0} == 1 ]]; then
+        local catalog
+        case "${MINECRAFT_SERVER_TYPE-paper}" in
+            purpur)
+                catalog="$(purpur_metadata)" || return 1
+                java_release_catalog_member --arg v "${version}" '.versions | (index($v) != null) | tostring' <<< "${catalog}"
+                return
+                ;;
+            vanilla) mojang_release_available "${version}"; return ;;
+        esac
+    fi
     case "${MINECRAFT_SERVER_TYPE-paper}" in
         paper) paper_version_build_channel "${version}" >/dev/null ;;
         purpur) purpur_metadata | jq -e --arg v "${version}" '.versions | index($v) != null' >/dev/null ;;

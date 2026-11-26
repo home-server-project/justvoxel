@@ -1,10 +1,16 @@
 name: Compile and validate the Management Agent from source
 description: Compile and validate the Management Agent from source
+inputs:
+  mode:
+    description: Management Agent artifacts to compile
+    default: production
 runs:
   using: composite
   steps:
     - name: Build management agent on Home Server Base 10
       shell: bash
+      env:
+        MANAGEMENT_BUILD_MODE: ${{ inputs.mode }}
       run: |
         set -euo pipefail
         mkdir -p build_artifacts/management
@@ -17,5 +23,5 @@ runs:
           -v "${PWD}/tests/run-pam-integration-alma.sh:/run-pam-integration-alma.sh:ro" \
           -v "${PWD}/build_artifacts/management:/out" \
           "${HOME_SERVER_BASE_IMAGE}" \
-          /bin/bash /repo/build_files/build-management-agent.sh
-        sudo chmod 0755 build_artifacts/management/management-agent
+          /bin/bash /repo/build_files/build-management-agent.sh "${MANAGEMENT_BUILD_MODE}"
+        sudo chmod 0755 build_artifacts/management/management-agent*

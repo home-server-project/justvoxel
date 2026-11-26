@@ -4,8 +4,10 @@ import copy
 import hashlib
 import io
 import json
+import os
 import pathlib
 import sys
+import subprocess
 import tempfile
 import unittest
 import zipfile
@@ -299,6 +301,42 @@ class ManagedModPreparation(unittest.TestCase):
         for rule in ['*', 'latest', '>=0.1 || anything', None, {'version':'26.3'}]:
             self.assertFalse(self.ns['accepts'](rule, '26.3'))
 
+
+
+class ManagedModRetirement(unittest.TestCase):
+    @unittest.skipUnless(os.geteuid() == 0, 'private ownership evidence requires root')
+    def test_managed_fabric_and_neoforge_require_exact_artifact_evidence(self):
+        helper = ROOT / 'mjust/libexec/managed-crossplay-mod-ownership'
+        for platform, names in [
+            ('fabric', ['Geyser-Fabric.jar', 'floodgate-fabric.jar', 'fabric-api.jar']),
+            ('neoforge', ['Geyser-NeoForge.jar', 'floodgate-neoforge.jar']),
+        ]:
+            with self.subTest(platform=platform), tempfile.TemporaryDirectory() as temp:
+                data = pathlib.Path(temp)
+                mods = data / 'mods'
+                mods.mkdir()
+                evidence = data / 'crossplay-mods.json'
+                hashes = {}
+                for name in names:
+                    artifact = name.encode()
+                    (mods / name).write_bytes(artifact)
+                    hashes[name] = hashlib.sha256(artifact).hexdigest()
+                evidence.write_text(json.dumps({'schema':1, 'platform':platform, 'artifacts':hashes}))
+                evidence.chmod(0o600)
+
+                def verify():
+                    return subprocess.run(['bash', str(helper), 'retire-verify', platform, str(data), str(evidence), 'true'],
+                                          capture_output=True, timeout=5).returncode
+                self.assertEqual(verify(), 0)
+                (mods / names[0]).unlink()
+                self.assertNotEqual(verify(), 0)
+                (mods / names[0]).write_bytes(names[0].encode())
+                (mods / names[-1]).write_bytes(b'different artifact')
+                self.assertNotEqual(verify(), 0)
+                (mods / names[-1]).write_bytes(names[-1].encode())
+                evidence.chmod(0o644)
+                self.assertNotEqual(verify(), 0)
+                self.assertTrue(evidence.exists())
 
 if __name__ == '__main__':
     unittest.main()

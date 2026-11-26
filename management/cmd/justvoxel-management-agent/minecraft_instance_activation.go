@@ -771,7 +771,11 @@ func (b *instanceRuntimeBackend) applyVersion(ctx context.Context, previous inst
 				return errInstanceRecovery
 			}
 			if instanceHash(files.Environment) != previous.EnvironmentSHA256 {
-				if _, err = b.command(ctx, "env", "JUSTVOXEL_MAINTENANCE_LOCK_HELD=1", "/usr/libexec/justvoxel/mjust/verify-minecraft-stack", "--instance", id, next.Runtime.Version); err != nil {
+				args := []string{"env", "JUSTVOXEL_MAINTENANCE_LOCK_HELD=1", "/usr/libexec/justvoxel/mjust/verify-minecraft-stack", "--instance", id}
+				if verified, _ := ctx.Value(switchDefinitionVerificationKey{}).(bool); verified {
+					args = append(args, "--switch")
+				}
+				if _, err = b.command(ctx, args[0], append(args[1:], next.Runtime.Version)...); err != nil {
 					return instanceRuntimeFailure("Running Minecraft does not match this definition-only change.")
 				}
 			}

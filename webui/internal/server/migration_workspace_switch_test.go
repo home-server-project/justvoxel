@@ -33,10 +33,11 @@ func TestMigrationSwitchUsesCompleteSetupCatalogueAndArtwork(t *testing.T) {
 <span><span class="plugins-badge plugins-badge-disabled migration-switch-status-dot" aria-hidden="true">C</span> Current</span>
 <span><span class="plugins-badge migration-switch-status-dot" aria-hidden="true">N</span> Not Supported</span>
 <span><span class="plugins-badge plugins-badge-enabled migration-switch-status-dot" aria-hidden="true">A</span> Available</span>
+<button type="button" data-switch-matrix-run hidden disabled>Run Switch Test</button>
 </div>
 <p class="muted">Switch server software at the same Minecraft version. Review compatibility before converting this server or creating a separate clone.</p>`
 	if !strings.Contains(markup, legend) {
-		t.Fatal("Switch legend must show Current, Not Supported and Available in that order immediately above the introduction")
+		t.Fatal("Switch legend must retain its labels and put the hidden development action after Available")
 	}
 	introEnd := strings.Index(markup, legend) + len(legend)
 	catalogue := strings.Index(markup, `migration-switch-catalogue"`)

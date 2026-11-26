@@ -36,9 +36,15 @@ type selectedServerContext struct {
 // Selection resolves only registered immutable identities. Missing context is
 // accepted only when the actual inventory contains exactly one server.
 func (a *App) selectedMinecraft(w http.ResponseWriter, r *http.Request, session string) (selectedServerContext, bool) {
+	return a.selectedMinecraftWithFallback(w, r, session, nil)
+}
+func (a *App) selectedMinecraftWithFallback(w http.ResponseWriter, r *http.Request, session string, allowUnselected func() bool) (selectedServerContext, bool) {
 	values, exists := r.URL.Query()["server"]
 	id := ""
 	if exists {
+		if len(values) == 1 && values[0] == "" && allowUnselected != nil && allowUnselected() {
+			return selectedServerContext{}, true
+		}
 		if len(values) != 1 || !addServerIDPattern.MatchString(values[0]) {
 			writeMinecraftWorkspaceError(w, 400, ui(w, "ui.abda10a5fa44"))
 			return selectedServerContext{}, false
@@ -47,10 +53,16 @@ func (a *App) selectedMinecraft(w http.ResponseWriter, r *http.Request, session 
 	}
 	instances, err := a.independentServerInventory(r.Context(), session)
 	if err != nil {
+		if allowUnselected != nil && allowUnselected() {
+			return selectedServerContext{}, true
+		}
 		writeMinecraftWorkspaceError(w, 503, ui(w, "ui.23112b254b17"))
 		return selectedServerContext{}, false
 	}
 	if !exists {
+		if len(instances) != 1 && allowUnselected != nil && allowUnselected() {
+			return selectedServerContext{}, true
+		}
 		if len(instances) == 0 {
 			writeMinecraftWorkspaceError(w, 409, ui(w, "ui.f30501d9bdd9"))
 			return selectedServerContext{}, false
@@ -65,6 +77,9 @@ func (a *App) selectedMinecraft(w http.ResponseWriter, r *http.Request, session 
 		if instance.ID == id {
 			return selectedServerContext{ID: id, Name: instance.DisplayName}, true
 		}
+	}
+	if allowUnselected != nil && allowUnselected() {
+		return selectedServerContext{}, true
 	}
 	writeMinecraftWorkspaceError(w, 404, ui(w, "ui.eca706fcd65b"))
 	return selectedServerContext{}, false

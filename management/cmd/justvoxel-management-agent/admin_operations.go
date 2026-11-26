@@ -40,6 +40,10 @@ func (s *server) adminOperationStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "operation status could not be read")
 		return
 	}
+	if operation.OperationType == operationTypeSwitchMatrix || operation.MatrixParent != "" {
+		writeError(w, http.StatusNotFound, "use the Switch matrix status route")
+		return
+	}
 	if isServerMigrationOperation(operation.OperationType) {
 		writeError(w, http.StatusNotFound, "use the selected instance migration operation route")
 		return

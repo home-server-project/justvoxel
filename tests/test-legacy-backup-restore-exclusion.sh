@@ -34,7 +34,11 @@ jv_minecraft_still_running() { return 1; }
 jv_backup_write_metadata() { :; }
 jv_stop_minecraft_adaptive() { echo stop >> "$TRACE"; }
 ''')
+        reservation = self.root/'reservation.sh'
+        reservation.write_text((REPO/'mjust/libexec/switch-matrix-reservation.sh').read_text()
+                               .replace('/var/lib/justvoxel/management/logs/operations',str(self.root/'operations')))
         source = (REPO/'runtime/minecraft-backup').read_text()
+        source = source.replace('/usr/libexec/justvoxel/mjust/switch-matrix-reservation.sh',str(reservation))
         for name in ('backup-common.sh','backup-instance-storage.sh','interrupt-safety.sh'):
             source = source.replace('/usr/libexec/justvoxel/mjust/'+name,str(helper))
         source = source.replace('/run/justvoxel-minecraft-maintenance.lock',str(self.maintenance))

@@ -195,25 +195,60 @@ Reopening or refreshing Switch re-evaluates current inventory. An experimental
 clone may remain available when Convert is blocked, while preserving the original.
 A target is Available whenever Convert or protected Clone is available.
 
-Fabric/Quilt, Forge/NeoForge and other Java loader transitions require verified
-installed bytes, exact game/target-loader metadata and verified required
-dependencies for Convert. Unknown or incompatible content blocks Convert but
-leaves a protected experimental clone available when its exact runtime exists.
-Plugins never become mods, and mods never become plugins. Blockers must be handled
-manually in Plugins & Mods. Leaving a mod loader for Vanilla or Paper offers only
-a clone: historic mod-added blocks/items/entities may not survive, even if the
-current mods folder is empty. Meaningful target runtime verification is required.
+Leaving any mod loader for another runtime offers protected experimental Clone
+when the target is safe to attempt. Historic mod-added blocks, items, dimensions
+and entities can be lost even when the mods directory is empty. RCON and world
+startup evidence verify runtime readiness only. [Fabric mod compatibility](https://docs.fabricmc.net/players/installing-mods),
+[Quilt loader compatibility](https://quiltmc.org/en/about/faq/),
+[Forge registry handling](https://docs.minecraftforge.net/en/1.21.x/concepts/registries/),
+[NeoForge server guidance](https://docs.neoforged.net/user/docs/server/).
 
-Spigot remains unsupported in this scope: Paper-to-Spigot is unsafe, and direct
-Spigot-to-Paper from 26.1 has a different world layout. No intermediary conversion
-is attempted. Java and native Bedrock remain unsupported in both directions.
+For Vanilla to Paper, Paper documents automatic migration during startup.
+The runtime image selects the server type and exact game release. For the
+reverse direction, JustVoxel uses the configured level name, moves the separate
+Nether and End directories for the supported pre-26.1 layout, and moves Paper's
+five Overworld metadata files into the shared level data path for 26.1 and later.
+Missing or ambiguous transformation paths block review. The moves preserve
+neighboring data, including custom dimensions, but do not establish that the
+target can interpret custom content. [Paper migration guidance](https://docs.papermc.io/paper/migration/),
+[itzg Paper-family runtime options](https://docker-minecraft-server.readthedocs.io/en/latest/types-and-platforms/server-types/paper/).
 
-The new conversion directions retain the startup content guard to avoid
-unrequested downloads. Supported target cross-play settings are preserved; review warns when the
-target requires Java connections. Existing same-Paper-family cross-play behavior is
-preserved. Failed in-place conversions restore their cold archive through the
-existing restore transaction before restarting the original. Interrupted recovery
-retains the same archive authority and never retries conversion.
+Leaf supports optional Linear region formats. Switch checks the configured world
+tree, including custom dimensions, for region file formats before leaving Leaf.
+Linear or ambiguous region files block review until a compatible transformation
+is available. Release metadata establishes what Leaf publishes for an exact
+game version. It provides no portability guarantee for those worlds.
+[Leaf region format guidance](https://www.leafmc.one/en/docs/how-to/optimize-leaf-server),
+[Leaf releases](https://github.com/Winds-Studio/Leaf/releases).
 
-Upstream world-layout reference:
-[Paper migration guidance](https://docs.papermc.io/paper/migration/).
+Spigot stays outside the verified world transformations. Paper documents a
+layout divergence with Spigot from Minecraft 26.1. Java and native Bedrock
+conversion is unsupported. [Paper migration guidance](https://docs.papermc.io/paper/migration/).
+
+Managed cross-play availability and installed artifact compatibility are
+separate checks. Geyser publishes distinct Paper/Spigot, Fabric and NeoForge
+artifacts. Paper-family Switch checks installed Geyser and Floodgate bytes
+against the reviewed artifact hashes and verifies the active target stack.
+Fabric and NeoForge also have private per-instance ownership evidence. The
+inventory binds that evidence to installed bytes. An archive alone does not
+carry that evidence. No current Switch direction between distinct runtimes has
+a supported shared Fabric or NeoForge ownership platform. Review blocks a move
+that would require managed replacements or execute unverified source-loader
+mods on a Java-only target. Geyser verification does not exercise a real
+Bedrock client. [Geyser platform downloads](https://geysermc.org/download),
+[Geyser release support](https://geysermc.org/wiki/geyser/supported-versions/).
+
+Switch keeps the content-preservation setting on the verified target to suppress
+automatic executable downloads. Verification uses logs bounded to the active
+container session, alongside exact version and image checks and successful RCON.
+For enabled cross-play, verification also checks the managed runtime components
+and UDP listener. Failed in-place conversions restore the cold archive through
+the existing restore transaction. Interrupted operations keep the same recovery
+authority and never retry conversion automatically.
+
+The source configuration matrix uses fixture publisher responses, the production
+planner and renderer, and real local port reservation checks. The root restore
+fixtures use real temporary archives and production extraction and rollback.
+These checks need to pass before real appliance acceptance. The previously
+observed VM evidence covers historical failed-clone recovery and a Java-only
+Vanilla-to-Purpur clone at Minecraft 26.3.

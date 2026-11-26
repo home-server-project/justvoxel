@@ -20,7 +20,14 @@ func (a *App) migrationSwitchPage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	selected, ok := a.selectedMinecraft(w, r, session)
+	selected, ok := a.selectedMinecraftWithFallback(w, r, session, func() bool {
+		client, ok := a.api.(migrationSwitchMatrixAPI)
+		if !ok {
+			return false
+		}
+		status, err := client.SwitchMatrixStatus(r.Context(), session, "")
+		return err == nil && (status.Enabled || status.Operation != nil)
+	})
 	if !ok {
 		return
 	}

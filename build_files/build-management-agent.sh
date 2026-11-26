@@ -2,6 +2,11 @@
 # Run inside the Home Server Base 10 validation container, with /repo and /out mounted.
 set -euo pipefail
 
+case "${1:-production}" in
+    production|development|both) build_mode="${1:-production}" ;;
+    *) echo "ERROR: invalid Management Agent build mode." >&2; exit 1 ;;
+esac
+
 # Local reusable builders already contain these dependencies; CI installs them by default.
 if [[ ${JUSTVOXEL_MANAGEMENT_SKIP_DNF:-0} != 1 ]]; then
     dnf install -y gcc golang pam-devel libpwquality-devel diffutils authselect authselect-libs shadow-utils
@@ -45,5 +50,13 @@ CGO_ENABLED=1 go vet -mod=readonly ./...
 CGO_ENABLED=1 go test -mod=readonly ./...
 # Adapt the runner working directory without changing the source script.
 bash <(sed "s|^cd /work$|cd /work/management|" /run-pam-integration-alma.sh)
-CGO_ENABLED=1 go build -mod=readonly -trimpath -o /out/management-agent ./cmd/justvoxel-management-agent
-/out/management-agent version
+if [[ "${build_mode}" != development ]]; then
+    CGO_ENABLED=1 go build -mod=readonly -trimpath -o /out/management-agent ./cmd/justvoxel-management-agent
+    /out/management-agent version
+fi
+if [[ "${build_mode}" != production ]]; then
+    CGO_ENABLED=1 go vet -mod=readonly -tags justvoxel_dev ./...
+    CGO_ENABLED=1 go test -mod=readonly -tags justvoxel_dev ./...
+    CGO_ENABLED=1 go build -mod=readonly -trimpath -tags justvoxel_dev -o /out/management-agent-development ./cmd/justvoxel-management-agent
+    /out/management-agent-development version
+fi

@@ -25,6 +25,9 @@ import (
 // and a fresh trusted snapshot of appliance storage and physical RAM.
 // Runtime secrets never enter the Phase 1 identity/name store.
 type minecraftInstanceRuntimeConfig struct {
+	// Internal only. Switch copies this policy to the reserved clone.
+	MatrixFixture   bool   `json:"matrix_fixture,omitempty"`
+	MatrixLeafBuild string `json:"matrix_leaf_build,omitempty"`
 	// Internal Switch startup guard; never accepted from public settings.
 	PreserveContent  bool   `json:"preserve_content,omitempty"`
 	ID               string `json:"id"`
@@ -411,6 +414,12 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 		if c.PaperChannel != "default" && c.PaperChannel != "experimental" {
 			return nil, errors.New("invalid Paper channel")
 		}
+		if c.MatrixFixture && (c.StartOnBoot || c.Software == "bedrock" || ctx.Placements[c.ID].NetworkMember ||
+			c.JavaMemory != switchMatrixHeap || c.ContainerMemory != switchMatrixMemory ||
+			(c.Software == "leaf" && !switchMatrixBuildPattern.MatchString(c.MatrixLeafBuild))) ||
+			c.MatrixLeafBuild != "" && (!c.MatrixFixture || c.Software != "leaf") {
+			return nil, errInstanceRecovery
+		}
 		if c.Software == "paper" && c.Version == "LATEST" && c.PaperChannel != "experimental" {
 			return nil, errors.New("latest Paper requires the experimental channel")
 		}
@@ -487,6 +496,16 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 		})
 		if err != nil {
 			return nil, err
+		}
+		if c.MatrixFixture {
+			f.Quadlet = bytes.ReplaceAll(f.Quadlet, []byte("PublishPort="), []byte("PublishPort=127.0.0.1:"))
+			f.Quadlet = bytes.Replace(f.Quadlet, []byte("[Container]\n"),
+				[]byte("[Container]\nPodmanArgs=--cpus=2 --pids-limit=256 --ulimit=fsize=536870912:536870912\n"), 1)
+			f.Quadlet = bytes.Replace(f.Quadlet, []byte("Restart=always\n"), []byte("Restart=no\n"), 1)
+			f.Environment = append(f.Environment, []byte("VIEW_DISTANCE=4\nSIMULATION_DISTANCE=4\nSPAWN_CHUNK_RADIUS=0\nMAX_WORLD_SIZE=64\nSEED=642021\n")...)
+			if c.MatrixLeafBuild != "" {
+				f.Environment = append(f.Environment, []byte("LEAF_BUILD="+c.MatrixLeafBuild+"\n")...)
+			}
 		}
 		if c.Software != "vanilla" && !capabilities.ManagedCrossplay {
 			f.Quadlet = bytes.Replace(f.Quadlet, []byte("/instance-crossplay-start "), []byte("/validate-instance-start-memory "), 1)

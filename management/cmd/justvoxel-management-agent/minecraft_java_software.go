@@ -16,30 +16,22 @@ type javaServerCapabilities struct {
 	LoaderEnvironment string
 }
 
+var javaServerCapabilityTable = map[string]javaServerCapabilities{
+	"paper":      {Type: "PAPER", Name: "Paper", BukkitPlugins: true, PluginsWorkspace: true, ManagedCrossplay: true},
+	"purpur":     {Type: "PURPUR", Name: "Purpur", BukkitPlugins: true, PluginsWorkspace: true, ManagedCrossplay: true},
+	"pufferfish": {Type: "PUFFERFISH", Name: "Pufferfish", BukkitPlugins: true, PluginsWorkspace: true, ManagedCrossplay: true},
+	"leaf":       {Type: "LEAF", Name: "Leaf", BukkitPlugins: true, PluginsWorkspace: true, ManagedCrossplay: true},
+	"vanilla":    {Type: "VANILLA", Name: "Vanilla"},
+	"spigot":     {Type: "SPIGOT", Name: "Spigot", BukkitPlugins: true, PluginsWorkspace: true, ManagedCrossplay: true},
+	"forge":      {Type: "FORGE", Name: "Forge", ModLoader: true, LoaderEnvironment: "FORGE_VERSION"},
+	"neoforge":   {Type: "NEOFORGE", Name: "NeoForge", ManagedCrossplay: true, ModLoader: true, LoaderEnvironment: "NEOFORGE_VERSION"},
+	"fabric":     {Type: "FABRIC", Name: "Fabric", ManagedCrossplay: true, ModLoader: true, LoaderEnvironment: "FABRIC_LOADER_VERSION"},
+	"quilt":      {Type: "QUILT", Name: "Quilt", ModLoader: true, LoaderEnvironment: "QUILT_LOADER_VERSION"},
+}
+
 func javaServerSoftware(software string) (javaServerCapabilities, bool) {
-	switch software {
-	case "paper":
-		return javaServerCapabilities{Type: "PAPER", Name: "Paper", BukkitPlugins: true, PluginsWorkspace: true, ManagedCrossplay: true}, true
-	case "purpur":
-		return javaServerCapabilities{Type: "PURPUR", Name: "Purpur", BukkitPlugins: true, PluginsWorkspace: true, ManagedCrossplay: true}, true
-	case "pufferfish":
-		return javaServerCapabilities{Type: "PUFFERFISH", Name: "Pufferfish", BukkitPlugins: true, PluginsWorkspace: true, ManagedCrossplay: true}, true
-	case "leaf":
-		return javaServerCapabilities{Type: "LEAF", Name: "Leaf", BukkitPlugins: true, PluginsWorkspace: true, ManagedCrossplay: true}, true
-	case "vanilla":
-		return javaServerCapabilities{Type: "VANILLA", Name: "Vanilla"}, true
-	case "spigot":
-		return javaServerCapabilities{Type: "SPIGOT", Name: "Spigot", BukkitPlugins: true, PluginsWorkspace: true, ManagedCrossplay: true}, true
-	case "forge":
-		return javaServerCapabilities{Type: "FORGE", Name: "Forge", ModLoader: true, LoaderEnvironment: "FORGE_VERSION"}, true
-	case "neoforge":
-		return javaServerCapabilities{Type: "NEOFORGE", Name: "NeoForge", ManagedCrossplay: true, ModLoader: true, LoaderEnvironment: "NEOFORGE_VERSION"}, true
-	case "fabric":
-		return javaServerCapabilities{Type: "FABRIC", Name: "Fabric", ManagedCrossplay: true, ModLoader: true, LoaderEnvironment: "FABRIC_LOADER_VERSION"}, true
-	case "quilt":
-		return javaServerCapabilities{Type: "QUILT", Name: "Quilt", ModLoader: true, LoaderEnvironment: "QUILT_LOADER_VERSION"}, true
-	}
-	return javaServerCapabilities{}, false
+	c, ok := javaServerCapabilityTable[software]
+	return c, ok
 }
 
 func javaServerPluginsWorkspace(software string) bool {

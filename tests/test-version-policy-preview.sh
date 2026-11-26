@@ -132,6 +132,8 @@ normalize_daily_backup_time() { printf '%s' "$1"; }
 daily_backup_schedule_from_time() { printf '*-*-* %s:00' "$1"; }
 EOF
 sed -n '/^jv_crossplay_viaversion_supports() {/,/^paper_version_has_stable_build() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/planner-common.sh"
+# Keep the exact release helpers wired to the fixture curl responses below.
+sed -n '/^java_exact_publisher_response() {/,/^paper_version_build_channel() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/planner-common.sh"
 sed -n '/^validate_server_type() {/,/^render_runtime_files() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/planner-common.sh"
 touch "${fixture_dir}/planner-storage.sh"
 cat > "${fixture_dir}/planner-crossplay.sh" <<'STUB'

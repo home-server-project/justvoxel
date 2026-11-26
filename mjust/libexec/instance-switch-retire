@@ -4,7 +4,7 @@ set -euo pipefail
 [[ ${EUID} == 0 && $# == 10 ]] || exit 1
 action=$1
 shift
-case "$action" in journal|unrestored|retired|empty) ;; *) exit 1 ;; esac
+case "$action" in journal|unrestored|retired|empty|matrix-empty|matrix-absent) ;; *) exit 1 ;; esac
 if ! /usr/libexec/justvoxel/mjust/instance-runtime-prerequisites restore-validate "${@:1:8}" >/dev/null 2>&1; then
     echo mount_identity
     exit 1
@@ -168,11 +168,17 @@ def main():
             require(not journal)
             os.fsync(base_fd)
             return
+        require(action != 'matrix-absent', 'unexpected_entry')
         fd = open_dir(stack, base_fd, ident)
         info = os.fstat(fd)
         require(info.st_dev == base_info.st_dev and mount_id(fd) == expected_mount, 'mount_identity')
         require(private_dir(info))
         transactions = names(fd, 65)
+        if action == 'matrix-empty':
+            require(identity(info) == json.loads(evidence) and not transactions, 'unexpected_entry')
+            os.rmdir(ident, dir_fd=base_fd)
+            os.fsync(base_fd)
+            return
         if journal:
             require(identity(info) == journal['parent'])
             current = entry(fd, 'data')

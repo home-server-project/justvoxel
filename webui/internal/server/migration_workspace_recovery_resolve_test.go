@@ -90,7 +90,7 @@ func TestMigrationRecoveryTabVisibilityContract(t *testing.T) {
 		`syncMigrationRecoveryAvailability(root);`,
 		`if (!Object.hasOwn(root.dataset, "migrationRecoveryAvailable")) return;`,
 		`recoveryTab.hidden = !available && currentTab !== "recovery";`,
-		`if (requestedMigrationTab === "recovery") {`,
+		`if (requestedMigrationTab === "recovery" || currentTab === "switch") return await loadMigration(tabURLs[currentTab]);`,
 	} {
 		if !strings.Contains(string(script), want) {
 			t.Fatalf("Recovery tab script missing %q", want)

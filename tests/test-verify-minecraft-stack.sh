@@ -15,6 +15,19 @@ systemctl() { [[ ${ACTIVE:-yes} == yes ]]; }
 wait_for_rcon() { [[ ${READY:-yes} == yes ]]; }
 sleep() { printf '%s\n' "$1" >> "${DATA_PATH}/sleeps"; }
 podman() {
+    if [[ $1 == inspect && ${*: -1} == '{{.Id}} {{.State.StartedAt}}' ]]; then
+        printf '%064d 2026-11-25T12:00:00.123456789Z\n' 0
+        return
+    fi
+    if [[ $1 == logs ]]; then
+        [[ $2 == --since && $3 == '2026-11-25T12:00:00.123456789Z' && $4 == --tail && $5 == 4096 ]] || return 1
+        printf '%s\n' "${SESSION_LOG-Done (7.5s)! For help, type help}"
+        return
+    fi
+    if [[ $1 == exec && $3 == sh && $4 == -c ]]; then
+        [[ ${NO_BEDROCK_LISTENER:-no} != yes ]]
+        return
+    fi
     case "${*: -1}" in
         --json)
             printf 'probe\n' >> "${DATA_PATH}/monitor-probes"
@@ -69,6 +82,11 @@ printf 'auth-type: floodgate\n' > "${DATA_PATH}/plugins/Geyser-Spigot/config.yml
     export VERSION_RESPONSE='This server is running Purpur version 26.3-2660 (MC: 26.3)'
     clone_verify() { bash "${fixture_dir}/verify" --instance jv-aaaaaa --switch-clone "$@"; }
     BEDROCK_ENABLED=no PLUGIN_RESPONSE='Plugins (0):' clone_verify 26.3
+    BEDROCK_ENABLED=no PLUGIN_RESPONSE='Plugins (0):' clone_verify LATEST
+    if BEDROCK_ENABLED=no VERSION_RESPONSE='This server is running Purpur version 26.2-2660 (MC: 26.2)' \
+        SESSION_LOG=$'Starting minecraft server version 26.2\nDone (7.5s)! For help, type help' clone_verify LATEST; then
+        echo 'Switch accepted a session version that disagrees with the committed exact definition' >&2; exit 1
+    fi
     BEDROCK_ENABLED=no PLUGIN_RESPONSE='Plugins (0):' \
         VERSION_RESPONSE='This server is running Purpur version 26.3-2660-ver/26.3' clone_verify 26.3
     BEDROCK_ENABLED=yes clone_verify 26.3
@@ -77,6 +95,9 @@ printf 'auth-type: floodgate\n' > "${DATA_PATH}/plugins/Geyser-Spigot/config.yml
             echo 'Cross-play clone accepted an incomplete or disabled plugin stack' >&2; exit 1
         fi
     done
+    if BEDROCK_ENABLED=yes NO_BEDROCK_LISTENER=yes clone_verify 26.3; then
+        echo 'Switch accepted a cross-play stack without its UDP listener' >&2; exit 1
+    fi
     if BEDROCK_ENABLED=yes GEYSER_RESPONSE='Unknown command' clone_verify 26.3; then
         echo 'Cross-play clone accepted an invalid Geyser version response' >&2; exit 1
     fi
@@ -85,6 +106,22 @@ printf 'auth-type: floodgate\n' > "${DATA_PATH}/plugins/Geyser-Spigot/config.yml
         'VERSION_RESPONSE=This server is running Paper (MC: 26.3) compatible with Purpur'; do
         if env BEDROCK_ENABLED=no "${failure}" bash "${fixture_dir}/verify" --instance jv-aaaaaa --switch-clone 26.3; then
             echo "Invalid Java-only clone runtime accepted: ${failure}" >&2; exit 1
+        fi
+    done
+)
+# Copied latest.log may describe an earlier successful session. Only the
+# selected active container's new session can prove this startup.
+mkdir -p "${DATA_PATH}/logs"
+printf '%s\n' 'Loading Minecraft 26.3 with Fabric Loader 0.18.4' 'Done (3.0s)! For help, type help' > "${DATA_PATH}/logs/latest.log"
+(
+    export MINECRAFT_SERVER_TYPE=fabric MINECRAFT_VERSION=26.3 MINECRAFT_LOADER_VERSION=0.18.4 BEDROCK_ENABLED=no
+    export MONITOR_RESPONSE='{"server_info":{"version":{"name":"26.3"}}}'
+    export SESSION_LOG=$'Loading Minecraft 26.3 with Fabric Loader 0.18.4\nDone (3.0s)! For help, type help'
+    bash "${fixture_dir}/verify" --instance jv-aaaaaa --switch 26.3
+    for stale in '' 'Done (3.0s)! For help, type help' $'Loading Minecraft 26.3 with Fabric Loader 0.18.40\nDone (3.0s)! For help, type help'; do
+        rm -f "${DATA_PATH}/monitor-probes"
+        if SESSION_LOG="${stale}" bash "${fixture_dir}/verify" --instance jv-aaaaaa --switch 26.3; then
+            echo 'Switch used copied or nonmatching startup evidence' >&2; exit 1
         fi
     done
 )

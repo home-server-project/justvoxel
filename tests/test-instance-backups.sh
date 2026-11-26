@@ -37,6 +37,8 @@ class InstanceBackups(unittest.TestCase):
         self.source = self.source.replace('/usr/libexec/justvoxel/mjust/',str(self.helpers)+'/')
         self.source = self.source.replace('/etc/justvoxel/instances',str(self.configs))
         self.source = self.source.replace('/var/lib/justvoxel/instances',str(self.registry))
+        self.source = self.source.replace('/var/lib/justvoxel/management/logs/operations',str(self.root/'operations'))
+        self.source = self.source.replace('/var/lib/justvoxel-instance-runtime',str(self.root/'matrix-state'))
         self.source = self.source.replace('/etc/justvoxel/minecraft-backup.env',str(self.root/'backup.env'))
         self.config()
         (self.registry/'names').mkdir(mode=0o700)
@@ -75,6 +77,125 @@ class InstanceBackups(unittest.TestCase):
         r=json.loads(path.read_text())
         r['backups']=dict(type='nfs' if source else 'system',root=str(root),path=str(root/identity),mount_point=str(root) if source else '',uuid='',source=source)
         self.private(path,json.dumps(r))
+
+    def test_matrix_backup_retirement_exact_identity_and_retry(self):
+        import hashlib
+
+        identity = 'jv-aaaaaa'
+        other = 'jv-bbbbbb'
+        parent = '01234567-89ab-4cde-8fab-0123456789ab'
+        self.run_helper('create', identity)
+        self.run_helper('create', other)
+        folder = self.backups/identity
+        saved_archives = self.root/'matrix-archives'
+        folder.rename(saved_archives)
+        self.pin_backup(identity, self.backups)
+        config = (self.configs/identity/'config.json').read_bytes()
+        record = json.loads(config)
+        (self.root/'operations').mkdir()
+        (self.root/'matrix-state').mkdir()
+        parent_path = self.root/'operations'/f'{parent}.json'
+        fixture_path = self.root/'matrix-state'/f'matrix-{parent}-{identity}.json'
+        reservation = dict(operation_id=parent, operation_type='switch_matrix', state='running',
+                           stage='fixtures', matrix_fixtures=[identity])
+        fixture = dict(parent=parent, id=identity, stage='binding', placement=record['backups'],
+                       storage=record['storage'], config_sha256=hashlib.sha256(config).hexdigest(),
+                       backups=dict(root=[0,0], directory=[0,0], files=None))
+        self.private(parent_path, json.dumps(reservation))
+        self.private(fixture_path, json.dumps(fixture))
+        helper = self.helpers/'matrix-worker'
+        self.tool(helper, self.source)
+
+        def matrix(action, selected=identity, ok=True):
+            result = subprocess.run(['bash',str(helper),action,selected,parent],env=self.env,
+                                    capture_output=True,text=True,timeout=20)
+            self.assertEqual(result.returncode == 0, ok, result.stdout+result.stderr)
+            return result.stdout
+
+        matrix('matrix-prepare', other, ok=False)
+        reservation.update(state='needs_attention', stage='interrupted')
+        self.private(parent_path, json.dumps(reservation))
+        config_path = self.configs/identity/'config.json'
+        config_path.unlink()
+        fixture['stage'] = 'reserved'
+        self.private(fixture_path, json.dumps(fixture))
+        matrix('matrix-absent')
+        self.private(config_path, config.decode())
+        fixture['stage'] = 'binding'
+        self.private(fixture_path, json.dumps(fixture))
+        matrix('matrix-absent')
+        folder.mkdir(mode=0o700)
+        matrix('matrix-absent', ok=False)
+        matrix('matrix-prepare', ok=False)
+        matrix('matrix-bind', ok=False)
+        self.assertTrue(folder.is_dir())
+        folder.rmdir()
+
+        prepared = json.loads(matrix('matrix-prepare'))
+        staged = self.backups/f'.matrix-{parent}-{identity}'
+        self.assertTrue(staged.is_dir())
+        self.assertFalse(folder.exists())
+        # A prepared directory alone is insufficient before its inode receipt.
+        matrix('matrix-absent', ok=False)
+        matrix('matrix-prepare', ok=False)
+        matrix('matrix-bind', ok=False)
+        fixture.update(backups=prepared)
+        self.private(fixture_path, json.dumps(fixture))
+        folder.mkdir(mode=0o700)
+        matrix('matrix-bind', ok=False)
+        self.assertTrue(staged.is_dir())
+        self.assertTrue(folder.is_dir())
+        folder.rmdir()
+        matrix('matrix-bind')
+        # Simulate interruption after publication, while the receipt is binding.
+        matrix('matrix-bind')
+        self.assertFalse(staged.exists())
+        self.assertEqual([folder.stat().st_dev, folder.stat().st_ino], prepared['directory'])
+        fixture.update(stage='owned')
+        reservation['state'] = 'running'
+        reservation['stage'] = 'retirement'
+        self.private(parent_path, json.dumps(reservation))
+        self.private(fixture_path, json.dumps(fixture))
+        for archive in saved_archives.iterdir():
+            archive.rename(folder/archive.name)
+        foreign_folder = self.backups/other
+        foreign_before = {p.name:p.read_bytes() for p in foreign_folder.iterdir()}
+        unexpected = folder/'unknown.json'
+        unexpected.write_text('preserve this unrelated item')
+        matrix('matrix-inventory', ok=False)
+        self.assertTrue(unexpected.exists())
+        unexpected.unlink()
+
+        fixture.update(stage='intent', backups=json.loads(matrix('matrix-inventory')))
+        self.private(fixture_path, json.dumps(fixture))
+        moved = folder.with_name('original')
+        folder.rename(moved)
+        folder.mkdir(mode=0o700)
+        matrix('matrix-retire', ok=False)
+        folder.rmdir()
+        moved.rename(folder)
+        archive = next(p for p in folder.iterdir() if p.name.endswith('.tar.gz'))
+        # Emulate loss of the process between archive and sidecar unlink.
+        archive.unlink()
+        matrix('matrix-retire')
+        matrix('matrix-retire')
+        self.assertFalse(folder.exists())
+        self.assertEqual(foreign_before, {p.name:p.read_bytes() for p in foreign_folder.iterdir()})
+        self.assertEqual((self.backups/'minecraft-paper-2026-01-01-0000.tar.gz').read_text(), 'legacy evidence')
+
+        reservation.update(state='needs_attention', stage='interrupted')
+        self.private(parent_path, json.dumps(reservation))
+        fixture.update(stage='binding', backups=dict(root=[0,0], directory=[0,0], files=None))
+        self.private(fixture_path, json.dumps(fixture))
+        fixture['backups'] = json.loads(matrix('matrix-prepare'))
+        self.private(fixture_path, json.dumps(fixture))
+        matrix('matrix-check')
+        fixture['stage'] = 'intent'
+        self.private(fixture_path, json.dumps(fixture))
+        matrix('matrix-retire')
+        matrix('matrix-retire')
+        self.assertFalse(staged.exists())
+        self.assertFalse(folder.exists())
 
     def test_physical_names_rename_collision_and_historical_retention(self):
         self.run_helper('create')
@@ -137,10 +258,12 @@ class InstanceBackups(unittest.TestCase):
         self.assertFalse(self.delete_metadata('jv-aaaaaa/'+old))
 
     def delete(self, action, refs, plan=None):
-        for name in ('admin-backup-delete-common.sh','admin-backup-delete-apply.sh','admin-backup-delete-json'):
+        for name in ('admin-backup-delete-common.sh','admin-backup-delete-apply.sh','admin-backup-delete-json','switch-matrix-reservation.sh'):
             source=(REPO/'mjust/libexec'/name).read_text()
             source=source.replace('/usr/libexec/justvoxel/mjust/',str(self.helpers)+'/')
             source=source.replace('/etc/justvoxel/instances',str(self.configs))
+            source=source.replace('/run/justvoxel-minecraft-restore-exclusion.lock',str(self.root/'exclusion.lock'))
+            source=source.replace('/var/lib/justvoxel/management/logs/operations',str(self.root/'operations'))
             self.tool(self.helpers/name,source)
         # Only the appliance root gate and lock location are fixture boundaries.
         with (self.helpers/'common.sh').open('a') as f:

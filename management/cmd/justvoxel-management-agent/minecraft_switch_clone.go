@@ -2,13 +2,13 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -55,6 +55,7 @@ func switchClonePorts(records []instanceRuntimeRecord, c *minecraftInstanceRunti
 		return 0, instanceRuntimeFailure("No free server ports could be allocated.")
 	}
 	var err error
+	c.BedrockPort = 0
 	c.JavaPort, err = allocate(25565, false)
 	if err != nil {
 		return err
@@ -100,6 +101,10 @@ func (s *server) cloneMinecraftSwitch(ctx context.Context, e *minecraftSwitchEvi
 	if source.NetworkMember {
 		return instanceRuntimeFailure("Remove the source from Minecraft Network before cloning its standalone settings.")
 	}
+	target, snapshot, err := b.prepareSwitchTarget(ctx, source, p, true)
+	if err != nil {
+		return err
+	}
 	if _, err = b.backupStorage(ctx, "preflight", e.Source); err != nil {
 		return err
 	}
@@ -115,13 +120,13 @@ func (s *server) cloneMinecraftSwitch(ctx context.Context, e *minecraftSwitchEvi
 	if err = saveSwitchEvidence(*e); err != nil {
 		return err
 	}
-	if err = b.prepareSwitchSourceCopy(ctx, e.Source, p.Version); err != nil {
-		return err
-	}
 	if e.OriginallyRunning {
 		if err = b.actionWithWarnings(ctx, e.Source, "stop", true); err != nil {
 			return err
 		}
+	}
+	if err = b.prepareSwitchSourceCopy(ctx, e.Source, p.Version); err != nil {
+		return err
 	}
 	before, inventoryErr := b.backupStorage(ctx, "inventory", e.Source)
 	var existing []instanceBackupMetadata
@@ -183,54 +188,19 @@ func (s *server) cloneMinecraftSwitch(ctx context.Context, e *minecraftSwitchEvi
 	if archive.ID != e.Source || archive.Version != p.Version || archive.Software != source.Runtime.Software || !validInstanceRestoreArchive(archive.Archive) {
 		return instanceRuntimeFailure("A consistent exact-version source backup could not be verified.")
 	}
-	snapshot, _, _, err := b.snapshot(ctx)
-	if err != nil {
-		return err
-	}
-	snapshot.StorageRoot, snapshot.MountPoint, snapshot.ExpectedUUID, snapshot.ExpectedSource = source.Storage.Root, source.Storage.MountPoint, source.Storage.UUID, source.Storage.Source
-	if source.Backups != nil {
-		snapshot.BackupPlacement = source.Backups
-		snapshot.BackupPath = source.Backups.Root
-	}
-	records, err := b.records()
-	if err != nil {
-		return err
-	}
-	c := source.Runtime
-	c.ID = ""
-	c.PreserveContent = true
-	c.Software = p.Target
-	c.Version = p.Version
-	c.PufferfishBuild = p.Runtime.PufferfishBuild
-	c.LoaderVersion = p.Runtime.LoaderVersion
-	if !(javaServerPaperFamily(p.Current) && javaServerPaperFamily(p.Target)) {
-		c.BedrockEnabled = p.Runtime.CrossplayEnabled
-	}
-	c.VersionPolicy = "pinned"
-	c.StartOnBoot = false
-	channel, channelErr := b.command(ctx, instanceRuntimeHelper, "channel", p.Target, p.Version, "pinned")
-	if channelErr != nil {
-		return channelErr
-	}
-	c.PaperChannel = strings.TrimSpace(string(channel))
-	c.ImageTag = p.Runtime.ImageTag
-	c.ImageDigest = p.RuntimeDigest
-	if err = switchClonePorts(records, &c); err != nil {
-		return err
-	}
-	var secret [24]byte
-	if _, err = rand.Read(secret[:]); err != nil {
-		return err
-	}
-	c.RCONPassword = hex.EncodeToString(secret[:])
 	names, err := b.identities().listInstances("")
 	if err != nil {
 		return err
 	}
 	name := switchCloneName(names, e.Source, p.Target)
-	_, err = b.createTracked(ctx, c, name, snapshot, func(record instanceRuntimeRecord) error {
-		if record.Runtime.ID == e.Source {
+	_, err = b.createTrackedCandidate(ctx, target.Runtime, name, snapshot, func(record instanceRuntimeRecord) error {
+		if record.Runtime.ID != target.Runtime.ID || record.Runtime.ID == e.Source {
 			return errInstanceID
+		}
+		if child, ok := ctx.Value(switchMatrixChildKey{}).(operationJournal); ok {
+			if err := s.operations.reserveSwitchMatrixFixture(child.MatrixParent, record, child, name); err != nil {
+				return err
+			}
 		}
 		e.CloneID = record.Runtime.ID
 		e.CloneRecord = &record
@@ -264,12 +234,18 @@ func (s *server) cloneMinecraftSwitch(ctx context.Context, e *minecraftSwitchEvi
 	if err != nil {
 		return err
 	}
-	if switchNeedsWorldMove(p.Current, p.Target) {
-		clone, readErr := b.readRecord(e.CloneID)
-		if readErr != nil {
-			return readErr
+	if p.Current == "leaf" {
+		if err = verifySwitchLeafWorld(target.Storage.DataPath); err != nil {
+			return err
 		}
-		if err = transformSwitchWorld(clone.Storage.DataPath, p.Version); err != nil {
+	}
+	if switchNeedsWorldMove(p.Current, p.Target) {
+		if err = transformSwitchWorld(target.Storage.DataPath, p.Version); err != nil {
+			return err
+		}
+	}
+	if p.Target == "pufferfish" {
+		if err = verifySwitchPufferfishCache(target.Storage.DataPath); err != nil {
 			return err
 		}
 	}
@@ -289,13 +265,18 @@ func (s *server) cloneMinecraftSwitch(ctx context.Context, e *minecraftSwitchEvi
 	if err = b.actionWithWarnings(ctx, e.CloneID, "stop", true); err != nil {
 		return err
 	}
-	if javaServerPaperFamily(p.Current) && javaServerPaperFamily(p.Target) {
-		if err = b.finishSwitchClone(ctx, e.CloneID); err != nil {
+	if target.Runtime.BedrockEnabled {
+		if err = b.verifySwitchPaperCrossplay(ctx, target, p.ManagedArtifacts); err != nil {
 			return err
 		}
 	}
 	if err = s.clearSwitchSourceContent(ctx, e); err != nil {
 		return err
+	}
+	restoredSource, err := b.readRecord(e.Source)
+	if err != nil || restoredSource.Runtime != source.Runtime || restoredSource.Storage != source.Storage ||
+		!reflect.DeepEqual(restoredSource.Backups, source.Backups) || !slices.Equal(restoredSource.Firewall, source.Firewall) {
+		return instanceRuntimeFailure("The original source configuration could not be verified after copying.")
 	}
 	e.Stage = "complete"
 	return saveSwitchEvidence(*e)
@@ -314,7 +295,7 @@ func (b *instanceRuntimeBackend) verifySwitchCloneRuntime(ctx context.Context, e
 	if err := b.verifyLive(record); err != nil {
 		return err
 	}
-	if err := verifyPluginRuntimeMode(ctx, e.CloneID, p.Version, "--switch-clone"); err != nil {
+	if err := verifyPluginRuntimeMode(ctx, e.CloneID, p.Version, "--switch"); err != nil {
 		return err
 	}
 	state, err := b.observeRaw(ctx, e.CloneID)
@@ -380,18 +361,24 @@ func (s *server) restoreSwitchSource(ctx context.Context, e *minecraftSwitchEvid
 		return nil
 	}
 	b := instanceRuntimes
+	record, err := b.readRecord(e.Source)
+	if err != nil || e.SourceRecord == nil || record.Runtime.Software != e.SourceRecord.Runtime.Software ||
+		record.Runtime.LoaderVersion != e.SourceRecord.Runtime.LoaderVersion || record.Runtime.PufferfishBuild != e.SourceRecord.Runtime.PufferfishBuild ||
+		record.Runtime.ImageTag != e.SourceRecord.Runtime.ImageTag || record.Runtime.ImageDigest != e.SourceRecord.Runtime.ImageDigest {
+		return errInstanceRecovery
+	}
 	state, err := b.observe(ctx, e.Source)
 	if err != nil {
 		return err
 	}
-	if state.State == "stopped" {
+	if state.State == "stopped" || state.State == "failed" && state.resettableFailure {
 		if err = lock.start(ctx, e.Source); err != nil {
 			return err
 		}
 	} else if state.State != "running" {
 		return errInstanceRecovery
 	}
-	if err = verifyPluginRuntime(ctx, e.Source, e.Version); err != nil {
+	if err = verifyPluginRuntimeMode(ctx, e.Source, e.Version, "--switch"); err != nil {
 		return err
 	}
 	e.SourceStopped = false
@@ -415,7 +402,7 @@ func (s *server) recoverMinecraftSwitchLocked(ctx context.Context, e *minecraftS
 		if e.CloneID != "" || e.SourceStopped || e.SourceContentChanged || e.WorldChanged {
 			return errInstanceRecovery
 		}
-		return b.verifyCommittedSwitchState(ctx, e.Source)
+		return b.verifyCommittedSwitchState(ctx, e.Source, e.Version)
 	}
 	if e.Action == "convert" {
 		if pending, pendingErr := b.pending(e.Source); pendingErr != nil {
@@ -436,12 +423,8 @@ func (s *server) recoverMinecraftSwitchLocked(ctx context.Context, e *minecraftS
 		if observeErr != nil {
 			return observeErr
 		}
-		if e.WorldChanged || current.Runtime.Software != e.SourceRecord.Runtime.Software || current.Runtime.PreserveContent || state.State == "stopped" && e.OriginallyRunning {
-			state, err := b.observeRaw(ctx, e.Source)
-			if err != nil {
-				return err
-			}
-			if state.State == "running" {
+		if e.WorldChanged || current.Runtime.Software != e.SourceRecord.Runtime.Software || current.Runtime.PreserveContent != e.SourceRecord.Runtime.PreserveContent || (state.State == "stopped" || state.State == "failed") && e.OriginallyRunning {
+			if state.State == "running" || state.State == "failed" {
 				if err = b.actionWithWarnings(ctx, e.Source, "stop", true); err != nil {
 					return err
 				}
@@ -481,7 +464,7 @@ func (s *server) recoverMinecraftSwitchLocked(ctx context.Context, e *minecraftS
 			if err != nil {
 				return err
 			}
-			if state.State == "running" {
+			if state.State == "running" || state.State == "failed" {
 				if err = b.actionWithWarnings(ctx, e.Source, "stop", true); err != nil {
 					return err
 				}
@@ -494,7 +477,7 @@ func (s *server) recoverMinecraftSwitchLocked(ctx context.Context, e *minecraftS
 		if err = s.clearSwitchSourceContent(ctx, e); err != nil {
 			return err
 		}
-		return b.verifyCommittedSwitchState(ctx, e.Source)
+		return b.verifyCommittedSwitchState(ctx, e.Source, e.Version)
 	}
 	if e.CloneID != "" && !validSwitchClonePlacement(*e) {
 		return switchRecoveryRefusal("source and clone storage binding failed")
@@ -519,7 +502,7 @@ func (s *server) recoverMinecraftSwitchLocked(ctx context.Context, e *minecraftS
 		if err := s.retireFailedSwitchClone(ctx, *e, lock); err != nil {
 			return err
 		}
-	} else if err := b.verifyCommittedSwitchState(ctx, e.Source); err != nil {
+	} else if err := b.verifyCommittedSwitchState(ctx, e.Source, e.Version); err != nil {
 		return switchRecoveryRefusal("source verification failed")
 	}
 	return b.finishSwitchCloneRecovery(ctx, e)
@@ -544,8 +527,11 @@ func validSwitchClonePlacement(e minecraftSwitchEvidence) bool {
 
 func (b *instanceRuntimeBackend) verifySwitchCloneSource(ctx context.Context, e minecraftSwitchEvidence) error {
 	source, err := b.readRecord(e.Source)
+	if err != nil || e.SourceRecord == nil {
+		return switchRecoveryRefusal("source verification failed")
+	}
 	saved := e.SourceRecord.Runtime
-	if err != nil || source.Storage != e.SourceRecord.Storage ||
+	if source.Storage != e.SourceRecord.Storage ||
 		source.Runtime.Software != saved.Software || source.Runtime.Version != saved.Version ||
 		source.Runtime.VersionPolicy != saved.VersionPolicy || source.Runtime.PaperChannel != saved.PaperChannel ||
 		source.Runtime.PreserveContent != saved.PreserveContent || source.Runtime.StartOnBoot != saved.StartOnBoot ||
@@ -556,7 +542,7 @@ func (b *instanceRuntimeBackend) verifySwitchCloneSource(ctx context.Context, e 
 	if err != nil || (e.OriginallyRunning && state.State != "running") || (!e.OriginallyRunning && state.State != "stopped") {
 		return switchRecoveryRefusal("original source server state could not be verified")
 	}
-	if err := b.verifyCommittedSwitchState(ctx, e.Source); err != nil {
+	if err := b.verifyCommittedSwitchState(ctx, e.Source, e.Version); err != nil {
 		return switchRecoveryRefusal("source verification failed")
 	}
 	return nil
@@ -610,7 +596,21 @@ func (s *server) retireFailedSwitchClone(ctx context.Context, e minecraftSwitchE
 			snapshot.BackupPlacement = e.CloneRecord.Backups
 			snapshot.BackupPath = e.CloneRecord.Backups.Root
 		}
-		if err = b.configureRegistered(ctx, id, instancePublicSettings(e.CloneRecord.Runtime), snapshot, uid, gid); err != nil {
+		if e.CloneRecord.Runtime.MatrixFixture {
+			child, ok := ctx.Value(switchMatrixChildKey{}).(operationJournal)
+			if !ok || child.OperationID != e.OperationID {
+				return runtimeIncomplete
+			}
+			receipt, receiptErr := readSwitchMatrixFixture(child.MatrixParent, id)
+			if receiptErr != nil || receipt.Stage != "reserved" || receipt.Candidate == nil ||
+				!reflect.DeepEqual(*receipt.Candidate, *e.CloneRecord) {
+				return runtimeIncomplete
+			}
+			err = b.configureRegisteredMatrixFixture(ctx, receipt, snapshot)
+		} else {
+			err = b.configureRegistered(ctx, id, instancePublicSettings(e.CloneRecord.Runtime), snapshot, uid, gid)
+		}
+		if err != nil {
 			return runtimeIncomplete
 		}
 		record, err = b.readRecord(id)
@@ -676,6 +676,11 @@ func (s *server) retireFailedSwitchClone(ctx context.Context, e minecraftSwitchE
 	}
 	if err := b.retireSwitchCloneRestore(ctx, e, record, ""); err != nil {
 		return err
+	}
+	if child, ok := ctx.Value(switchMatrixChildKey{}).(operationJournal); ok {
+		if err := s.operations.retireFailedMatrixCloneMods(ctx, child, e, record); err != nil {
+			return err
+		}
 	}
 	if err := b.deleteInstance(ctx, id, names[id].DisplayName); err != nil {
 		return runtimeIncomplete
@@ -828,7 +833,7 @@ func (b *instanceRuntimeBackend) finishSwitchCloneRecovery(ctx context.Context, 
 	return nil
 }
 
-func (b *instanceRuntimeBackend) verifyCommittedSwitchState(ctx context.Context, id string) error {
+func (b *instanceRuntimeBackend) verifyCommittedSwitchState(ctx context.Context, id string, exact ...string) error {
 	record, err := b.readRecord(id)
 	if err != nil {
 		return err
@@ -843,7 +848,11 @@ func (b *instanceRuntimeBackend) verifyCommittedSwitchState(ctx context.Context,
 	if state.State == "running" {
 		verify, cancel := context.WithTimeout(ctx, 15*time.Minute)
 		defer cancel()
-		return verifyPluginRuntime(verify, id, record.Runtime.Version)
+		version := record.Runtime.Version
+		if len(exact) == 1 {
+			version = exact[0]
+		}
+		return verifyPluginRuntimeMode(verify, id, version, "--switch")
 	}
 	if state.State != "stopped" {
 		return errInstanceRecovery
@@ -851,26 +860,6 @@ func (b *instanceRuntimeBackend) verifyCommittedSwitchState(ctx context.Context,
 	return b.storage(ctx, "validate", record)
 }
 
-func (b *instanceRuntimeBackend) setSwitchPreserveContent(ctx context.Context, id string, preserve bool) error {
-	previous, err := b.readRecord(id)
-	if err != nil {
-		return err
-	}
-	if previous.Runtime.PreserveContent == preserve {
-		return nil
-	}
-	next := previous
-	next.Runtime.PreserveContent = preserve
-	snapshot, _, _, err := b.snapshot(ctx)
-	if err != nil {
-		return err
-	}
-	records, err := b.records()
-	if err != nil {
-		return err
-	}
-	return b.applyVersion(ctx, previous, instanceReplaceRecord(records, next), snapshot, true)
-}
 func (s *server) clearSwitchSourceContent(ctx context.Context, e *minecraftSwitchEvidence) error {
 	if !e.SourceContentChanged {
 		return nil
@@ -896,7 +885,7 @@ func (s *server) clearSwitchSourceContent(ctx context.Context, e *minecraftSwitc
 	if err != nil {
 		return err
 	}
-	if err = b.applyVersion(ctx, current, instanceReplaceRecord(records, next), snapshot, true); err != nil {
+	if err = b.applyVersion(context.WithValue(ctx, switchDefinitionVerificationKey{}, true), current, instanceReplaceRecord(records, next), snapshot, true); err != nil {
 		return err
 	}
 	if err = rebindSwitchSourceRestore(ctx, e); err != nil {
@@ -930,27 +919,4 @@ func (b *instanceRuntimeBackend) prepareSwitchSourceCopy(ctx context.Context, id
 		return err
 	}
 	return b.applyVersion(ctx, current, instanceReplaceRecord(records, next), snapshot, true)
-}
-
-// Only a verified terminal clone restore may have its configuration binding
-// advanced past the temporary startup guard. Active/deployed restore evidence
-// keeps its original binding and recovery semantics.
-func (b *instanceRuntimeBackend) finishSwitchClone(ctx context.Context, id string) error {
-	journal, err := b.restoreJournal(id)
-	if err != nil || journal.Stage != "completed" {
-		return errInstanceRecovery
-	}
-	raw, err := b.readPrivate(filepath.Join(b.root, id, "config.json"))
-	if err != nil || instanceHash(raw) != journal.ConfigSHA256 {
-		return errInstanceRecovery
-	}
-	if err = b.setSwitchPreserveContent(ctx, id, false); err != nil {
-		return err
-	}
-	raw, err = b.readPrivate(filepath.Join(b.root, id, "config.json"))
-	if err != nil {
-		return err
-	}
-	journal.ConfigSHA256 = instanceHash(raw)
-	return b.writeJSON(filepath.Join(b.root, id, "restore-journal.json"), journal, true)
 }

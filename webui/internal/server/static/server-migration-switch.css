@@ -67,3 +67,6 @@
 @media(max-width:430px){
   .migration-switch .setup-software-lanes .setup-server-types{grid-template-columns:1fr}
 }
+
+.migration-switch [data-switch-matrix-run]{margin-inline-start:auto;align-self:center}
+.migration-switch [data-switch-matrix-status] progress{width:min(100%,18rem);height:.55rem}

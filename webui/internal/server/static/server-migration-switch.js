@@ -40,6 +40,160 @@
         row.append(...children);
         return row;
       };
+      const matrixRun = root.querySelector("[data-switch-matrix-run]");
+      const matrixStatus = root.querySelector("[data-switch-matrix-status]");
+      let matrix = null;
+      let matrixAction = "";
+      let matrixError = "";
+      let matrixStatusFailed = false;
+      let matrixTicket = 0;
+      let syncReview = null;
+      const availableCards = new Set();
+      const matrixBlocksSwitch = () => matrixAction === "start" || Boolean(matrix?.operation?.reservation_active);
+      const syncControls = () => {
+        if (matrixRun) {
+          matrixRun.hidden = matrix?.enabled !== true;
+          matrixRun.disabled = busy || Boolean(matrixAction || matrixStatusFailed || matrix?.operation?.reservation_active);
+        }
+        cards.forEach((card) => { card.disabled = busy || matrixBlocksSwitch() || !availableCards.has(card); });
+        syncReview?.();
+      };
+      const setBusy = (value) => { busy = value; syncControls(); };
+      const matrixButton = (text, handler) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = text;
+        button.addEventListener("click", handler);
+        return button;
+      };
+      const renderMatrix = () => {
+        syncControls();
+        matrixStatus.replaceChildren();
+        if (matrixError) matrixStatus.append(paragraph(matrixError, "migration-switch-error"));
+        const run = matrix?.operation;
+        if (!run) return;
+        if (!matrix.enabled) {
+          if (run.reservation_active) matrixStatus.append(paragraph(jvT("switch_matrix.development_recovery"), "notice warning"));
+          return;
+        }
+
+        const status = run.progress;
+        const messages = {
+          preparing: "switch_matrix.discovering",
+          running: "switch_matrix.running",
+          closing: "switch_matrix.closing",
+          completed: status?.failed ? "switch_matrix.completed_failures" : "switch_matrix.completed",
+          cancelled: "switch_matrix.cancelled",
+          interrupted: "switch_matrix.interrupted",
+          needs_attention: "switch_matrix.needs_attention",
+          recovered: "switch_matrix.recovered",
+          status_unavailable: "switch_matrix.status_failed",
+        };
+        matrixStatus.append(paragraph(jvT(messages[run.state] || "switch_matrix.status_failed")));
+        if (status?.cancel_requested && run.reservation_active && !run.recovery_required) {
+          matrixStatus.append(paragraph(jvT("switch_matrix.cancelling")));
+        }
+        if (status?.manifest_ready && run.state !== "preparing") {
+          if (run.reservation_active && !run.recovery_required && status.total > 0) {
+            const bar = document.createElement("progress");
+            bar.max = status.total;
+            bar.value = status.completed;
+            bar.setAttribute("aria-label", jvT("switch_matrix.count", {v0: status.completed, v1: status.total}));
+            matrixStatus.append(bar);
+          }
+          matrixStatus.append(paragraph(jvT("switch_matrix.count", {v0: status.completed, v1: status.total})));
+          if (status.source && status.target && ["clone", "convert"].includes(status.action)) {
+            const action = status.action === "clone" ? jvT("switch_matrix.clone") : jvT("switch_matrix.convert");
+            matrixStatus.append(paragraph(jvT("switch_matrix.current", {v0: status.source, v1: status.target, v2: action})));
+          }
+          matrixStatus.append(paragraph(jvT("switch_matrix.results", {
+            v0: status.passed, v1: status.failed, v2: status.unsupported, v3: status.blocked,
+          })));
+          if (status.unfinished && (!run.reservation_active || run.recovery_required)) {
+            matrixStatus.append(paragraph(jvT("switch_matrix.unfinished", {v0: status.unfinished})));
+          }
+        }
+
+        if (run.recovery_required) {
+          const recover = matrixButton(jvT(matrixAction === "recover" ? "ui.d90064dbdb11" : "switch_matrix.recover"),
+            () => void submitMatrix("recover", run.operation_id));
+          recover.disabled = Boolean(matrixAction);
+          matrixStatus.append(actionRow(paragraph(jvT("switch_matrix.reservation_held")), recover));
+        }
+        if (run.reservation_active && !run.recovery_required) {
+          if (run.state === "closing") return;
+          const stop = matrixButton(jvT("switch_matrix.stop"), () => void submitMatrix("stop", run.operation_id));
+          stop.disabled = Boolean(matrixAction || status?.cancel_requested);
+          matrixStatus.append(actionRow(paragraph(jvT("switch_matrix.stop_help")), stop));
+        } else {
+          const logs = matrixButton(jvT("switch_matrix.open_logs"), () => {
+            if (activeSwitch()) void window.JustVoxelSystem?.openMigrationLogs(run.diagnostic_id);
+          });
+          matrixStatus.append(actionRow(paragraph(jvT("switch_matrix.logs_help")), logs));
+        }
+      };
+      const matrixRequest = async (action = "", id = "") => {
+        const response = await fetch("/api/migration/switch-matrix" + (action ? "/" + action : ""), {
+          method: action ? "POST" : "GET", credentials: "same-origin", cache: "no-store",
+          ...(action ? {
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams(id ? {csrf, operation_id: id} : {csrf}),
+          } : {}),
+        });
+        if (!response.ok) throw new Error();
+        return response.json();
+      };
+      const matrixPoll = (ticket) => {
+        if (!matrix?.operation?.reservation_active || matrix.operation.recovery_required || !matrix.enabled) return;
+        setTimeout(() => {
+          if (activeSwitch() && ticket === matrixTicket && !matrixAction) void refreshMatrix();
+        }, 2000);
+      };
+      const refreshMatrix = async (actionFailed = false) => {
+        const ticket = ++matrixTicket;
+        try {
+          const status = await matrixRequest();
+          if (!activeSwitch() || ticket !== matrixTicket) return;
+          matrix = status;
+          matrixStatusFailed = false;
+          matrixError = actionFailed ? jvT("switch_matrix.action_failed") : "";
+        } catch (_) {
+          if (!activeSwitch() || ticket !== matrixTicket) return;
+          matrixStatusFailed = true;
+          matrixError = jvT("switch_matrix.status_failed");
+        }
+        renderMatrix();
+        matrixPoll(ticket);
+      };
+      const submitMatrix = async (action, id = "") => {
+        if (!activeSwitch() || matrix?.enabled !== true || matrixAction) return;
+        if (action === "start" && matrixRun.disabled) return;
+        if (action === "stop" && (matrix.operation?.operation_id !== id || !matrix.operation.reservation_active ||
+            matrix.operation.recovery_required || matrix.operation.state === "closing" || matrix.operation.progress?.cancel_requested)) return;
+        if (action === "recover" && (matrix.operation?.operation_id !== id || !matrix.operation.recovery_required)) return;
+        const ticket = ++matrixTicket;
+        matrixAction = action;
+        matrixError = "";
+        renderMatrix();
+        try {
+          const status = await matrixRequest(action, id);
+          if (!activeSwitch() || ticket !== matrixTicket) return;
+          matrix = status;
+          matrixStatusFailed = false;
+        } catch (_) {
+          // A lost response may still have changed the durable operation.
+          if (activeSwitch() && ticket === matrixTicket) await refreshMatrix(true);
+          return;
+        } finally {
+          matrixAction = "";
+          if (activeSwitch()) renderMatrix();
+        }
+        matrixPoll(ticket);
+      };
+      if (matrixRun && matrixStatus) {
+        matrixRun.addEventListener("click", () => void submitMatrix("start"));
+        void refreshMatrix();
+      }
       const setState = (message, error = false) => {
         state.classList.toggle("migration-switch-error", error);
         state.textContent = message;
@@ -47,11 +201,13 @@
       const showCard = (node, plan) => {
         const active = plan.current === node.dataset.switchTarget;
         const available = !active && Boolean(plan.convert || plan.clone);
+        if (available) availableCards.add(node);
+        else availableCards.delete(node);
         node.classList.toggle("is-pending", false);
         node.classList.toggle("is-current", active);
         node.classList.toggle("is-available", available);
         node.classList.toggle("is-unsupported", !active && !available);
-        node.disabled = active || !available || busy;
+        node.disabled = active || !available || busy || matrixBlocksSwitch();
         const marker = node.querySelector("[data-switch-status]");
         marker.textContent = active ? "C" : available ? "A" : "N";
         marker.classList.toggle("plugins-badge-disabled", active);
@@ -64,7 +220,7 @@
         if (!current() || ticket !== sequence) return;
         if (resolvedRecovery && (result.operation?.operation_id !== id || result.operation.state !== "resolved")) return;
         operation = result.operation || null;
-        busy = Boolean(operation && !["succeeded", "resolved"].includes(operation.state));
+        setBusy(Boolean(operation && !["succeeded", "resolved"].includes(operation.state)));
         const recovery = ["needs_attention", "failed"].includes(operation?.state);
         if (!operation) { progress.replaceChildren(); return; }
         if (cards.some((node) => node.dataset.switchTarget === result.target)) {
@@ -118,7 +274,7 @@
                 throw new Error(jvT("ui.1eb6b959b7ce"));
               }
               operation = result.operation;
-              busy = false;
+              setBusy(false);
               progress.replaceChildren(paragraph(operation.status || jvT("ui.934767ef0bcc")));
               await load(operationID, operation);
             } catch (failure) {
@@ -147,10 +303,11 @@
         }
       };
       const select = async (target) => {
-        if (busy) return;
+        if (busy || matrixBlocksSwitch()) return;
         const ticket = ++sequence;
         cards.forEach((node) => node.classList.toggle("is-selected", node.dataset.switchTarget === target));
         review.hidden = true;
+        syncReview = null;
         if (operation && terminal.has(operation.state)) {
           operation = null;
           progress.replaceChildren();
@@ -184,14 +341,16 @@
             const consent = document.createElement("input"); consent.type = "checkbox"; consent.setAttribute("role", "switch");
             const confirmation = document.createElement("span"); confirmation.textContent = jvT("ui.1ee40e71974c");
             label.append(confirmation, consent); review.appendChild(label);
-            const applyButtons = [];
+            const updateApplyButtons = [];
+            syncReview = () => updateApplyButtons.forEach((update) => update());
+            consent.addEventListener("change", syncReview);
             for (const [action, text, allowed] of [["convert", jvT("ui.5abb6e80374e"), plan.convert], ["clone", jvT("ui.90b908765b19"), plan.clone]]) {
               const button = document.createElement("button"); button.type = "button"; button.textContent = text; button.disabled = true;
               if (!allowed) button.title = plan.reason || jvT("ui.f4239cda81ee");
-              consent.addEventListener("change", () => { button.disabled = !allowed || !consent.checked || busy; });
+              updateApplyButtons.push(() => { button.disabled = !allowed || !consent.checked || busy || matrixBlocksSwitch(); });
               button.addEventListener("click", async () => {
-                if (!current() || ticket !== sequence || !allowed || !consent.checked || busy || button.disabled) return;
-                busy = true; applyButtons.forEach((item) => { item.disabled = true; }); cards.forEach((item) => { item.disabled = true; });
+                if (!current() || ticket !== sequence || !allowed || !consent.checked || busy || matrixBlocksSwitch() || button.disabled) return;
+                setBusy(true);
                 try {
                   const result = await request("apply", { target, action, plan_fingerprint: plan.plan_fingerprint, confirm: "yes" }, true);
                   if (!current() || ticket !== sequence) return;
@@ -216,7 +375,6 @@
                   catch (_) { if (current() && ticket === sequence) setState(jvT("ui.683b73665685", {v0: (failure.message)}), true); }
                 }
               });
-              applyButtons.push(button);
               actions.appendChild(button);
             }
           }
@@ -227,6 +385,8 @@
       const load = async (id = "", resolvedRecovery = null) => {
         const ticket = ++sequence;
         review.hidden = true;
+        syncReview = null;
+        availableCards.clear();
         cards.forEach((node) => { node.disabled = true; });
         setState(jvT("ui.e29d2712155f"));
         try {
@@ -236,7 +396,7 @@
             // Recovery already returned its authoritative terminal state.
             // Continue to refresh cards if the follow-up snapshot is unavailable.
             if (!resolvedRecovery) throw failure;
-            busy = false;
+            setBusy(false);
           }
           if (!current() || ticket !== sequence) return;
           if (!operation) cards.forEach((node) => { node.classList.toggle("is-selected", false); });
@@ -251,7 +411,7 @@
         } catch (failure) { if (current() && ticket === sequence) setState(failure.message, true); }
       };
       cards.forEach((node) => node.addEventListener("click", () => { if (!node.disabled) void select(node.dataset.switchTarget); }));
-      void load();
+      if (server) void load();
     },
   };
 })();

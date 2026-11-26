@@ -1,11 +1,22 @@
 #!/usr/bin/bash
 set -euo pipefail
+source /usr/libexec/justvoxel/mjust/switch-matrix-reservation.sh
 
 backup_delete_apply() {
     local request submitted_fingerprint submitted_confirmation current_fingerprint expected_confirmation
     local archive metadata index deleted=0
 
     request="$(cat)"
+
+    local saved_umask
+    saved_umask=$(umask)
+    umask 0077
+    exec 8>>/run/justvoxel-minecraft-restore-exclusion.lock
+    umask "${saved_umask}"
+    if ! flock -n 8 || ! jv_switch_matrix_reservation_clear; then
+        backup_delete_json_error 'Another JustVoxel maintenance operation is running. Nothing was deleted.'
+        return 0
+    fi
 
     exec 9>"${JV_MAINTENANCE_LOCK}"
     if ! flock -n 9; then

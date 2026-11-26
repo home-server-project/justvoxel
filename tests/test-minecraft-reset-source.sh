@@ -3,11 +3,12 @@ set -euo pipefail
 
 common=mjust/libexec/minecraft-reset-common.sh
 retirement=management/cmd/justvoxel-management-agent/minecraft_instance_delete.go
+matrix_retirement=management/cmd/justvoxel-management-agent/minecraft_switch_matrix_retirement.go
 start_over=mjust/libexec/start-over
 agent=management/cmd/justvoxel-management-agent/admin_minecraft_reset.go
 operations=management/cmd/justvoxel-management-agent/operation_store.go
 
-for path in "${common}" "${retirement}" "${start_over}" "${agent}" "${operations}"; do
+for path in "${common}" "${retirement}" "${matrix_retirement}" "${start_over}" "${agent}" "${operations}"; do
     [[ -f "${path}" ]] || {
         echo "ERROR: missing Minecraft reset source: ${path}" >&2
         exit 1
@@ -50,7 +51,11 @@ grep -Fq 'plan.InstanceID != journal.InstanceID' "${agent}"
 grep -Fq 's.prepareResetPluginTransaction(ctx, operationID, plan)' "${agent}"
 grep -Fq 'instanceRuntimes.retireSelectedInstance(ctx, plan.InstanceID, tx.InstanceName, plan.DataAction)' "${agent}"
 grep -Fq 'validateInstanceRecordPlacement(j.Record)' "${retirement}"
-grep -Fq 'retry && j.ResetPolicy != resetPolicy' "${retirement}"
+# Ordinary Reset binds the policy on retry. Matrix retirement also binds the data identity.
+grep -Fq 'return b.retireSelectedInstanceOwned(ctx, id, name, resetPolicy, "")' "${retirement}"
+grep -Fq 'if retry && (j.ResetPolicy != resetPolicy || dataIdentity != "" && j.DataIdentity != dataIdentity) {' "${retirement}"
+grep -Fq 'if dataIdentity != "" && j.DataIdentity != dataIdentity {' "${retirement}"
+grep -Fq 'b.retireSelectedInstanceOwned(ctx, f.ID, f.Name, "", f.DataIdentity)' "${matrix_retirement}"
 grep -Fq 'if j.ResetPolicy == "preserve" {' "${retirement}"
 grep -Fq 'return b.removeInstanceData(ctx, j)' "${retirement}"
 grep -Fq '"podman", "rm", "--ignore", "--", "minecraft-"+id' "${retirement}"

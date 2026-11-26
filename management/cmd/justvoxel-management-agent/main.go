@@ -174,7 +174,7 @@ func main() {
 		}
 	case "version":
 		meta, _ := readReleaseMetadata()
-		fmt.Printf("JustVoxel Management API %s\nWebUI %s\n", managementAPI, valueOr(meta.Version, "unknown"))
+		fmt.Printf("JustVoxel Management API %s\nWebUI %s\nSwitch matrix=%t\n", managementAPI, valueOr(meta.Version, "unknown"), switchMatrixDevelopment)
 	default:
 		fatal("unknown command %q", args[0])
 	}

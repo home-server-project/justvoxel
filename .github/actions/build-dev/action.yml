@@ -23,6 +23,7 @@ runs:
         WEBUI_VERSION: ${{ steps.webui.outputs.version }}
       run: |
         set -euo pipefail
+        test -x build_artifacts/management/management-agent-development
         sudo podman build \
           --pull=always \
           --security-opt=label=disable \

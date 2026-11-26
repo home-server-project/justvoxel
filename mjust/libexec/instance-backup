@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 umask 0077
 fail() { echo 'ERROR: instance backup prerequisite or storage operation failed.' >&2; exit 1; }
-[[ $EUID == 0 && ( $# == 2 || ( $# == 3 && $1 == create ) ) && $2 =~ ^jv-[a-z0-9]{6,12}$ ]] || fail
+[[ $EUID == 0 && ( $# == 2 || ( $# == 3 && ( $1 == create || $1 == matrix-* ) ) ) && $2 =~ ^jv-[a-z0-9]{6,12}$ ]] || fail
 action=$1 id=$2
 if [[ ${action} == run ]]; then
     # Local root peer authentication; no token, cookie, or runtime secret.
@@ -11,18 +11,42 @@ if [[ ${action} == run ]]; then
         --header 'Content-Type: application/json' --data '{}' \
         "http://localhost/v1/minecraft/instances/${id}/backups/run"
 fi
-case ${action} in inventory|preflight|create|retain) ;; *) fail ;; esac
+case ${action} in inventory|preflight|create|retain|matrix-prepare|matrix-bind|matrix-absent|matrix-inventory|matrix-check|matrix-retire) ;; *) fail ;; esac
 source /usr/libexec/justvoxel/mjust/backup-common.sh
-# Validate private committed evidence before reading placement.
-/usr/libexec/justvoxel/mjust/validate-instance-runtime-commit "${id}" >/dev/null 2>&1 || fail
-jv_instance_backup_load_target "${id}" || fail
-if [[ ${action} != inventory ]]; then
+# Matrix absence checks use the reservation receipt when no committed runtime
+# exists. All other actions still require the committed runtime.
+if [[ ${action} != matrix-absent ]]; then
+    /usr/libexec/justvoxel/mjust/validate-instance-runtime-commit "${id}" >/dev/null 2>&1 || fail
+fi
+if [[ ${action} == matrix-* ]]; then
+    [[ ${3:-} =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]] || fail
+    receipt="/var/lib/justvoxel-instance-runtime/matrix-$3-${id}.json"
+    [[ -f ${receipt} && ! -L ${receipt} && $(stat -c '%u:%g:%a' -- "${receipt}") == 0:0:600 ]] || fail
+    mapfile -t placement < <(jq -er '.placement | [.root,.path,.mount_point,.uuid,.source] | .[]' "${receipt}")
+    [[ ${#placement[@]} == 5 && ${placement[1]} == "${placement[0]}/${id}" ]] || fail
+    minecraft_backup_path=${placement[0]} BACKUP_MOUNT_POINT=${placement[2]}
+    BACKUP_EXPECTED_UUID=${placement[3]} BACKUP_EXPECTED_SOURCE=${placement[4]}
+    [[ ${minecraft_backup_path} =~ ^/[A-Za-z0-9_./-]+$ && ${minecraft_backup_path} != / &&
+        $(realpath -e -- "${minecraft_backup_path}") == "${minecraft_backup_path}" ]] || fail
+    case "${minecraft_backup_path}" in /etc|/etc/*|/usr|/usr/*|/boot|/boot/*|/proc|/proc/*|/sys|/sys/*|/dev|/dev/*|/run|/run/*) fail ;; esac
+    if [[ -n ${BACKUP_MOUNT_POINT} ]]; then
+        [[ $(realpath -e -- "${BACKUP_MOUNT_POINT}") == "${BACKUP_MOUNT_POINT}" &&
+            ( -n ${BACKUP_EXPECTED_UUID} || -n ${BACKUP_EXPECTED_SOURCE} ) ]] || fail
+    else
+        [[ -z ${BACKUP_EXPECTED_UUID} && -z ${BACKUP_EXPECTED_SOURCE} ]] || fail
+    fi
+    jv_backup_require_read_target >/dev/null 2>&1 || fail
+    export JV_INSTANCE_BACKUP_ROOT="${minecraft_backup_path}"
+else
+    jv_instance_backup_load_target "${id}" || fail
+fi
+if [[ ${action} != inventory && ${action} != matrix-absent ]]; then
     mapfile -t fields < <(jq -er '[.runtime.id,.storage.root,.storage.data_path,.storage.mount_point,.storage.uuid,.storage.source,(.runtime.uid|tostring),(.runtime.gid|tostring)] | .[]' "/etc/justvoxel/instances/${id}/config.json")
     [[ ${#fields[@]} == 8 && ${fields[0]} == "${id}" ]] || fail
     /usr/libexec/justvoxel/mjust/instance-runtime-prerequisites validate "${fields[@]}" >/dev/null 2>&1 || fail
 fi
 python3 - "${action}" "${id}" "${3:-}" <<'PY'
-import datetime, errno, gzip, hashlib, json, os, re, secrets, stat, sys, tarfile, unicodedata
+import ctypes, datetime, errno, gzip, hashlib, json, os, re, secrets, stat, sys, tarfile, unicodedata
 
 action, identity, creation_name = sys.argv[1:]
 root = os.environ['JV_INSTANCE_BACKUP_ROOT']
@@ -66,11 +90,11 @@ def read_at(fd, name, limit=16384):
             raise ValueError('size')
         return raw
 
-def private(path, limit=65536):
+def private(path, limit=65536, root_group=True):
     fd = open_dir(os.path.dirname(path))
     try:
         info = os.stat(os.path.basename(path), dir_fd=fd, follow_symlinks=False)
-        if info.st_uid != 0 or info.st_gid != 0 or stat.S_IMODE(info.st_mode) != 0o600:
+        if info.st_uid != 0 or (root_group and info.st_gid != 0) or stat.S_IMODE(info.st_mode) != 0o600:
             raise ValueError('private')
         return read_at(fd, os.path.basename(path), limit)
     finally:
@@ -132,9 +156,192 @@ def write_new(fd, name, data):
         stream.flush()
         os.fsync(stream.fileno())
 
+def storage_identity(fd):
+    info = os.fstat(fd)
+    return [info.st_dev, info.st_ino]
+
+def mount_id(fd):
+    with open(f'/proc/self/fdinfo/{fd}') as stream:
+        return next(line for line in stream if line.startswith('mnt_id:')).split()[1]
+
+def file_proof(fd, name):
+    f = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+    with os.fdopen(f, 'rb') as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size <= 0 or mount_id(f) != mount_id(fd):
+            raise ValueError('unsafe backup retirement file')
+        digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+        after = os.fstat(stream.fileno())
+        if (info.st_size, info.st_ctime_ns, info.st_mtime_ns) != (after.st_size, after.st_ctime_ns, after.st_mtime_ns):
+            raise ValueError('backup retirement file changed')
+        return {'inode':[info.st_dev, info.st_ino], 'size':info.st_size, 'sha256':digest}
+
+def missing_at(fd, name):
+    try:
+        os.stat(name, dir_fd=fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return True
+    return False
+
+def matrix_backup_directory(root_fd, name):
+    fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root_fd)
+    info = os.fstat(fd)
+    if mount_id(fd) != mount_id(root_fd) or info.st_uid != 0 or stat.S_IMODE(info.st_mode) != 0o700:
+        os.close(fd)
+        raise ValueError('backup directory identity')
+    return fd
+
+def matrix_backup_storage(root_fd):
+    # The Agent holds the persistent matrix reservation and uses only a
+    # fixture's verified committed placement. Refuse substituted directories.
+    parent_id = creation_name
+    if not re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}', parent_id):
+        raise ValueError('matrix operation identity')
+    parent = json.loads(private('/var/lib/justvoxel/management/logs/operations/' + parent_id + '.json', 1024 * 1024, root_group=False))
+    fixture = json.loads(private('/var/lib/justvoxel-instance-runtime/matrix-' + parent_id + '-' + identity + '.json', 1024 * 1024))
+    phase = parent['stage']
+    active = parent['state'] == 'running'
+    interrupted = parent['state'] == 'needs_attention'
+    retirement = active and phase == 'retirement' or interrupted
+    binding = active and phase in ('fixtures', 'switch') or interrupted
+    allowed = (action == 'matrix-prepare' and binding and fixture['stage'] == 'binding' or
+               action == 'matrix-bind' and binding and fixture['stage'] == 'binding' or
+               action == 'matrix-absent' and retirement and fixture['stage'] in ('reserved', 'binding', 'intent') or
+               action == 'matrix-inventory' and (active and phase == 'switch' or retirement) and fixture['stage'] == 'owned' or
+               action == 'matrix-check' and retirement and fixture['stage'] in ('binding', 'intent') or
+               action == 'matrix-retire' and retirement and fixture['stage'] == 'intent')
+    if not allowed or parent['operation_id'] != parent_id or parent['operation_type'] != 'switch_matrix' or identity not in parent['matrix_fixtures']:
+        raise ValueError('matrix operation ownership')
+    if (fixture['parent'] != parent_id or fixture['id'] != identity or
+            fixture['placement']['root'] != root or fixture['placement']['path'] != root + '/' + identity):
+        raise ValueError('matrix fixture ownership')
+    staged = '.matrix-' + parent_id + '-' + identity
+    expected = fixture['backups']
+    root_identity = storage_identity(root_fd)
+    if action == 'matrix-absent':
+        if (expected['directory'] != [0, 0] or expected['root'] != [0, 0] or
+                not missing_at(root_fd, identity) or not missing_at(root_fd, staged)):
+            raise ValueError('unverified backup namespace')
+        sync_dir(root_fd)
+        return
+    if fixture['placement'] != record.get('backups') or fixture['storage'] != record['storage']:
+        raise ValueError('matrix fixture placement changed')
+    if fixture['config_sha256'] != hashlib.sha256(record_raw).hexdigest():
+        raise ValueError('matrix fixture configuration changed')
+    if action == 'matrix-retire':
+        try:
+            restore = json.loads(private(config_root + '/' + identity + '/restore-journal.json'))
+        except FileNotFoundError:
+            pass
+        else:
+            if restore['id'] != identity or restore['stage'] not in ('completed', 'rolled_back'):
+                raise ValueError('restore is unresolved')
+    if action == 'matrix-prepare':
+        if expected['directory'] != [0, 0] or expected['root'] != [0, 0] or not missing_at(root_fd, identity):
+            raise ValueError('backup namespace already exists')
+        os.mkdir(staged, 0o700, dir_fd=root_fd)
+        fd = matrix_backup_directory(root_fd, staged)
+        try:
+            sync_dir(fd)
+            sync_dir(root_fd)
+            print(json.dumps({'root':root_identity, 'directory':storage_identity(fd), 'files':{}}))
+        finally:
+            os.close(fd)
+        return
+    if expected['root'] != root_identity:
+        raise ValueError('backup root identity')
+    if action == 'matrix-bind':
+        pending = not missing_at(root_fd, staged)
+        fd = matrix_backup_directory(root_fd, staged if pending else identity)
+        try:
+            with os.scandir(fd) as reader:
+                if storage_identity(fd) != expected['directory'] or next(reader, None) is not None:
+                    raise ValueError('unverified prepared backup directory')
+            if pending:
+                libc = ctypes.CDLL(None, use_errno=True)
+                # Publish the exact staged inode without replacing a foreign name.
+                if libc.renameat2(root_fd, os.fsencode(staged), root_fd, os.fsencode(identity), 1) != 0:
+                    raise OSError(ctypes.get_errno(), 'backup namespace publication')
+            current = os.stat(identity, dir_fd=root_fd, follow_symlinks=False)
+            if [current.st_dev, current.st_ino] != expected['directory']:
+                raise ValueError('published backup directory changed')
+        finally:
+            os.close(fd)
+        sync_dir(root_fd)
+        return
+    namespace = identity
+    if not missing_at(root_fd, staged):
+        if action == 'matrix-inventory' or not missing_at(root_fd, identity):
+            raise ValueError('multiple backup namespaces')
+        namespace = staged
+    try:
+        fd = matrix_backup_directory(root_fd, namespace)
+    except FileNotFoundError:
+        if action in ('matrix-check', 'matrix-retire'):
+            if action == 'matrix-retire':
+                sync_dir(root_fd)
+            return
+        raise
+    try:
+        directory = storage_identity(fd)
+        info = os.fstat(fd)
+        if expected['directory'] != directory:
+            raise ValueError('backup directory replaced')
+        with os.scandir(fd) as reader:
+            entries = []
+            for entry in reader:
+                if len(entries) >= 256:
+                    raise ValueError('backup retirement bound')
+                entries.append(entry.name)
+        files = {}
+        if action == 'matrix-inventory':
+            for filename in entries:
+                if filename.endswith('.meta.json'):
+                    continue
+                metadata = validate_meta(fd, filename)
+                files[filename] = file_proof(fd, filename)
+                if files[filename]['sha256'] != metadata['sha256'] or files[filename]['size'] != metadata['size']:
+                    raise ValueError('archive checksum')
+                sidecar = filename + '.meta.json'
+                files[sidecar] = file_proof(fd, sidecar)
+                if validate_meta(fd, filename) != metadata:
+                    raise ValueError('archive metadata changed')
+            if set(entries) != set(files):
+                raise ValueError('unexpected backup file')
+            print(json.dumps({'root':root_identity, 'directory':directory, 'files':files}))
+            return
+        # Missing entries are allowed on retry, but only after the full exact
+        # inventory was saved as retirement intent by the Agent.
+        for filename in entries:
+            if filename not in expected['files'] or file_proof(fd, filename) != expected['files'][filename]:
+                raise ValueError('backup retirement file replaced')
+        if action == 'matrix-check':
+            return
+        for filename in entries:
+            if file_proof(fd, filename) != expected['files'][filename]:
+                raise ValueError('backup retirement file changed')
+            os.unlink(filename, dir_fd=fd)
+        sync_dir(fd)
+        current = os.stat(namespace, dir_fd=root_fd, follow_symlinks=False)
+        if (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino):
+            raise ValueError('backup retirement directory changed')
+        os.rmdir(namespace, dir_fd=root_fd)
+        sync_dir(root_fd)
+    finally:
+        os.close(fd)
+
 try:
+    if action == 'matrix-absent':
+        root_fd = open_dir(root)
+        try:
+            matrix_backup_storage(root_fd)
+        finally:
+            os.close(root_fd)
+        raise SystemExit(0)
     record_raw = private(config_root + '/' + identity + '/config.json')
     record = json.loads(record_raw)
+    if action.startswith('matrix-') and 'backups' not in record:
+        raise ValueError('backup placement unavailable')
     if 'backups' in record and (record['backups']['root'] != root or record['backups']['path'] != root + '/' + identity):
         raise ValueError('backup placement changed')
     if json.loads(private(registry + '/' + identity + '.json')) != {'id':identity} or record['runtime']['id'] != identity:
@@ -147,6 +354,9 @@ try:
     root_fd = open_dir(root)
     fd = None
     try:
+        if action.startswith('matrix-'):
+            matrix_backup_storage(root_fd)
+            raise SystemExit(0)
         if action != 'inventory':
             try:
                 os.mkdir(identity, 0o700, dir_fd=root_fd)

@@ -463,17 +463,19 @@ binds Apply to selected-instance configuration, runtime evidence and current
 plugin/mod inventory and hashes. Changing Minecraft version is a separate
 Version operation. Target software remains pinned to the reviewed game version.
 
-The implemented structural path is the existing Paper, Purpur, Pufferfish and
-Leaf family. A fully verified target offers **Convert existing server** and
-**Clone and convert**. Incompatible or unknown/unverified plugin/mod releases
-block Convert and are listed by name when identified. Provider failures stay
+The Switch capability table covers Paper, Purpur, Pufferfish, Leaf, Vanilla,
+Fabric, NeoForge, Forge and Quilt. A direction can offer **Convert existing
+server**, **Clone and convert**, or both. Incompatible or unverified plugin and
+mod releases block Convert and are listed by name when identified. Provider failures stay
 unverified. The Plugins & Mods link opens that existing workspace for the same
 server. Resolve content manually, then return or refresh to review again. Switch
 never deletes, disables, replaces, updates or downloads plugins or mods.
 
-Convert keeps the immutable instance ID, configured data location, ports, backup
-destination and ordinary settings, using reviewed maintenance, player-aware
-shutdown, a cold backup, exact-runtime verification and rollback. Clone creates
+Convert preserves the immutable instance ID, data and backup locations, Java
+port and boot preference. If the reviewed target uses Java only, Convert releases
+the former cross-play port through normal firewall ownership handling. Switch
+renders and validates the prospective runtime before player-aware shutdown or
+backup creation. Convert uses a verified cold archive for rollback. Clone creates
 a new ID through normal instance creation, uses a separate directory under the
 source's configured Minecraft root and the same backup destination, allocates
 new ports with existing reservation/binding checks, and derives its name from
@@ -482,9 +484,10 @@ required. A running source stops only for a consistent backup/copy and resumes
 its previous state before clone conversion/verification. Original settings are
 restored after the copy. Verified clones are left stopped and support normal rename.
 
-A clone may be experimental when installed content cannot be proven compatible,
-but only inside the implemented structural family. Runtime failure never counts
-as success. Existing creation/runtime/restore cleanup and recovery preserve the
+A protected experimental clone can be reviewed when verified world or content
+compatibility prevents in-place Convert. If launching the target would reuse an
+incompatible managed cross-play stack, review blocks the affected direction.
+Clone preserves the original and leaves the verified target stopped. Existing creation/runtime/restore cleanup and recovery preserve the
 original; retained Switch attention is handled in Switch, without routing an
 ordinary conversion through Export/Import Recovery. Recovery never retries the
 conversion automatically. Minecraft Network members must first leave Network
@@ -495,11 +498,81 @@ and showing its result. Opening Switch reconnects to work in progress or an
 operation that requires recovery. Administrators can find Switch progress,
 failure details and recovery results in **System Settings → Logs → Migration**.
 
-Spigot, Vanilla world transformations and mod-loader conversions currently remain
-Not Supported. In particular, Bukkit support does not make Spigot a safe member
-of the Paper family. Paper-to-Spigot is unsupported; direct Spigot-to-Paper
-migration is unsafe from 26.1 without the necessary verified world transformation.
-No automatic Vanilla intermediary is attempted. Fabric/Quilt and Forge/NeoForge
-names do not establish exact-version mod/dependency or historic world safety;
-removing installed mods does not establish it either. Java and native Bedrock
-world/runtime conversion is unsupported in both directions.
+Spigot remains outside the verified Switch paths. Java and native Bedrock world
+and runtime conversion is unsupported. See [server software](server-software.md)
+for the upstream world and executable-content contracts.
+
+### Switch matrix integration
+
+The matrix parent uses the Management Agent operation journal and holds the
+legacy backup restore-exclusion flock throughout its run. Instance startup
+can acquire the normal maintenance flock during the systemd handoff. The
+parent and its active child remain reserved if the Agent exits. On startup the
+Agent records the interruption and preserves the evidence for explicit
+recovery.
+
+Exact release classification uses the Setup publisher resolvers and records
+`AVAILABLE`, `UNSUPPORTED`, or `UNVERIFIED`. An incomplete publisher lookup
+or inconclusive metadata produces `UNVERIFIED`.
+
+On the development appliance, open **Server Migration → Switch** as an
+administrator. **Run Switch Test** is on the right side of the catalogue
+legend. The test applies to the whole appliance and uses its own fixtures.
+Changing the selected server, closing Switch, or refreshing the browser leaves
+the run in place. Reopen Switch to reconnect to its status.
+
+The test is available on `ghcr.io/home-server-project/justvoxel-dev:testing`
+and on the local `justvoxel-dev:local` image built by `./jv-build.sh`.
+VM and HWS product images exclude the runner and its execution routes and
+controls. If a product image boots with unresolved test ownership, maintenance
+remains reserved. Return to a JustVoxel development image and use
+**Recover Switch Test** in Switch to recover it.
+
+The matrix runner checks up to eight recent game releases per world
+layout family. For each direction it selects the first common publisher-verified
+release, with a separate selection for a managed cross-play stack when applicable.
+The manifest records the candidate catalog, exact runtime and image selections,
+and policy refusals before creating any fixtures. The appliance needs network
+access to software publishers and container registries.
+
+Cases run sequentially with a fresh source and at most one clone. Fixtures use
+private local data and backup directories, loopback-only published ports, and no
+firewall rules or boot enablement. Admission checks available storage and memory.
+Each runtime has a 2.5 GiB memory limit, a two-CPU limit and bounded startup.
+Leave 2.5 GiB available for a Convert fixture and 5 GiB for a Clone pair,
+in addition to the appliance and existing server allocations. For each
+admitted case, the Management Agent checks for at least 12 GiB of available
+space and 4,096 free inodes at the fixture, backup, and container image
+storage locations.
+The runner restricts generation distance, checks the fixture's size before Switch
+and after target startup, and uses the established backup and Restore capacity
+checks.
+
+The runner verifies exact current-session software, game, loader and applicable
+managed cross-play components. It writes deterministic block markers in the
+Overworld, Nether and End, flushes the source save, then checks the markers in
+the loaded target. Clone also verifies the original source's configuration,
+runtime, world markers and original running or stopped state. This exercises
+pristine worlds and managed server components. Source-level fixture checks
+verify the implementation with controlled test inputs. Successful execution
+on a real appliance, Bedrock client connectivity, and compatibility with
+custom modded worlds each require separate verification.
+
+**Open Logs** opens **System Settings → Logs → Migration** and selects the
+matrix report when it is available. Download the JSON report for the
+authoritative manifest and case results. Its counters distinguish failed
+execution from unsupported and blocked cases. The unfinished count includes
+interrupted, cancelled and not-run cases. **Stop Test** records the request
+immediately. The admitted case completes
+or recovers and retires its fixtures before the runner stops. An Agent restart
+preserves the manifest and marks interrupted work. **Recover Switch Test**
+verifies fixture closure and leaves interrupted or unstarted cases unfinished.
+Unresolved cleanup keeps maintenance reserved and leaves recovery available.
+
+Fixture retirement uses the immutable instances recorded by the parent.
+It verifies stopped state, committed configuration, storage identity and
+managed Fabric or NeoForge ownership before removing metadata. It records an
+inventory of exact archives and sidecars before removal and keeps rollback
+archives until Switch and Restore evidence is terminal. The Agent then uses
+ordinary journaled instance deletion. Ordinary Delete Server continues to
+preserve backups.

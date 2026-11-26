@@ -20,6 +20,11 @@ if [[ ${MINECRAFT_SERVER_TYPE} == pufferfish ]]; then
 fi
 switch_exact=${JUSTVOXEL_SWITCH_EXACT:-no}
 switch_preserve_content=${switch_exact}
+verify_mode=()
+if [[ ${switch_exact} == yes ]]; then verify_mode=(--switch); fi
+verify_runtime() {
+    JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack "${instance_args[@]}" "${verify_mode[@]}" "$1"
+}
 write_main_config() {
     local build=''
     if [[ ${MINECRAFT_SERVER_TYPE} == pufferfish ]]; then
@@ -212,12 +217,12 @@ cleanup() {
             if ! write_main_config || ! render_runtime; then recovery_ok=no; fi
             if [[ ${was_active} == yes && $(podman inspect "${JV_INSTANCE_CONTAINER}" --format '{{.Image}}' 2>/dev/null || true) != "${old_running_id}" ]]; then recovery_ok=no; fi
             if [[ ${was_active} != yes ]] && systemctl is-active --quiet "${JV_INSTANCE_UNIT}"; then recovery_ok=no; fi
-            if [[ ${was_active} == yes ]] && ! JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack "${instance_args[@]}" "${old_game_version}"; then recovery_ok=no; fi
+            if [[ ${was_active} == yes ]] && ! verify_runtime "${old_game_version}"; then recovery_ok=no; fi
         elif ! systemctl stop "${JV_INSTANCE_UNIT}"; then
             echo 'ERROR: Minecraft could not be stopped for rollback; operation requires attention.' >&2
             recovery_ok=no
         else
-            if ! jv_crossplay_rollback "${component_staging}"; then
+            if [[ ${switch_exact} != yes ]] && ! jv_crossplay_rollback "${component_staging}"; then
                 echo 'ERROR: managed Geyser/Floodgate rollback failed; previous runtime was not restored; operation requires attention.' >&2
                 recovery_ok=no
             fi
@@ -245,7 +250,7 @@ cleanup() {
                 recovery_ok=no
             fi
             if [[ ${recovery_ok} == yes && ${was_active} == yes ]]; then
-                if ! systemctl start "${JV_INSTANCE_UNIT}" || ! wait_for_rcon 900 || [[ $(podman inspect "${JV_INSTANCE_CONTAINER}" --format '{{.Image}}' 2>/dev/null || true) != "${old_running_id:-${old_local_id}}" ]] || ! JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack "${instance_args[@]}" "${old_game_version}"; then recovery_ok=no; fi
+                if ! systemctl start "${JV_INSTANCE_UNIT}" || ! wait_for_rcon 900 || [[ $(podman inspect "${JV_INSTANCE_CONTAINER}" --format '{{.Image}}' 2>/dev/null || true) != "${old_running_id:-${old_local_id}}" ]] || ! verify_runtime "${old_game_version}"; then recovery_ok=no; fi
             fi
         fi
         if [[ ${recovery_ok} != yes ]]; then
@@ -273,7 +278,7 @@ if [[ ${target_server_type} == "${old_server_type}" &&
         echo 'ERROR: current Minecraft image cannot be verified; review again.' >&2; exit 1;
     }
     if [[ ${was_active} == yes ]]; then
-        JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack "${instance_args[@]}" "${latest_mc}"
+        verify_runtime "${latest_mc}"
     fi
     if [[ ${reviewed} != yes ]] && ! confirm 'Save the verified container channel?'; then
         echo 'Update cancelled.'
@@ -290,7 +295,7 @@ if [[ ${target_server_type} == "${old_server_type}" &&
     [[ $(podman image inspect "${image}" --format '{{.Id}}' 2>/dev/null || true) == "${verified_id}" ]] || exit 1
     if [[ ${was_active} == yes ]]; then
         [[ $(podman inspect "${JV_INSTANCE_CONTAINER}" --format '{{.Image}}' 2>/dev/null || true) == "${old_running_id}" ]] || exit 1
-        JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack "${instance_args[@]}" "${latest_mc}"
+        verify_runtime "${latest_mc}"
     else
         ! systemctl is-active --quiet "${JV_INSTANCE_UNIT}" || exit 1
     fi
@@ -414,8 +419,8 @@ if [[ ${new_running_id} != ${new_local_id} ]]; then
     exit 1
 fi
 
-JUSTVOXEL_MAINTENANCE_LOCK_HELD=1 /usr/libexec/justvoxel/mjust/verify-minecraft-stack "${instance_args[@]}" "${latest_mc}"
-if [[ ${BEDROCK_ENABLED} == yes ]]; then
+verify_runtime "${latest_mc}"
+if [[ ${BEDROCK_ENABLED} == yes && ${switch_exact} != yes ]]; then
     jv_crossplay_verify "${component_staging}"
 fi
 

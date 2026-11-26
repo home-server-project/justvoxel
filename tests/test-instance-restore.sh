@@ -148,6 +148,39 @@ class IndependentRestore(unittest.TestCase):
         self.restore('plan',ok=False)
         self.assertEqual((self.data/'world/level.dat').read_bytes(),world_metadata())
 
+    def test_neoforge_to_quilt_real_archive_and_retained_restore(self):
+        source, clone = 'jv-aaaaaa', 'jv-bbbbbb'
+        source_config = self.configs/source/'config.json'
+        clone_config = self.configs/clone/'config.json'
+        source_record = json.loads(source_config.read_text())
+        clone_record = json.loads(clone_config.read_text())
+        source_record['runtime'].update(software='neoforge', loader_version='21.4.147', bedrock_enabled=True, bedrock_port=19132)
+        clone_record['runtime'].update(software='quilt', loader_version='0.28.1', bedrock_enabled=False, bedrock_port=0, start_on_boot=False, preserve_content=True)
+        self.private(source_config,json.dumps(source_record))
+        self.private(clone_config,json.dumps(clone_record))
+        marker = self.data/'world/region/r.0.0.mca'
+        marker.parent.mkdir()
+        marker.write_bytes(b'Switch archive region marker')
+        self.run_helper('create',source)
+        archive = next(m for m in self.inventory(source) if m['software']=='neoforge')
+        self.archive = archive['archive']
+        args = {'identity': clone, 'clone_source': source}
+        plan = self.plan(**args)
+        self.assertEqual(plan['metadata'],archive)
+        self.assertEqual((plan['current_software'],plan['current_version']),('quilt','1.21.4'))
+        self.restore('prepare',plan['fingerprint'],**args)
+        self.restore('shutdown',identity=clone)
+        self.restore('activate',identity=clone)
+        clone_data = self.other.parent
+        self.assertEqual((clone_data/'world/region/r.0.0.mca').read_bytes(),marker.read_bytes())
+        self.restore('rollback',identity=clone)
+        self.restore('rollback-verifying',identity=clone)
+        self.restore('rolled-back',identity=clone)
+        self.assertEqual(self.other.read_bytes(),b'jv-bbbbbb world')
+        self.assertFalse((clone_data/'world').exists())
+        self.assertEqual(marker.read_bytes(),b'Switch archive region marker')
+        self.assertEqual(json.loads(source_config.read_text()),source_record)
+
     def test_neoforge_to_paper_clone_stages_source_owned_exact_version_archive(self):
         source, clone = 'jv-aaaaaa', 'jv-bbbbbb'
         source_config = self.configs/source/'config.json'

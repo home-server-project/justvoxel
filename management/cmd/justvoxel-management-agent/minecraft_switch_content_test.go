@@ -84,7 +84,7 @@ func TestSwitchLoaderEvidenceUsesExactBytesAndDependencies(t *testing.T) {
 					t.Fatalf("wrong target evidence: %+v want %s", content, want)
 				}
 				convert, clone := switchTransitionActions(pair[0], pair[1], true, true, content)
-				if !clone || convert != (status == "verified") {
+				if !clone || convert {
 					t.Fatalf("wrong actions convert=%v clone=%v", convert, clone)
 				}
 				after := switchWorldSnapshot(t, record.Storage.DataPath)

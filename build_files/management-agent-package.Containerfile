@@ -9,4 +9,4 @@ LABEL org.opencontainers.image.title="JustVoxel Management Agent internal build 
       io.home-server-project.justvoxel.management-input="${MANAGEMENT_INPUT_IDENTITY}" \
       io.home-server-project.justvoxel.management-base="${HOME_SERVER_BASE_IDENTITY}" \
       io.home-server-project.justvoxel.management-api="v1"
-COPY management-agent /artifacts/management-agent
+COPY management-agent* /artifacts/

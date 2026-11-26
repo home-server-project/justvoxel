@@ -88,6 +88,10 @@ func (s *operationStore) appendOperationJournalDiagnosticBestEffort(journal oper
 	if s == nil || journal.OperationType == operationTypeSetup || !validOperationID(journal.OperationID) {
 		return
 	}
+	if journal.OperationType == operationTypeSwitchMatrix && journal.PlanFingerprint == switchMatrixRunnerFingerprint() {
+		// The runner uses this Migration Logs slot for its structured manifest.
+		return
+	}
 	_ = s.appendOperationDiagnostic(journal.OperationID, journal.OperationType, "STAGE", "operation progress", map[string]string{
 		"state": string(journal.State), "stage": journal.Stage, "status": journal.Status,
 		"rollback_state": journal.Rollback.State, "rollback_result": journal.Rollback.Result,
@@ -183,7 +187,7 @@ func (s *operationStore) appendOperationDiagnostic(id, operationType, category, 
 
 func validDiagnosticOperationType(value string) bool {
 	switch value {
-	case pluginReviewDiagnosticType, operationTypePluginAddonInstall, operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove, operationTypeRestore, operationTypeDataMigration, operationTypeMinecraftReset, operationTypeFactoryReset, operationTypeMigrationExport, operationTypeMigrationImport, operationTypeMigrationRecovery, operationTypeMinecraftSwitch:
+	case pluginReviewDiagnosticType, operationTypePluginAddonInstall, operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove, operationTypeRestore, operationTypeDataMigration, operationTypeMinecraftReset, operationTypeFactoryReset, operationTypeMigrationExport, operationTypeMigrationImport, operationTypeMigrationRecovery, operationTypeMinecraftSwitch, operationTypeSwitchMatrix:
 		return true
 	}
 	return false
@@ -201,7 +205,7 @@ func diagnosticCategoryForOperationType(value string) string {
 	switch value {
 	case operationTypeSetup:
 		return "setup"
-	case operationTypeDataMigration, operationTypeMigrationExport, operationTypeMigrationImport, operationTypeMigrationRecovery, operationTypeMinecraftSwitch:
+	case operationTypeDataMigration, operationTypeMigrationExport, operationTypeMigrationImport, operationTypeMigrationRecovery, operationTypeMinecraftSwitch, operationTypeSwitchMatrix:
 		return "migration"
 	case operationTypeRestore:
 		return "restore"

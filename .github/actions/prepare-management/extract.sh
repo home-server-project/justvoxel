@@ -11,3 +11,9 @@ test -f "${stage}/management-agent"
 test -x "${stage}/management-agent"
 sudo install -m0755 "${stage}/management-agent" build_artifacts/management/management-agent
 test -x build_artifacts/management/management-agent
+if [[ "${MANAGEMENT_BUILD_MODE:-production}" == both ]]; then
+    sudo podman cp "${container}:/artifacts/management-agent-development" "${stage}/management-agent-development"
+    test -f "${stage}/management-agent-development"
+    test -x "${stage}/management-agent-development"
+    sudo install -m0755 "${stage}/management-agent-development" build_artifacts/management/management-agent-development
+fi

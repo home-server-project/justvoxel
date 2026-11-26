@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -25,6 +26,7 @@ const (
 	operationTypeMinecraftReset    = "minecraft_reset"
 	operationTypeMinecraftUpdate   = "minecraft_update"
 	operationTypeMinecraftSwitch   = "minecraft_switch"
+	operationTypeSwitchMatrix      = "switch_matrix"
 	operationTypePluginInstall     = "plugin_install"
 	operationTypePluginEnable      = "plugin_enable"
 	operationTypePluginDisable     = "plugin_disable"
@@ -75,6 +77,8 @@ type operationRollback struct {
 }
 
 type operationJournal struct {
+	MatrixParent    string            `json:"matrix_parent,omitempty"`
+	MatrixFixtures  []string          `json:"matrix_fixtures,omitempty"`
 	InstanceSetup   bool              `json:"instance_setup,omitempty"`
 	InstanceID      string            `json:"instance_id,omitempty"`
 	SchemaVersion   string            `json:"schema_version"`
@@ -95,6 +99,10 @@ type operationStore struct {
 	mu                      sync.Mutex
 	traceMu                 sync.Mutex
 	pluginRecoveryMu        sync.Mutex
+	switchMatrixMu          sync.Mutex
+	switchMatrixRunMu       sync.Mutex
+	switchMatrixWorkerMu    sync.Mutex
+	switchMatrixExclusion   *os.File
 	diagnosticMu            sync.Mutex
 	baseDir                 string
 	operationsDir           string
@@ -228,10 +236,7 @@ func openOperationStore(baseDir string) (*operationStore, error) {
 		now:                   time.Now,
 	}
 	if err := s.loadAndRecover(); err != nil {
-		migrationLockFile.Close()
-		dataMigrationLockFile.Close()
-		restoreLockFile.Close()
-		lockFile.Close()
+		_ = s.close()
 		return nil, err
 	}
 	return s, nil
@@ -366,6 +371,10 @@ func (s *operationStore) close() error {
 	}
 
 	var firstErr error
+	if s.switchMatrixExclusion != nil {
+		firstErr = s.switchMatrixExclusion.Close()
+		s.switchMatrixExclusion = nil
+	}
 	if s.migrationLockFile != nil {
 		if err := s.migrationLockFile.Close(); err != nil && firstErr == nil {
 			firstErr = err
@@ -463,7 +472,7 @@ func (s *operationStore) loadAndRecover() error {
 				_ = s.persist(journal)
 			}
 		}
-		if operationIsCurrent(journal.State) {
+		if operationIsCurrent(journal.State) && journal.MatrixParent == "" {
 			switch journal.OperationType {
 			case operationTypeSetup:
 				if activeSetup != "" {
@@ -480,7 +489,7 @@ func (s *operationStore) loadAndRecover() error {
 					return errors.New("multiple active data migration operation journals require attention")
 				}
 				activeDataMigration = journal.OperationID
-			case operationTypeMinecraftReset, operationTypeMinecraftSwitch, operationTypeMinecraftUpdate, operationTypeMinecraftContainerUpdate, operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove, operationTypePluginAddonInstall:
+			case operationTypeSwitchMatrix, operationTypeMinecraftReset, operationTypeMinecraftSwitch, operationTypeMinecraftUpdate, operationTypeMinecraftContainerUpdate, operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove, operationTypePluginAddonInstall:
 				if activeMinecraftReset != "" {
 					return errors.New("multiple active Minecraft reset operation journals require attention")
 				}
@@ -508,6 +517,12 @@ func (s *operationStore) loadAndRecover() error {
 			return err
 		}
 		journal := s.operations[activeMinecraftReset]
+		if journal.OperationType == operationTypeSwitchMatrix {
+			s.switchMatrixExclusion, err = acquireInstanceRestoreExclusion()
+			if err != nil {
+				return err
+			}
+		}
 		if operationInterruptedByRestart(journal.State) {
 			now := s.now().UTC().Format(time.RFC3339Nano)
 			wasQueued := journal.State == operationQueued
@@ -523,6 +538,9 @@ func (s *operationStore) loadAndRecover() error {
 			if journal.OperationType == operationTypeMinecraftSwitch || journal.OperationType == operationTypeMinecraftUpdate || journal.OperationType == operationTypeMinecraftContainerUpdate {
 				journal.Status = "Server update was interrupted. Review Minecraft state before continuing."
 			}
+			if journal.OperationType == operationTypeSwitchMatrix {
+				journal.Status = "Switch matrix interrupted. Test evidence was preserved for recovery."
+			}
 			if journal.OperationType == operationTypePluginInstall {
 				journal.Status = "Plugin installation was interrupted. Automatic recovery could not be proven; administrator attention is required. Staged transaction evidence has been preserved."
 			} else if isPluginOperationType(journal.OperationType) {
@@ -535,11 +553,22 @@ func (s *operationStore) loadAndRecover() error {
 				return err
 			}
 			s.operations[journal.OperationID] = journal
-			if isPluginOperationType(journal.OperationType) {
+			if isPluginOperationType(journal.OperationType) || journal.OperationType == operationTypeSwitchMatrix {
 				s.appendOperationJournalDiagnosticBestEffort(journal)
 			}
 		}
+		if journal.OperationType == operationTypeSwitchMatrix && !switchMatrixDevelopment {
+			log.Printf("Switch matrix %s: %s", journal.OperationID, switchMatrixProductionDiagnostic)
+		}
 		s.currentMinecraftResetID = activeMinecraftReset
+	}
+	if err := s.reconcileSwitchMatrixChildren(); err != nil {
+		return err
+	}
+	if err := s.reconcileSwitchMatrixRun(s.operations[activeMinecraftReset]); err != nil {
+		// The parent journal still holds the reservation. A damaged result
+		// document must not take the rest of the Management Agent offline.
+		log.Printf("Switch matrix %s results could not be reconciled. The maintenance reservation was retained.", activeMinecraftReset)
 	}
 
 	if activeFactoryReset != "" {
@@ -753,7 +782,10 @@ func validateOperationJournal(journal operationJournal) error {
 	if !validOperationID(journal.OperationID) {
 		return errors.New("invalid operation id")
 	}
-	if journal.OperationType != operationTypeSetup && journal.OperationType != operationTypeRestore && journal.OperationType != operationTypeDataMigration && journal.OperationType != operationTypeMinecraftReset && journal.OperationType != operationTypeMinecraftUpdate && journal.OperationType != operationTypeMinecraftSwitch && journal.OperationType != operationTypeMinecraftContainerUpdate && !isPluginOperationType(journal.OperationType) && journal.OperationType != operationTypeFactoryReset && journal.OperationType != operationTypeMigrationExport && journal.OperationType != operationTypeMigrationImport && journal.OperationType != operationTypeMigrationRecovery {
+	if err := validateSwitchMatrixJournal(journal); err != nil {
+		return err
+	}
+	if journal.OperationType != operationTypeSwitchMatrix && journal.OperationType != operationTypeSetup && journal.OperationType != operationTypeRestore && journal.OperationType != operationTypeDataMigration && journal.OperationType != operationTypeMinecraftReset && journal.OperationType != operationTypeMinecraftUpdate && journal.OperationType != operationTypeMinecraftSwitch && journal.OperationType != operationTypeMinecraftContainerUpdate && !isPluginOperationType(journal.OperationType) && journal.OperationType != operationTypeFactoryReset && journal.OperationType != operationTypeMigrationExport && journal.OperationType != operationTypeMigrationImport && journal.OperationType != operationTypeMigrationRecovery {
 		return errors.New("unsupported operation type")
 	}
 	if !operationFingerprintPattern.MatchString(journal.PlanFingerprint) {
@@ -1197,7 +1229,7 @@ func (s *operationStore) beginMinecraftReset(planFingerprint string) (operationJ
 
 // Update, reset and plugin installation share the existing maintenance locks.
 func (s *operationStore) beginMinecraftMaintenance(planFingerprint, kind string, instanceID ...string) (operationJournal, bool, error) {
-	if kind != operationTypeMinecraftReset && kind != operationTypeMinecraftUpdate && kind != operationTypeMinecraftSwitch && kind != operationTypeMinecraftContainerUpdate && !isPluginOperationType(kind) {
+	if kind != operationTypeSwitchMatrix && kind != operationTypeMinecraftReset && kind != operationTypeMinecraftUpdate && kind != operationTypeMinecraftSwitch && kind != operationTypeMinecraftContainerUpdate && !isPluginOperationType(kind) {
 		return operationJournal{}, false, errors.New("invalid Minecraft maintenance type")
 	}
 	if !operationFingerprintPattern.MatchString(planFingerprint) {
@@ -1208,7 +1240,7 @@ func (s *operationStore) beginMinecraftMaintenance(planFingerprint, kind string,
 
 	if s.currentMinecraftResetID != "" {
 		current := s.operations[s.currentMinecraftResetID]
-		if current.PlanFingerprint == planFingerprint && current.OperationType == kind && (len(instanceID) == 0 || current.InstanceID == instanceID[0]) {
+		if kind != operationTypeSwitchMatrix && current.PlanFingerprint == planFingerprint && current.OperationType == kind && (len(instanceID) == 0 || current.InstanceID == instanceID[0]) {
 			return current, false, nil
 		}
 		return operationJournal{}, false, errMinecraftResetOperationBusy
@@ -1223,6 +1255,35 @@ func (s *operationStore) beginMinecraftMaintenance(planFingerprint, kind string,
 		return operationJournal{}, false, err
 	}
 
+	if kind == operationTypeSwitchMatrix {
+		exclusion, err := acquireInstanceRestoreExclusion()
+		if err != nil {
+			_ = s.releaseMinecraftResetLocks()
+			return operationJournal{}, false, err
+		}
+		defer func() {
+			if s.switchMatrixExclusion != exclusion {
+				_ = exclusion.Close()
+			}
+		}()
+		runtime, err := acquirePluginRuntimeLock()
+		if err != nil {
+			_ = s.releaseMinecraftResetLocks()
+			return operationJournal{}, false, err
+		}
+		defer runtime.Close()
+		if err := instanceRuntimes.requireNoInstanceRestore(); err != nil {
+			_ = s.releaseMinecraftResetLocks()
+			return operationJournal{}, false, err
+		}
+		// Assign only after the queued parent journal is durable.
+		return s.queueMinecraftMaintenance(planFingerprint, kind, instanceID, exclusion)
+	}
+	return s.queueMinecraftMaintenance(planFingerprint, kind, instanceID, nil)
+}
+
+// Caller holds the operation mutex and owns all four operation locks.
+func (s *operationStore) queueMinecraftMaintenance(planFingerprint, kind string, instanceID []string, exclusion *os.File) (operationJournal, bool, error) {
 	id, err := newOperationID()
 	if err != nil {
 		_ = s.releaseMinecraftResetLocks()
@@ -1230,6 +1291,9 @@ func (s *operationStore) beginMinecraftMaintenance(planFingerprint, kind string,
 	}
 	now := s.now().UTC().Format(time.RFC3339Nano)
 	status := "Minecraft reset operation queued."
+	if kind == operationTypeSwitchMatrix {
+		status = "Switch matrix queued."
+	}
 	if kind == operationTypeMinecraftSwitch || kind == operationTypeMinecraftUpdate || kind == operationTypeMinecraftContainerUpdate {
 		status = "Server update operation queued."
 	}
@@ -1257,7 +1321,8 @@ func (s *operationStore) beginMinecraftMaintenance(planFingerprint, kind string,
 	}
 	s.operations[id] = journal
 	s.currentMinecraftResetID = id
-	if isPluginOperationType(kind) || kind == operationTypeMinecraftSwitch {
+	s.switchMatrixExclusion = exclusion
+	if isPluginOperationType(kind) || kind == operationTypeMinecraftSwitch || kind == operationTypeSwitchMatrix {
 		s.appendOperationJournalDiagnosticBestEffort(journal)
 	}
 	return journal, true, nil
@@ -1548,7 +1613,13 @@ func (s *operationStore) transition(id string, next operationState, stage, statu
 	queuedPluginCancellation := isPluginOperationType(journal.OperationType) && journal.State == operationQueued && next == operationRolledBack && stage == "complete"
 	dataMigrationRecovery := journal.OperationType == operationTypeDataMigration && journal.State == operationNeedsAttention && next == operationRollingBack && stage == "migration_recovery"
 	setupCommitForward := journal.OperationType == operationTypeSetup && journal.State == operationRollingBack && (journal.Stage == "runtime_recovery" || journal.Stage == "runtime_rollback") && next == operationSucceeded && stage == "completed"
-	if !setupCommitForward && !dataMigrationRecovery && !setupRecovery && !queuedPluginCancellation && !operationTransitionAllowed(journal.State, next) {
+	if journal.OperationType == operationTypeSwitchMatrix && next != operationNeedsAttention &&
+		s.activeSwitchMatrixChild(journal.OperationID) {
+		return operationJournal{}, errInstanceBusy
+	}
+	matrixPhase := journal.OperationType == operationTypeSwitchMatrix && journal.State == operationRunning &&
+		next == operationRunning && (stage == "fixtures" || stage == "switch" || stage == "retirement")
+	if !matrixPhase && !setupCommitForward && !dataMigrationRecovery && !setupRecovery && !queuedPluginCancellation && !operationTransitionAllowed(journal.State, next) {
 		return operationJournal{}, fmt.Errorf("invalid operation transition %s -> %s", journal.State, next)
 	}
 	recoveryFailed := journal.OperationType == operationTypeSetup && journal.State == operationRollingBack && (journal.Stage == "storage_recovery" || journal.Stage == "runtime_recovery") && next == operationNeedsAttention && (stage == "storage_rollback" || stage == "runtime_rollback")
@@ -1570,6 +1641,11 @@ func (s *operationStore) transition(id string, next operationState, stage, statu
 		journal.Rollback.State = "failed"
 		journal.Rollback.Result = "needs_attention"
 	}
+	if journal.OperationType == operationTypeSwitchMatrix && !operationIsCurrent(next) {
+		if err := s.verifySwitchMatrixClosure(journal); err != nil {
+			return operationJournal{}, err
+		}
+	}
 	if next == operationSucceeded || next == operationRolledBack || next == operationResolved {
 		journal.FinishedAt = journal.UpdatedAt
 	}
@@ -1579,7 +1655,7 @@ func (s *operationStore) transition(id string, next operationState, stage, statu
 	s.operations[id] = journal
 	s.appendSetupJournalDiagnosticBestEffort(journal)
 	s.appendOperationJournalDiagnosticBestEffort(journal)
-	if next == operationSucceeded || next == operationRolledBack || next == operationResolved {
+	if !operationIsCurrent(next) && journal.MatrixParent == "" {
 		switch journal.OperationType {
 		case operationTypeSetup:
 			s.currentSetupID = ""
@@ -1596,8 +1672,15 @@ func (s *operationStore) transition(id string, next operationState, stage, statu
 			if err := s.releaseDataMigrationLock(); err != nil {
 				return operationJournal{}, err
 			}
-		case operationTypeMinecraftReset, operationTypeMinecraftSwitch, operationTypeMinecraftUpdate, operationTypeMinecraftContainerUpdate, operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove, operationTypePluginAddonInstall:
+		case operationTypeSwitchMatrix, operationTypeMinecraftReset, operationTypeMinecraftSwitch, operationTypeMinecraftUpdate, operationTypeMinecraftContainerUpdate, operationTypePluginInstall, operationTypePluginEnable, operationTypePluginDisable, operationTypePluginRemove, operationTypePluginAddonInstall:
 			s.currentMinecraftResetID = ""
+			if journal.OperationType == operationTypeSwitchMatrix && s.switchMatrixExclusion != nil {
+				file := s.switchMatrixExclusion
+				s.switchMatrixExclusion = nil
+				if err := file.Close(); err != nil {
+					return operationJournal{}, errors.Join(err, s.releaseMinecraftResetLocks())
+				}
+			}
 			if err := s.releaseMinecraftResetLocks(); err != nil {
 				return operationJournal{}, err
 			}

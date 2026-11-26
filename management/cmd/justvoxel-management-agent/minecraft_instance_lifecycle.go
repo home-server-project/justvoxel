@@ -435,6 +435,12 @@ func (b *instanceRuntimeBackend) queryFirewall(ctx context.Context, r instanceFi
 func (b *instanceRuntimeBackend) planFirewall(ctx context.Context, old, next instanceRuntimeRecord) ([]instanceFirewallChange, []instanceFirewallRule, error) {
 	changes := []instanceFirewallChange{}
 	owned := []instanceFirewallRule{}
+	if next.Runtime.MatrixFixture {
+		if len(old.Firewall) != 0 || len(next.Firewall) != 0 {
+			return nil, nil, errInstanceRecovery
+		}
+		return changes, owned, nil
+	}
 	output, err := b.command(ctx, "firewall-cmd", "--get-default-zone")
 	zone := strings.TrimSpace(string(output))
 	if err != nil || !instanceFirewallZonePattern.MatchString(zone) {
@@ -525,6 +531,11 @@ func (b *instanceRuntimeBackend) create(ctx context.Context, c minecraftInstance
 // Setup records the generated identity before registration. Both entry points
 // use exactly the same validation, publication and activation transaction.
 func (b *instanceRuntimeBackend) createTracked(ctx context.Context, c minecraftInstanceRuntimeConfig, name string, snapshot minecraftInstanceRuntimeContext, track func(instanceRuntimeRecord) error) (string, error) {
+	c.ID = ""
+	return b.createTrackedCandidate(ctx, c, name, snapshot, track)
+}
+
+func (b *instanceRuntimeBackend) createTrackedCandidate(ctx context.Context, c minecraftInstanceRuntimeConfig, name string, snapshot minecraftInstanceRuntimeContext, track func(instanceRuntimeRecord) error) (string, error) {
 	if err := b.requireNoStartOver(); err != nil {
 		return "", err
 	}
@@ -551,11 +562,15 @@ func (b *instanceRuntimeBackend) createTracked(ctx context.Context, c minecraftI
 			return "", err
 		}
 	}
-	var entropy [6]byte
-	if _, err = io.ReadFull(rand.Reader, entropy[:]); err != nil {
-		return "", err
+	if c.ID == "" {
+		var entropy [6]byte
+		if _, err = io.ReadFull(rand.Reader, entropy[:]); err != nil {
+			return "", err
+		}
+		c.ID = "jv-" + hex.EncodeToString(entropy[:])
+	} else if track == nil || !instanceIDPattern.MatchString(c.ID) {
+		return "", errInstanceID
 	}
-	c.ID = "jv-" + hex.EncodeToString(entropy[:])
 	if c.Software == "bedrock" {
 		name = strings.TrimSpace(name)
 		if name == "" {

@@ -13,7 +13,8 @@ FROM ${MINECRAFT_NETWORK_PACKAGE_IMAGE} AS minecraft-network-package
 
 FROM scratch AS ctx
 COPY build_files /build_files
-COPY build_artifacts /build_artifacts
+COPY build_artifacts/management/management-agent /build_artifacts/management/management-agent
+COPY build_artifacts/webui /build_artifacts/webui
 COPY system_files /system_files
 COPY docs /docs
 COPY templates /templates
@@ -34,7 +35,7 @@ LABEL io.home-server-project.justvoxel.base="home-server-base-10" \
 RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
     --mount=type=tmpfs,dst=/run \
     --mount=type=tmpfs,dst=/tmp \
-    /ctx/build_files/build-common.sh
+    /ctx/build_files/build-common.sh false
 
 FROM common AS justvoxel-vm
 ARG JUSTVOXEL_VM_REPOSITORY

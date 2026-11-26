@@ -1,7 +1,7 @@
 #!/usr/bin/bash
 # Agent-only trusted storage arguments, following the runtime host-mount contract.
 set -euo pipefail
-[[ $# == 10 && ( $1 == inspect || $1 == remove || $1 == verify || $1 == absent ) ]] || exit 1
+[[ $# == 10 && ( $1 == inspect || $1 == matrix-inspect || $1 == matrix-retry || $1 == remove || $1 == verify || $1 == absent ) ]] || exit 1
 action=$1
 shift
 /usr/libexec/justvoxel/mjust/instance-runtime-prerequisites restore-validate "${@:1:8}"
@@ -25,10 +25,14 @@ def main():
         parent = os.fstat(fd)
         if parent.st_uid != 0 or stat.S_IMODE(parent.st_mode) != 0o700:
             raise ValueError()
+        retry = json.loads(evidence) if action == 'matrix-retry' else None
+        if retry is not None and retry['parent'] != [parent.st_dev, parent.st_ino]:
+            raise ValueError()
         try:
             st = os.stat('data', dir_fd=fd, follow_symlinks=False)
         except FileNotFoundError:
-            if action in ('remove', 'verify', 'absent') and evidence != '-':
+            if (action in ('remove', 'verify', 'absent') and evidence != '-' or
+                    retry is not None and retry['data_may_be_absent'] is True):
                 os.fsync(fd)
                 return
             raise
@@ -45,6 +49,26 @@ def main():
                 target = re.sub(r'\\([0-7]{3})', lambda m: chr(int(m[1], 8)), target)
                 if target == data or target.startswith(data + '/'):
                     raise ValueError()
+        if retry is not None:
+            if token != retry['data']:
+                raise ValueError()
+            return
+        if action == 'matrix-inspect':
+            # Matrix worlds are disposable fixture data. Validate all entries
+            # before allowing the ordinary journaled delete to remove them.
+            budget = 750000
+            def traversal_error(error):
+                raise error
+            for _, dirs, files, directory in os.fwalk('data', dir_fd=fd, follow_symlinks=False, onerror=traversal_error):
+                for name in dirs + files:
+                    budget -= 1
+                    entry = os.stat(name, dir_fd=directory, follow_symlinks=False)
+                    if budget < 0 or entry.st_dev != st.st_dev or (
+                            not stat.S_ISDIR(entry.st_mode) and
+                            not (stat.S_ISREG(entry.st_mode) and entry.st_nlink == 1)):
+                        raise ValueError()
+            print(json.dumps({'identity': token, 'parent_identity': [parent.st_dev, parent.st_ino]}))
+            return
         for directory, dirs, files in os.walk(data, followlinks=False):
             if os.stat(directory, follow_symlinks=False).st_dev != st.st_dev:
                 raise ValueError()

@@ -105,6 +105,13 @@ func (a *App) registerMinecraftWorkspaceRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /workspace/migration/switch", a.migrationSwitchPage)
 	mux.HandleFunc("GET /api/migration/switch/{action}", a.migrationSwitchAPI)
 	mux.HandleFunc("POST /api/migration/switch/{action}", a.migrationSwitchAPI)
+	mux.HandleFunc("GET /api/migration/switch-matrix", a.migrationSwitchMatrix)
+	for _, action := range []string{"start", "stop", "recover"} {
+		mux.HandleFunc("POST /api/migration/switch-matrix/"+action, func(w http.ResponseWriter, r *http.Request) {
+			r.SetPathValue("matrixAction", action)
+			a.migrationSwitchMatrix(w, r)
+		})
+	}
 	mux.HandleFunc("GET /api/minecraft/workspace/selection", a.minecraftSelection)
 	mux.HandleFunc("POST /api/minecraft/workspace/console", a.selectedMinecraftConsole)
 	mux.HandleFunc("GET /api/minecraft/workspace/snapshot", a.selectedMinecraftSnapshot)

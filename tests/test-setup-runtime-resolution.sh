@@ -4,7 +4,7 @@ set -euo pipefail
 repo_root="$(cd -- "$(dirname -- "$0")/.." && pwd)"
 source "${repo_root}/mjust/libexec/common.sh"
 reject() { if "$@"; then echo 'Unsafe setup resolution accepted' >&2; exit 1; fi; }
-curl() {
+setup_fixture_curl() {
     [[ ${offline:-no} != yes ]] || return 22
     case "${*: -1}" in
         */version_manifest_v2.json)
@@ -41,6 +41,7 @@ curl() {
         *) return 22 ;; # Never delegate unlisted URLs to the network.
     esac
 }
+curl() { setup_fixture_curl "$@"; }
 for software in paper purpur vanilla; do
     resolved="$(resolve_setup_java_runtime "${software}" pinned 26.3)"
     jq -e '.game == "26.3" and .loader == "" and .image == "java25"' <<< "${resolved}" >/dev/null
@@ -80,3 +81,36 @@ for software in spigot fabric quilt forge neoforge; do
 done
 reject java_server_version_available neoforge 26.3 26.3.1.999
 reject java_server_version_available fabric 26.3 0.99.0
+
+# Classifications come from the same pinned resolver and exact HTTP endpoints.
+# A timeout can still emit curl's write-out code; only HTTP failure 22 with a
+# confirmed 404 establishes the absence of the requested exact resource.
+curl() {
+    local exact=no response
+    [[ ${1:-} != --write-out ]] || { exact=yes; shift 2; }
+    case "${matrix_lookup:-}" in
+        timeout) [[ ${exact} != yes ]] || printf '\n000'; return 28 ;;
+        rate_limit) [[ ${exact} != yes ]] || printf '\n429'; return 22 ;;
+        absent) [[ ${exact} != yes ]] || printf '\n404'; return 22 ;;
+        malformed)
+            printf '%s' '[{"downloads":{"server:default":{"url":42}}}]'
+            [[ ${exact} != yes ]] || printf '\n200'
+            return 0
+            ;;
+    esac
+    response="$(setup_fixture_curl "$@")" || return "$?"
+    printf '%s' "${response}"
+    [[ ${exact} != yes ]] || printf '\n200'
+}
+jq -e '.outcome == "AVAILABLE" and .runtime.game == "26.3" and .runtime.image == "java25"' \
+    <<< "$(resolve_switch_matrix_java_release paper 26.3)" >/dev/null
+jq -e '.outcome == "AVAILABLE" and .runtime.loader == "0.19.5"' \
+    <<< "$(resolve_switch_matrix_java_release fabric 26.3)" >/dev/null
+jq -e '.outcome == "UNSUPPORTED" and (has("runtime") | not)' \
+    <<< "$(resolve_switch_matrix_java_release purpur 1.21.8)" >/dev/null
+jq -e '.outcome == "UNSUPPORTED" and (has("runtime") | not)' \
+    <<< "$(matrix_lookup=absent resolve_switch_matrix_java_release paper 26.3)" >/dev/null
+for failure in timeout rate_limit malformed; do
+    jq -e '.outcome == "UNVERIFIED" and (has("runtime") | not)' \
+        <<< "$(matrix_lookup=${failure} resolve_switch_matrix_java_release paper 26.3)" >/dev/null
+done

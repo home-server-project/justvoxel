@@ -30,16 +30,16 @@ func TestSwitchTransitionMatrix(t *testing.T) {
 		{"vanilla neoforge", "vanilla", "neoforge", "", true, true, true, true},
 		{"paper vanilla", "paper", "vanilla", "", true, true, true, true},
 		{"paper missing layout", "paper", "vanilla", "", true, false, false, false},
-		{"fabric quilt compatible", "fabric", "quilt", "verified", true, true, true, true},
+		{"fabric quilt compatible", "fabric", "quilt", "verified", true, true, false, true},
 		{"fabric quilt incompatible", "fabric", "quilt", "incompatible", true, true, false, true},
 		{"fabric quilt unknown", "fabric", "quilt", "unknown", true, true, false, true},
 		{"quilt only mod", "quilt", "fabric", "incompatible", true, true, false, true},
-		{"forge neo compatible", "forge", "neoforge", "verified", true, true, true, true},
+		{"forge neo compatible", "forge", "neoforge", "verified", true, true, false, true},
 		{"forge neo incompatible", "forge", "neoforge", "incompatible", true, true, false, true},
 		{"forge neo unknown", "forge", "neoforge", "unknown", true, true, false, true},
-		{"neo forge compatible", "neoforge", "forge", "verified", true, true, true, true},
+		{"neo forge compatible", "neoforge", "forge", "verified", true, true, false, true},
 		{"neo forge incompatible", "neoforge", "forge", "incompatible", true, true, false, true},
-		{"fabric forge compatible", "fabric", "forge", "verified", true, true, true, true},
+		{"fabric forge compatible", "fabric", "forge", "verified", true, true, false, true},
 		{"fabric forge unknown", "fabric", "forge", "unknown", true, true, false, true},
 		{"empty modded world", "fabric", "paper", "", true, true, false, true},
 		{"modded vanilla", "neoforge", "vanilla", "", true, true, false, true},
@@ -722,7 +722,7 @@ func TestSwitchCloneRuntimeVerificationAndRecovery(t *testing.T) {
 					return []byte(f.players), nil
 				}
 				if strings.HasSuffix(command, "verify-minecraft-stack") {
-					if cloneID == "" || !reflect.DeepEqual(args, []string{"--instance", cloneID, "--switch-clone", "1.21.4"}) {
+					if cloneID == "" || !reflect.DeepEqual(args, []string{"--instance", cloneID, "--switch", "1.21.4"}) {
 						t.Fatal("runtime verification did not target the exact-version clone", args)
 					}
 					if switchNeedsWorldMove(tc.from, target) {
@@ -905,9 +905,9 @@ func TestSwitchPlannerResolvesApprovedDirections(t *testing.T) {
 		{"paper", "fabric", true, true, true, false, true},
 		{"paper", "fabric", false, false, true, false, false},
 		{"fabric", "paper", false, false, true, false, true},
-		{"fabric", "quilt", false, false, true, true, true},
-		{"forge", "neoforge", false, false, true, true, true},
-		{"neoforge", "forge", false, false, true, true, true},
+		{"fabric", "quilt", false, false, true, false, true},
+		{"forge", "neoforge", false, false, true, false, true},
+		{"neoforge", "forge", false, false, true, false, true},
 		{"vanilla", "fabric", false, false, false, false, false},
 	}
 	for _, tc := range cases {
@@ -1001,8 +1001,9 @@ func TestSwitchPublicationKeepsOrdinaryVersionSoftwareGuard(t *testing.T) {
 				return raw, err
 			}
 			plan, err := planMinecraftSwitch(ctx, source.Runtime.ID, pair[1])
-			if err != nil || !plan.Convert {
-				t.Fatal("fixture did not reach reviewed Convert", plan, err)
+			cloneOnly := pair[0] == "fabric" && pair[1] == "quilt"
+			if err != nil || !plan.Clone || plan.Convert == cloneOnly {
+				t.Fatal("wrong reviewed Switch actions", plan, err)
 			}
 			if err = f.backend.prepareSwitchSourceCopy(ctx, source.Runtime.ID, plan.Version); err != nil {
 				t.Fatal(err)
@@ -1028,6 +1029,21 @@ func TestSwitchPublicationKeepsOrdinaryVersionSoftwareGuard(t *testing.T) {
 			}
 			if err = saveSwitchEvidence(e); err != nil {
 				t.Fatal(err)
+			}
+			if cloneOnly {
+				if err = publish(e, plan, next); err == nil {
+					t.Fatal("publication accepted a Clone-only plan for in-place Convert")
+				}
+				forced := plan
+				forced.Convert = true
+				if err = publish(e, forced, next); err == nil {
+					t.Fatal("publication accepted a forged cross-loader Convert")
+				}
+				after, err := f.backend.readRecord(source.Runtime.ID)
+				if err != nil || !reflect.DeepEqual(after, previous) {
+					t.Fatal("rejected Convert changed the source runtime", err)
+				}
+				return
 			}
 			for _, mutation := range []string{"version", "loader", "software", "convert", "backup", "content"} {
 				target, reviewed, evidence := next, plan, e

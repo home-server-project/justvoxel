@@ -12,7 +12,8 @@ FROM ${MINECRAFT_NETWORK_PACKAGE_IMAGE} AS minecraft-network-package
 
 FROM scratch AS ctx
 COPY build_files /build_files
-COPY build_artifacts /build_artifacts
+COPY build_artifacts/management/management-agent-development /build_artifacts/management/management-agent
+COPY build_artifacts/webui /build_artifacts/webui
 COPY system_files /system_files
 COPY docs /docs
 COPY templates /templates
@@ -44,7 +45,7 @@ LABEL containers.bootc=1 \
 RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
     --mount=type=tmpfs,dst=/run \
     --mount=type=tmpfs,dst=/tmp \
-    /ctx/build_files/build-common.sh
+    /ctx/build_files/build-common.sh true
 
 RUN --mount=type=bind,from=ctx,source=/,target=/ctx \
     --mount=type=tmpfs,dst=/tmp \

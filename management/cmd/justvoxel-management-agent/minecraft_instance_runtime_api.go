@@ -51,6 +51,7 @@ func registerInstanceRuntimeRoutes(mux *http.ServeMux, s *server) {
 	mux.HandleFunc("POST /v1/minecraft/instances/{id}/delete", s.instanceDelete)
 	registerInstanceMaintenanceRoutes(mux, s)
 	registerMinecraftSwitchRoutes(mux, s)
+	registerSwitchMatrixRoutes(mux, s)
 	registerInstanceBackupRoutes(mux, s)
 	mux.HandleFunc("POST /v1/minecraft/instances", s.instanceRuntimeCreate)
 	mux.HandleFunc("GET /v1/minecraft/instances/runtime", s.instanceRuntimeList)
@@ -214,6 +215,17 @@ func (s *server) instanceRuntimeConfigure(w http.ResponseWriter, r *http.Request
 	})
 }
 func (b *instanceRuntimeBackend) configureRegistered(ctx context.Context, id string, settings instanceRuntimeSettings, snapshot minecraftInstanceRuntimeContext, uid, gid uint32) error {
+	return b.configureRegisteredCandidate(ctx, id, snapshot, func() (instanceRuntimeRecord, error) {
+		var secret [24]byte
+		if _, err := rand.Read(secret[:]); err != nil {
+			return instanceRuntimeRecord{}, err
+		}
+		return instanceRuntimeRecord{SchemaVersion: 1, Runtime: settings.runtime(id, uid, gid, hex.EncodeToString(secret[:])),
+			Storage: instanceStorageFor(snapshot, id), Backups: instanceBackupsFor(snapshot, id), Firewall: []instanceFirewallRule{}}, nil
+	})
+}
+
+func (b *instanceRuntimeBackend) configureRegisteredCandidate(ctx context.Context, id string, snapshot minecraftInstanceRuntimeContext, candidate func() (instanceRuntimeRecord, error)) error {
 	registered, err := b.identities().readRecord(id + ".json")
 	if err != nil || registered != id {
 		return errInstanceNotFound
@@ -228,11 +240,13 @@ func (b *instanceRuntimeBackend) configureRegistered(ctx context.Context, id str
 	if err != nil {
 		return err
 	}
-	var secret [24]byte
-	if _, err = rand.Read(secret[:]); err != nil {
+	next, err := candidate()
+	if err != nil {
 		return err
 	}
-	next := instanceRuntimeRecord{SchemaVersion: 1, Runtime: settings.runtime(id, uid, gid, hex.EncodeToString(secret[:])), Storage: instanceStorageFor(snapshot, id), Backups: instanceBackupsFor(snapshot, id), Firewall: []instanceFirewallRule{}}
+	if next.Runtime.ID != id {
+		return errInstanceRecovery
+	}
 	candidates := instanceReplaceRecord(records, next)
 	if next.Runtime.StartOnBoot {
 		if err = b.admitMemory(ctx, snapshot.TotalMemoryMiB, candidates, next.Runtime, true); err != nil {

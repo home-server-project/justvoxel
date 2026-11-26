@@ -224,3 +224,49 @@ func transformSwitchWorld(data, version string) error {
 	}
 	return nil
 }
+
+// Leaf supports both Anvil and Linear region formats. Refuse ambiguous world
+// trees, including region, entity and POI data inside custom dimensions.
+func verifySwitchLeafWorld(data string) error {
+	root, err := os.OpenRoot(data)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	level, err := switchLevelName(root)
+	if err != nil {
+		return err
+	}
+	count := 0
+	for _, world := range []string{level, level + "_nether", level + "_the_end"} {
+		info, err := switchWorldInfo(root, world)
+		if errors.Is(err, os.ErrNotExist) && world != level {
+			continue
+		}
+		if err != nil || !info.IsDir() {
+			return errInstanceRecovery
+		}
+		if err := fs.WalkDir(root.FS(), world, func(path string, entry fs.DirEntry, err error) error {
+			count++
+			if err != nil {
+				return err
+			}
+			if count > 250000 || entry.Type()&os.ModeSymlink != 0 || (!entry.IsDir() && !entry.Type().IsRegular()) {
+				return errInstanceRecovery
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			parent := filepath.Base(filepath.Dir(path))
+			ext := strings.ToLower(filepath.Ext(path))
+			if ext == ".linear" || strings.HasPrefix(entry.Name(), "r.") &&
+				(parent == "region" || parent == "entities" || parent == "poi") && ext != ".mca" {
+				return errInstanceRecovery
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}

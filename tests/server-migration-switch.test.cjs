@@ -27,7 +27,8 @@ class Element {
     this.dataset = {};
     this.events = {};
     this.children = [];
-    this.style = {};
+    this.style = { setProperty() {} };
+    this.attributes = {};
     this.disabled = false;
     const classes = new Set();
     this.classList = {
@@ -47,12 +48,15 @@ class Element {
   querySelectorAll(tag) { return this.children.filter(node => node.tag === tag); }
   addEventListener(event, listener) { this.events[event] = listener; }
   click() { return this.events.click?.(); }
-  setAttribute() {}
+  setAttribute(name, value) { this.attributes[name] = value; }
 }
 
-function fixture(operation, readPlan = plan, apply, recover, setupNavigation) {
+function fixture(operation, readPlan = plan, apply, recover, setupNavigation, matrix) {
   const state = new Element('p');
   const progress = new Element('div');
+  const matrixRun = new Element('button');
+  const matrixStatus = new Element('div');
+  matrixRun.hidden = matrixRun.disabled = true;
   const review = new Element('div');
   const cards = ['paper', 'leaf', 'fabric'].map(target => {
     const card = new Element('button');
@@ -64,7 +68,7 @@ function fixture(operation, readPlan = plan, apply, recover, setupNavigation) {
   const timers = [];
   const operations = [];
   const root = new Element('section');
-  root.dataset.serverId = sourceID;
+  root.dataset.serverId = matrix?.server ?? sourceID;
   root.isConnected = true;
   const workspace = {
     open: true,
@@ -80,6 +84,7 @@ function fixture(operation, readPlan = plan, apply, recover, setupNavigation) {
   root.querySelector = selector => ({
     '[data-switch-state]': state, '[data-switch-operation]': progress,
     '[data-switch-review]': review, '[data-switch-csrf]': { value: 'csrf' },
+    ...(matrix && {'[data-switch-matrix-run]': matrixRun, '[data-switch-matrix-status]': matrixStatus}),
   })[selector];
   const context = {
     window: {}, URLSearchParams, justVoxelSelectionGeneration: { migration: 1 },
@@ -88,6 +93,12 @@ function fixture(operation, readPlan = plan, apply, recover, setupNavigation) {
     setTimeout: callback => timers.push(callback),
     fetch: async (request, options) => {
       const url = new URL(request, 'https://justvoxel.example');
+      if (url.pathname.startsWith('/api/migration/switch-matrix')) {
+        assert.ok(matrix);
+        assert.equal(url.search, '');
+        if (options.method === 'POST') assert.equal(options.body.get('csrf'), 'csrf');
+        return matrix.request(url.pathname, options);
+      }
       assert.equal(url.searchParams.get('server'), sourceID);
       const action = url.pathname.split('/').at(-1);
       let result;
@@ -113,7 +124,7 @@ function fixture(operation, readPlan = plan, apply, recover, setupNavigation) {
   vm.runInNewContext(source, context);
   context.window.JustVoxelServerMigrationSwitch.init(root);
   const selected = () => cards.filter(card => card.classList.contains('is-selected')).map(card => card.dataset.switchTarget);
-  return { cards, root, workspace, state, review, progress, timers, operations,
+  return { cards, root, workspace, state, review, progress, matrixRun, matrixStatus, timers, operations,
     generation: context.justVoxelSelectionGeneration, selected, navigation };
 }
 
@@ -441,7 +452,7 @@ test('operation response from an old workspace generation is ignored', async () 
 
 test('Switch uses one aligned stack below the catalogue for operation, checking, errors and review', () => {
   const markup = read('templates/migration_workspace_switch.html');
-  assert.match(markup, /<\/fieldset>{{end}}\s*<\/div>\s*<div class="migration-switch-content migration-switch-stack">\s*<div class="migration-switch-stack" data-switch-operation role="status"><\/div>\s*<p data-switch-state role="status">{{t "ui.e29d2712155f"}}<\/p>\s*<section class="migration-switch-stack" data-switch-review hidden><\/section>\s*<\/div>/);
+  assert.match(markup, /<\/fieldset>{{end}}\s*<\/div>\s*<div class="migration-switch-content migration-switch-stack">\s*<div class="migration-switch-stack" data-switch-operation role="status"><\/div>\s*<div class="migration-switch-stack" data-switch-matrix-status role="status"><\/div>\s*<p data-switch-state role="status">{{if \.ServerID}}{{t "ui.e29d2712155f"}}{{else}}{{t "ui.389e87e83148"}}{{end}}<\/p>\s*<section class="migration-switch-stack" data-switch-review hidden><\/section>\s*<\/div>/);
   const css = read('static/server-migration-switch.css');
   const rule = selector => {
     const start = css.indexOf(selector + '{');
@@ -662,4 +673,267 @@ test('compatibility review opens native Plugins for its exact source and keeps r
   plugins.click();
   assert.equal(nav.pluginsOpened, 1);
   await flush();
+});
+
+const matrixID = 'a32d4725-8951-44cb-8b41-ace226d184a5';
+const matrixProgress = {
+  manifest_ready: true, completed: 7, total: 23, passed: 2, failed: 1,
+  unsupported: 3, blocked: 1, unfinished: 16,
+  source: 'paper', target: 'purpur', action: 'convert', cancel_requested: false,
+};
+const matrixSnapshot = (state, changes = {}) => ({
+  enabled: true,
+  operation: state ? {
+    operation_id: matrixID, diagnostic_id: matrixID, state,
+    reservation_active: ['preparing', 'running', 'closing', 'interrupted', 'needs_attention'].includes(state),
+    recovery_required: ['interrupted', 'needs_attention'].includes(state),
+    progress: state === 'preparing' ? {manifest_ready: false} : matrixProgress,
+    ...changes,
+  } : null,
+});
+const matrixOK = result => ({ ok: true, json: async () => result });
+const matrixText = f => f.matrixStatus.children.filter(node => node.tag === 'p').map(node => node.textContent);
+const matrixAction = (f, label) => f.matrixStatus.children
+  .flatMap(node => node.children).find(node => node.tag === 'button' && node.textContent === label);
+
+test('Switch matrix is capability-gated and uses standard buttons at the right of the existing legend', async () => {
+  const html = read('templates/migration_workspace_switch.html');
+  const css = read('static/server-migration-switch.css');
+  assert.match(html, /class="migration-switch-legend">[\s\S]*?Current[\s\S]*?120d1307d24e[\s\S]*?e674447337e8[\s\S]*?<button type="button" data-switch-matrix-run hidden disabled>[\s\S]*?<\/button>\s*<\/div>/);
+  assert.match(css, /\[data-switch-matrix-run\]\{margin-inline-start:auto;align-self:center\}/);
+  assert.doesNotMatch(css, /\[data-switch-matrix-(?:run|status)\][^{]*\{[^}]*\b(?:font-size|padding|border-radius|min-height):/);
+  assert.match(html, /migration-switch-content[^>]*>[\s\S]*data-switch-matrix-status/);
+
+  for (const enabled of [false, true]) {
+    let posts = 0;
+    const f = fixture(() => ({operation: null}), plan, undefined, undefined, undefined, {
+      request: (_url, options) => {
+        if (options.method === 'POST') posts++;
+        return matrixOK({ enabled, operation: null });
+      },
+    });
+    await flush();
+    assert.equal(f.matrixRun.hidden, !enabled);
+    assert.deepEqual(matrixText(f), []);
+    assert.equal(f.cards[1].disabled, false);
+    if (!enabled) f.matrixRun.click();
+    assert.equal(posts, 0);
+  }
+  const unresolved = fixture(() => ({operation: null}), plan, undefined, undefined, undefined, {
+    request: () => matrixOK({...matrixSnapshot('interrupted'), enabled: false}),
+  });
+  await flush();
+  assert.ok(unresolved.matrixRun.hidden);
+  assert.ok(unresolved.cards.every(card => card.disabled));
+  assert.match(matrixText(unresolved).join(' '), /Return to a JustVoxel development image/);
+  assert.equal(matrixAction(unresolved, 'Recover Switch Test'), undefined);
+  const failed = fixture(() => ({operation: null}), plan, undefined, undefined, undefined, {
+    request: () => ({ok: false}),
+  });
+  await flush();
+  assert.ok(failed.matrixRun.hidden);
+  assert.deepEqual(matrixText(failed), ['Switch matrix status could not be read.']);
+});
+
+test('Switch matrix discovery, live progress, and graceful cancellation use persisted appliance status', async () => {
+  let result = matrixSnapshot();
+  let starts = 0;
+  let stops = 0;
+  let finishStop;
+  const f = fixture(() => ({operation: null}), plan, undefined, undefined, undefined, {
+    request: (url, options) => {
+      if (url.endsWith('/start')) {
+        starts++;
+        assert.deepEqual([...options.body.keys()], ['csrf']);
+        result = matrixSnapshot('preparing');
+      }
+      if (url.endsWith('/stop')) {
+        stops++;
+        assert.equal(options.body.get('operation_id'), matrixID);
+        return new Promise(resolve => { finishStop = resolve; });
+      }
+      return matrixOK(result);
+    },
+  });
+  await flush();
+  assert.equal(f.matrixRun.disabled, false);
+  await f.cards[1].click();
+  await flush();
+  const consent = f.review.children.find(node => node.tag === 'label').children[1];
+  consent.checked = true;
+  consent.events.change();
+  const apply = f.review.children.at(-1).children.at(-1);
+  assert.equal(apply.disabled, false);
+  f.matrixRun.click();
+  f.matrixRun.click();
+  await flush();
+  assert.equal(starts, 1);
+  assert.equal(apply.disabled, true);
+  assert.ok(f.cards.every(card => card.disabled));
+  assert.deepEqual(matrixText(f), ['Discovering available releases from software publishers.']);
+  assert.equal(f.matrixStatus.children.find(node => node.tag === 'progress'), undefined);
+
+  result = matrixSnapshot('running');
+  await f.timers.shift()();
+  await flush();
+  assert.deepEqual(matrixText(f), [
+    'Switch matrix test in progress.', '7 / 23 completed', 'paper → purpur (Convert)',
+    'Passed: 2 · Failed: 1 · Unsupported: 3 · Blocked: 1',
+  ]);
+  const bar = f.matrixStatus.children.find(node => node.tag === 'progress');
+  assert.equal(bar.max, 23);
+  assert.equal(bar.value, 7);
+  const stop = matrixAction(f, 'Stop Test');
+  assert.equal(stop.className, undefined);
+  stop.click();
+  stop.click();
+  assert.equal(stops, 1);
+  assert.equal(matrixAction(f, 'Stop Test').disabled, true);
+  assert.doesNotMatch(matrixText(f).join(' '), /Cancellation requested/);
+  result = matrixSnapshot('running', {progress: {...matrixProgress, cancel_requested: true}});
+  finishStop(matrixOK(result));
+  await flush();
+  assert.match(matrixText(f).join(' '), /Cancellation requested\./);
+  assert.equal(matrixAction(f, 'Stop Test').disabled, true);
+  assert.equal(f.matrixRun.disabled, true);
+  result = matrixSnapshot('cancelled', {progress: {...matrixProgress, source: '', target: '', cancel_requested: true}});
+  while (f.timers.length) {
+    await f.timers.shift()();
+    await flush();
+  }
+  assert.match(matrixText(f).join(' '), /test cancelled.*Unfinished: 16/);
+  assert.equal(f.matrixRun.disabled, false);
+  assert.equal(apply.disabled, false);
+  assert.equal(f.cards[1].disabled, false);
+  assert.equal(matrixAction(f, 'Open Logs').className, undefined);
+});
+
+test('Switch matrix reconnects without an ordinary server and shows completed and recovery outcomes', async () => {
+  for (const state of ['completed', 'interrupted', 'needs_attention', 'recovered']) {
+    let requests = 0;
+    const f = fixture(() => assert.fail('matrix should not request an ordinary server operation'), plan, undefined, undefined, undefined, {
+      server: '',
+      request: (url, options) => {
+        requests++;
+        if (url.endsWith('/recover')) {
+          assert.equal(options.body.get('operation_id'), matrixID);
+          return matrixOK(matrixSnapshot('recovered'));
+        }
+        assert.equal(options.method, 'GET');
+        return matrixOK(matrixSnapshot(state));
+      },
+    });
+    await flush();
+    assert.deepEqual(f.operations, []);
+    assert.equal(requests, 1);
+    assert.deepEqual(f.timers, []);
+    assert.ok(matrixAction(f, 'Open Logs'));
+    if (state === 'completed') {
+      assert.match(matrixText(f).join(' '), /completed with failures/);
+      assert.equal(f.matrixRun.disabled, false);
+    }
+    if (state === 'interrupted' || state === 'needs_attention') {
+      assert.match(matrixText(f).join(' '), /needs attention.*Unfinished: 16/);
+      assert.equal(f.matrixRun.disabled, true);
+      const recover = matrixAction(f, 'Recover Switch Test');
+      assert.equal(recover.className, undefined);
+      recover.click();
+      await flush();
+      assert.equal(requests, 2);
+    }
+    if (state !== 'completed') {
+      assert.match(matrixText(f).join(' '), /cleanup recovered.*Unfinished: 16/);
+      assert.equal(f.matrixRun.disabled, false);
+    }
+  }
+  let reads = 0;
+  const active = fixture(() => assert.fail('no ordinary server'), plan, undefined, undefined, undefined, {
+    server: '',
+    request: (_url, options) => {
+      assert.equal(options.method, 'GET');
+      reads++;
+      return matrixOK(matrixSnapshot('running'));
+    },
+  });
+  await flush();
+  active.workspace.open = false;
+  await active.timers.shift()();
+  assert.equal(reads, 1);
+  assert.equal(active.matrixRun.disabled, true);
+});
+
+function nativeMatrixLogs(context) {
+  const nav = nativeNavigation(context);
+  const system = new Element('dialog');
+  system.dataset.workspaceWindow = 'system';
+  system.open = false;
+  system.show = () => { system.open = true; };
+  const content = new Element('div');
+  const tabs = ['health', 'logs'].map(name => {
+    const tab = new Element('button');
+    tab.dataset.systemTab = name;
+    return tab;
+  });
+  system.querySelector = selector => ({
+    '[data-system-workspace-content]': content,
+    '[data-system-state]': new Element('p'),
+  })[selector];
+  system.querySelectorAll = selector => selector === '[data-system-tab]' ? tabs : [];
+  const launcher = new Element('button');
+  const find = context.document.querySelector;
+  context.document.querySelector = selector => ({
+    '[data-system-open]': launcher,
+    '[data-system-workspace-dialog]': system,
+  })[selector] ?? find(selector);
+  Object.assign(context.document.body.classList, { remove() {}, toggle() {}, add() {} });
+  context.jvS = value => value;
+  context.formatDiagnosticLogTimestamp = () => '';
+  const requests = [];
+  const fetch = context.fetch;
+  context.fetch = (url, options) => {
+    if (url === '/api/session-info') return matrixOK({username: 'voxel', role: 'administrator'});
+    if (url === '/api/ups') return matrixOK({available: false});
+    if (url === '/api/system/workspace/logs') {
+      requests.push(url);
+      return matrixOK({logs: [{category: 'migration', log_id: matrixID, operation_type: 'switch_matrix'}]});
+    }
+    if (url === '/api/system/workspace/logs/migration/' + matrixID) {
+      requests.push(url);
+      return {ok: true, text: async () => 'structured matrix report'};
+    }
+    return fetch(url, options);
+  };
+  const systemSource = app.slice(app.indexOf('const systemWorkspaceOpen ='), app.indexOf('// Plugin workspace. All local inventory'));
+  vm.runInNewContext(systemSource, context);
+  return Object.assign(nav, {system, content, tabs, logRequests: requests});
+}
+
+test('Switch matrix Open Logs raises native System Settings, refreshes Migration, and preserves other workspaces', async () => {
+  const f = fixture(() => ({operation: null}), plan, undefined, undefined, nativeMatrixLogs, {
+    request: () => matrixOK(matrixSnapshot('completed')),
+  });
+  const nav = f.navigation;
+  await flush();
+  await nav.launcher.click();
+  await flush();
+  const selections = nav.selections();
+  const url = nav.location.href;
+  assert.ok(nav.dialog.open);
+  matrixAction(f, 'Open Logs').click();
+  await flush();
+  assert.ok(nav.system.open);
+  assert.equal(nav.tabs[1].attributes['aria-selected'], 'true');
+  const group = nav.content.children[0].children[0].children.find(button => button.textContent === 'Migration');
+  assert.equal(group.attributes['aria-pressed'], 'true');
+  const requests = ['/api/system/workspace/logs', '/api/system/workspace/logs/migration/' + matrixID];
+  assert.deepEqual(nav.logRequests, requests);
+  const previousZ = Number(nav.system.style.zIndex);
+  matrixAction(f, 'Open Logs').click();
+  await flush();
+  assert.ok(Number(nav.system.style.zIndex) > previousZ);
+  assert.deepEqual(nav.logRequests, requests.concat(requests));
+  assert.ok(f.workspace.open);
+  assert.ok(nav.dialog.open);
+  assert.deepEqual(nav.selections(), selections);
+  assert.equal(nav.location.href, url);
 });

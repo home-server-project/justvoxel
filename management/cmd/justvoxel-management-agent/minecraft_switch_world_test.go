@@ -403,3 +403,24 @@ func TestSwitchInPlaceRuntimeFailureRollsBackWorldAndSoftware(t *testing.T) {
 		t.Fatal("failed in-place conversion changed original world paths or bytes")
 	}
 }
+
+func TestSwitchLeafRejectsLinearCustomDimension(t *testing.T) {
+	data := t.TempDir()
+	switchWorldFixture(t, data, "26.3", "Family")
+	dir := filepath.Join(data, "Family", "dimensions", "example", "moon", "region")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "r.0.0.mca"), []byte("Anvil marker"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifySwitchLeafWorld(data); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "r.0.1.linear"), []byte("Linear marker"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifySwitchLeafWorld(data); err == nil {
+		t.Fatal("Linear region in a custom dimension was accepted")
+	}
+}
