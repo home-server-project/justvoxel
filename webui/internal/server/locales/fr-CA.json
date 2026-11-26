@@ -1558,7 +1558,7 @@
   "ui.75d0f1469d16": "Redémarrage…",
   "ui.75db37c5b1a1": "Les modules complémentaires nécessitent un plugiciel hôte Bukkit et ne sont pas disponibles pour les mods avec chargeur.",
   "ui.75dcb9e07392": "Le changement réseau a échoué.",
-  "ui.75ea388b9a14": "Autoriser la récupération à rétablir l’état précédent du serveur d’origine et à nettoyer un clone échoué, le cas échéant.",
+  "ui.75ea388b9a14": "Rétablir l’état du serveur d’origine et nettoyer le clone ayant échoué.",
   "ui.75f9fe5a435c": "Administrateur · page de secours",
   "ui.76140e34f635": "Capteurs",
   "ui.7623c72221c7": "L’importation du serveur nécessite une intervention.",

@@ -1558,7 +1558,7 @@
   "ui.75d0f1469d16": "Starter på nytt …",
   "ui.75db37c5b1a1": "Tillegg krever en Bukkit-pluginvert og er utilgjengelige for modifikasjoner som bruker modlaster.",
   "ui.75dcb9e07392": "Nettverksendringen mislyktes.",
-  "ui.75ea388b9a14": "Tillat at gjenopprettingen setter den opprinnelige serveren tilbake i forrige tilstand og rydder bort en eventuell mislykket klone.",
+  "ui.75ea388b9a14": "Gjenopprett tilstanden til den opprinnelige serveren og rydd opp etter en mislykket klone.",
   "ui.75f9fe5a435c": "Administrator · reserveside",
   "ui.76140e34f635": "Sensorer",
   "ui.7623c72221c7": "Serverimporten må følges opp.",

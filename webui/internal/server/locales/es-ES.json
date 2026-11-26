@@ -1558,7 +1558,7 @@
   "ui.75d0f1469d16": "Reiniciando…",
   "ui.75db37c5b1a1": "Los complementos necesitan un servidor compatible con plugins de Bukkit y no están disponibles para mods que necesitan un cargador.",
   "ui.75dcb9e07392": "Ha fallado el cambio de red.",
-  "ui.75ea388b9a14": "Permite que la recuperación restaure el estado anterior del servidor original y limpie el clon si falló su creación.",
+  "ui.75ea388b9a14": "Restaura el estado del servidor original y limpia el clon fallido.",
   "ui.75f9fe5a435c": "Administrador · página alternativa",
   "ui.76140e34f635": "Sensores",
   "ui.7623c72221c7": "La importación del servidor requiere atención.",

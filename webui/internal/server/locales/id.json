@@ -1558,7 +1558,7 @@
   "ui.75d0f1469d16": "Memulai ulang…",
   "ui.75db37c5b1a1": "Add-on memerlukan host plugin Bukkit dan tidak tersedia untuk mod yang memakai loader.",
   "ui.75dcb9e07392": "Perubahan jaringan gagal.",
-  "ui.75ea388b9a14": "Izinkan pemulihan mengembalikan server asli ke kondisi sebelumnya dan membersihkan klon yang gagal jika ada.",
+  "ui.75ea388b9a14": "Pulihkan keadaan server asli dan bersihkan klon yang gagal.",
   "ui.75f9fe5a435c": "Administrator · halaman cadangan",
   "ui.76140e34f635": "Sensor",
   "ui.7623c72221c7": "Impor Server perlu ditangani.",

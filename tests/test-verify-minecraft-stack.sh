@@ -42,6 +42,7 @@ podman() {
 }
 STUB
 sed -e "s|^source /usr/libexec/justvoxel/mjust/common.sh$|source ${fixture_dir}/common.sh|" \
+    -e "s|^    source /usr/libexec/justvoxel/mjust/instance-context.sh$|    source ${fixture_dir}/instance-context.sh|" \
     -e "s|/usr/libexec/justvoxel/mjust/managed-crossplay-mod-ownership|fixture_ownership|g" \
     "${repo_root}/mjust/libexec/verify-minecraft-stack" > "${fixture_dir}/verify"
 bash "${fixture_dir}/verify" 26.2
@@ -53,6 +54,40 @@ printf 'auth-type: online\n' > "${DATA_PATH}/plugins/Geyser-Spigot/config.yml"
 if bash "${fixture_dir}/verify" 26.2; then echo 'Unverified authentication accepted' >&2; exit 1; fi
 
 MINECRAFT_SERVER_TYPE=purpur BEDROCK_ENABLED=no VERSION_RESPONSE='This server is running Purpur version 26.2-19-main' bash "${fixture_dir}/verify" 26.2
+cat > "${fixture_dir}/instance-context.sh" <<'STUB'
+jv_load_instance() {
+    [[ $1 == jv-aaaaaa ]] || return 1
+    JV_INSTANCE_ID=$1
+    JV_INSTANCE_CONTAINER=minecraft-$1
+    JV_INSTANCE_UNIT=minecraft-$1.service
+    JV_NETWORK_MEMBER=no
+}
+STUB
+printf 'auth-type: floodgate\n' > "${DATA_PATH}/plugins/Geyser-Spigot/config.yml"
+(
+    export MINECRAFT_VERSION=26.3 MINECRAFT_SERVER_TYPE=purpur
+    export VERSION_RESPONSE='This server is running Purpur version 26.3-2660 (MC: 26.3)'
+    clone_verify() { bash "${fixture_dir}/verify" --instance jv-aaaaaa --switch-clone "$@"; }
+    BEDROCK_ENABLED=no PLUGIN_RESPONSE='Plugins (0):' clone_verify 26.3
+    BEDROCK_ENABLED=no PLUGIN_RESPONSE='Plugins (0):' \
+        VERSION_RESPONSE='This server is running Purpur version 26.3-2660-ver/26.3' clone_verify 26.3
+    BEDROCK_ENABLED=yes clone_verify 26.3
+    for plugins in 'Plugins (0):' 'Plugins (2): Geyser-Spigot, floodgate' 'Plugins (3): §cGeyser-Spigot, floodgate, ViaVersion'; do
+        if BEDROCK_ENABLED=yes PLUGIN_RESPONSE="${plugins}" clone_verify 26.3; then
+            echo 'Cross-play clone accepted an incomplete or disabled plugin stack' >&2; exit 1
+        fi
+    done
+    if BEDROCK_ENABLED=yes GEYSER_RESPONSE='Unknown command' clone_verify 26.3; then
+        echo 'Cross-play clone accepted an invalid Geyser version response' >&2; exit 1
+    fi
+    for failure in 'ACTIVE=no' 'READY=no' 'LIST_FAIL=yes' \
+        'VERSION_RESPONSE=This server is running Purpur (MC: 26.30)' \
+        'VERSION_RESPONSE=This server is running Paper (MC: 26.3) compatible with Purpur'; do
+        if env BEDROCK_ENABLED=no "${failure}" bash "${fixture_dir}/verify" --instance jv-aaaaaa --switch-clone 26.3; then
+            echo "Invalid Java-only clone runtime accepted: ${failure}" >&2; exit 1
+        fi
+    done
+)
 MINECRAFT_SERVER_TYPE=vanilla BEDROCK_ENABLED=no MONITOR_RESPONSE='{"server_info":{"version":{"name":"26.2"}}}' bash "${fixture_dir}/verify" 26.2
 for response in '{"server_info":{"version":{"name":"26.3"}}}' '{}' 'not JSON'; do
     if MINECRAFT_SERVER_TYPE=vanilla BEDROCK_ENABLED=no MONITOR_RESPONSE="${response}" bash "${fixture_dir}/verify" 26.2; then

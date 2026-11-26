@@ -116,9 +116,12 @@ destination and uses the existing cold-backup maintenance/rollback transaction.
 same storage root, the same backup destination and automatically allocated ports.
 It briefly stops a running original for a consistent backup/copy, then restores
 its previous state. A verified clone is left stopped, with normal rename available.
-Failed clones are never reported as successful; existing creation, restore and
-runtime recovery mechanisms clean up or retain a contextual Switch recovery action.
-No conversion is automatically retried.
+A Java-only clone can pass runtime verification with zero plugins. When Cross-play
+is enabled, the managed Cross-play stack must also pass verification.
+If Switch needs attention, select **Recover Switch** to restore the original
+server's previous state and finish cleaning up any failed clone. Recovery leaves
+the original server verified and removes the failed clone's name after cleanup
+is verified. No conversion is automatically retried.
 
 Switch supports Paper/Purpur/Pufferfish/Leaf in every direction with an exact
 available runtime, Vanilla to that family or a supported Java mod loader, and

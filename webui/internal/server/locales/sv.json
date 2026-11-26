@@ -1558,7 +1558,7 @@
   "ui.75d0f1469d16": "Startar om…",
   "ui.75db37c5b1a1": "Tillägg kräver en värd för Bukkit-insticksprogram och kan inte användas med moddar som kräver en moddladdare.",
   "ui.75dcb9e07392": "Nätverksändringen misslyckades.",
-  "ui.75ea388b9a14": "Tillåt att återställningen återför originalservern till dess tidigare tillstånd och rensar en eventuell misslyckad klon.",
+  "ui.75ea388b9a14": "Återställ originalserverns tillstånd och rensa bort den misslyckade klonen.",
   "ui.75f9fe5a435c": "Administratör · reservsida",
   "ui.76140e34f635": "Sensorer",
   "ui.7623c72221c7": "Serverimporten behöver åtgärdas.",

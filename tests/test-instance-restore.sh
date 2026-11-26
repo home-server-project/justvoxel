@@ -14,14 +14,14 @@ namespace = {'__name__':'backup_fixtures'}
 exec(compile(text.replace('unittest.main()',''),'<backup fixtures>','exec'),namespace)
 Base = namespace['InstanceBackups']
 
-def world_metadata(version='1.21.4', data_version=4189):
+def world_metadata(version='1.21.4', data_version=4189, extra_data=b''):
     def name(value):
         raw=value.encode();return struct.pack('>H',len(raw))+raw
     raw=b'\x0a'+name('')+b'\x0a'+name('Data')
     raw+=b'\x03'+name('DataVersion')+struct.pack('>i',data_version)
     raw+=b'\x0a'+name('Version')+b'\x03'+name('Id')+struct.pack('>i',data_version)
     raw+=b'\x08'+name('Name')+name(version)+b'\x01'+name('Snapshot')+b'\x00'
-    return gzip.compress(raw+b'\x00\x00\x00', mtime=0)
+    return gzip.compress(raw+b'\x00'+extra_data+b'\x00\x00', mtime=0)
 
 class IndependentRestore(unittest.TestCase):
     private = Base.private
@@ -60,9 +60,11 @@ class IndependentRestore(unittest.TestCase):
         self.other=self.root/'storage/minecraft-instances/jv-bbbbbb/data/level.dat'
         (self.data/'level.dat').write_bytes(b'original at restore time')
 
-    def restore(self,action,plan='',ok=True,identity='jv-aaaaaa',source=None,archive=None):
+    def restore(self,action,plan='',ok=True,identity='jv-aaaaaa',source=None,archive=None,clone_source=None):
         helper=self.helpers/'restore-worker';self.tool(helper,source or self.restore_source)
-        result=subprocess.run(['bash',str(helper),action,identity,archive or self.archive,plan,'false'],env=self.env,capture_output=True,text=True,timeout=30)
+        args=['bash',str(helper),action,identity,archive or self.archive,plan,'false']
+        if clone_source is not None: args.append(clone_source)
+        result=subprocess.run(args,env=self.env,capture_output=True,text=True,timeout=30)
         self.assertEqual(result.returncode==0,ok,result.stdout+result.stderr)
         self.assertNotIn('private-runtime-secret',result.stdout+result.stderr)
         return result
@@ -145,6 +147,83 @@ class IndependentRestore(unittest.TestCase):
         self.private(config,json.dumps(record))
         self.restore('plan',ok=False)
         self.assertEqual((self.data/'world/level.dat').read_bytes(),world_metadata())
+
+    def test_neoforge_to_paper_clone_stages_source_owned_exact_version_archive(self):
+        source, clone = 'jv-aaaaaa', 'jv-bbbbbb'
+        source_config = self.configs/source/'config.json'
+        clone_config = self.configs/clone/'config.json'
+        source_record = json.loads(source_config.read_text())
+        source_record['runtime'].update(software='neoforge', loader_version='21.4.147', version_policy='pinned')
+        self.private(source_config,json.dumps(source_record))
+        clone_record = json.loads(clone_config.read_text())
+        clone_record['runtime'].update(start_on_boot=False, version_policy='pinned', preserve_content=True)
+        self.private(clone_config,json.dumps(clone_record))
+        self.assertEqual(source_record['storage']['root'],clone_record['storage']['root'])
+        self.run_helper('create',source)
+        ordinary = next(m for m in self.inventory(source) if m['software']=='neoforge')
+        self.assertEqual(self.plan(identity=source,archive=ordinary['archive'])['metadata'],ordinary)
+        # A deployed source can still use the global backup configuration,
+        # while a new clone gets an explicit placement from the snapshot.
+        self.pin_backup(clone,self.root/'clone-backups')
+        (self.root/'clone-backups'/clone).mkdir()
+
+        # A Java-written mod string with a NUL and supplementary character.
+        # NBT uses modified UTF-8, including UTF-16 surrogate code units.
+        mod_data = b'\x08\x00\x07ModNote\x00\x08\xc0\x80\xed\xa0\xbd\xed\xb8\x80'
+        world = world_metadata(extra_data=mod_data)
+        (self.data/'world/level.dat').write_bytes(world)
+        self.run_helper('create',source)
+        item = next(m for m in self.inventory(source) if m['software']=='neoforge' and m['archive']!=ordinary['archive'])
+        self.archive = item['archive']
+        args = {'identity': clone, 'clone_source': source}
+        plan = self.plan(**args)
+        self.assertEqual(plan['metadata'],item)
+        self.assertEqual((plan['metadata']['id'],plan['metadata']['loader_version']),(source,'21.4.147'))
+        self.assertEqual((plan['current_software'],plan['current_version']),('paper','1.21.4'))
+
+        # Even in the clone's own backup namespace, foreign ownership fails.
+        clone_backups = self.root/'clone-backups'/clone
+        meta = self.backups/source/(self.archive+'.meta.json')
+        self.private(clone_backups/meta.name,meta.read_text())
+        self.restore('plan',identity=clone,ok=False)
+        owned = dict(item,id=clone)
+        self.private(clone_backups/meta.name,json.dumps(owned))
+        result = self.restore('plan',identity=clone,ok=False)
+        self.assertEqual(json.loads(result.stdout),{'error':'incompatible_software_version'})
+
+        for patch, code in [
+            ({'id': clone}, 'invalid_metadata_binding'),
+            ({'configuration_sha256': 'a'*64}, 'invalid_metadata_binding'),
+            ({'loader_version': '21.4.148'}, 'invalid_loader_evidence'),
+            ({'loader_version': '/private/archive-controlled'}, 'invalid_loader_evidence'),
+            ({'version': '1.21.3'}, 'incompatible_software_version'),
+            ({'sha256': 'a'*64}, 'invalid_archive_integrity'),
+        ]:
+            with self.subTest(patch=patch):
+                self.private(meta,json.dumps(dict(item,**patch)))
+                result = self.restore('plan',ok=False,**args)
+                self.assertEqual(json.loads(result.stdout),{'error':code})
+                self.assertNotIn(str(self.root),result.stdout+result.stderr)
+                self.assertNotIn('archive-controlled',result.stdout+result.stderr)
+        self.private(meta,json.dumps(item))
+        for invalid_source in (clone,'/private/archive-controlled'):
+            result = self.restore('plan',identity=clone,clone_source=invalid_source,ok=False)
+            self.assertEqual(json.loads(result.stdout),{'error':'invalid_clone_identity'})
+        result = self.restore('prepare','0'*64,ok=False,**args)
+        self.assertEqual(json.loads(result.stdout),{'error':'stale_plan'})
+        self.restore('prepare',plan['fingerprint'],**args)
+        result = self.restore('plan',ok=False,**args)
+        self.assertEqual(json.loads(result.stdout),{'error':'recovery_required'})
+        # Only planning and preparation carry clone_source. Durable activation
+        # and rollback retain the independent restore journal's destination ID.
+        self.restore('shutdown',identity=clone)
+        self.restore('activate',identity=clone)
+        self.assertEqual((self.other.parent/'world/level.dat').read_bytes(),world)
+        self.assertEqual((self.data/'world/level.dat').read_bytes(),world)
+        self.restore('rollback',identity=clone)
+        self.restore('rollback-verifying',identity=clone)
+        self.restore('rolled-back',identity=clone)
+        self.assertEqual(self.other.read_bytes(),b'jv-bbbbbb world')
 
     def test_same_instance_atomic_replacement_original_preserved_and_isolation(self):
         other=self.other.read_bytes();plan=self.prepare()

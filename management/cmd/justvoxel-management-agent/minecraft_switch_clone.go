@@ -253,7 +253,8 @@ func (s *server) cloneMinecraftSwitch(ctx context.Context, e *minecraftSwitchEvi
 		return err
 	}
 	var inspection instanceRestoreInspection
-	if instanceDecode(out, &inspection) != nil || inspection.Metadata.ID != e.Source || inspection.Metadata.Archive != archive.Archive || inspection.Integrity != "verified" || !instanceSHA256Pattern.MatchString(inspection.Fingerprint) {
+	if instanceDecode(out, &inspection) != nil || inspection.Metadata != archive || inspection.CurrentSoftware != p.Target || inspection.CurrentVersion != p.Version ||
+		inspection.Integrity != "verified" || !instanceSHA256Pattern.MatchString(inspection.Fingerprint) {
 		return errInstanceRecovery
 	}
 	plan := instanceRestorePlan{instanceRestoreInspection: inspection, RuntimeState: "stopped", CloneSourceID: e.Source}
@@ -280,17 +281,8 @@ func (s *server) cloneMinecraftSwitch(ctx context.Context, e *minecraftSwitchEvi
 	if err = lock.start(ctx, e.CloneID); err != nil {
 		return err
 	}
-	if err = verifyPluginRuntime(ctx, e.CloneID, p.Version); err != nil {
+	if err = b.verifySwitchCloneRuntime(ctx, *e, p); err != nil {
 		return err
-	}
-	record, err := b.readRecord(e.CloneID)
-	if err != nil || record.Runtime.Software != p.Target || record.Runtime.Version != p.Version || record.Runtime.ID == e.Source {
-		return errInstanceRecovery
-	}
-	expected, imageErr := b.command(ctx, "podman", "image", "inspect", instanceRuntimeImage(record.Runtime), "--format", "{{.Id}}")
-	actual, runningErr := b.command(ctx, "podman", "inspect", "minecraft-"+e.CloneID, "--format", "{{.Image}}")
-	if imageErr != nil || runningErr != nil || strings.TrimSpace(string(expected)) == "" || strings.TrimSpace(string(expected)) != strings.TrimSpace(string(actual)) {
-		return errInstanceRecovery
 	}
 
 	// A new clone is left stopped after meaningful runtime verification, avoiding
@@ -310,15 +302,78 @@ func (s *server) cloneMinecraftSwitch(ctx context.Context, e *minecraftSwitchEvi
 	return saveSwitchEvidence(*e)
 }
 
+func (b *instanceRuntimeBackend) verifySwitchCloneRuntime(ctx context.Context, e minecraftSwitchEvidence, p minecraftSwitchPlan) error {
+	record, err := b.readRecord(e.CloneID)
+	if err != nil || e.CloneRecord == nil || e.CloneID == e.Source || record.Runtime.ID != e.CloneID ||
+		record.Runtime.Software != p.Target || record.Runtime.Version != p.Version || record.Runtime.VersionPolicy != "pinned" ||
+		record.Runtime.ImageTag != p.Runtime.ImageTag || record.Runtime.ImageDigest != p.RuntimeDigest ||
+		record.Runtime.LoaderVersion != p.Runtime.LoaderVersion || record.Runtime.PufferfishBuild != p.Runtime.PufferfishBuild ||
+		record.Runtime.BedrockEnabled != e.CloneRecord.Runtime.BedrockEnabled || !record.Runtime.PreserveContent ||
+		record.NetworkMember || record.Storage != e.CloneRecord.Storage {
+		return errInstanceRecovery
+	}
+	if err := b.verifyLive(record); err != nil {
+		return err
+	}
+	if err := verifyPluginRuntimeMode(ctx, e.CloneID, p.Version, "--switch-clone"); err != nil {
+		return err
+	}
+	state, err := b.observeRaw(ctx, e.CloneID)
+	if err != nil || state.State != "running" {
+		return errInstanceRecovery
+	}
+	if _, err := b.players(ctx, e.CloneID); err != nil {
+		return err
+	}
+	expected, imageErr := b.command(ctx, "podman", "image", "inspect", instanceRuntimeImage(record.Runtime), "--format", "{{.Id}}")
+	actual, runningErr := b.command(ctx, "podman", "inspect", "minecraft-"+e.CloneID, "--format", "{{.Image}}")
+	if imageErr != nil || runningErr != nil || strings.TrimSpace(string(expected)) == "" || strings.TrimSpace(string(expected)) != strings.TrimSpace(string(actual)) {
+		return errInstanceRecovery
+	}
+	return nil
+}
+
 func (b *instanceRuntimeBackend) switchCloneRestoreStorage(ctx context.Context, action, id, source, archive, fingerprint string) ([]byte, error) {
 	if !instanceIDPattern.MatchString(id) || !instanceIDPattern.MatchString(source) || id == source || (action != "plan" && action != "prepare") {
 		return nil, errInstanceID
 	}
 	out, err := instanceBackupStorageCommand(ctx, "nsenter", "--mount=/proc/1/ns/mnt", "--", instanceRestoreHelper, action, id, archive, fingerprint, "false", source)
 	if err != nil {
-		return nil, instanceRuntimeFailure("The consistent source archive could not be safely staged into the new clone. The original server is preserved.")
+		return nil, switchCloneRestoreFailure(out)
 	}
 	return out, nil
+}
+
+func switchCloneRestoreFailure(out []byte) error {
+	const message = "The consistent source archive could not be safely staged into the new clone. The original server is preserved."
+	var refusal struct {
+		Error string `json:"error"`
+	}
+	if len(out) <= 256 && instanceDecode(out, &refusal) == nil {
+		var reason string
+		switch refusal.Error {
+		case "invalid_clone_identity":
+			reason = "The source and clone runtime identities or storage bindings could not be verified."
+		case "invalid_metadata_binding":
+			reason = "The backup metadata does not match the source server or archive."
+		case "invalid_archive_integrity":
+			reason = "The backup archive or world metadata failed integrity validation."
+		case "invalid_loader_evidence":
+			reason = "The backup loader version could not be verified against the source server."
+		case "incompatible_software_version", "unverified_version":
+			reason = "The source and target could not be verified at the same exact Minecraft version."
+		case "insufficient_staging_capacity":
+			reason = "Clone storage has insufficient capacity for staging and rollback."
+		case "stale_plan":
+			reason = "The clone restore plan changed before staging."
+		case "recovery_required":
+			reason = "An interrupted restore requires recovery before staging."
+		}
+		if reason != "" {
+			return instanceRuntimeFailure(message + " " + reason)
+		}
+	}
+	return instanceRuntimeFailure(message)
 }
 
 func (s *server) restoreSwitchSource(ctx context.Context, e *minecraftSwitchEvidence, lock *pluginMaintenanceLock) error {
@@ -558,6 +613,9 @@ func (s *server) recoverMinecraftSwitch(ctx context.Context, e *minecraftSwitchE
 
 func (b *instanceRuntimeBackend) finishSwitchCloneRecovery(ctx context.Context, e *minecraftSwitchEvidence) error {
 	if id := e.CloneID; id != "" {
+		if !switchStructuralPathFromEvidence(*e) {
+			return errInstanceRecovery
+		}
 		if _, err := b.identities().readRecord(id + ".json"); !errors.Is(err, os.ErrNotExist) {
 			return errInstanceRecovery
 		}
@@ -582,6 +640,24 @@ func (b *instanceRuntimeBackend) finishSwitchCloneRecovery(ctx context.Context, 
 	}
 	if err := b.verifyCommittedSwitchState(ctx, e.Source); err != nil {
 		return err
+	}
+	if e.CloneID != "" {
+		name := filepath.Join(b.identities().directory, "names", e.CloneID+".json")
+		raw, err := b.readPrivate(name)
+		if err == nil {
+			var record minecraftInstanceNameRecord
+			if instanceDecode(raw, &record) != nil || record.ID != e.CloneID || record.Software != e.CloneRecord.Runtime.Software {
+				return errInstanceRecovery
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if err := b.removePrivate(name); err != nil {
+			return err
+		}
+		if _, err := os.Lstat(name); !errors.Is(err, os.ErrNotExist) {
+			return errInstanceRecovery
+		}
 	}
 	e.Stage = "recovered"
 	return saveSwitchEvidence(*e)

@@ -1558,7 +1558,7 @@
   "ui.75d0f1469d16": "Yeniden başlatılıyor…",
   "ui.75db37c5b1a1": "Eklentiler bir Bukkit eklenti sunucusu gerektirir ve mod yükleyici modları için kullanılamaz.",
   "ui.75dcb9e07392": "Ağ değişikliği başarısız oldu.",
-  "ui.75ea388b9a14": "Kurtarmanın özgün sunucuyu önceki durumuna döndürmesine ve varsa başarısız klonu temizlemesine izin verin.",
+  "ui.75ea388b9a14": "Özgün sunucunun durumunu geri yükleyin ve başarısız klonu temizleyin.",
   "ui.75f9fe5a435c": "Yönetici · alternatif sayfa",
   "ui.76140e34f635": "Sensörler",
   "ui.7623c72221c7": "Sunucu İçe Aktarma müdahale gerektiriyor.",

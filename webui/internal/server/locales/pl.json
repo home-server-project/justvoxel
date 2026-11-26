@@ -1558,7 +1558,7 @@
   "ui.75d0f1469d16": "Ponowne uruchamianie…",
   "ui.75db37c5b1a1": "Dodatki wymagają serwera obsługującego wtyczki Bukkit i są niedostępne dla modów wymagających programu ładującego.",
   "ui.75dcb9e07392": "Nie udało się zmienić sieci.",
-  "ui.75ea388b9a14": "Zezwól na przywrócenie poprzedniego stanu oryginalnego serwera i usunięcie nieudanego klonu, jeśli powstał.",
+  "ui.75ea388b9a14": "Przywróć stan oryginalnego serwera i usuń nieudany klon.",
   "ui.75f9fe5a435c": "Administrator · strona awaryjna",
   "ui.76140e34f635": "Czujniki",
   "ui.7623c72221c7": "Import serwera wymaga uwagi.",

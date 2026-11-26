@@ -1558,7 +1558,7 @@
   "ui.75d0f1469d16": "Reiniciando…",
   "ui.75db37c5b1a1": "Complementos exigem um host de plugins Bukkit e estão indisponíveis para mods que usam carregador.",
   "ui.75dcb9e07392": "Falha na alteração de rede.",
-  "ui.75ea388b9a14": "Permita que a recuperação restaure o estado anterior do servidor original e limpe um clone com falha, se houver.",
+  "ui.75ea388b9a14": "Restaure o estado do servidor original e limpe o clone que falhou.",
   "ui.75f9fe5a435c": "Administrador · página alternativa",
   "ui.76140e34f635": "Sensores",
   "ui.7623c72221c7": "A importação de servidor precisa de atenção.",

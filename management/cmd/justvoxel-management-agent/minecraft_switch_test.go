@@ -481,11 +481,25 @@ func TestSwitchRuntimeGuardPreservesNormalRendering(t *testing.T) {
 	}
 }
 
-func TestSwitchFailedCloneRuntimeVerificationPreservesOriginal(t *testing.T) {
-	for _, target := range []string{"purpur", "vanilla", "fabric"} {
-		t.Run(target, func(t *testing.T) {
-
-			f := switchPlannerFixture(t)
+func TestSwitchCloneRuntimeVerificationAndRecovery(t *testing.T) {
+	for _, tc := range []struct {
+		name, from, target string
+		success, interrupt bool
+	}{
+		{name: "Paper to Purpur failure", from: "paper", target: "purpur"},
+		{name: "Paper to Vanilla failure", from: "paper", target: "vanilla"},
+		{name: "Paper to Fabric failure", from: "paper", target: "fabric"},
+		{name: "Vanilla to Purpur Java only", from: "vanilla", target: "purpur", success: true},
+		{name: "retry interrupted cleanup", from: "paper", target: "purpur", interrupt: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			target := tc.target
+			var f *instanceActivationFixture
+			if tc.from == "paper" {
+				f = switchPlannerFixture(t)
+			} else {
+				f = switchPlannerFixture(t, tc.from)
+			}
 			oldStorage, oldCommand, oldLock, oldDiagnostic := instanceBackupStorageCommand, pluginInstallCommand, pluginRuntimeLockPath, runFailedUnitCommand
 			t.Cleanup(func() {
 				instanceBackupStorageCommand = oldStorage
@@ -544,7 +558,21 @@ func TestSwitchFailedCloneRuntimeVerificationPreservesOriginal(t *testing.T) {
 				}
 			}
 			base := f.backend.command
+			blockCleanup := tc.interrupt
+			imageChecks := 0
 			f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+				if command == "podman" && (len(args) == 5 && args[0] == "image" && args[1] == "inspect" ||
+					len(args) == 4 && args[0] == "inspect" && args[3] == "{{.Image}}") {
+					if !tc.success || f.states[cloneID] != "active" {
+						t.Fatal("unexpected clone image proof", args)
+					}
+					if args[0] == "image" && args[2] != "docker.io/itzg/minecraft-server@"+testMinecraftResetFingerprint ||
+						args[0] == "inspect" && args[1] != "minecraft-"+cloneID {
+						t.Fatal("clone image proof used an unexpected binding", args)
+					}
+					imageChecks++
+					return []byte("verified-image-id\n"), nil
+				}
 				if command == "podman" && len(args) > 0 && args[0] == "rm" {
 					if cloneID == "" || cloneID == sourceID || !reflect.DeepEqual(args, []string{"rm", "--ignore", "--", "minecraft-" + cloneID}) {
 						t.Fatal("cleanup did not target the expected failed clone", args)
@@ -572,6 +600,9 @@ func TestSwitchFailedCloneRuntimeVerificationPreservesOriginal(t *testing.T) {
 						return out, err
 					}
 					if args[2] == instanceRuntimeHelper && args[3] == "restore-validate" && args[4] == cloneID {
+						if blockCleanup {
+							return nil, errors.New("clone storage temporarily unavailable")
+						}
 						return nil, nil
 					}
 				}
@@ -589,7 +620,7 @@ func TestSwitchFailedCloneRuntimeVerificationPreservesOriginal(t *testing.T) {
 				return base(ctx, command, args...)
 			}
 			created := false
-			archive := instanceBackupMetadata{Schema: 1, ID: sourceID, Software: "paper", Version: "1.21.4", Archive: "JV Paper-backup-paper-2026-03-06-0015.tar.gz"}
+			archive := instanceBackupMetadata{Schema: 1, ID: sourceID, Software: tc.from, Version: "1.21.4", Archive: "Source-backup-" + tc.from + "-2026-03-06-0015.tar.gz"}
 			instanceBackupStorageCommand = func(ctx context.Context, command string, args ...string) ([]byte, error) {
 				if command != "nsenter" || len(args) < 5 {
 					t.Fatal("unexpected storage call", command, args)
@@ -620,7 +651,10 @@ func TestSwitchFailedCloneRuntimeVerificationPreservesOriginal(t *testing.T) {
 						t.Fatal("unexpected clone identity or automatic retry", id)
 					}
 					cloneID = id
-					return json.Marshal(instanceRestoreInspection{Metadata: archive, Integrity: "verified", Fingerprint: instanceHash([]byte("clone-copy"))})
+					if len(args) != 9 || args[8] != sourceID {
+						t.Fatal("clone restore omitted its source binding", args)
+					}
+					return json.Marshal(instanceRestoreInspection{Metadata: archive, CurrentSoftware: target, CurrentVersion: archive.Version, Integrity: "verified", Fingerprint: instanceHash([]byte("clone-copy"))})
 				}
 				if action == "prepare" {
 					raw, err := f.backend.readPrivate(filepath.Join(f.backend.root, id, "config.json"))
@@ -672,10 +706,10 @@ func TestSwitchFailedCloneRuntimeVerificationPreservesOriginal(t *testing.T) {
 					return []byte(f.players), nil
 				}
 				if strings.HasSuffix(command, "verify-minecraft-stack") {
-					if cloneID == "" || !reflect.DeepEqual(args, []string{"--instance", cloneID, "1.21.4"}) {
+					if cloneID == "" || !reflect.DeepEqual(args, []string{"--instance", cloneID, "--switch-clone", "1.21.4"}) {
 						t.Fatal("runtime verification did not target the exact-version clone", args)
 					}
-					if switchNeedsWorldMove("paper", target) {
+					if switchNeedsWorldMove(tc.from, target) {
 						clone, readErr := f.backend.readRecord(cloneID)
 						if readErr != nil {
 							t.Fatal(readErr)
@@ -691,6 +725,13 @@ func TestSwitchFailedCloneRuntimeVerificationPreservesOriginal(t *testing.T) {
 					}
 					verificationCalls++
 					verified = true
+					if tc.success {
+						clone, err := f.backend.readRecord(cloneID)
+						if err != nil || clone.Runtime.BedrockEnabled || clone.Runtime.Software != "purpur" || clone.Runtime.Version != "1.21.4" || f.states[cloneID] != "active" {
+							t.Fatal("Java-only target did not start at the planned version", err)
+						}
+						return []byte("Minecraft version: Purpur 1.21.4\n"), nil
+					}
 					return []byte("verification stopped at internal-node.example\ntoken=verification-secret\n"), errors.New("target software failed exact verification")
 				}
 				t.Fatal("unexpected runtime command", command, args)
@@ -711,13 +752,39 @@ func TestSwitchFailedCloneRuntimeVerificationPreservesOriginal(t *testing.T) {
 			}
 			s.runMinecraftSwitch(context.Background(), journal, plan, request)
 			result, err := s.operations.get(journal.OperationID)
+			if tc.success {
+				if err != nil || result.State != operationSucceeded || verificationCalls != 1 || imageChecks != 2 || cleanupCalls != 0 ||
+					f.states[cloneID] != "inactive" || len(diagnostics) != 0 {
+					t.Fatalf("Java-only clone did not complete and stop cleanly: %+v %v", result, err)
+				}
+				return
+			}
 			if err != nil || !verified || result.State == operationSucceeded || result.State == operationRunning {
 				t.Fatalf("failed verification reported success: %+v verified=%v err=%v", result, verified, err)
 			}
-			if cleanupCalls != 1 || verificationCalls != 1 || result.State != operationResolved {
+			expectedState := operationResolved
+			if tc.interrupt {
+				expectedState = operationNeedsAttention
+			}
+			if cleanupCalls != 1 || verificationCalls != 1 || result.State != expectedState {
 				t.Fatalf("failed clone was not cleaned up and recovered exactly once: cleanup=%d verification=%d result=%+v", cleanupCalls, verificationCalls, result)
 			}
 			evidence, err := readSwitchEvidence(journal)
+			namePath := filepath.Join(f.backend.identities().directory, "names", cloneID+".json")
+			if tc.interrupt {
+				if err != nil || evidence.CloneID != cloneID || evidence.Stage != "verifying_clone" {
+					t.Fatalf("unsafe cleanup lost its Switch evidence: %+v %v", evidence, err)
+				}
+				if _, err := os.Lstat(namePath); err != nil {
+					t.Fatal("unsafe cleanup removed the name before absence was proven", err)
+				}
+				blockCleanup = false
+				for i := 0; i < 2; i++ {
+					if err := s.recoverMinecraftSwitch(context.Background(), &evidence); err != nil {
+						t.Fatal("verified clone cleanup could not be retried safely", err)
+					}
+				}
+			}
 			if err != nil || evidence.CloneID != cloneID || evidence.Stage != "recovered" {
 				t.Fatalf("clone recovery evidence was not completed: %+v %v", evidence, err)
 			}
@@ -725,8 +792,12 @@ func TestSwitchFailedCloneRuntimeVerificationPreservesOriginal(t *testing.T) {
 				t.Fatal("failed clone did not attempt both bounded diagnostic commands", diagnostics)
 			}
 			log := switchTestDiagnostic(t, s.operations, journal.OperationID)
+			recoveryResult := `result="succeeded"`
+			if tc.interrupt {
+				recoveryResult = `result="failed"`
+			}
 			for _, want := range []string{"target software failed exact verification", `stage="verifying_clone"`, `target="` + target + `"`,
-				`action="clone"`, `version="1.21.4"`, `clone_id="` + cloneID + `"`, `result="succeeded"`, "<HOSTNAME-REDACTED>"} {
+				`action="clone"`, `version="1.21.4"`, `clone_id="` + cloneID + `"`, recoveryResult, "<HOSTNAME-REDACTED>"} {
 				if !strings.Contains(log, want) {
 					t.Errorf("migration diagnostic missing %q", want)
 				}
@@ -745,6 +816,18 @@ func TestSwitchFailedCloneRuntimeVerificationPreservesOriginal(t *testing.T) {
 			}
 			if _, err := os.Lstat(filepath.Dir(evidence.CloneRecord.Storage.DataPath)); !errors.Is(err, os.ErrNotExist) {
 				t.Fatal("failed clone parent remains", err)
+			}
+			dir, env, quadlet := f.backend.paths(cloneID)
+			for _, path := range []string{namePath, dir, env, quadlet, f.backend.deletePath(cloneID), filepath.Join(dir, "restore-journal.json")} {
+				if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+					t.Fatal("failed clone artifact remains", path, err)
+				}
+			}
+			if _, err := f.backend.identities().readRecord(cloneID + ".json"); !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("failed clone remains registered", err)
+			}
+			if state, err := f.backend.observeRaw(context.Background(), cloneID); err != nil || state.State != "configured" {
+				t.Fatal("failed clone unit or container remains", state, err)
 			}
 			response := switchTestOperation(t, s, sourceID, "?operation_id="+journal.OperationID)
 			if response["clone_id"] != cloneID || response["target"] != target || response["action"] != "clone" || response["version"] != "1.21.4" {
@@ -765,6 +848,31 @@ func TestSwitchFailedCloneRuntimeVerificationPreservesOriginal(t *testing.T) {
 				t.Fatal("failed converted clone changed original world paths or bytes")
 			}
 		})
+	}
+}
+
+func TestSwitchCloneRestoreRefusalIsBounded(t *testing.T) {
+	generic := switchCloneRestoreFailure(nil).Error()
+	for _, tc := range []struct {
+		output string
+		reason string
+	}{
+		{`{"error":"invalid_loader_evidence"}`, "The backup loader version could not be verified against the source server."},
+		{`{"error":"invalid_archive_integrity"}`, "The backup archive or world metadata failed integrity validation."},
+		{`{"error":"stale_plan"}`, "The clone restore plan changed before staging."},
+		{`{"error":"recovery_required"}`, "An interrupted restore requires recovery before staging."},
+		{`{"error":"/private/archive-controlled"}`, ""},
+		{`{"error":"invalid_metadata_binding","detail":"private-runtime-secret"}`, ""},
+		{`{"error":"stale_plan"}` + strings.Repeat(" ", 256), ""},
+		{`{"error":"stale_plan"}{"error":"invalid_loader_evidence"}`, ""},
+	} {
+		want := generic
+		if tc.reason != "" {
+			want += " " + tc.reason
+		}
+		if got := switchCloneRestoreFailure([]byte(tc.output)).Error(); got != want || !strings.Contains(got, "The original server is preserved.") {
+			t.Errorf("unexpected clone restore refusal %q, want %q", got, want)
+		}
 	}
 }
 

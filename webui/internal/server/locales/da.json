@@ -1558,7 +1558,7 @@
   "ui.75d0f1469d16": "Genstarter…",
   "ui.75db37c5b1a1": "Tilføjelser kræver en Bukkit-pluginvært og er utilgængelige for mods som bruger modloader.",
   "ui.75dcb9e07392": "Netværksændringen mislykkedes.",
-  "ui.75ea388b9a14": "Tillad at gendannelsen setter den oprindelige server tilbage i forrige tilstand og rydder væk en eventuel mislykket klon.",
+  "ui.75ea388b9a14": "Gendan den oprindelige servers tilstand, og ryd op efter en mislykket klon.",
   "ui.75f9fe5a435c": "Administrator · reserveside",
   "ui.76140e34f635": "Sensorer",
   "ui.7623c72221c7": "Serverimporten skal følges op.",

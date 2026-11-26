@@ -1558,7 +1558,7 @@
   "ui.75d0f1469d16": "Opnieuw starten…",
   "ui.75db37c5b1a1": "Uitbreidingen vereisen een Bukkit-plug-inhost en zijn niet beschikbaar voor loadermods.",
   "ui.75dcb9e07392": "Netwerkwijziging mislukt.",
-  "ui.75ea388b9a14": "Sta toe dat herstel de vorige toestand van de oorspronkelijke server terugzet en een eventuele mislukte kloon opruimt.",
+  "ui.75ea388b9a14": "Herstel de toestand van de oorspronkelijke server en ruim de mislukte kloon op.",
   "ui.75f9fe5a435c": "Beheerder · terugvalpagina",
   "ui.76140e34f635": "Sensoren",
   "ui.7623c72221c7": "Serverimport vereist aandacht.",

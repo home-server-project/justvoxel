@@ -1315,14 +1315,14 @@ func pluginService(ctx context.Context, id, action string) error {
 	return err
 }
 func verifyPluginRuntime(ctx context.Context, id, version string) error {
-	return verifyPluginRuntimeMode(ctx, id, version, false)
+	return verifyPluginRuntimeMode(ctx, id, version, "")
 }
 
 func verifyPluginInstallRuntime(ctx context.Context, id, version string) error {
-	return verifyPluginRuntimeMode(ctx, id, version, true)
+	return verifyPluginRuntimeMode(ctx, id, version, "--content-install")
 }
 
-func verifyPluginRuntimeMode(ctx context.Context, id, version string, contentInstall bool) error {
+func verifyPluginRuntimeMode(ctx context.Context, id, version, mode string) error {
 	if err := validatePluginInstance(id, ""); err != nil {
 		return err
 	}
@@ -1350,8 +1350,8 @@ func verifyPluginRuntimeMode(ctx context.Context, id, version string, contentIns
 	verify, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	args := []string{"--instance", id}
-	if contentInstall {
-		args = append(args, "--content-install")
+	if mode != "" {
+		args = append(args, mode)
 	}
 	args = append(args, version)
 	output, err := pluginInstallCommand(verify, "/usr/libexec/justvoxel/mjust/verify-minecraft-stack", args...)

@@ -1558,7 +1558,7 @@
   "ui.75d0f1469d16": "Riavvio in corso…",
   "ui.75db37c5b1a1": "I componenti aggiuntivi richiedono un host per plugin Bukkit e non sono disponibili per le mod con loader.",
   "ui.75dcb9e07392": "Modifica della rete non riuscita.",
-  "ui.75ea388b9a14": "Consenti al recupero di ripristinare lo stato precedente del server originale e rimuovere l'eventuale clone non riuscito.",
+  "ui.75ea388b9a14": "Ripristina lo stato del server originale e rimuovi il clone non riuscito.",
   "ui.75f9fe5a435c": "Amministratore · pagina di riserva",
   "ui.76140e34f635": "Sensori",
   "ui.7623c72221c7": "L'importazione del server richiede attenzione.",

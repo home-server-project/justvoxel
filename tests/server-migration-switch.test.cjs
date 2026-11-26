@@ -33,7 +33,7 @@ class Element {
   setAttribute() {}
 }
 
-function fixture(operation, readPlan = plan, apply) {
+function fixture(operation, readPlan = plan, apply, recover) {
   const state = new Element('p');
   const progress = new Element('div');
   const review = new Element('div');
@@ -71,7 +71,9 @@ function fixture(operation, readPlan = plan, apply) {
         result = await operation(url.searchParams.get('operation_id'));
       } else if (action === 'recover') {
         assert.equal(options.body.get('operation_id'), 'switch-1');
-        result = snapshot('resolved');
+        assert.equal(options.body.get('confirm'), 'yes');
+        assert.equal(options.body.get('csrf'), 'csrf');
+        result = recover ? await recover() : snapshot('resolved');
       } else if (action === 'apply' && apply) {
         return apply(options.body);
       } else {
@@ -115,7 +117,12 @@ test('fresh open has no selection or progress for terminal history', async () =>
 
 test('fresh open reconnects to unresolved Switch and recovery keeps the same card', async () => {
   for (let state of ['needs_attention', 'failed']) {
-    const f = fixture(id => state === 'resolved' && !id ? { operation: null } : snapshot(state));
+    let finishRecovery;
+    let recoveryRequests = 0;
+    const f = fixture(id => state === 'resolved' && !id ? { operation: null } : snapshot(state), plan, undefined, () => {
+      recoveryRequests++;
+      return new Promise(resolve => { finishRecovery = resolve; });
+    });
     await flush();
     assert.deepEqual(f.selected(), ['leaf']);
     assert.equal(f.review.hidden, true);
@@ -124,11 +131,20 @@ test('fresh open reconnects to unresolved Switch and recovery keeps the same car
     assert.deepEqual(f.selected(), ['leaf']);
     assert.equal(f.progress.children[0].textContent, state);
     if (state === 'needs_attention') {
-      const consent = f.progress.children[1].children[1];
-      consent.checked = true;
-      consent.events.change();
+      const row = f.progress.children[1];
+      assert.equal(row.className, 'action-row');
+      assert.deepEqual(row.children.map(node => node.tag), ['span', 'button']);
+      const [description, button] = row.children;
+      assert.equal(description.textContent, 'Restore original server state and clean up failed clone.');
+      assert.equal(button.textContent, 'Recover Switch');
+      assert.equal(button.disabled, false);
+      const request = button.events.click();
+      assert.equal(button.disabled, true);
+      await button.events.click();
+      assert.equal(recoveryRequests, 1);
       state = 'resolved';
-      await f.progress.children[2].events.click();
+      finishRecovery(snapshot(state));
+      await request;
       assert.deepEqual(f.operations, ['', 'switch-1']);
       assert.deepEqual(f.selected(), ['leaf']);
       assert.equal(f.progress.children[0].textContent, 'resolved');

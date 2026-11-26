@@ -1558,7 +1558,7 @@
   "ui.75d0f1469d16": "Restarting…",
   "ui.75db37c5b1a1": "Add-ons require a Bukkit plugin host and are unavailable for loader mods.",
   "ui.75dcb9e07392": "Network change failed.",
-  "ui.75ea388b9a14": "Allow recovery to restore the original server’s previous state and clean up a failed clone when present.",
+  "ui.75ea388b9a14": "Restore original server state and clean up failed clone.",
   "ui.75f9fe5a435c": "Administrator · fallback page",
   "ui.76140e34f635": "Sensors",
   "ui.7623c72221c7": "Server Import needs attention.",

@@ -62,21 +62,20 @@
           link.href = `/?server=${encodeURIComponent(result.clone_id)}`; link.textContent = jvT("ui.10c040af618e"); progress.appendChild(link);
         }
         if (["needs_attention", "failed"].includes(operation.state)) {
-          const label = document.createElement("label"); label.className = "minecraft-native-toggle";
-          const consent = document.createElement("input"); consent.type = "checkbox"; consent.setAttribute("role", "switch");
-          label.append(paragraph(jvT("ui.75ea388b9a14")), consent);
-          const recover = document.createElement("button"); recover.type = "button"; recover.textContent = jvT("ui.b8e7e9e5f031"); recover.disabled = true;
-          consent.addEventListener("change", () => { recover.disabled = !consent.checked; });
+          const actions = document.createElement("div"); actions.className = "action-row";
+          const description = document.createElement("span"); description.textContent = jvT("ui.75ea388b9a14");
+          const recover = document.createElement("button"); recover.type = "button"; recover.textContent = jvT("ui.b8e7e9e5f031");
           recover.addEventListener("click", async () => {
-            if (!current() || ticket !== sequence || !consent.checked || recover.disabled) return;
+            if (!current() || ticket !== sequence || recover.disabled) return;
             recover.disabled = true;
             try {
               const result = await request("recover", { operation_id: operation.operation_id, confirm: "yes" }, true);
               if (current() && ticket === sequence) await load(result.operation.operation_id);
             }
-            catch (failure) { if (current() && ticket === sequence) { state.textContent = failure.message; recover.disabled = !consent.checked; } }
+            catch (failure) { if (current() && ticket === sequence) { state.textContent = failure.message; recover.disabled = false; } }
           });
-          progress.append(label, recover);
+          actions.append(description, recover);
+          progress.appendChild(actions);
         }
         cards.forEach((node) => { if (busy) node.disabled = true; });
         if (!terminal.has(operation.state) && !polling) {

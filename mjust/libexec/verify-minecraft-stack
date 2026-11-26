@@ -13,10 +13,18 @@ else
     JV_INSTANCE_UNIT=minecraft.service
 fi
 content_install=no
-if [[ ${1:-} == --content-install ]]; then
-    content_install=yes
-    shift
-fi
+switch_clone=no
+runtime_only=no
+case "${1:-}" in
+    --content-install) content_install=yes; shift ;;
+    --switch-clone)
+        [[ -n ${JV_INSTANCE_ID:-} && ${JV_NETWORK_MEMBER} == no &&
+           $# == 2 && $2 == "${MINECRAFT_VERSION}" && $2 != LATEST ]] || exit 1
+        switch_clone=yes
+        if [[ ${BEDROCK_ENABLED} == no ]]; then runtime_only=yes; fi
+        shift
+        ;;
+esac
 if [[ ${JUSTVOXEL_MAINTENANCE_LOCK_HELD:-0} != 1 ]]; then
     exec 9>"${JV_MAINTENANCE_LOCK}"
     flock -n 9 || { echo 'ERROR: another Minecraft maintenance operation is running.' >&2; exit 1; }
@@ -145,17 +153,41 @@ done
 # Only the exact transient response may use the local status fallback above.
 if [[ ${comparison_version} != 'Checking version, please wait...' ]]; then
     printf 'Minecraft version: %s\n' "${version}"
-    [[ ${version,,} == *"${MINECRAFT_SERVER_TYPE-paper}"* ]] || { echo 'ERROR: Minecraft is not running the selected server software.' >&2; exit 1; }
-    [[ ${version} == *'MC: '* || ${version} == *'Minecraft version '* || ${version} == *'Paper version '* || ${version} == *'Purpur version '* || ${version} == *'Pufferfish version '* || ${version} == *'Leaf version '* ]] || { echo 'ERROR: Minecraft version response could not be verified.' >&2; exit 1; }
-    expected_version="${1:-${MINECRAFT_VERSION}}"
-    if [[ ${expected_version} != LATEST ]]; then
-        [[ ${expected_version} =~ ^[0-9A-Za-z._-]+$ ]] || exit 1
-        [[ ${version} == *"MC: ${expected_version})"* || ${version} == *"Minecraft version ${expected_version} "* ||
-           ${version} == *"Paper version ${expected_version}-"* || ${version} == *"Paper version ${expected_version} "* || ${version} == *"Purpur version ${expected_version}-"* || ${version} == *"Purpur version ${expected_version} "* ]] || {
-            echo 'ERROR: Minecraft is not running the selected game version.' >&2; exit 1;
-        }
+    if [[ ${switch_clone} == yes ]]; then
+        # Bind the version to the software banner, before any update notices.
+        # Paper-family implementations include either an MC marker or a build
+        # identifier prefixed with the exact game version.
+        banner="${comparison_version%%$'\n'*}"
+        software="${MINECRAFT_SERVER_TYPE^}"
+        case "${banner}" in
+            "This server is running ${software} "*) ;;
+            *) echo 'ERROR: Minecraft is not running the selected server software.' >&2; exit 1 ;;
+        esac
+        if [[ ${banner} == *'MC: '* ]]; then
+            [[ ${banner} == *"(MC: ${expected_version})"* ]] || exit 1
+        else
+            release="This server is running ${software} version ${expected_version}"
+            case "${banner}" in
+                "${release}"|"${release}-"*|"${release} "*) ;;
+                *) echo 'ERROR: Minecraft is not running the selected game version.' >&2; exit 1 ;;
+            esac
+        fi
+    else
+        [[ ${version,,} == *"${MINECRAFT_SERVER_TYPE-paper}"* ]] || { echo 'ERROR: Minecraft is not running the selected server software.' >&2; exit 1; }
+        [[ ${version} == *'MC: '* || ${version} == *'Minecraft version '* || ${version} == *'Paper version '* || ${version} == *'Purpur version '* || ${version} == *'Pufferfish version '* || ${version} == *'Leaf version '* ]] || { echo 'ERROR: Minecraft version response could not be verified.' >&2; exit 1; }
+        if [[ ${expected_version} != LATEST ]]; then
+            [[ ${expected_version} =~ ^[0-9A-Za-z._-]+$ ]] || exit 1
+            [[ ${version} == *"MC: ${expected_version})"* || ${version} == *"Minecraft version ${expected_version} "* ||
+               ${version} == *"Paper version ${expected_version}-"* || ${version} == *"Paper version ${expected_version} "* || ${version} == *"Purpur version ${expected_version}-"* || ${version} == *"Purpur version ${expected_version} "* ]] || {
+                echo 'ERROR: Minecraft is not running the selected game version.' >&2; exit 1;
+            }
+        fi
     fi
 fi
+fi
+if [[ ${runtime_only} == yes ]]; then
+    podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli list >/dev/null || exit 1
+    exit 0
 fi
 plugins="$(podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli plugins)"
 printf 'Plugins: %s\n' "${plugins}"
