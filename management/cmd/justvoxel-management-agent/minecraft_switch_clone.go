@@ -6,12 +6,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -400,12 +399,17 @@ func (s *server) restoreSwitchSource(ctx context.Context, e *minecraftSwitchEvid
 }
 
 func (s *server) recoverMinecraftSwitch(ctx context.Context, e *minecraftSwitchEvidence) error {
-	b := instanceRuntimes
 	lock, err := acquirePluginMaintenanceLock()
 	if err != nil {
 		return err
 	}
 	defer lock.Close()
+	return s.recoverMinecraftSwitchLocked(ctx, e, lock)
+}
+
+func (s *server) recoverMinecraftSwitchLocked(ctx context.Context, e *minecraftSwitchEvidence, lock *pluginMaintenanceLock) error {
+	b := instanceRuntimes
+	var err error
 	// This evidence was saved before any runtime changes were authorized.
 	if e.Stage == "validating" {
 		if e.CloneID != "" || e.SourceStopped || e.SourceContentChanged || e.WorldChanged {
@@ -492,233 +496,336 @@ func (s *server) recoverMinecraftSwitch(ctx context.Context, e *minecraftSwitchE
 		}
 		return b.verifyCommittedSwitchState(ctx, e.Source)
 	}
+	if e.CloneID != "" && !validSwitchClonePlacement(*e) {
+		return switchRecoveryRefusal("source and clone storage binding failed")
+	}
 	if pending, pendingErr := b.pending(e.Source); pendingErr != nil {
-		return pendingErr
+		return switchRecoveryRefusal("source verification failed")
 	} else if pending {
 		if err = b.recover(ctx, e.Source); err != nil {
-			return err
+			return switchRecoveryRefusal("source runtime recovery failed")
 		}
 	}
 	if err = s.restoreSwitchSource(ctx, e, lock); err != nil {
-		return err
+		return switchRecoveryRefusal("original source server state could not be restored")
 	}
 	if err = s.clearSwitchSourceContent(ctx, e); err != nil {
-		return err
+		return switchRecoveryRefusal("original source configuration could not be restored")
 	}
 	if e.CloneID != "" {
-		if !switchStructuralPathFromEvidence(*e) || validateInstanceRecordPlacement(*e.CloneRecord) != nil ||
-			validateInstanceRecordPlacement(*e.SourceRecord) != nil {
-			return errInstanceRecovery
-		}
-		// Resume ordinary deletion if it was already journaled before a restart.
-		if deletion, deleteErr := b.deleteJournal(e.CloneID); deleteErr == nil {
-			if deletion.Record.Storage != e.CloneRecord.Storage {
-				return errInstanceRecovery
-			}
-			if err = b.deleteInstance(ctx, e.CloneID, deletion.Name); err != nil {
-				return err
-			}
-			return b.finishSwitchCloneRecovery(ctx, e)
-		} else if !errors.Is(deleteErr, os.ErrNotExist) {
-			return deleteErr
-		}
-		// Creation/activation and restore recovery retain their own evidence. Finish
-		// rollback first, then use normal instance deletion for this failed clone.
-		record, readErr := b.readRecord(e.CloneID)
-		if errors.Is(readErr, os.ErrNotExist) || errors.Is(readErr, errInstanceNotFound) {
-			registered, regErr := b.identities().readRecord(e.CloneID + ".json")
-			if errors.Is(regErr, os.ErrNotExist) {
-				return b.finishSwitchCloneRecovery(ctx, e)
-			}
-			if regErr != nil || registered != e.CloneID {
-				return errInstanceRecovery
-			}
-			snapshot, uid, gid, snapshotErr := b.snapshot(ctx)
-			if snapshotErr != nil {
-				return snapshotErr
-			}
-			snapshot.StorageRoot = e.CloneRecord.Storage.Root
-			snapshot.MountPoint = e.CloneRecord.Storage.MountPoint
-			snapshot.ExpectedUUID = e.CloneRecord.Storage.UUID
-			snapshot.ExpectedSource = e.CloneRecord.Storage.Source
-			if e.CloneRecord.Backups != nil {
-				snapshot.BackupPlacement = e.CloneRecord.Backups
-				snapshot.BackupPath = e.CloneRecord.Backups.Root
-			}
-			if err = b.configureRegistered(ctx, e.CloneID, instancePublicSettings(e.CloneRecord.Runtime), snapshot, uid, gid); err != nil {
-				return err
-			}
-			record, readErr = b.readRecord(e.CloneID)
-		}
-		if readErr != nil || record.Runtime.ID != e.CloneID || record.Storage != e.CloneRecord.Storage {
-			return errInstanceRecovery
-		}
-		state, stateErr := b.observeRaw(ctx, e.CloneID)
-		if stateErr != nil {
-			return stateErr
-		}
-		if state.State == "running" {
-			if err = b.actionWithWarnings(ctx, e.CloneID, "stop", true); err != nil {
-				return err
-			}
-		}
-		if pending, pendingErr := b.pending(e.CloneID); pendingErr != nil {
-			return pendingErr
-		} else if pending {
-			if err = b.recover(ctx, e.CloneID); err != nil {
-				return err
-			}
-		}
-		recoveredRecord, recordErr := b.readRecord(e.CloneID)
-		if recordErr != nil {
-			return recordErr
-		}
-		if recoveredRecord.EnvironmentSHA256 == "" {
-			// An interrupted initial activation is a configured reservation. Complete
-			// its existing stopped-only activation path so normal deletion can verify
-			// ownership; never start it or retry conversion.
-			snapshot, _, _, snapshotErr := b.snapshot(ctx)
-			if snapshotErr != nil {
-				return snapshotErr
-			}
-			records, recordsErr := b.records()
-			if recordsErr != nil {
-				return recordsErr
-			}
-			if err = b.apply(ctx, recoveredRecord, records, snapshot); err != nil {
-				return err
-			}
-		}
-		if j, journalErr := b.restoreJournal(e.CloneID); journalErr == nil && !restoreTerminal(j.Stage) {
-			claim := &instanceRestoreClaim{s: s, maintenance: lock.file}
-			err = claim.recover(ctx, e.CloneID)
-			lock.file = claim.maintenance
-			if err != nil {
-				return err
-			}
-		} else if journalErr != nil && !errors.Is(journalErr, os.ErrNotExist) {
-			return journalErr
-		}
-		// Normal deletion is journaled and safe to retry; no source paths are used.
-		names, nameErr := b.identities().readNames()
-		if nameErr != nil {
-			return nameErr
-		}
-		if err = b.deleteInstance(ctx, e.CloneID, names[e.CloneID].DisplayName); err != nil {
+		if err := b.verifySwitchCloneSource(ctx, *e); err != nil {
 			return err
 		}
+		if err := s.retireFailedSwitchClone(ctx, *e, lock); err != nil {
+			return err
+		}
+	} else if err := b.verifyCommittedSwitchState(ctx, e.Source); err != nil {
+		return switchRecoveryRefusal("source verification failed")
 	}
 	return b.finishSwitchCloneRecovery(ctx, e)
 }
 
-func (b *instanceRuntimeBackend) finishSwitchCloneRecovery(ctx context.Context, e *minecraftSwitchEvidence) error {
-	if id := e.CloneID; id != "" {
-		if !switchStructuralPathFromEvidence(*e) {
-			return errInstanceRecovery
-		}
-		if _, err := b.identities().readRecord(id + ".json"); !errors.Is(err, os.ErrNotExist) {
-			return errInstanceRecovery
-		}
-		dir, env, quadlet := b.paths(id)
-		for _, path := range []string{dir, env, quadlet, b.deletePath(id)} {
-			if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
-				return errInstanceRecovery
-			}
-		}
-		// "configured" from observeRaw proves the generated unit is not found
-		// and there is no container, even a stopped one.
-		state, err := b.observeRaw(ctx, id)
-		if err != nil || state.State != "configured" {
-			return errors.Join(errInstanceRecovery, err)
-		}
-		if err := b.storage(ctx, "restore-validate", *e.CloneRecord); err != nil {
-			return err
-		}
-		if err := removeEmptySwitchCloneParent(*e); err != nil {
-			return err
-		}
-	}
-	if err := b.verifyCommittedSwitchState(ctx, e.Source); err != nil {
-		return err
-	}
-	if e.CloneID != "" {
-		name := filepath.Join(b.identities().directory, "names", e.CloneID+".json")
-		raw, err := b.readPrivate(name)
-		if err == nil {
-			var record minecraftInstanceNameRecord
-			if instanceDecode(raw, &record) != nil || record.ID != e.CloneID || record.Software != e.CloneRecord.Runtime.Software {
-				return errInstanceRecovery
-			}
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		if err := b.removePrivate(name); err != nil {
-			return err
-		}
-		if _, err := os.Lstat(name); !errors.Is(err, os.ErrNotExist) {
-			return errInstanceRecovery
-		}
-	}
-	e.Stage = "recovered"
-	return saveSwitchEvidence(*e)
+func switchRecoveryRefusal(reason string) error {
+	return fmt.Errorf("%w: %s", errInstanceRecovery, reason)
 }
 
-func removeEmptySwitchCloneParent(e minecraftSwitchEvidence) error {
+func validSwitchClonePlacement(e minecraftSwitchEvidence) bool {
 	if e.CloneID == "" || !switchStructuralPathFromEvidence(e) ||
-		validateInstanceRecordPlacement(*e.CloneRecord) != nil ||
-		e.SourceRecord.Storage.DataPath == e.CloneRecord.Storage.DataPath {
-		return errInstanceRecovery
+		validateInstanceRecordPlacement(*e.SourceRecord) != nil || validateInstanceRecordPlacement(*e.CloneRecord) != nil {
+		return false
 	}
-	base := filepath.Join(e.CloneRecord.Storage.Root, "minecraft-instances")
-	parent, err := instanceOpen(base, syscall.O_RDONLY|syscall.O_DIRECTORY)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
+	clone, source := e.CloneRecord, e.SourceRecord
+	storage := source.Storage
+	storage.DataPath = clone.Storage.DataPath
+	return clone.Storage == storage && clone.Runtime.Software == e.Target &&
+		clone.Runtime.UID == source.Runtime.UID && clone.Runtime.GID == source.Runtime.GID &&
+		!clone.Runtime.StartOnBoot && !clone.NetworkMember
+}
+
+func (b *instanceRuntimeBackend) verifySwitchCloneSource(ctx context.Context, e minecraftSwitchEvidence) error {
+	source, err := b.readRecord(e.Source)
+	saved := e.SourceRecord.Runtime
+	if err != nil || source.Storage != e.SourceRecord.Storage ||
+		source.Runtime.Software != saved.Software || source.Runtime.Version != saved.Version ||
+		source.Runtime.VersionPolicy != saved.VersionPolicy || source.Runtime.PaperChannel != saved.PaperChannel ||
+		source.Runtime.PreserveContent != saved.PreserveContent || source.Runtime.StartOnBoot != saved.StartOnBoot ||
+		source.Runtime.UID != saved.UID || source.Runtime.GID != saved.GID {
+		return switchRecoveryRefusal("source verification failed")
 	}
-	if err != nil {
-		return err
+	state, err := b.observeRaw(ctx, e.Source)
+	if err != nil || (e.OriginallyRunning && state.State != "running") || (!e.OriginallyRunning && state.State != "stopped") {
+		return switchRecoveryRefusal("original source server state could not be verified")
 	}
-	defer parent.Close()
-	// Anchor the exact child to the checked, symlink-free parent directory.
-	path := filepath.Join("/proc/self/fd", strconv.FormatUint(uint64(parent.Fd()), 10), e.CloneID)
-	info, err := os.Lstat(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return parent.Sync()
-	}
-	if err != nil || !rootPrivateSwitchDirectory(info) {
-		return errors.Join(errInstanceRecovery, err)
-	}
-	baseInfo, err := parent.Stat()
-	if err != nil || !rootPrivateSwitchDirectory(baseInfo) {
-		return errors.Join(errInstanceRecovery, err)
-	}
-	dir, err := os.OpenFile(path, os.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW, 0)
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	opened, err := dir.Stat()
-	if err != nil || !os.SameFile(info, opened) || !rootPrivateSwitchDirectory(opened) {
-		return errors.Join(errInstanceRecovery, err)
-	}
-	// Any child, including data or .provision.json, makes cleanup unsafe.
-	if entries, err := dir.Readdirnames(1); err != io.EOF || len(entries) != 0 {
-		return errInstanceRecovery
-	}
-	if err := os.Remove(path); err != nil {
-		return err
-	}
-	if err := parent.Sync(); err != nil {
-		return err
-	}
-	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
-		return errors.Join(errInstanceRecovery, err)
+	if err := b.verifyCommittedSwitchState(ctx, e.Source); err != nil {
+		return switchRecoveryRefusal("source verification failed")
 	}
 	return nil
 }
 
-func rootPrivateSwitchDirectory(info os.FileInfo) bool {
-	owner, ok := info.Sys().(*syscall.Stat_t)
-	return ok && owner.Uid == 0 && info.Mode() == os.ModeDir|0o700
+func (s *server) retireFailedSwitchClone(ctx context.Context, e minecraftSwitchEvidence, lock *pluginMaintenanceLock) error {
+	b, id := instanceRuntimes, e.CloneID
+	runtimeIncomplete := switchRecoveryRefusal("clone runtime retirement incomplete")
+	// Older workers may have started ordinary deletion before retiring the
+	// Restore directory. Use its journal while it still exists.
+	if deletion, err := b.deleteJournal(id); err == nil {
+		if deletion.ResetPolicy != "" || !switchCloneRecordMatches(deletion.Record, *e.CloneRecord) {
+			return runtimeIncomplete
+		}
+		if err := b.deleteStopped(ctx, id, true); err != nil {
+			return runtimeIncomplete
+		}
+		if err := b.retireSwitchCloneRestore(ctx, e, deletion.Record, deletion.Stage); err != nil {
+			return err
+		}
+		if err := b.deleteInstance(ctx, id, deletion.Name); err != nil {
+			return runtimeIncomplete
+		}
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return runtimeIncomplete
+	}
+
+	// Finish interrupted creation/activation and Restore using their existing
+	// paths before ordinary deletion. Already retired clones go to finalization.
+	record, err := b.readRecord(id)
+	if errors.Is(err, os.ErrNotExist) || errors.Is(err, errInstanceNotFound) {
+		registered, regErr := b.identities().readRecord(id + ".json")
+		if errors.Is(regErr, os.ErrNotExist) {
+			return nil
+		}
+		// Only interrupted initial creation can have a valid reservation but
+		// no runtime config. Never reconstruct a formerly committed clone.
+		if regErr != nil || registered != id || !errors.Is(err, os.ErrNotExist) || e.Stage != "creating_clone" {
+			return runtimeIncomplete
+		}
+		snapshot, uid, gid, snapshotErr := b.snapshot(ctx)
+		if snapshotErr != nil {
+			return runtimeIncomplete
+		}
+		snapshot.StorageRoot = e.CloneRecord.Storage.Root
+		snapshot.MountPoint = e.CloneRecord.Storage.MountPoint
+		snapshot.ExpectedUUID = e.CloneRecord.Storage.UUID
+		snapshot.ExpectedSource = e.CloneRecord.Storage.Source
+		if e.CloneRecord.Backups != nil {
+			snapshot.BackupPlacement = e.CloneRecord.Backups
+			snapshot.BackupPath = e.CloneRecord.Backups.Root
+		}
+		if err = b.configureRegistered(ctx, id, instancePublicSettings(e.CloneRecord.Runtime), snapshot, uid, gid); err != nil {
+			return runtimeIncomplete
+		}
+		record, err = b.readRecord(id)
+	}
+	if err != nil || !switchCloneRecordMatches(record, *e.CloneRecord) {
+		return runtimeIncomplete
+	}
+	state, err := b.observeRaw(ctx, id)
+	if err != nil {
+		return runtimeIncomplete
+	}
+	if state.State == "running" {
+		if err := b.actionWithWarnings(ctx, id, "stop", true); err != nil {
+			return runtimeIncomplete
+		}
+	}
+	if pending, err := b.pending(id); err != nil {
+		return runtimeIncomplete
+	} else if pending {
+		if err := b.recover(ctx, id); err != nil {
+			return runtimeIncomplete
+		}
+	}
+	record, err = b.readRecord(id)
+	if err != nil || !switchCloneRecordMatches(record, *e.CloneRecord) {
+		return runtimeIncomplete
+	}
+	if record.EnvironmentSHA256 == "" {
+		// Complete an interrupted initial activation without starting the server.
+		snapshot, _, _, snapshotErr := b.snapshot(ctx)
+		records, recordsErr := b.records()
+		if snapshotErr != nil || recordsErr != nil || b.apply(ctx, record, records, snapshot) != nil {
+			return runtimeIncomplete
+		}
+		record, err = b.readRecord(id)
+		if err != nil || !switchCloneRecordMatches(record, *e.CloneRecord) {
+			return runtimeIncomplete
+		}
+	}
+	if j, err := b.restoreJournal(id); err == nil && !restoreTerminal(j.Stage) {
+		if j.OriginallyRunning {
+			return switchRecoveryRefusal("retained Restore transaction validation failed")
+		}
+		claim := &instanceRestoreClaim{s: s, maintenance: lock.file}
+		restoreErr := claim.recover(ctx, id)
+		lock.file = claim.maintenance
+		if restoreErr != nil {
+			return switchRecoveryRefusal("clone Restore recovery incomplete")
+		}
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return switchRecoveryRefusal("retained Restore transaction validation failed")
+	}
+	state, err = b.observeRaw(ctx, id)
+	if err != nil || (state.State == "failed" && b.normalizeStoppedFailure(ctx, state) != nil) {
+		return runtimeIncomplete
+	}
+	if b.verifyLive(record) != nil || b.deleteStopped(ctx, id, false) != nil {
+		return runtimeIncomplete
+	}
+	names, err := b.identities().readNames()
+	if err != nil || names[id].Software != e.CloneRecord.Runtime.Software {
+		return switchRecoveryRefusal("clone name metadata validation failed")
+	}
+	if err := b.retireSwitchCloneRestore(ctx, e, record, ""); err != nil {
+		return err
+	}
+	if err := b.deleteInstance(ctx, id, names[id].DisplayName); err != nil {
+		return runtimeIncomplete
+	}
+	return nil
+}
+
+func switchCloneRecordMatches(current, saved instanceRuntimeRecord) bool {
+	return current.Runtime.ID == saved.Runtime.ID && current.Storage == saved.Storage &&
+		current.Runtime.Software == saved.Runtime.Software && current.Runtime.UID == saved.Runtime.UID &&
+		current.Runtime.GID == saved.Runtime.GID && !current.Runtime.StartOnBoot && !current.NetworkMember
+}
+
+func (b *instanceRuntimeBackend) retireSwitchCloneRestore(ctx context.Context, e minecraftSwitchEvidence, record instanceRuntimeRecord, deleteStage string) error {
+	id := record.Runtime.ID
+	journal, err := b.restoreJournal(id)
+	if errors.Is(err, os.ErrNotExist) {
+		// These older deletion stages may already have removed the journal.
+		// Only the fully retired clone can use journal-less cleanup afterward.
+		if deleteStage == "data_removed" || deleteStage == "identity_retired" {
+			return nil
+		}
+		return b.switchCloneRetirementStorage(ctx, "unrestored", record, "-")
+	}
+	refusal := switchRecoveryRefusal("retained Restore transaction validation failed")
+	if err != nil || !restoreTerminal(journal.Stage) || journal.OriginallyRunning ||
+		!instanceSHA256Pattern.MatchString(journal.Fingerprint) ||
+		(journal.Stage == "completed" && len(journal.Replacement) != 2) ||
+		(len(journal.Replacement) != 0 && len(journal.Replacement) != 2) {
+		return refusal
+	}
+	raw, err := b.readPrivate(filepath.Join(b.root, id, "config.json"))
+	if err != nil {
+		return refusal
+	}
+	if instanceHash(raw) != journal.ConfigSHA256 {
+		// A Paper-family worker may have committed removal of its startup
+		// guard just before rebinding the terminal journal. Accept only that
+		// exact transition on the captured clone. The helper still checks the
+		// journal's parent and world inodes before retiring anything.
+		prior := record.Runtime
+		prior.PreserveContent = true
+		if (e.Stage != "verifying_clone" && e.Stage != "complete") || journal.Stage != "completed" ||
+			!javaServerPaperFamily(e.SourceRecord.Runtime.Software) || !javaServerPaperFamily(e.Target) ||
+			record.Runtime.PreserveContent || prior != e.CloneRecord.Runtime {
+			return refusal
+		}
+	}
+	proof, err := json.Marshal(struct {
+		ID              string   `json:"id"`
+		Stage           string   `json:"stage"`
+		Transaction     string   `json:"transaction"`
+		Parent          []uint64 `json:"parent"`
+		Original        []uint64 `json:"original"`
+		Replacement     []uint64 `json:"replacement,omitempty"`
+		DataMayBeAbsent bool     `json:"data_may_be_absent"`
+	}{
+		ID: id, Stage: journal.Stage, Transaction: journal.Transaction,
+		Parent: journal.Parent, Original: journal.Original, Replacement: journal.Replacement,
+		DataMayBeAbsent: deleteStage != "" && deleteStage != "intent",
+	})
+	if err != nil {
+		return refusal
+	}
+	return b.switchCloneRetirementStorage(ctx, "journal", record, string(proof))
+}
+
+const instanceSwitchRetireHelper = "/usr/libexec/justvoxel/mjust/instance-switch-retire"
+
+func (b *instanceRuntimeBackend) switchCloneRetirementStorage(ctx context.Context, action string, record instanceRuntimeRecord, evidence string) error {
+	c, st := record.Runtime, record.Storage
+	out, err := b.command(ctx, "nsenter", "--mount=/proc/1/ns/mnt", "--", instanceSwitchRetireHelper, action, c.ID, st.Root, st.DataPath, st.MountPoint, st.UUID, st.Source, strconv.FormatUint(uint64(c.UID), 10), strconv.FormatUint(uint64(c.GID), 10), evidence)
+	if err == nil {
+		return nil
+	}
+	switch strings.TrimSpace(string(out)) {
+	case "mount_identity":
+		return switchRecoveryRefusal("clone storage mount identity mismatch")
+	case "unexpected_entry":
+		return switchRecoveryRefusal("unexpected clone storage entry")
+	default:
+		return switchRecoveryRefusal("retained Restore transaction validation or retirement failed")
+	}
+}
+
+func (b *instanceRuntimeBackend) finishSwitchCloneRecovery(ctx context.Context, e *minecraftSwitchEvidence) error {
+	if id := e.CloneID; id != "" {
+		runtimeIncomplete := switchRecoveryRefusal("clone runtime retirement incomplete")
+		if _, err := b.identities().readRecord(id + ".json"); !errors.Is(err, os.ErrNotExist) {
+			return runtimeIncomplete
+		}
+		dir, env, quadlet := b.paths(id)
+		for _, path := range []string{dir, env, quadlet, b.deletePath(id)} {
+			if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+				return runtimeIncomplete
+			}
+		}
+		// Configured from observeRaw means systemd did not find a loaded
+		// unit and Podman did not find a container, even a stopped one.
+		state, err := b.observeRaw(ctx, id)
+		if err != nil || state.State != "configured" || b.deleteStopped(ctx, id, true) != nil {
+			return runtimeIncomplete
+		}
+		action := "empty"
+		switch e.Stage {
+		case "copying_clone", "verifying_clone", "complete", "recovered":
+			action = "retired"
+		}
+		if err := b.switchCloneRetirementStorage(ctx, action, *e.CloneRecord, "-"); err != nil {
+			return err
+		}
+		namesPath := filepath.Join(b.identities().directory, "names")
+		name := filepath.Join(namesPath, id+".json")
+		nameInvalid := switchRecoveryRefusal("clone name metadata validation failed")
+		names, err := b.privateDirectory(namesPath, false)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nameInvalid
+		}
+		if names != nil {
+			defer names.Close()
+		}
+		raw, err := b.readPrivate(name)
+		if err == nil {
+			var record minecraftInstanceNameRecord
+			if len(raw) > 4096 || instanceDecode(raw, &record) != nil || record.ID != id || record.Software != e.CloneRecord.Runtime.Software {
+				return nameInvalid
+			}
+			displayName, err := validateInstanceName(record.DisplayName)
+			if err != nil || displayName == "" || displayName != record.DisplayName {
+				return nameInvalid
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return nameInvalid
+		}
+		if err := b.removePrivate(name); err != nil {
+			return nameInvalid
+		}
+		if _, err := os.Lstat(name); !errors.Is(err, os.ErrNotExist) {
+			return nameInvalid
+		}
+		// Also sync on retry after an interrupted unlink.
+		if names != nil && names.Sync() != nil {
+			return nameInvalid
+		}
+	}
+	e.Stage = "recovered"
+	if err := saveSwitchEvidence(*e); err != nil {
+		return switchRecoveryRefusal("recovered Switch evidence could not be persisted")
+	}
+	return nil
 }
 
 func (b *instanceRuntimeBackend) verifyCommittedSwitchState(ctx context.Context, id string) error {

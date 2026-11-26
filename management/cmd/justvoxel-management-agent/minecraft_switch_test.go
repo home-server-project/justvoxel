@@ -599,11 +599,27 @@ func TestSwitchCloneRuntimeVerificationAndRecovery(t *testing.T) {
 						}
 						return out, err
 					}
-					if args[2] == instanceRuntimeHelper && args[3] == "restore-validate" && args[4] == cloneID {
-						if blockCleanup {
-							return nil, errors.New("clone storage temporarily unavailable")
+					if args[2] == instanceSwitchRetireHelper {
+						if args[4] != cloneID || args[4] == sourceID {
+							t.Fatal("Restore retirement selected the wrong instance", args)
 						}
-						return nil, nil
+						switch args[3] {
+						case "journal":
+							// This worker fixture mocks Restore, including its inode
+							// evidence. The retirement fixture runs the real helper.
+							return nil, nil
+						case "retired":
+							if blockCleanup {
+								return []byte("mount_identity"), errors.New("clone storage temporarily unavailable")
+							}
+							err := os.Remove(filepath.Dir(args[6]))
+							if errors.Is(err, os.ErrNotExist) {
+								err = nil
+							}
+							return nil, err
+						default:
+							t.Fatal("unexpected Restore retirement action", args)
+						}
 					}
 				}
 				if command == "systemctl" && len(args) > 0 {

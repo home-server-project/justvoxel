@@ -4,11 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -189,12 +193,12 @@ func TestSwitchCloneParentCleanupRequiresExactEmptyPrivateDirectory(t *testing.T
 			base := filepath.Join(root, "minecraft-instances")
 			sourceID, cloneID := "jv-source", "jv-clone1"
 			sourcePath, clonePath := filepath.Join(base, sourceID), filepath.Join(base, cloneID)
-			source := instanceRuntimeRecord{Runtime: minecraftInstanceRuntimeConfig{ID: sourceID, Software: "paper"}, Storage: instanceRuntimeStorage{Root: root, DataPath: filepath.Join(sourcePath, "data")}}
-			clone := instanceRuntimeRecord{Runtime: minecraftInstanceRuntimeConfig{ID: cloneID, Software: "purpur"}, Storage: instanceRuntimeStorage{Root: root, DataPath: filepath.Join(clonePath, "data")}}
+			source := instanceRuntimeRecord{Runtime: minecraftInstanceRuntimeConfig{ID: sourceID, Software: "paper", UID: 1000, GID: 1000}, Storage: instanceRuntimeStorage{Root: root, DataPath: filepath.Join(sourcePath, "data")}}
+			clone := instanceRuntimeRecord{Runtime: minecraftInstanceRuntimeConfig{ID: cloneID, Software: "purpur", UID: 1000, GID: 1000}, Storage: instanceRuntimeStorage{Root: root, DataPath: filepath.Join(clonePath, "data")}}
 			e := minecraftSwitchEvidence{Source: sourceID, Target: "purpur", Version: "1.21.4", Action: "clone", SourceRecord: &source, CloneID: cloneID, CloneRecord: &clone}
 			if os.Geteuid() != 0 {
 				switch name {
-				case "empty", "wrong mode", "data", "provision marker", "unexpected entry":
+				case "empty", "missing", "foreign owner", "wrong mode", "symlink", "symlink ancestor", "data", "provision marker", "unexpected entry":
 					t.Skip("this case requires a root-owned fixture")
 				}
 			}
@@ -240,7 +244,13 @@ func TestSwitchCloneParentCleanupRequiresExactEmptyPrivateDirectory(t *testing.T
 				t.Fatal(err)
 			}
 			wantRemoved := name == "empty" || name == "missing"
-			if err := removeEmptySwitchCloneParent(e); (err == nil) != wantRemoved {
+			err = errInstanceRecovery
+			if validSwitchClonePlacement(e) {
+				storage := newSwitchRetirementTestStorage(t)
+				b := &instanceRuntimeBackend{command: storage.command}
+				err = b.switchCloneRetirementStorage(context.Background(), "empty", *e.CloneRecord, "-")
+			}
+			if (err == nil) != wantRemoved {
 				t.Fatalf("cleanup success = %v, want %v: %v", err == nil, wantRemoved, err)
 			}
 			if _, err := os.Lstat(clonePath); (wantRemoved && !errors.Is(err, os.ErrNotExist)) || (!wantRemoved && err != nil) {
@@ -248,6 +258,543 @@ func TestSwitchCloneParentCleanupRequiresExactEmptyPrivateDirectory(t *testing.T
 			}
 			if _, err := os.Lstat(sourcePath); err != nil {
 				t.Fatal("cleanup touched the source", err)
+			}
+		})
+	}
+}
+
+type switchRetirementTestStorage struct {
+	t         *testing.T
+	helpers   map[string]string
+	mountInfo string
+}
+
+func newSwitchRetirementTestStorage(t *testing.T) *switchRetirementTestStorage {
+	t.Helper()
+	dir := t.TempDir()
+	copyHelper := func(name, oldPath, fixturePath string) string {
+		t.Helper()
+		contents, err := os.ReadFile(filepath.Join("../../../mjust/libexec", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(strings.ReplaceAll(string(contents), oldPath, fixturePath)), 0700); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	common := filepath.Join(dir, "common.sh")
+	// The local-storage paths under test only call require_root from common.sh.
+	if err := os.WriteFile(common, []byte("require_root() { [[ $EUID == 0 ]]; }\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	prerequisites := copyHelper("instance-runtime-prerequisites", "/usr/libexec/justvoxel/mjust/common.sh", common)
+	retire := copyHelper("instance-switch-retire", instanceRuntimeHelper, prerequisites)
+	remove := copyHelper("instance-delete", instanceRuntimeHelper, prerequisites)
+	return &switchRetirementTestStorage{t: t, helpers: map[string]string{
+		instanceRuntimeHelper: prerequisites, instanceSwitchRetireHelper: retire, instanceDeleteHelper: remove,
+	}}
+}
+
+func (s *switchRetirementTestStorage) command(ctx context.Context, name string, args ...string) ([]byte, error) {
+	s.t.Helper()
+	if name != "nsenter" || len(args) < 4 || args[0] != "--mount=/proc/1/ns/mnt" || args[1] != "--" || s.helpers[args[2]] == "" {
+		s.t.Fatalf("unexpected storage invocation: %s %v", name, args)
+	}
+	path := s.helpers[args[2]]
+	if args[2] == instanceSwitchRetireHelper && s.mountInfo != "" {
+		// Inject mount discovery only. The target and all checked entries are
+		// real, isolated directories. This also models same-device bind mounts.
+		program, err := os.ReadFile(path)
+		if err != nil {
+			s.t.Fatal(err)
+		}
+		path = filepath.Join(filepath.Dir(path), "retire-with-mount-fixture")
+		program = []byte(strings.ReplaceAll(string(program), "/proc/self/mountinfo", s.mountInfo))
+		if err := os.WriteFile(path, program, 0700); err != nil {
+			s.t.Fatal(err)
+		}
+	}
+	return exec.CommandContext(ctx, "bash", append([]string{path}, args[3:]...)...).Output()
+}
+
+type switchRetirementFixture struct {
+	f       *instanceActivationFixture
+	server  *server
+	storage *switchRetirementTestStorage
+	e       minecraftSwitchEvidence
+	j       operationJournal
+	parent  string
+	tx      string
+	name    string
+	before  map[string]string
+	world   map[string]string
+}
+
+func newSwitchRetirementFixture(t *testing.T, historical bool) *switchRetirementFixture {
+	t.Helper()
+	if os.Geteuid() != 0 {
+		t.Skip("requires root for isolated Restore ownership fixtures")
+	}
+	f := switchPlannerFixture(t, "vanilla")
+	b := f.backend
+	oldLock, oldUnits := pluginRuntimeLockPath, instanceBackupUnits
+	pluginRuntimeLockPath = filepath.Join(t.TempDir(), "maintenance.lock")
+	instanceBackupUnits = t.TempDir()
+	t.Cleanup(func() {
+		pluginRuntimeLockPath, instanceBackupUnits = oldLock, oldUnits
+	})
+	sourceID, cloneID := f.configs[0].ID, f.configs[1].ID
+	source, err := b.readRecord(sourceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	switchWorldFixture(t, source.Storage.DataPath, source.Runtime.Version, "Survival")
+	if err := os.Chown(source.Storage.DataPath, int(source.Runtime.UID), int(source.Runtime.GID)); err != nil {
+		t.Fatal(err)
+	}
+	registry := b.identities().directory
+	sourceName := filepath.Join(registry, "names", sourceID+".json")
+	if err := b.writeJSON(sourceName, minecraftInstanceNameRecord{ID: sourceID, Software: "vanilla", DisplayName: "Survival"}, true); err != nil {
+		t.Fatal(err)
+	}
+	clone, err := b.readRecord(cloneID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, secret := clone.Runtime.JavaPort, clone.Runtime.RCONPassword
+	clone.Runtime = source.Runtime
+	clone.Runtime.ID, clone.Runtime.JavaPort, clone.Runtime.RCONPassword = cloneID, port, secret
+	clone.Runtime.Software, clone.Runtime.StartOnBoot, clone.Runtime.PreserveContent = "purpur", false, true
+	cloneDir, _, _ := b.paths(cloneID)
+	name := filepath.Join(registry, "names", cloneID+".json")
+	if err := b.writeJSON(name, minecraftInstanceNameRecord{ID: cloneID, Software: "purpur", DisplayName: "Survival Purpur"}, true); err != nil {
+		t.Fatal(err)
+	}
+	parent := filepath.Dir(clone.Storage.DataPath)
+	if historical {
+		for _, path := range []string{filepath.Join(cloneDir, "config.json"), cloneDir, filepath.Join(registry, cloneID+".json")} {
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.Mkdir(parent, 0700); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		if err := b.writeJSON(filepath.Join(cloneDir, "config.json"), clone, true); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.apply(cloneID); err != nil {
+			t.Fatal(err)
+		}
+		clone, err = b.readRecord(cloneID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chown(clone.Storage.DataPath, int(clone.Runtime.UID), int(clone.Runtime.GID)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tx := filepath.Join(parent, ".restore-"+strings.Repeat("a", 32))
+	if err := os.MkdirAll(filepath.Join(tx, "replacement"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{tx, filepath.Join(tx, "replacement")} {
+		// Represents the effective justvoxel-web group of the production Agent.
+		if err := os.Chown(path, 0, 1001); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(tx, "archive.tar.gz"), []byte("retained staging archive"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	original := filepath.Join(tx, "original")
+	if err := os.Mkdir(original, 0750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(original, int(clone.Runtime.UID), int(clone.Runtime.GID)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(original, "clone-only"), []byte("old clone data"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s := surfaceTestServer(t, roleAdministrator)
+	s.operations = openTestOperationStore(t)
+	j, _, err := s.operations.beginMinecraftMaintenance(testMinecraftResetFingerprint, operationTypeMinecraftSwitch, sourceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.operations.transition(j.OperationID, operationNeedsAttention, "switch_failed", "Switch did not complete."); err != nil {
+		t.Fatal(err)
+	}
+	e := minecraftSwitchEvidence{
+		Schema: 1, OperationID: j.OperationID, Source: sourceID, Target: "purpur", Version: source.Runtime.Version,
+		Action: "clone", Stage: "verifying_clone", SourceRecord: &source, CloneID: cloneID, CloneRecord: &clone,
+	}
+	if err := saveSwitchEvidence(e); err != nil {
+		t.Fatal(err)
+	}
+	storage := newSwitchRetirementTestStorage(t)
+	base := b.command
+	b.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+		if command == "nsenter" && len(args) > 3 && storage.helpers[args[2]] != "" {
+			// Production path and inode checks run against temporary directories.
+			// The test already runs in the namespace containing those directories.
+			return storage.command(ctx, command, args...)
+		}
+		if command == "systemctl" && args[0] == "show" {
+			if args[1] == "--property=Job" {
+				return nil, nil
+			}
+			if strings.Contains(args[len(args)-1], "-backup-") || args[len(args)-1] == instanceBackupUnit(cloneID, "service") {
+				return []byte("LoadState=not-found\nActiveState=inactive\nJob=0\n"), nil
+			}
+		}
+		if command == "podman" && args[0] == "rm" {
+			if args[len(args)-1] != "minecraft-"+cloneID {
+				t.Fatal("attempted to remove a container other than the clone")
+			}
+			delete(f.containers, cloneID)
+			return nil, nil
+		}
+		return base(ctx, command, args...)
+	}
+	_, sourceEnv, sourceQuadlet := b.paths(sourceID)
+	before := map[string]string{}
+	for _, path := range []string{filepath.Join(registry, sourceID+".json"), sourceName, filepath.Join(b.root, sourceID, "config.json"), sourceEnv, sourceQuadlet} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before[path] = string(raw)
+	}
+	return &switchRetirementFixture{
+		f: f, server: s, storage: storage, e: e, j: j, parent: parent, tx: tx, name: name,
+		before: before, world: switchWorldSnapshot(t, source.Storage.DataPath),
+	}
+}
+
+func (fx *switchRetirementFixture) recover() *httptest.ResponseRecorder {
+	response := httptest.NewRecorder()
+	path := "/v1/minecraft/instances/" + fx.e.Source + "/switch/recover"
+	body := fmt.Sprintf(`{"operation_id":%q,"confirm":true}`, fx.j.OperationID)
+	fx.server.minecraftSwitchRecover(response, surfaceRequest(http.MethodPost, path, body))
+	return response
+}
+
+func (fx *switchRetirementFixture) assertBlocked(t *testing.T, diagnostic string) {
+	t.Helper()
+	if response := fx.recover(); response.Code != http.StatusConflict {
+		t.Fatalf("unexpected recovery response: %d %s", response.Code, response.Body)
+	}
+	current, err := fx.server.operations.currentMinecraftMaintenance()
+	if err != nil || current == nil || current.OperationID != fx.j.OperationID || current.State != operationNeedsAttention {
+		t.Fatalf("recovery released maintenance on refusal: %+v %v", current, err)
+	}
+	if log := switchTestDiagnostic(t, fx.server.operations, fx.j.OperationID); !strings.Contains(log, diagnostic) || strings.Contains(log, fx.parent) {
+		t.Fatalf("missing or unsafe diagnostic: %s", log)
+	}
+}
+
+func (fx *switchRetirementFixture) assertRecovered(t *testing.T) {
+	t.Helper()
+	if response := fx.recover(); response.Code != http.StatusOK {
+		t.Fatalf("recovery failed: %d %s\n%s", response.Code, response.Body, switchTestDiagnostic(t, fx.server.operations, fx.j.OperationID))
+	}
+	for _, path := range []string{fx.parent, fx.tx, fx.name, filepath.Join(fx.f.backend.root, fx.e.CloneID), fx.f.backend.deletePath(fx.e.CloneID)} {
+		if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("clone artifact remains: %s (%v)", path, err)
+		}
+	}
+	for path, want := range fx.before {
+		if raw, err := os.ReadFile(path); err != nil || string(raw) != want {
+			t.Fatalf("source file changed: %s (%v)", path, err)
+		}
+	}
+	data := fx.e.SourceRecord.Storage.DataPath
+	if state, err := fx.f.backend.observe(context.Background(), fx.e.Source); err != nil || state.State != "stopped" ||
+		!reflect.DeepEqual(fx.world, switchWorldSnapshot(t, data)) {
+		t.Fatalf("source state or data changed: %+v %v", state, err)
+	}
+	j, err := fx.server.operations.get(fx.j.OperationID)
+	if err != nil || j.State != operationResolved {
+		t.Fatalf("Switch is not resolved: %+v %v", j, err)
+	}
+	e, err := readSwitchEvidence(j)
+	if err != nil || e.Stage != "recovered" {
+		t.Fatalf("recovered Switch evidence not persisted: %v, stage %q", err, e.Stage)
+	}
+	if current, err := fx.server.operations.currentMinecraftMaintenance(); err != nil || current != nil {
+		t.Fatalf("maintenance gate remains held: %+v %v", current, err)
+	}
+	if log := switchTestDiagnostic(t, fx.server.operations, fx.j.OperationID); !strings.Contains(log, "recovery finalization completed") {
+		t.Fatal("finalization stage is missing from Migration diagnostics")
+	}
+	plan, err := planMinecraftSwitch(context.Background(), fx.e.Source, "purpur")
+	if err != nil || !plan.Clone {
+		t.Fatalf("another Switch cannot be reviewed: %+v %v", plan, err)
+	}
+	if response := fx.recover(); response.Code != http.StatusConflict {
+		t.Fatalf("resolved Switch accepted another recovery: %d %s", response.Code, response.Body)
+	}
+	if err := fx.server.recoverMinecraftSwitch(context.Background(), &e); err != nil {
+		t.Fatal("re-running finalization after an interruption is unsafe", err)
+	}
+}
+
+func TestSwitchHistoricalCloneRecovery(t *testing.T) {
+	t.Run("retired clone", func(t *testing.T) {
+		newSwitchRetirementFixture(t, true).assertRecovered(t)
+	})
+	t.Run("interrupted after storage retirement", func(t *testing.T) {
+		fx := newSwitchRetirementFixture(t, true)
+		// Partial removal of a recognized directory is a valid retry input.
+		if err := os.Remove(filepath.Join(fx.tx, "archive.tar.gz")); err != nil {
+			t.Fatal(err)
+		}
+		base := fx.f.backend.command
+		interrupt := true
+		fx.f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+			out, err := base(ctx, command, args...)
+			if err == nil && interrupt && command == "nsenter" && args[2] == instanceSwitchRetireHelper {
+				interrupt = false
+				return nil, errors.New("interrupted after verified storage cleanup")
+			}
+			return out, err
+		}
+		fx.assertBlocked(t, "retained Restore transaction validation or retirement failed")
+		if _, err := os.Lstat(fx.parent); !errors.Is(err, os.ErrNotExist) {
+			t.Fatal("production helper did not remove the clone parent", err)
+		}
+		if _, err := os.Lstat(fx.name); err != nil {
+			t.Fatal("name must survive until finalization", err)
+		}
+		fx.assertRecovered(t)
+	})
+	t.Run("interrupted after name retirement", func(t *testing.T) {
+		fx := newSwitchRetirementFixture(t, true)
+		b := fx.f.backend
+		if err := b.switchCloneRetirementStorage(context.Background(), "retired", *fx.e.CloneRecord, "-"); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.removePrivate(fx.name); err != nil {
+			t.Fatal(err)
+		}
+		fx.assertRecovered(t)
+	})
+	t.Run("real bind mount in private namespace", func(t *testing.T) {
+		namespace := []string{"--mount", "--propagation", "private", "--"}
+		if err := exec.Command("unshare", append(namespace, "true")...).Run(); err != nil {
+			t.Skip("requires a private mount namespace; mount discovery is also covered with a fixture")
+		}
+		fx := newSwitchRetirementFixture(t, true)
+		base := fx.f.backend.command
+		fx.f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+			if command != "nsenter" || args[2] != instanceSwitchRetireHelper {
+				return base(ctx, command, args...)
+			}
+			mountAndRun := `mount --bind -- "$1" "$2" || exit 125; shift 2; exec bash "$@"`
+			argv := append(namespace, "bash", "-c", mountAndRun, "mount-test",
+				fx.e.SourceRecord.Storage.DataPath, filepath.Join(fx.tx, "original"), fx.storage.helpers[args[2]])
+			out, err := exec.CommandContext(ctx, "unshare", append(argv, args[3:]...)...).Output()
+			var exit *exec.ExitError
+			if errors.As(err, &exit) && exit.ExitCode() == 125 {
+				t.Skip("cannot bind mount fixture directories in the private namespace")
+			}
+			return out, err
+		}
+		fx.assertBlocked(t, "clone storage mount identity mismatch")
+		if !reflect.DeepEqual(fx.world, switchWorldSnapshot(t, fx.e.SourceRecord.Storage.DataPath)) {
+			t.Fatal("nested mount refusal touched the source")
+		}
+	})
+	for _, refusal := range []struct {
+		name, diagnostic string
+		change           func(*testing.T, *switchRetirementFixture) error
+	}{
+		{"unknown entry", "unexpected clone storage entry", func(_ *testing.T, fx *switchRetirementFixture) error {
+			return os.Mkdir(filepath.Join(fx.parent, "unknown"), 0700)
+		}},
+		{"invalid structure", "retained Restore transaction validation", func(_ *testing.T, fx *switchRetirementFixture) error {
+			return os.Mkdir(filepath.Join(fx.tx, "unknown"), 0700)
+		}},
+		{"unsafe ownership", "retained Restore transaction validation", func(_ *testing.T, fx *switchRetirementFixture) error {
+			return os.Chown(fx.tx, 1000, 0)
+		}},
+		{"unsafe permissions", "retained Restore transaction validation", func(_ *testing.T, fx *switchRetirementFixture) error {
+			return os.Chmod(fx.tx, 0770)
+		}},
+		{"symlink escape", "retained Restore transaction validation", func(_ *testing.T, fx *switchRetirementFixture) error {
+			return os.Symlink(fx.e.SourceRecord.Storage.DataPath, filepath.Join(fx.tx, "original", "source-link"))
+		}},
+		{"nested bind mount", "clone storage mount identity mismatch", func(t *testing.T, fx *switchRetirementFixture) error {
+			fx.storage.mountInfo = filepath.Join(t.TempDir(), "mountinfo")
+			mountInfo := "900 1 0:1 /other " + filepath.Join(fx.tx, "original") + " rw - tmpfs none rw\n"
+			return os.WriteFile(fx.storage.mountInfo, []byte(mountInfo), 0600)
+		}},
+		{"invalid source binding", "source verification failed", func(_ *testing.T, fx *switchRetirementFixture) error {
+			// A structurally valid, distinct path pair on another placement must
+			// still fail verification against the source's committed record.
+			root := filepath.Join(fx.e.SourceRecord.Storage.Root, "other")
+			for _, record := range []*instanceRuntimeRecord{fx.e.SourceRecord, fx.e.CloneRecord} {
+				record.Storage.Root = root
+				record.Storage.DataPath = filepath.Join(root, "minecraft-instances", record.Runtime.ID, "data")
+			}
+			return saveSwitchEvidence(fx.e)
+		}},
+		{"invalid clone binding", "Switch recovery evidence validation failed", func(_ *testing.T, fx *switchRetirementFixture) error {
+			fx.e.CloneID = fx.e.Source
+			return saveSwitchEvidence(fx.e)
+		}},
+		{"live clone", "clone runtime retirement incomplete", func(_ *testing.T, fx *switchRetirementFixture) error {
+			fx.f.states[fx.e.CloneID], fx.f.containers[fx.e.CloneID] = "active", "running"
+			return nil
+		}},
+		{"registered clone", "clone runtime retirement incomplete", func(_ *testing.T, fx *switchRetirementFixture) error {
+			b := fx.f.backend
+			return b.writeJSON(filepath.Join(b.identities().directory, fx.e.CloneID+".json"), minecraftInstanceRecord{ID: fx.e.CloneID}, false)
+		}},
+		{"unverified source", "source verification failed", func(_ *testing.T, fx *switchRetirementFixture) error {
+			_, _, q := fx.f.backend.paths(fx.e.Source)
+			return os.WriteFile(q, []byte("uncommitted Quadlet"), 0600)
+		}},
+		{"source no longer stopped", "original source server state could not be verified", func(_ *testing.T, fx *switchRetirementFixture) error {
+			fx.f.states[fx.e.Source], fx.f.containers[fx.e.Source] = "active", "running"
+			return nil
+		}},
+	} {
+		t.Run(refusal.name, func(t *testing.T) {
+			fx := newSwitchRetirementFixture(t, true)
+			world := switchWorldSnapshot(t, fx.e.SourceRecord.Storage.DataPath)
+			sourceData := fx.e.SourceRecord.Storage.DataPath
+			if err := refusal.change(t, fx); err != nil {
+				t.Fatal(err)
+			}
+			fx.assertBlocked(t, refusal.diagnostic)
+			for _, path := range []string{fx.tx, fx.name} {
+				if _, err := os.Lstat(path); err != nil {
+					t.Fatal("refused recovery erased evidence", err)
+				}
+			}
+			if !reflect.DeepEqual(world, switchWorldSnapshot(t, sourceData)) {
+				t.Fatal("refused recovery touched source data")
+			}
+		})
+	}
+}
+
+func switchRetirementInode(t *testing.T, path string) []uint64 {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := info.Sys().(*syscall.Stat_t)
+	return []uint64{uint64(st.Dev), st.Ino}
+}
+
+func TestSwitchCloneRestoreRetirement(t *testing.T) {
+	t.Run("registered clone with missing Restore journal", func(t *testing.T) {
+		fx := newSwitchRetirementFixture(t, false)
+		fx.assertBlocked(t, "unexpected clone storage entry")
+		for _, path := range []string{fx.tx, fx.e.CloneRecord.Storage.DataPath, fx.name} {
+			if _, err := os.Lstat(path); err != nil {
+				t.Fatal("unbound Restore storage was removed", err)
+			}
+		}
+	})
+	for _, stage := range []string{"completed", "rolled_back", "unresolved", "foreign inode", "foreign config digest", "interrupted before deletion"} {
+		t.Run(stage, func(t *testing.T) {
+			fx := newSwitchRetirementFixture(t, false)
+			b := fx.f.backend
+			path := filepath.Join(b.root, fx.e.CloneID, "restore-journal.json")
+			config, err := b.readPrivate(filepath.Join(b.root, fx.e.CloneID, "config.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			previous := filepath.Join(fx.tx, "original")
+			data := fx.e.CloneRecord.Storage.DataPath
+			journal := instanceRestoreJournal{
+				Schema: 1, ID: fx.e.CloneID, Stage: "completed", ConfigSHA256: instanceHash(config),
+				Transaction: strings.TrimPrefix(filepath.Base(fx.tx), ".restore-"),
+				Parent:      switchRetirementInode(t, fx.parent), Original: switchRetirementInode(t, previous),
+				Replacement: switchRetirementInode(t, data), Archive: "Survival-backup-vanilla-2026-03-06-0015.tar.gz",
+				Fingerprint: instanceHash([]byte("fixture")),
+			}
+			switch stage {
+			case "rolled_back":
+				journal.Stage = stage
+				journal.Original, journal.Replacement = journal.Replacement, journal.Original
+				if err := os.Rename(previous, filepath.Join(fx.tx, "failed-replacement")); err != nil {
+					t.Fatal(err)
+				}
+			case "unresolved":
+				journal.Stage = "recovery_required"
+			case "foreign inode":
+				journal.Original[1]++
+			case "foreign config digest":
+				journal.ConfigSHA256 = instanceHash([]byte("another configuration"))
+			}
+			if err := b.writeJSON(path, journal, false); err != nil {
+				t.Fatal(err)
+			}
+			if stage == "unresolved" {
+				old := instanceBackupStorageCommand
+				t.Cleanup(func() { instanceBackupStorageCommand = old })
+				var calls []string
+				instanceBackupStorageCommand = func(_ context.Context, command string, args ...string) ([]byte, error) {
+					if command != "nsenter" || args[2] != instanceRestoreHelper || args[4] != fx.e.CloneID {
+						t.Fatal("Restore recovery selected the wrong target", args)
+					}
+					calls = append(calls, args[3])
+					return nil, errors.New("the existing Restore engine could not verify rollback")
+				}
+				fx.assertBlocked(t, "clone Restore recovery incomplete")
+				if !reflect.DeepEqual(calls, []string{"rollback", "recovery-required"}) {
+					t.Fatal("existing Restore recovery was bypassed", calls)
+				}
+			}
+			if stage == "foreign inode" || stage == "foreign config digest" {
+				fx.assertBlocked(t, "retained Restore transaction validation")
+			}
+			if stage == "unresolved" || stage == "foreign inode" || stage == "foreign config digest" {
+				for _, kept := range []string{path, fx.tx, data, fx.name} {
+					if _, err := os.Lstat(kept); err != nil {
+						t.Fatal("failed verification discarded evidence", err)
+					}
+				}
+				return
+			}
+			base := b.command
+			interrupt := stage == "interrupted before deletion"
+			checkOrdering := true
+			b.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+				if command == "nsenter" && args[2] == instanceDeleteHelper && args[3] == "inspect" && checkOrdering {
+					if _, err := os.Lstat(fx.tx); !errors.Is(err, os.ErrNotExist) {
+						t.Fatal("ordinary deletion started before Restore storage was retired", err)
+					}
+					if _, err := b.restoreJournal(fx.e.CloneID); err != nil {
+						t.Fatal("Restore journal lost before ordinary deletion", err)
+					}
+					if interrupt {
+						interrupt = false
+						return nil, errors.New("interrupted at start of ordinary deletion")
+					}
+					checkOrdering = false
+				}
+				return base(ctx, command, args...)
+			}
+			if interrupt {
+				fx.assertBlocked(t, "clone runtime retirement incomplete")
+				if _, err := b.readRecord(fx.e.CloneID); err != nil {
+					t.Fatal("clone configuration and identity must survive interrupted retirement", err)
+				}
+			}
+			fx.assertRecovered(t)
+			if checkOrdering {
+				t.Fatal("ordinary deletion did not run")
 			}
 		})
 	}

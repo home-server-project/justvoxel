@@ -1,0 +1,213 @@
+#!/usr/bin/bash
+# Private Switch recovery protocol. The caller owns appliance maintenance.
+set -euo pipefail
+[[ ${EUID} == 0 && $# == 10 ]] || exit 1
+action=$1
+shift
+case "$action" in journal|unrestored|retired|empty) ;; *) exit 1 ;; esac
+if ! /usr/libexec/justvoxel/mjust/instance-runtime-prerequisites restore-validate "${@:1:8}" >/dev/null 2>&1; then
+    echo mount_identity
+    exit 1
+fi
+exec python3 - "$action" "$@" <<'PY'
+import json, os, re, stat, sys
+from contextlib import ExitStack
+
+DIR = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+TX = re.compile(r'\.restore-[a-f0-9]{32}')
+
+class Refusal(Exception):
+    pass
+
+def require(condition, reason='restore_validation'):
+    if not condition:
+        raise Refusal(reason)
+
+def identity(info):
+    return [info.st_dev, info.st_ino]
+
+def private_dir(info):
+    return stat.S_ISDIR(info.st_mode) and info.st_uid == 0 and stat.S_IMODE(info.st_mode) == 0o700
+
+def entry(fd, name):
+    try:
+        return os.stat(name, dir_fd=fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return None
+
+def open_dir(stack, fd, name):
+    child = os.open(name, DIR, dir_fd=fd)
+    stack.callback(os.close, child)
+    return child
+
+def names(fd, limit):
+    with os.scandir(fd) as entries:
+        result = []
+        for item in entries:
+            require(len(result) < limit, 'unexpected_entry')
+            result.append(item.name)
+        return result
+
+def check_mounts(root, mount, base, parent):
+    with open('/proc/self/mountinfo', errors='surrogateescape') as mounts:
+        for line in mounts:
+            target = re.sub(r'\\([0-7]{3})', lambda m: chr(int(m[1], 8)), line.split()[4])
+            require(not (target in (base, parent) or target.startswith(parent + '/')
+                         or (mount and target.startswith(mount + '/') and
+                             (target == root or root.startswith(target + '/')))), 'mount_identity')
+
+def mount_id(fd):
+    with open(f'/proc/self/fdinfo/{fd}') as info:
+        for line in info:
+            if line.startswith('mnt_id:'):
+                return int(line.split()[1])
+    raise Refusal('mount_identity')
+
+def remove_tree(fd, name, expected_mount):
+    with ExitStack() as stack:
+        tree = open_dir(stack, fd, name)
+        # Check the opened inode before traversal, even if a new bind mount
+        # appeared after the mount table was read.
+        require(mount_id(tree) == expected_mount, 'mount_identity')
+        with os.scandir(tree) as entries:
+            for item in entries:
+                st = item.stat(follow_symlinks=False)
+                if stat.S_ISDIR(st.st_mode):
+                    remove_tree(tree, item.name, expected_mount)
+                else:
+                    require(stat.S_ISREG(st.st_mode) and st.st_nlink == 1)
+                    os.unlink(item.name, dir_fd=tree)
+    os.rmdir(name, dir_fd=fd)
+
+def check_tree(fd, name, device, expected_mount, uid, gid, private_gid, budget, expected=None, staged=False):
+    info = entry(fd, name)
+    require(info is not None and stat.S_ISDIR(info.st_mode))
+    require((info.st_uid, info.st_gid) == (uid, gid) or (staged and info.st_uid == 0))
+    require(not stat.S_IMODE(info.st_mode) & 0o7002)
+    require(expected is None or identity(info) == expected)
+    # The roots are sealed behind private directories, and the stopped/retired
+    # clone cannot mutate them. Refuse foreign ownership, hard links and links
+    # of any kind before handing the tree to the fd-based remover.
+    def walk_error(error):
+        raise error
+
+    for _, dirs, files, directory in os.fwalk(name, onerror=walk_error, dir_fd=fd, follow_symlinks=False):
+        require(mount_id(directory) == expected_mount, 'mount_identity')
+        for child in dirs + files:
+            budget[0] -= 1
+            require(budget[0] >= 0)
+            st = entry(directory, child)
+            require(st is not None)
+            require(st.st_dev == device, 'mount_identity')
+            require(st.st_uid in (0, uid) and st.st_gid in (0, gid, private_gid) and
+                    not stat.S_IMODE(st.st_mode) & 0o7002 and
+                    (stat.S_ISDIR(st.st_mode) or (stat.S_ISREG(st.st_mode) and st.st_nlink == 1)))
+
+def check_transaction(fd, name, device, expected_mount, uid, gid, journal, budget):
+    with ExitStack() as stack:
+        tx = open_dir(stack, fd, name)
+        info = os.fstat(tx)
+        require(info.st_dev == device and mount_id(tx) == expected_mount, 'mount_identity')
+        # The agent's effective group can be justvoxel-web. Mode 0700
+        # provides the ownership boundary independently of the group.
+        require(private_dir(info))
+        children = names(tx, 4)
+        require(set(children) <= {'archive.tar.gz', 'original', 'failed-replacement', 'replacement'})
+        if 'archive.tar.gz' in children:
+            archive = entry(tx, 'archive.tar.gz')
+            require(archive.st_dev == device, 'mount_identity')
+            require(stat.S_ISREG(archive.st_mode) and archive.st_uid == 0 and
+                    archive.st_nlink == 1 and stat.S_IMODE(archive.st_mode) == 0o600)
+        worlds = [(tx, role, False) for role in ('original', 'failed-replacement') if role in children]
+        if 'replacement' in children:
+            replacement = open_dir(stack, tx, 'replacement')
+            st = os.fstat(replacement)
+            require(st.st_dev == device and mount_id(replacement) == expected_mount, 'mount_identity')
+            require(private_dir(st))
+            replacement_entries = names(replacement, 1)
+            require(replacement_entries in ([], ['data']))
+            if replacement_entries:
+                worlds.append((replacement, 'data', True))
+        require(len(worlds) <= 1)
+        for directory, role, staged in worlds:
+            expected = None
+            if journal:
+                require((role == 'original') == (journal['stage'] == 'completed'))
+                expected = journal['original'] if role == 'original' else journal.get('replacement')
+                require(expected is not None or staged)
+            st = entry(directory, role)
+            require(st is not None and st.st_dev == device, 'mount_identity')
+            check_tree(directory, role, device, expected_mount, uid, gid, info.st_gid, budget, expected, staged)
+
+def main():
+    action, ident, root, data, mount, uuid, source, uid, gid, evidence = sys.argv[1:]
+    base = root + '/minecraft-instances'
+    parent = base + '/' + ident
+    require(re.fullmatch(r'jv-[a-z0-9]{6,12}', ident) and data == parent + '/data')
+    check_mounts(root, mount, base, parent)
+    journal = json.loads(evidence) if action == 'journal' else None
+    if action == 'journal':
+        require(isinstance(journal, dict) and journal['stage'] in ('completed', 'rolled_back') and
+                journal['id'] == ident and re.fullmatch(r'[a-f0-9]{32}', journal['transaction']))
+    with ExitStack() as stack:
+        root_fd = open_dir(stack, None, '/')
+        for part in root.split('/')[1:]:
+            root_fd = open_dir(stack, root_fd, part)
+        root_info = os.fstat(root_fd)
+        expected_mount = mount_id(root_fd)
+        require(root_info.st_uid == 0 and not stat.S_IMODE(root_info.st_mode) & 0o022)
+        if entry(root_fd, 'minecraft-instances') is None:
+            require(not journal)
+            os.fsync(root_fd)
+            return
+        base_fd = open_dir(stack, root_fd, 'minecraft-instances')
+        base_info = os.fstat(base_fd)
+        require(base_info.st_dev == root_info.st_dev and mount_id(base_fd) == expected_mount, 'mount_identity')
+        require(private_dir(base_info))
+        if entry(base_fd, ident) is None:
+            require(not journal)
+            os.fsync(base_fd)
+            return
+        fd = open_dir(stack, base_fd, ident)
+        info = os.fstat(fd)
+        require(info.st_dev == base_info.st_dev and mount_id(fd) == expected_mount, 'mount_identity')
+        require(private_dir(info))
+        transactions = names(fd, 65)
+        if journal:
+            require(identity(info) == journal['parent'])
+            current = entry(fd, 'data')
+            if current is not None:
+                expected = journal.get('replacement') if journal['stage'] == 'completed' else journal['original']
+                require(stat.S_ISDIR(current.st_mode) and identity(current) == expected and
+                        (current.st_uid, current.st_gid) == (int(uid), int(gid)))
+                transactions.remove('data')
+            else:
+                require(journal['data_may_be_absent'])
+            require(set(transactions) <= {'.restore-' + journal['transaction']}, 'unexpected_entry')
+        elif action == 'unrestored':
+            require(set(transactions) <= {'data'}, 'unexpected_entry')
+            return
+        else:
+            require(all(action == 'retired' and TX.fullmatch(name) for name in transactions), 'unexpected_entry')
+        # Validate all retained entries before deleting any of them. A partially
+        # removed transaction is still a subset of the same validated layout.
+        budget = [750000]
+        for name in transactions:
+            check_transaction(fd, name, info.st_dev, expected_mount, int(uid), int(gid), journal, budget)
+        check_mounts(root, mount, base, parent)
+        for name in transactions:
+            remove_tree(fd, name, expected_mount)
+        os.fsync(fd)
+        if not journal:
+            os.rmdir(ident, dir_fd=base_fd)
+            os.fsync(base_fd)
+
+try:
+    main()
+except Refusal as err:
+    print(err.args[0])
+    sys.exit(1)
+except (OSError, ValueError, TypeError, KeyError, RecursionError):
+    print('restore_validation')
+    sys.exit(1)
+PY

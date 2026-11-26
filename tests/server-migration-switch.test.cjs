@@ -28,6 +28,12 @@ class Element {
   append(...nodes) { this.children.push(...nodes); }
   appendChild(node) { this.append(node); }
   replaceChildren(...nodes) { this.children = nodes; }
+  insertBefore(node, before) {
+    const index = this.children.indexOf(before);
+    assert.notEqual(index, -1);
+    this.children.splice(index, 0, node);
+    node.remove = () => { this.children = this.children.filter(child => child !== node); };
+  }
   querySelectorAll(tag) { return this.children.filter(node => node.tag === tag); }
   addEventListener(event, listener) { this.events[event] = listener; }
   setAttribute() {}
@@ -132,7 +138,7 @@ test('fresh open reconnects to unresolved Switch and recovery keeps the same car
     assert.equal(f.progress.children[0].textContent, state);
     if (state === 'needs_attention') {
       const row = f.progress.children[1];
-      assert.equal(row.className, 'action-row');
+      assert.equal(row.className, 'action-row migration-switch-recovery-action');
       assert.deepEqual(row.children.map(node => node.tag), ['span', 'button']);
       const [description, button] = row.children;
       assert.equal(description.textContent, 'Restore original server state and clean up failed clone.');
@@ -140,6 +146,7 @@ test('fresh open reconnects to unresolved Switch and recovery keeps the same car
       assert.equal(button.disabled, false);
       const request = button.events.click();
       assert.equal(button.disabled, true);
+      assert.equal(button.textContent, 'Recovering');
       await button.events.click();
       assert.equal(recoveryRequests, 1);
       state = 'resolved';
@@ -147,10 +154,72 @@ test('fresh open reconnects to unresolved Switch and recovery keeps the same car
       await request;
       assert.deepEqual(f.operations, ['', 'switch-1']);
       assert.deepEqual(f.selected(), ['leaf']);
-      assert.equal(f.progress.children[0].textContent, 'resolved');
+      assert.deepEqual(f.progress.children.map(node => node.textContent), ['resolved']);
       assert.equal(f.review.hidden, true);
+      assert.equal(f.cards[1].disabled, false);
+      assert.equal(f.cards[2].disabled, false);
     }
   }
+});
+
+test('Switch recovery keeps errors between status and the single action until retry resolves', async () => {
+  const status = 'Switch did not complete. Review Switch recovery; the conversion will not be retried automatically.';
+  const error = 'Instance runtime recovery is required. Retry the instance recovery operation.';
+  let requests = 0;
+  let finish;
+  const f = fixture(() => {
+    const pending = snapshot('needs_attention');
+    pending.operation.status = status;
+    return pending;
+  }, plan, undefined, () => {
+    if (++requests === 1) throw new Error(error);
+    return new Promise(resolve => { finish = resolve; });
+  });
+  await flush();
+  const [statusRow, actionRow] = f.progress.children;
+  const [description, recover] = actionRow.children;
+  assert.equal(f.progress.classList.contains('migration-switch-recovery'), true);
+  assert.equal(statusRow.textContent, status);
+  assert.equal(f.progress.children.length, 2);
+  assert.deepEqual(actionRow.children.map(node => node.tag), ['span', 'button']);
+  assert.equal(description.textContent, 'Restore original server state and clean up failed clone.');
+  assert.equal(recover.type, 'button');
+  await recover.events.click();
+  assert.deepEqual(f.progress.children.map(node => node.tag), ['p', 'p', 'div']);
+  assert.deepEqual(f.progress.children.slice(0, 2).map(node => node.textContent), [status, error]);
+  assert.equal(f.progress.children[2], actionRow);
+  assert.equal(f.state.textContent, '');
+  assert.equal(recover.disabled, false);
+  const retry = recover.events.click();
+  assert.deepEqual(f.progress.children, [statusRow, actionRow]);
+  assert.equal(recover.textContent, 'Recovering');
+  assert.equal(recover.disabled, true);
+  await recover.events.click();
+  assert.equal(requests, 2);
+  finish(snapshot('resolved'));
+  await retry;
+  assert.deepEqual(f.progress.children.map(node => node.textContent), ['resolved']);
+  assert.equal(f.progress.classList.contains('migration-switch-recovery'), false);
+  assert.equal(f.cards[2].disabled, false);
+  f.cards[2].events.click();
+  await flush();
+  assert.deepEqual(f.progress.children, []);
+  assert.equal(f.state.textContent, '');
+});
+
+test('a failed recovery response from a prior server selection cannot render an error', async () => {
+  let fail;
+  const f = fixture(() => snapshot('needs_attention'), plan, undefined, () =>
+    new Promise((_, reject) => { fail = reject; }));
+  await flush();
+  const button = f.progress.children.at(-1).children.at(-1);
+  const recovery = button.events.click();
+  f.generation.migration++;
+  f.root.isConnected = false;
+  fail(new Error('old server error'));
+  await recovery;
+  assert.equal(f.progress.children.length, 2);
+  assert.equal(f.state.textContent, '');
 });
 
 test('a new card clears terminal progress immediately and stale reviews cannot restore earlier selections', async () => {

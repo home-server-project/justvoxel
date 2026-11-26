@@ -815,22 +815,34 @@ func (s *server) minecraftSwitchRecover(w http.ResponseWriter, r *http.Request) 
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Minute)
 	defer cancel()
+	lock, err := acquirePluginMaintenanceLock()
+	if err != nil {
+		s.operations.recordSwitchRecovery(minecraftSwitchEvidence{OperationID: j.OperationID}, err)
+		instanceRuntimeError(w, err, id)
+		return
+	}
+	defer lock.Close()
+	// Recheck after taking maintenance ownership so a queued duplicate cannot
+	// recover evidence from an operation that has since been resolved.
+	current, err := s.operations.currentMinecraftMaintenance()
+	if err != nil || current == nil || current.OperationID != j.OperationID || current.State != operationNeedsAttention {
+		writeError(w, 409, "No Switch recovery is available.")
+		return
+	}
 	e, err := readSwitchEvidence(*j)
 	if err != nil {
 		e = minecraftSwitchEvidence{OperationID: j.OperationID}
 	}
 	if errors.Is(err, os.ErrNotExist) {
 		// No evidence means no worker mutation was authorized. Verify source only.
-		lock, lockErr := acquirePluginMaintenanceLock()
-		if lockErr != nil {
-			err = lockErr
-		} else {
-			err = instanceRuntimes.verifyCommittedSwitchState(ctx, id)
-			err = errors.Join(err, lock.Close())
+		err = instanceRuntimes.verifyCommittedSwitchState(ctx, id)
+		if err != nil {
+			err = switchRecoveryRefusal("source verification failed")
 		}
 	} else if err == nil {
-		s.operations.recordSwitchCloneRuntime(e)
-		err = s.recoverMinecraftSwitch(ctx, &e)
+		err = s.recoverMinecraftSwitchLocked(ctx, &e, lock)
+	} else {
+		err = switchRecoveryRefusal("Switch recovery evidence validation failed")
 	}
 	s.operations.recordSwitchRecovery(e, err)
 	if err != nil {

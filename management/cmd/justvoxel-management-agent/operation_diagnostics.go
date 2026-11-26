@@ -570,6 +570,8 @@ func (s *operationStore) recordSwitchRecovery(e minecraftSwitchEvidence, cause e
 	if cause != nil {
 		values["result"] = "failed"
 		values["reason"] = s.switchDiagnosticReason(e, cause)
+	} else if e.Stage == "recovered" {
+		values["stage"] = "recovery finalization completed"
 	}
 	_ = s.appendOperationDiagnostic(e.OperationID, operationTypeMinecraftSwitch, "switch_recovery", "Minecraft Switch recovery result", values)
 }

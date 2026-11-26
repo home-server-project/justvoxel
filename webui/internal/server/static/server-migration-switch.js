@@ -45,12 +45,15 @@
         marker.classList.toggle("plugins-badge-enabled", available);
         node.title = plan.reason || (active ? jvT("ui.7d4f12e4405b") : jvT("ui.a195a363286b", {v0: (plan.version)}));
       };
-      const reconnect = async (id = "") => {
+      const reconnect = async (id = "", resolvedRecovery = null) => {
         const ticket = sequence;
         const result = await request("operation", { operation_id: id });
         if (!current() || ticket !== sequence) return;
+        if (resolvedRecovery && (result.operation?.operation_id !== id || result.operation.state !== "resolved")) return;
         operation = result.operation || null;
         busy = Boolean(operation && !["succeeded", "resolved"].includes(operation.state));
+        const recovery = ["needs_attention", "failed"].includes(operation?.state);
+        progress.classList.toggle("migration-switch-recovery", recovery);
         if (!operation) { progress.replaceChildren(); return; }
         if (cards.some((node) => node.dataset.switchTarget === result.target)) {
           cards.forEach((node) => node.classList.toggle("is-selected", node.dataset.switchTarget === result.target));
@@ -61,18 +64,35 @@
           const link = document.createElement("a"); link.className = "button-link";
           link.href = `/?server=${encodeURIComponent(result.clone_id)}`; link.textContent = jvT("ui.10c040af618e"); progress.appendChild(link);
         }
-        if (["needs_attention", "failed"].includes(operation.state)) {
-          const actions = document.createElement("div"); actions.className = "action-row";
+        if (recovery) {
+          const actions = document.createElement("div"); actions.className = "action-row migration-switch-recovery-action";
           const description = document.createElement("span"); description.textContent = jvT("ui.75ea388b9a14");
           const recover = document.createElement("button"); recover.type = "button"; recover.textContent = jvT("ui.b8e7e9e5f031");
+          const operationID = operation.operation_id;
+          let errorRow;
           recover.addEventListener("click", async () => {
-            if (!current() || ticket !== sequence || recover.disabled) return;
+            if (!current() || ticket !== sequence || operation?.operation_id !== operationID || recover.disabled) return;
             recover.disabled = true;
+            recover.textContent = jvT("ui.d90064dbdb11");
+            errorRow?.remove();
             try {
-              const result = await request("recover", { operation_id: operation.operation_id, confirm: "yes" }, true);
-              if (current() && ticket === sequence) await load(result.operation.operation_id);
+              const result = await request("recover", { operation_id: operationID, confirm: "yes" }, true);
+              if (!current() || ticket !== sequence) return;
+              if (result.operation?.operation_id !== operationID || result.operation.state !== "resolved") {
+                throw new Error(jvT("ui.1eb6b959b7ce"));
+              }
+              operation = result.operation;
+              busy = false;
+              progress.classList.toggle("migration-switch-recovery", false);
+              progress.replaceChildren(paragraph(operation.status || jvT("ui.934767ef0bcc"), "notice"));
+              await load(operationID, operation);
+            } catch (failure) {
+              if (!current() || ticket !== sequence) return;
+              errorRow = paragraph(failure.message, "migration-switch-recovery-error");
+              progress.insertBefore(errorRow, actions);
+              recover.disabled = false;
+              recover.textContent = jvT("ui.b8e7e9e5f031");
             }
-            catch (failure) { if (current() && ticket === sequence) { state.textContent = failure.message; recover.disabled = false; } }
           });
           actions.append(description, recover);
           progress.appendChild(actions);
@@ -163,13 +183,20 @@
           review.hidden = false; state.textContent = "";
         } catch (failure) { if (current() && ticket === sequence) state.textContent = failure.message; }
       };
-      const load = async (id = "") => {
+      const load = async (id = "", resolvedRecovery = null) => {
         const ticket = ++sequence;
         review.hidden = true;
         cards.forEach((node) => { node.disabled = true; });
         state.textContent = jvT("ui.e29d2712155f");
         try {
-          await reconnect(id);
+          try {
+            await reconnect(id, resolvedRecovery);
+          } catch (failure) {
+            // Recovery already returned its authoritative terminal state.
+            // Continue to refresh cards if the follow-up snapshot is unavailable.
+            if (!resolvedRecovery) throw failure;
+            busy = false;
+          }
           if (!current() || ticket !== sequence) return;
           if (!operation) cards.forEach((node) => { node.classList.toggle("is-selected", false); });
           const results = await Promise.allSettled(cards.map(async (node) => ({ node, plan: await request("plan", { target: node.dataset.switchTarget }) })));
