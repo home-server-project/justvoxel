@@ -116,6 +116,8 @@ destination and uses the existing cold-backup maintenance/rollback transaction.
 same storage root, the same backup destination and automatically allocated ports.
 It briefly stops a running original for a consistent backup/copy, then restores
 its previous state. A verified clone is left stopped, with normal rename available.
+**Open cloned server** opens or brings forward Minecraft Servers and refreshes
+the list so you can find the clone. Switch keeps its original server selected.
 A Java-only clone can pass runtime verification with zero plugins. When Cross-play
 is enabled, the managed Cross-play stack must also pass verification.
 If Switch needs attention, select **Recover Switch** to restore the original
@@ -136,9 +138,10 @@ Incompatible or unknown evidence blocks Convert but can leave a protected
 experimental Clone available. Removing current mods does not prove a modded world
 safe for Vanilla or Paper: that direction offers only Clone and warns about lost
 mod-added world content. Every clone must pass target runtime verification.
-Review links to the selected server's **Plugins & Mods** workspace; Switch never
-removes, replaces, disables or downloads executable content. Returning to Switch
-or refreshing rechecks inventory. Across the new conversion directions, automatic
+Select **Plugins & Mods** from the review to open that workspace for the reviewed
+server and keep the review open. Reopen or refresh Switch to recheck inventory
+after making changes. Switch never removes, replaces, disables or downloads
+executable content. Across the new conversion directions, automatic
 startup content downloads stay suppressed. Supported target cross-play settings are preserved; review warns when the
 target requires Java connections. Same-family Switch retains
 its established cross-play handling.

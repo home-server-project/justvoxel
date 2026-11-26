@@ -21,12 +21,42 @@
 .migration-switch .server-software-card:disabled:hover{border-color:var(--jv-border-strong);background:var(--jv-surface-sunken)}
 .migration-switch .is-current:disabled:hover{border-color:#e5bb40;background:color-mix(in srgb,#e5bb40 12%,var(--jv-surface-sunken))}
 .migration-switch .server-software-card.is-selected:not(.is-current){border-color:var(--jv-success);background:color-mix(in srgb,var(--jv-success) 18%,var(--jv-surface-sunken))}
-.migration-switch .migration-switch-recovery{display:grid;gap:var(--jv-space-sm);padding:.8rem 1rem;text-align:start}
-.migration-switch .migration-switch-recovery>.notice,.migration-switch .migration-switch-recovery-error{margin:0;padding:0;overflow-wrap:anywhere}
-.migration-switch .migration-switch-recovery-error{color:var(--jv-danger);white-space:pre-line}
-.migration-switch .migration-switch-recovery .migration-switch-recovery-action{justify-content:space-between;margin:0}
-.migration-switch .migration-switch-recovery-action>span{flex:1 1 14rem;min-width:0}
-.migration-switch .migration-switch-recovery-action>button{margin-inline-start:auto}
+.migration-switch .migration-switch-stack{
+  display:grid;
+  grid-template-columns:minmax(0,1fr);
+  gap:var(--jv-space-sm);
+  min-width:0;
+}
+.migration-switch .migration-switch-content{
+  text-align:start;
+  font-size:.88rem;
+  line-height:1.4;
+  overflow-wrap:anywhere;
+}
+.migration-switch .migration-switch-content:has(>:not(:empty,[hidden])){margin-block-start:var(--jv-space-md)}
+.migration-switch .migration-switch-content>:empty{position:absolute}
+.migration-switch .migration-switch-content :is(p,label){
+  margin:0;
+  padding:0;
+  font-size:inherit;
+  line-height:inherit;
+}
+.migration-switch .migration-switch-content .notice.warning{
+  border:0;
+  background:none;
+  color:color-mix(in srgb,var(--jv-warning) 80%,var(--jv-text));
+}
+.migration-switch .migration-switch-error{color:var(--jv-danger);white-space:pre-line}
+.migration-switch .migration-switch-content .migration-switch-action{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  justify-content:flex-end;
+  gap:var(--jv-space-sm);
+  margin:0;
+}
+.migration-switch .migration-switch-action>p{flex:1 1 14rem;min-width:0}
+.migration-switch .migration-switch-action>button{max-width:100%;white-space:normal}
 @media(prefers-color-scheme:light){
   .migration-switch .setup-server-types legend{color:#34414a}
   .migration-switch .migration-switch-status-dot:not(.plugins-badge-enabled,.plugins-badge-disabled){background:#e9ecef}

@@ -49,10 +49,11 @@ const validServerID = (id) => typeof id === "string" && /^jv-[a-z0-9]{6,12}$/.te
 let serverSelectionInventoryLoading = false;
 globalThis.justVoxelLoadServerSelections = (refresh = false) => {
   if (globalThis.justVoxelSelectionReady && (!refresh || serverSelectionInventoryLoading)) return globalThis.justVoxelSelectionReady;
+  const previousInventory = globalThis.justVoxelSelectionReady;
   serverSelectionInventoryLoading = true;
   const inventoryTickets = {...globalThis.justVoxelSelectionGeneration};
   const slotTickets = new Map(Array.from(document.querySelectorAll("[data-server-selector-slot][data-server-workspace]"), slot => [slot, slot.dataset.inventoryGeneration]));
-  globalThis.justVoxelSelectionReady = (async () => {
+  const inventory = (async () => {
     // Never send a saved or URL server ID to the inventory endpoint.
     const response = await fetch("/api/minecraft/workspace/selection?selection=none", {credentials:"same-origin",cache:"no-store"});
     const data = await response.json();
@@ -78,8 +79,13 @@ globalThis.justVoxelLoadServerSelections = (refresh = false) => {
       }
     }
     return data;
-  })().finally(() => { serverSelectionInventoryLoading = false; });
-  return globalThis.justVoxelSelectionReady;
+  })().catch(error => {
+    // A failed refresh must not block workspaces already using a valid inventory.
+    if (globalThis.justVoxelSelectionReady === inventory) globalThis.justVoxelSelectionReady = previousInventory;
+    throw error;
+  }).finally(() => { serverSelectionInventoryLoading = false; });
+  globalThis.justVoxelSelectionReady = inventory;
+  return inventory;
 };
 if (selectionDashboard && workspaceRestoreAllowed()) {
   // Consumers await the same inventory validation before their first request.

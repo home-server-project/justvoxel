@@ -103,11 +103,11 @@ async function open(fail=false) {
 
  cards[1].events.click();await flush();const confirm=page.review.all().find(node=>node.tagName==="input");
  const actions=page.review.children.at(-1);
- assert.equal(actions.className,"action-row");
+ assert.equal(actions.className,"action-row migration-switch-action");
  assert.equal(page.review.children.at(-2).children.includes(confirm),true);
  assert.deepEqual(actions.children.map(node=>node.textContent),["Plugins & Mods","Convert existing server","Clone and convert"]);
- assert.equal(actions.children[0].tagName,"a");assert.equal(actions.children[0].className,"button-link secondary");
- assert.equal(actions.children[0].href,"/?workspace=plugins&server=jv-family1");
+ assert.equal(actions.children[0].tagName,"button");assert.equal(actions.children[0].className,"secondary");
+ assert.equal(actions.children[0].type,"button");assert.equal(actions.children[0].href,undefined);
  assert.doesNotMatch(page.review.textContent,/Open Plugins & Mods/);
  const convert=page.review.all().find(node=>node.tagName==="button"&&node.textContent==="Convert existing server");
  const clone=page.review.all().find(node=>node.tagName==="button"&&node.textContent==="Clone and convert");

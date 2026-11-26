@@ -41,13 +41,14 @@ func TestMigrationSwitchUsesCompleteSetupCatalogueAndArtwork(t *testing.T) {
 	introEnd := strings.Index(markup, legend) + len(legend)
 	catalogue := strings.Index(markup, `migration-switch-catalogue"`)
 	lastGroupEnd := strings.LastIndex(markup, `</fieldset>`) + len(`</fieldset>`)
-	operation := strings.Index(markup, `<div data-switch-operation role="status"></div>`)
+	content := strings.Index(markup, `<div class="migration-switch-content migration-switch-stack">`)
+	operation := strings.Index(markup, `<div class="migration-switch-stack" data-switch-operation role="status"></div>`)
 	state := strings.Index(markup, `data-switch-state`)
 	review := strings.Index(markup, `data-switch-review`)
 	if strings.Count(markup, `data-switch-operation`) != 1 || catalogue < introEnd ||
-		lastGroupEnd <= catalogue || operation < lastGroupEnd ||
-		strings.TrimSpace(markup[lastGroupEnd:operation]) != `</div>` || state <= operation || review <= state {
-		t.Fatal("Switch must show the introduction, complete catalogue, single operation status, compatibility state and selected-target review in that order")
+		lastGroupEnd <= catalogue || content < lastGroupEnd || operation < content ||
+		strings.TrimSpace(markup[lastGroupEnd:content]) != `</div>` || state <= operation || review <= state {
+		t.Fatal("Switch must show the introduction and complete catalogue before the shared area for operation status, compatibility state and review")
 	}
 	page, err := os.ReadFile("migration_workspace_switch.go")
 	if err != nil {
