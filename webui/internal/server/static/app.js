@@ -2626,7 +2626,7 @@ if (migrationOpen && migrationDialog) {
 
   const requestMigrationSMBPassword = (purpose, serverId, signal) => new Promise((resolve) => {
     const dialog = document.createElement("dialog");
-    dialog.className = "system-action-dialog";
+    dialog.className = "system-action-dialog migration-smb-password-dialog";
     dialog.setAttribute("aria-label", jvT("ui.c144fd7c3b42"));
     const shell = document.createElement("div");
     shell.className = "system-action-dialog-content";

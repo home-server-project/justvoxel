@@ -702,6 +702,7 @@ input[type=checkbox]:not(.destructive-confirm-toggle):not(.storage-confirm-toggl
 .migration-workspace-content .panel:first-of-type{margin-top:0}
 .migration-workspace-content .details{margin:.55rem 0}
 .migration-workspace-content .action-row{justify-content:flex-end;margin-top:.65rem}
+.migration-smb-password-dialog .action-row button{min-height:34px;padding:.45rem .65rem;font-size:.8rem}
 .migration-workspace-content form>.action-row:last-of-type{padding:.55rem 0}
 .migration-workspace-content .admin-form-grid{gap:.65rem}
 .migration-workspace-content label{margin:.45rem 0}

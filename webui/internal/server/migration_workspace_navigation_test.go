@@ -300,6 +300,13 @@ func TestMigrationWorkspaceExplicitURLStateContract(t *testing.T) {
 }
 
 func TestMigrationWorkspaceImportAttentionActionsAndResolvedNavigation(t *testing.T) {
+	markup, err := assets.ReadFile("templates/migration_workspace_progress.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(markup), `{{if eq .Operation.OperationType "migration_export" "migration_import"}}{{t "ui.11a6767d5674"}}`) {
+		t.Fatal("Import and Export must share the existing localized Done label")
+	}
 	backAnchor := regexp.MustCompile(`<a\b[^>]*\bid="server-migration-back-link"[^>]*>Back</a>`)
 	hiddenAttribute := regexp.MustCompile(`\shidden(?:\s|>)`)
 	for _, surface := range []string{"workspace"} {
@@ -330,9 +337,9 @@ func TestMigrationWorkspaceImportAttentionActionsAndResolvedNavigation(t *testin
 						t.Fatalf("progress navigation still labelled Server Migration: %s", body)
 					}
 					if state == "succeeded" {
-						dashboardLink := regexp.MustCompile(`<a\b[^>]*\bid="server-migration-dashboard-link"[^>]*>Open dashboard</a>`).FindString(body)
+						dashboardLink := regexp.MustCompile(`<a\b[^>]*\bid="server-migration-dashboard-link"[^>]*>Done</a>`).FindString(body)
 						if !strings.Contains(dashboardLink, "data-migration-open-dashboard") || !migrationMarkupHasURL(dashboardLink, "/", "", "", "") || hiddenAttribute.MatchString(dashboardLink) {
-							t.Fatalf("succeeded progress missing visible dashboard action: %s", body)
+							t.Fatalf("succeeded progress missing visible Done action to the selected server dashboard: %s", body)
 						}
 					}
 					if state == "needs_attention" {
@@ -344,6 +351,26 @@ func TestMigrationWorkspaceImportAttentionActionsAndResolvedNavigation(t *testin
 				})
 			}
 		})
+	}
+}
+
+func TestMigrationSMBPasswordDialogUsesCompactActionButtons(t *testing.T) {
+	script, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	promptClass := regexp.MustCompile(`const requestMigrationSMBPassword = [^\n]+\n\s+const dialog = document\.createElement\("dialog"\);\s+dialog\.className = "system-action-dialog migration-smb-password-dialog";`)
+	if !promptClass.Match(script) {
+		t.Fatal("transient SMB password prompt is missing its dedicated dialog class")
+	}
+
+	styles, err := assets.ReadFile("static/app.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const compactRule = ".migration-smb-password-dialog .action-row button{min-height:34px;padding:.45rem .65rem;font-size:.8rem}"
+	if !strings.Contains("\n"+string(styles)+"\n", "\n"+compactRule+"\n") {
+		t.Fatal("compact action button sizing must use a rule scoped to the transient SMB password dialog")
 	}
 }
 
