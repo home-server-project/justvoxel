@@ -11,6 +11,36 @@ const origin = 'https://justvoxel.test';
 const importPath = '/workspace/migration/import';
 const selectionEvent = 'justvoxel:server-selection-changed';
 
+const mutationObservers = new Set();
+
+class MutationObserver {
+  constructor(callback) {
+    this.callback = callback;
+    this.records = [];
+  }
+  observe(target, options) {
+    this.target = target;
+    this.options = options;
+    mutationObservers.add(this);
+  }
+  disconnect() {
+    mutationObservers.delete(this);
+    this.takeRecords();
+  }
+  takeRecords() { return this.records.splice(0); }
+  recordRemoval(target, removedNode) {
+    if (!this.options.childList) return;
+    if (this.target !== target && !(this.options.subtree && this.target.contains(target))) return;
+    this.records.push({ removedNodes: [removedNode] });
+    if (this.records.length === 1) {
+      queueMicrotask(() => {
+        const records = this.takeRecords();
+        if (records.length) this.callback(records);
+      });
+    }
+  }
+}
+
 class Element extends EventTarget {
   constructor() {
     super();
@@ -38,25 +68,33 @@ class Element extends EventTarget {
   replaceChildren(...nodes) { this.children.forEach(node => node.remove()); this.append(...nodes); }
   remove() {
     if (!this.parentElement) return;
-    this.parentElement.children = this.parentElement.children.filter(node => node !== this);
+    const parent = this.parentElement;
+    parent.children = parent.children.filter(node => node !== this);
     this.parentElement = null;
+    for (const observer of mutationObservers) observer.recordRemoval(parent, this);
   }
+  contains(node) { return this === node || this.children.some(child => child.contains(node)); }
+  get isConnected() { return this.isDocument || Boolean(this.parentElement?.isConnected); }
   querySelector() { return null; }
   querySelectorAll() { return []; }
   setAttribute(name, value) { this.attributes.set(name, value); }
   getAttribute(name) { return this.attributes.get(name) ?? null; }
   showModal() { this.open = true; }
-  close() { this.open = false; }
+  close() {
+    if (!this.open) return;
+    this.open = false;
+    setImmediate(() => this.dispatchEvent(new Event('close')));
+  }
   focus() {}
   click() { this.dispatchEvent(new Event('click')); }
 }
 
-function importRoot(server, action = 'review') {
+function migrationRoot(server, action = 'review', path = importPath) {
   const root = new Element();
   const submitter = new Element();
   const form = new Element();
   form.method = 'post';
-  form.getAttribute = () => `${importPath}/${action}?server=${server}`;
+  form.getAttribute = () => `${path}/${action}?server=${server}`;
   form.closest = selector => selector === 'form' ? form : null;
   root.dataset.serverId = server;
   root.contains = node => node === form;
@@ -65,12 +103,14 @@ function importRoot(server, action = 'review') {
   return { root, submitter, submit: () => submit({ target: form, submitter, preventDefault() {} }) };
 }
 
-async function fixture(review) {
-  const first = importRoot('jv-first01');
-  const next = importRoot('jv-second1');
-  const reselected = importRoot('jv-first01');
-  const reviewed = importRoot('jv-first01', 'apply');
-  const nextReviewed = importRoot('jv-second1', 'apply');
+async function fixture(review, tab = 'import') {
+  const path = '/workspace/migration/' + tab;
+  const action = tab === 'import' ? 'review' : 'apply';
+  const first = migrationRoot('jv-first01', action, path);
+  const next = migrationRoot('jv-second1', action, path);
+  const reselected = migrationRoot('jv-first01', action, path);
+  const reviewed = migrationRoot('jv-first01', 'apply', path);
+  const nextReviewed = migrationRoot('jv-second1', 'apply', path);
   const roots = {
     first: first.root,
     next: next.root,
@@ -85,8 +125,21 @@ async function fixture(review) {
   const state = new Element();
   const content = new Element();
   const refresh = new Element();
+  const document = Object.assign(new Element(), {
+    body,
+    isDocument: true,
+    querySelector: selector => selector === '[data-migration-open]' ? open : migration,
+    createElement(tag) {
+      const node = new Element();
+      if (tag === 'div') node.querySelector = () => roots[node.innerHTML];
+      return node;
+    },
+  });
+  document.appendChild(body);
   const requests = [];
   const loads = [];
+  const controllers = [];
+  let abortNextController = false;
   const sharedControlsCalls = [];
   const generation = { migration: 0 };
   migration.querySelector = selector => ({
@@ -97,21 +150,21 @@ async function fixture(review) {
   })[selector];
 
   const window = new EventTarget();
-  window.location = new URL('/?workspace=migration&tab=import&server=jv-first01', origin);
+  window.location = new URL(`/?workspace=migration&tab=${tab}&server=jv-first01`, origin);
   for (const name of ['Export', 'Import', 'Operation', 'Switch']) {
     window['JustVoxelServerMigration' + name] = { init() {} };
   }
   const context = {
-    window, URL, URLSearchParams, AbortController, controlCenter: null,
-    document: {
-      body,
-      addEventListener() {},
-      querySelector: selector => selector === '[data-migration-open]' ? open : migration,
-      createElement(tag) {
-        const node = new Element();
-        if (tag === 'div') node.querySelector = () => roots[node.innerHTML];
-        return node;
-      },
+    window, URL, URLSearchParams, document, MutationObserver, controlCenter: null,
+    AbortController: class extends AbortController {
+      constructor() {
+        super();
+        controllers.push(this);
+        if (abortNextController) {
+          abortNextController = false;
+          this.abort();
+        }
+      }
     },
     readWorkspaceWindowState: () => ({}),
     setupWorkspaceWindow: (element, { onOpen, onClose }) => ({
@@ -126,7 +179,7 @@ async function fixture(review) {
     justVoxelSelectionGeneration: generation,
     justVoxelSelectedURL: url => url,
     FormData: class {
-      forEach(callback) { callback('smb', 'source_kind'); }
+      forEach(callback) { callback('smb', tab === 'import' ? 'source_kind' : 'kind'); }
     },
     fetch: async (url, options) => {
       if (options.method === 'POST') {
@@ -140,7 +193,7 @@ async function fixture(review) {
       const markup = window.location.searchParams.get('server') === next.root.dataset.serverId
         ? 'next' : loads.length === 1 ? 'first' : 'reselected';
       return {
-        ok: true, status: 200, url: origin + importPath,
+        ok: true, status: 200, url: origin + path,
         text: async () => markup,
       };
     },
@@ -163,7 +216,9 @@ async function fixture(review) {
     assert.equal(state.textContent, '');
     assert.equal(refresh.disabled, false);
   };
-  return { first, next, reselected, reviewed, nextReviewed, content, body, credentials, requests, loads, migration, assertIdle, sharedControlsCalls,
+  return { first, next, reselected, reviewed, nextReviewed, content, body, document, credentials, requests, loads, migration, assertIdle, sharedControlsCalls,
+    submitSignal: () => controllers.at(-1).signal,
+    abortNextSubmit: () => { abortNextController = true; },
     close: () => close.click(),
     invalidate: () => { generation.migration++; },
     changeServer(serverId = next.root.dataset.serverId) {
@@ -305,6 +360,98 @@ test('SMB Import waits for credentials, cancels on server change, and can review
   assert.equal(f.requests[0].body.get('source_smb_password'), 'review-password');
   assert.equal(input.value, '');
   assert.equal(f.content.children[0], f.nextReviewed.root);
+  f.assertIdle();
+});
+
+for (const [reason, dismiss] of [
+  ['unexpected removal', (_, { dialog }) => dialog.remove()],
+  ['immediate reinsertion', (f, { dialog }) => {
+    dialog.remove();
+    f.body.appendChild(dialog);
+    assert.equal(dialog.isConnected, true);
+    assert.equal(dialog.open, true);
+  }],
+  ['immediate subtree reinsertion', f => {
+    f.body.remove();
+    f.document.appendChild(f.body);
+  }],
+  ['external close', (_, { dialog }) => dialog.close()],
+  ['reinsertion followed by a click before mutation delivery', (f, { dialog, use }) => {
+    dialog.remove();
+    f.body.appendChild(dialog);
+    use.click();
+  }],
+]) {
+  test(`SMB Import cancels after ${reason} and allows a fresh review`, async () => {
+    const f = await fixture();
+    let resolved = false;
+    const submitted = f.first.submit().then(() => { resolved = true; });
+    const signal = f.submitSignal();
+    const prompt = f.credentials();
+    prompt.input.value = 'discarded';
+    assert.equal(f.first.submitter.disabled, true);
+
+    dismiss(f, prompt);
+    await flush();
+    assert.equal(resolved, true);
+    await submitted;
+    assert.equal(f.requests.length, 0);
+    assert.equal(f.first.submitter.disabled, false);
+    assert.equal(f.content.children[0], f.first.root);
+    assert.equal(prompt.dialog.open, false);
+    assert.equal(prompt.dialog.isConnected, false);
+    assert.equal(prompt.input.value, '');
+    assert.equal([...mutationObservers].some(observer => observer.target === f.document), false);
+    f.assertIdle();
+
+    const retry = f.first.submit();
+    // Starting another submit would abort the previous controller if it still owned the slot.
+    assert.equal(signal.aborted, false);
+    const { input, use } = f.credentials();
+    input.value = ' exact review password ';
+    use.click();
+    await retry;
+    assert.equal(f.requests.length, 1);
+    assert.equal(f.requests[0].url, importPath + '/review?server=jv-first01');
+    assert.equal(f.requests[0].body.get('source_smb_password'), ' exact review password ');
+    assert.equal(f.content.children[0], f.reviewed.root);
+    assert.equal(f.first.submitter.disabled, false);
+    f.assertIdle();
+  });
+}
+
+test('an already-aborted SMB Import submit settles without attaching a prompt', async () => {
+  const f = await fixture();
+  f.body.appendChild = () => assert.fail('An aborted prompt must not attach');
+  f.abortNextSubmit();
+  await f.first.submit();
+  assert.equal(f.submitSignal().aborted, true);
+  assert.equal(f.first.submitter.disabled, false);
+  assert.equal(f.requests.length, 0);
+  f.assertIdle();
+});
+
+test('SMB Export cancels on prompt removal and sends only a fresh temporary password on retry', async () => {
+  const f = await fixture(undefined, 'export');
+  const submitted = f.first.submit();
+  const prompt = f.credentials();
+  prompt.input.value = 'discarded';
+  prompt.dialog.remove();
+  await submitted;
+  assert.equal(f.first.submitter.disabled, false);
+  assert.equal(f.requests.length, 0);
+  f.assertIdle();
+
+  const retry = f.first.submit();
+  const { input, use } = f.credentials();
+  input.value = 'export-password';
+  use.click();
+  await retry;
+  assert.equal(f.requests.length, 1);
+  assert.equal(f.requests[0].url, '/workspace/migration/export/apply?server=jv-first01');
+  assert.equal(f.requests[0].body.get('smb_password'), 'export-password');
+  assert.equal(f.content.children[0], f.reviewed.root);
+  assert.equal(f.first.submitter.disabled, false);
   f.assertIdle();
 });
 

@@ -2658,9 +2658,18 @@ if (migrationOpen && migrationDialog) {
     shell.append(title, copy, label, actions);
     dialog.appendChild(shell);
 
+    let settled = false;
     const finish = (value) => {
+      if (settled) return;
+      settled = true;
       signal.removeEventListener("abort", abort);
       window.removeEventListener("justvoxel:server-selection-changed", detach);
+      dialog.removeEventListener("close", abort);
+      dialog.removeEventListener("cancel", onCancel);
+      cancel.removeEventListener("click", abort);
+      use.removeEventListener("click", submitPassword);
+      input.removeEventListener("keydown", onPasswordKeydown);
+      observer.disconnect();
       input.value = "";
       if (dialog.open) dialog.close();
       dialog.remove();
@@ -2672,28 +2681,54 @@ if (migrationOpen && migrationDialog) {
       const selectedServer = event.detail.serverId;
       if (!validServerID(selectedServer) || selectedServer !== serverId) finish(null);
     };
-    signal.addEventListener("abort", abort, { once: true });
-    window.addEventListener("justvoxel:server-selection-changed", detach);
-    cancel.addEventListener("click", () => finish(null), { once: true });
-    dialog.addEventListener("cancel", (event) => {
+    const promptLost = (records) => !dialog.open || !dialog.isConnected || records.some((record) =>
+      Array.from(record.removedNodes).some((node) => node.contains(dialog))
+    );
+    const observer = new MutationObserver((records) => {
+      if (promptLost(records)) finish(null);
+    });
+    const onCancel = (event) => {
       event.preventDefault();
       finish(null);
-    }, { once: true });
-    use.addEventListener("click", () => {
+    };
+    const submitPassword = () => {
+      // A close or removal can precede delivery of its event or mutation records.
+      if (promptLost(observer.takeRecords())) {
+        finish(null);
+        return;
+      }
       if (!input.value) {
         input.focus();
         return;
       }
       finish(input.value);
-    }, { once: true });
-    input.addEventListener("keydown", (event) => {
+    };
+    const onPasswordKeydown = (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
         use.click();
       }
-    });
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    window.addEventListener("justvoxel:server-selection-changed", detach);
+    dialog.addEventListener("close", abort);
+    dialog.addEventListener("cancel", onCancel);
+    cancel.addEventListener("click", abort);
+    use.addEventListener("click", submitPassword, { once: true });
+    input.addEventListener("keydown", onPasswordKeydown);
+    if (signal.aborted) {
+      finish(null);
+      return;
+    }
+    observer.observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ["open"] });
     document.body.appendChild(dialog);
-    dialog.showModal();
+    try {
+      dialog.showModal();
+    } catch (error) {
+      if (error.name !== "InvalidStateError") throw error;
+      finish(null);
+      return;
+    }
     input.focus();
   });
 
