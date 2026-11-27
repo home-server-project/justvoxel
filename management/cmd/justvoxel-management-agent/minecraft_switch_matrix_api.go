@@ -108,7 +108,7 @@ func (o *operationStore) switchMatrixSummary(id string) (*switchMatrixSummary, e
 	}
 	if err == nil {
 		switch progress.State {
-		case "preparing", "running", "completed", "cancelled", "interrupted", "needs_attention", "recovered":
+		case "preparing", "running", "completed", "cancelled", "halted", "interrupted", "needs_attention", "recovered":
 			summary.State = progress.State
 		}
 		summary.Progress = &switchMatrixAPICounters{

@@ -3362,6 +3362,7 @@
   "switch_matrix.completed": "Тест переходу завершено.",
   "switch_matrix.completed_failures": "Тест переходу завершено з помилками.",
   "switch_matrix.cancelled": "Тест переходу скасовано.",
+  "switch_matrix.halted": "Тест перемикання зупинився достроково. Причину вказано в журналі.",
   "switch_matrix.interrupted": "Тест переходу перервано. Потрібне очищення.",
   "switch_matrix.needs_attention": "Очищення після тесту переходу потребує втручання.",
   "switch_matrix.recovered": "Відновлення й очищення після тесту завершено.",

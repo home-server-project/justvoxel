@@ -3362,6 +3362,7 @@
   "switch_matrix.completed": "Wechseltest abgeschlossen.",
   "switch_matrix.completed_failures": "Wechseltest mit Fehlern abgeschlossen.",
   "switch_matrix.cancelled": "Wechseltest abgebrochen.",
+  "switch_matrix.halted": "Der Wechseltest wurde vorzeitig beendet. Den Grund finden Sie im Protokoll.",
   "switch_matrix.interrupted": "Wechseltest unterbrochen. Die Bereinigung erfordert Aufmerksamkeit.",
   "switch_matrix.needs_attention": "Die Bereinigung des Wechseltests erfordert Aufmerksamkeit.",
   "switch_matrix.recovered": "Bereinigung des Wechseltests wiederhergestellt.",

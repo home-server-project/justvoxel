@@ -535,7 +535,11 @@ func (b *instanceRuntimeBackend) createTracked(ctx context.Context, c minecraftI
 	return b.createTrackedCandidate(ctx, c, name, snapshot, track)
 }
 
-func (b *instanceRuntimeBackend) createTrackedCandidate(ctx context.Context, c minecraftInstanceRuntimeConfig, name string, snapshot minecraftInstanceRuntimeContext, track func(instanceRuntimeRecord) error) (string, error) {
+func (b *instanceRuntimeBackend) createTrackedCandidate(ctx context.Context, c minecraftInstanceRuntimeConfig, name string, snapshot minecraftInstanceRuntimeContext, track func(instanceRuntimeRecord) error) (_ string, result error) {
+	stage := matrixFixtureOwnership
+	if c.MatrixFixture {
+		defer func() { result = wrapSwitchMatrixFixtureError(stage, result) }()
+	}
 	if err := b.requireNoStartOver(); err != nil {
 		return "", err
 	}
@@ -557,6 +561,7 @@ func (b *instanceRuntimeBackend) createTrackedCandidate(ctx context.Context, c m
 			return "", errInstanceRecovery
 		}
 	}
+	stage = matrixFixtureConfiguration
 	if len(records) > 0 {
 		if _, err = b.render(snapshot, records); err != nil {
 			return "", err
@@ -592,9 +597,11 @@ func (b *instanceRuntimeBackend) createTrackedCandidate(ctx context.Context, c m
 	if _, err = b.renderCandidate(snapshot, candidates, c.ID); err != nil {
 		return "", err
 	}
+	stage = matrixFixtureStorage
 	if err = b.storage(ctx, "preflight-new", next); err != nil {
 		return "", err
 	}
+	stage = matrixFixtureSoftware
 	if c.Software == "bedrock" {
 		if err = b.validateNewNativeBedrock(ctx, c); err != nil {
 			return "", err
@@ -606,6 +613,7 @@ func (b *instanceRuntimeBackend) createTrackedCandidate(ctx context.Context, c m
 	if err = b.validateSoftware(ctx, c); err != nil {
 		return "", err
 	}
+	stage = matrixFixturePorts
 	if c.Software == "bedrock" {
 		ports, e := holdNativeBedrock(c)
 		if e != nil {
@@ -620,6 +628,7 @@ func (b *instanceRuntimeBackend) createTrackedCandidate(ctx context.Context, c m
 	for _, l := range held {
 		l.Close()
 	}
+	stage = matrixFixtureOwnership
 	if track != nil {
 		if err = track(next); err != nil {
 			return "", err
@@ -630,6 +639,7 @@ func (b *instanceRuntimeBackend) createTrackedCandidate(ctx context.Context, c m
 		return "", err
 	}
 	id := registered.ID
+	stage = matrixFixturePublication
 	root, err := b.privateDirectory(b.root, true)
 	if err != nil {
 		return id, instanceRuntimeFailure("Instance was registered but runtime configuration could not be persisted.")

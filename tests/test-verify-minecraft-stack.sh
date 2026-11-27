@@ -14,16 +14,42 @@ fixture_ownership() { [[ ${OWNERSHIP_FAIL:-no} != yes ]]; }
 systemctl() { [[ ${ACTIVE:-yes} == yes ]]; }
 wait_for_rcon() { [[ ${READY:-yes} == yes ]]; }
 sleep() { printf '%s\n' "$1" >> "${DATA_PATH}/sleeps"; }
+session_id=06cfb682ddd8af5effcb62288b093e39d047cc8d10c885c66b2b261ca76453db
+session_start="${SESSION_START:-2026-11-26T21:26:24.041767168-05:00}"
+image_id=564597b966776244baa18d71a7bcc862663879eb93f24cc610b0bb6cb07702b0
 podman() {
-    if [[ $1 == inspect && ${*: -1} == '{{.Id}} {{.State.StartedAt}}' ]]; then
-        printf '%064d 2026-11-25T12:00:00.123456789Z\n' 0
+    if [[ $* == 'container inspect minecraft-jv-aaaaaa' ]]; then
+        [[ ${INSPECT_FAIL:-no} != yes ]] || return 125
+        if [[ -v FINAL_INSPECT_JSON ]]; then
+            if [[ -f ${DATA_PATH}/inspect-called ]]; then
+                printf '%s\n' "${FINAL_INSPECT_JSON}"
+                return
+            fi
+            touch "${DATA_PATH}/inspect-called"
+        fi
+        if [[ -v INSPECT_JSON ]]; then
+            printf '%s\n' "${INSPECT_JSON}"
+        else
+            printf '[{"Id":"%s","State":{"Status":"running","Running":true,"StartedAt":"%s","FinishedAt":"0001-01-01T00:00:00Z"},"Image":"%s"}]\n' \
+                "${session_id}" "${session_start}" "${image_id}"
+        fi
+        return
+    fi
+    if [[ $* == "inspect ${session_id} --format {{.Image}}" ]]; then
+        printf '%s\n' "${image_id}"
+        return
+    fi
+    if [[ $* == "image inspect ${image_id} --format {{.Digest}}" ]]; then
+        printf '%s\n' "${IMAGE_DIGEST:-${JV_INSTANCE_IMAGE_DIGEST}}"
         return
     fi
     if [[ $1 == logs ]]; then
-        [[ $2 == --since && $3 == '2026-11-25T12:00:00.123456789Z' && $4 == --tail && $5 == 4096 ]] || return 1
+        [[ $* == "logs --since ${session_start} --tail 4096 ${session_id}" ]] || return 1
         printf '%s\n' "${SESSION_LOG-Done (7.5s)! For help, type help}"
         return
     fi
+    [[ $1 == exec ]] || return 1
+    if [[ ${REQUIRE_SESSION_ID:-no} == yes ]]; then [[ $2 == "${session_id}" ]] || return 1; fi
     if [[ $1 == exec && $3 == sh && $4 == -c ]]; then
         [[ ${NO_BEDROCK_LISTENER:-no} != yes ]]
         return
@@ -108,6 +134,63 @@ printf 'auth-type: floodgate\n' > "${DATA_PATH}/plugins/Geyser-Spigot/config.yml
             echo "Invalid Java-only clone runtime accepted: ${failure}" >&2; exit 1
         fi
     done
+)
+# The Podman 6.1.4 inspect array uses an RFC3339Nano string under State.
+(
+    export MINECRAFT_SERVER_TYPE=vanilla MINECRAFT_VERSION=26.3 BEDROCK_ENABLED=no REQUIRE_SESSION_ID=yes
+    export MONITOR_RESPONSE='{"host":"localhost","port":25565,"server_info":{"version":{"name":"26.3","protocol":776},"players":{"max":1,"online":0}}}'
+    printf -v digest 'sha256:%064d' 1
+    export JV_INSTANCE_IMAGE_DIGEST="${digest}"
+    verify_switch() { bash "${fixture_dir}/verify" --instance jv-aaaaaa --switch 26.3; }
+    expect_switch_failure() {
+        local expected="$1" status=0
+        shift
+        rm -f "${DATA_PATH}/inspect-called"
+        env "$@" bash "${fixture_dir}/verify" --instance jv-aaaaaa --switch 26.3 || status=$?
+        if [[ ${status} != "${expected}" ]]; then
+            echo "Expected Switch verification exit ${expected}, got ${status}" >&2
+            exit 1
+        fi
+    }
+    for started in '2026-11-26T21:26:24.041767168-05:00' '2026-11-27T02:26:24Z' \
+        '2026-11-27T02:26:24.1Z' '2026-11-27T02:26:24.041+00:00'; do
+        SESSION_START="${started}" verify_switch
+    done
+
+    id=06cfb682ddd8af5effcb62288b093e39d047cc8d10c885c66b2b261ca76453db
+    replacement=af45ca8e00194d6e94b323c069a9f99c200ec93f8afd948c5b900dd88ce31dbe
+    started='2026-11-26T21:26:24.041767168-05:00'
+    inspect_record() {
+        printf '{"Id":"%s","State":{"Running":%s,"StartedAt":"%s"}}' "$1" "$2" "$3"
+    }
+    record="$(inspect_record "${id}" true "${started}")"
+    expect_switch_failure 43 "FINAL_INSPECT_JSON=[$(inspect_record "${replacement}" true "${started}")]"
+    expect_switch_failure 43 "FINAL_INSPECT_JSON=[$(inspect_record "${id}" true '2026-11-26T21:26:25.041767168-05:00')]"
+    expect_switch_failure 43 "FINAL_INSPECT_JSON=[$(inspect_record "${id}" false "${started}")]"
+    MINECRAFT_SERVER_TYPE=spigot VERSION_RESPONSE='This server is running CraftBukkit version fixture-Spigot-build (MC: 26.3)' \
+        verify_switch
+    expect_switch_failure 43 MINECRAFT_SERVER_TYPE=spigot \
+        'VERSION_RESPONSE=This server is running CraftBukkit version fixture-Spigot-build (MC: 26.3)' \
+        "FINAL_INSPECT_JSON=[$(inspect_record "${replacement}" true "${started}")]"
+    expect_switch_failure 41 INSPECT_FAIL=yes
+    for invalid in 'not JSON' '[]' "[${record},${record}]" "[${record}] [${record}]" \
+        "[$(inspect_record "${id}" false "${started}")]"; do
+        expect_switch_failure 41 "INSPECT_JSON=${invalid}"
+    done
+    expect_switch_failure 41 'FINAL_INSPECT_JSON=not JSON'
+    expect_switch_failure 42 "INSPECT_JSON=[{\"Id\":\"${id}\",\"State\":{\"Running\":true}}]"
+    expect_switch_failure 42 "FINAL_INSPECT_JSON=[{\"Id\":\"${id}\",\"State\":{\"Running\":true}}]"
+    expect_switch_failure 42 "INSPECT_JSON=[$(inspect_record "${id:0:12}" true "${started}")]"
+    for invalid in '' '2026-11-26 21:26:24.041767168 -0500 EST' '2026-02-30T21:26:24Z' \
+        '2026-11-26T21:26:24' '2026-11-26T21:26:24-0500' '0001-01-01T00:00:00Z'; do
+        expect_switch_failure 42 "INSPECT_JSON=[$(inspect_record "${id}" true "${invalid}")]"
+    done
+    expect_switch_failure 44 SESSION_LOG=
+    printf -v wrong_digest 'sha256:%064d' 2
+    expect_switch_failure 45 "IMAGE_DIGEST=${wrong_digest}"
+    expect_switch_failure 46 MONITOR_FAIL=yes
+    expect_switch_failure 47 'MONITOR_RESPONSE={"server_info":{"version":{"name":"26.2"}}}'
+    expect_switch_failure 49 LIST_FAIL=yes
 )
 # Copied latest.log may describe an earlier successful session. Only the
 # selected active container's new session can prove this startup.

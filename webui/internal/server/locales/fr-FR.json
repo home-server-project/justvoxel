@@ -3362,6 +3362,7 @@
   "switch_matrix.completed": "Test de changement terminé.",
   "switch_matrix.completed_failures": "Test de changement terminé avec des échecs.",
   "switch_matrix.cancelled": "Test de changement annulé.",
+  "switch_matrix.halted": "Le test de changement s’est arrêté avant la fin. Ouvrez le journal pour en connaître la raison.",
   "switch_matrix.interrupted": "Test de changement interrompu. Le nettoyage nécessite une intervention.",
   "switch_matrix.needs_attention": "Le nettoyage du test de changement nécessite une intervention.",
   "switch_matrix.recovered": "La récupération et le nettoyage du test sont terminés.",

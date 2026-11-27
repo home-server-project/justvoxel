@@ -363,14 +363,66 @@ func (s *operationStore) diagnosticCategoryDirectory(category string) string {
 	return filepath.Join(s.logsDir, category+"-logs")
 }
 
-// The error text is browser-safe; command output is private diagnostic evidence.
+// These statuses are reserved by verify-minecraft-stack in Switch mode.
+const (
+	switchVerificationConfiguration = 40
+	switchVerificationInspection    = 41
+	switchVerificationIdentity      = 42
+	switchVerificationSession       = 43
+	switchVerificationStartup       = 44
+	switchVerificationImage         = 45
+	switchVerificationStatus        = 46
+	switchVerificationVersion       = 47
+	switchVerificationSoftware      = 48
+	switchVerificationRCON          = 49
+	switchVerificationCrossplay     = 50
+)
+
+// Command output is only retained for non-Switch plugin diagnostics.
 type pluginRuntimeVerificationError struct {
-	cause  error
-	output string
+	output       string
+	switchStatus int
 }
 
 func (*pluginRuntimeVerificationError) Error() string {
 	return "Existing Minecraft stack verification failed"
+}
+
+func (e *pluginRuntimeVerificationError) diagnosticCode() string {
+	switch e.switchStatus {
+	case switchVerificationConfiguration:
+		return "committed_runtime_configuration_mismatch"
+	case switchVerificationInspection:
+		return "container_session_inspection_failed"
+	case switchVerificationIdentity:
+		return "container_session_identity_invalid"
+	case switchVerificationSession:
+		return "container_session_changed"
+	case switchVerificationStartup:
+		return "current_session_startup_evidence_missing"
+	case switchVerificationImage:
+		return "image_identity_mismatch"
+	case switchVerificationStatus:
+		return "minecraft_status_probe_failed"
+	case switchVerificationVersion:
+		return "minecraft_game_version_mismatch"
+	case switchVerificationSoftware:
+		return "minecraft_software_or_loader_mismatch"
+	case switchVerificationRCON:
+		return "runtime_rcon_failed"
+	case switchVerificationCrossplay:
+		return "managed_crossplay_verification_failed"
+	default:
+		return "exact_runtime_unverified"
+	}
+}
+
+func switchRuntimeDiagnostic(err error) string {
+	var verification *pluginRuntimeVerificationError
+	if errors.As(err, &verification) {
+		return verification.diagnosticCode()
+	}
+	return ""
 }
 
 func recordPluginFailure(store *operationStore, id, stage string, cause error) {
@@ -545,16 +597,16 @@ func sanitizeOperationDiagnosticDetail(line, hostname string) string {
 
 func (s *operationStore) recordSwitchFailure(e minecraftSwitchEvidence, cause error) {
 	var start *pluginStartError
-	var verification *pluginRuntimeVerificationError
 	reason := cause
 	if errors.As(cause, &start) {
 		reason = errors.Join(reason, start.cause)
 	}
-	if errors.As(cause, &verification) {
-		reason = errors.Join(reason, verification.cause)
+	code := switchRuntimeDiagnostic(cause)
+	if code == "" {
+		code = s.switchDiagnosticReason(e, reason)
 	}
 	values := map[string]string{
-		"reason": s.switchDiagnosticReason(e, reason),
+		"reason": code,
 		"target": e.Target, "action": e.Action, "version": e.Version, "stage": e.Stage,
 	}
 	if e.CloneID != "" {
@@ -564,16 +616,17 @@ func (s *operationStore) recordSwitchFailure(e minecraftSwitchEvidence, cause er
 	if start != nil {
 		s.recordSwitchCommandEvidence(e, "systemctl_start", start.output)
 	}
-	if verification != nil {
-		s.recordSwitchCommandEvidence(e, "runtime_verification", verification.output)
-	}
 }
 
 func (s *operationStore) recordSwitchRecovery(e minecraftSwitchEvidence, cause error) {
 	values := map[string]string{"result": "succeeded"}
 	if cause != nil {
 		values["result"] = "failed"
-		values["reason"] = s.switchDiagnosticReason(e, cause)
+		code := switchRuntimeDiagnostic(cause)
+		if code == "" {
+			code = s.switchDiagnosticReason(e, cause)
+		}
+		values["reason"] = code
 	} else if e.Stage == "recovered" {
 		values["stage"] = "recovery finalization completed"
 	}

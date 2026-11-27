@@ -51,15 +51,20 @@ func switchMatrixVersions(catalog []string) map[string][]string {
 	return out
 }
 
-func discoverSwitchMatrixVersions(ctx context.Context) map[string][]string {
+func discoverSwitchMatrixVersions(ctx context.Context) (map[string][]string, string) {
 	probe, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	raw, err := instanceRuntimes.command(probe, switchMatrixVersionHelper, "matrix-catalog")
 	var catalog []string
-	if err != nil || len(raw) > 256<<10 || instanceDecode(raw, &catalog) != nil {
-		return nil
+	switch {
+	case probe.Err() != nil:
+		return nil, "publisher_catalog_timeout"
+	case err != nil:
+		return nil, "publisher_catalog_request_failed"
+	case len(raw) > 256<<10 || instanceDecode(raw, &catalog) != nil || len(catalog) == 0:
+		return nil, "publisher_catalog_response_invalid"
 	}
-	return switchMatrixVersions(catalog)
+	return switchMatrixVersions(catalog), ""
 }
 
 type switchMatrixReleaseKey struct{ Software, Version string }
@@ -90,7 +95,7 @@ func buildSwitchMatrixCases(ctx context.Context, versions map[string][]string, l
 		if result, ok := cached[key]; ok {
 			return result
 		}
-		result := switchMatrixRelease{Outcome: switchMatrixReleaseUnverified}
+		result := switchMatrixRelease{Outcome: switchMatrixReleaseUnverified, Verification: "publisher_discovery_deadline"}
 		if ctx.Err() == nil {
 			result = lookup(ctx, name, version)
 		}

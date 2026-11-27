@@ -3362,6 +3362,7 @@
   "switch_matrix.completed": "切換測試已完成。",
   "switch_matrix.completed_failures": "切換測試已完成，但有失敗項目。",
   "switch_matrix.cancelled": "切換測試已取消。",
+  "switch_matrix.halted": "切換測試提前停止。請開啟記錄查看原因。",
   "switch_matrix.interrupted": "切換測試已中斷，清理作業需要處理。",
   "switch_matrix.needs_attention": "切換測試的清理作業需要處理。",
   "switch_matrix.recovered": "切換測試已復原並完成清理。",

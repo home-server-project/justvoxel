@@ -535,6 +535,16 @@ The manifest records the candidate catalog, exact runtime and image selections,
 and policy refusals before creating any fixtures. The appliance needs network
 access to software publishers and container registries.
 
+The runner first executes one Java-only Vanilla → Purpur Clone from the
+manifest using an exact release in the modern world layout family. The
+remaining executable cases start only after that case passes and its fixtures
+are retired. A missing verified smoke case, a failed smoke case, or a shared
+fixture infrastructure failure stops admission. Pending cases remain unfinished.
+The Migration log records the halt reason, the selected smoke case when
+available, and any case or publisher verification diagnostics. Runtime failures
+record fixed reasons for the failed check, such as a changed container session,
+missing startup evidence, an image mismatch, or an unexpected published port.
+
 Cases run sequentially with a fresh source and at most one clone. Fixtures use
 private local data and backup directories, loopback-only published ports, and no
 firewall rules or boot enablement. Admission checks available storage and memory.

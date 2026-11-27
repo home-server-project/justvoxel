@@ -3362,6 +3362,7 @@
   "switch_matrix.completed": "Test di cambio completato.",
   "switch_matrix.completed_failures": "Test di cambio completato con errori.",
   "switch_matrix.cancelled": "Test di cambio annullato.",
+  "switch_matrix.halted": "Il test di cambio si è interrotto prima del termine. Apri il registro per vedere il motivo.",
   "switch_matrix.interrupted": "Test di cambio interrotto. La pulizia richiede un intervento.",
   "switch_matrix.needs_attention": "La pulizia del test di cambio richiede un intervento.",
   "switch_matrix.recovered": "Ripristino e pulizia del test di cambio completati.",

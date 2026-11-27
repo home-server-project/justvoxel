@@ -59,16 +59,16 @@ func (b *instanceRuntimeBackend) prepareSwitchTarget(ctx context.Context, source
 	candidate, storageCheck := "", "preflight"
 	if clone {
 		var id [6]byte
-		var secret [24]byte
 		if _, err = rand.Read(id[:]); err != nil {
 			return next, snapshot, err
 		}
-		if _, err = rand.Read(secret[:]); err != nil {
+		secret, err := newInstanceRCONPassword()
+		if err != nil {
 			return next, snapshot, err
 		}
 		candidate, storageCheck = "jv-"+hex.EncodeToString(id[:]), "preflight-new"
 		c := &next.Runtime
-		c.ID, c.RCONPassword, c.StartOnBoot = candidate, hex.EncodeToString(secret[:]), false
+		c.ID, c.RCONPassword, c.StartOnBoot = candidate, secret, false
 		if err = switchClonePorts(records, c); err != nil {
 			return next, snapshot, err
 		}

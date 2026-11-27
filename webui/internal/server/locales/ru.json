@@ -3362,6 +3362,7 @@
   "switch_matrix.completed": "Тест перехода завершён.",
   "switch_matrix.completed_failures": "Тест перехода завершён с ошибками.",
   "switch_matrix.cancelled": "Тест перехода отменён.",
+  "switch_matrix.halted": "Тест переключения остановлен досрочно. Причина указана в журнале.",
   "switch_matrix.interrupted": "Тест перехода прерван. Требуется очистка.",
   "switch_matrix.needs_attention": "Очистка после теста перехода требует вмешательства.",
   "switch_matrix.recovered": "Восстановление и очистка после теста завершены.",

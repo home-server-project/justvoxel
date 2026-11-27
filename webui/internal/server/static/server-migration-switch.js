@@ -84,6 +84,7 @@
           closing: "switch_matrix.closing",
           completed: status?.failed ? "switch_matrix.completed_failures" : "switch_matrix.completed",
           cancelled: "switch_matrix.cancelled",
+          halted: "switch_matrix.halted",
           interrupted: "switch_matrix.interrupted",
           needs_attention: "switch_matrix.needs_attention",
           recovered: "switch_matrix.recovered",

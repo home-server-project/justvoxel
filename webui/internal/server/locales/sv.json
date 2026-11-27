@@ -3362,6 +3362,7 @@
   "switch_matrix.completed": "Bytestestet är klart.",
   "switch_matrix.completed_failures": "Bytestestet slutfördes med fel.",
   "switch_matrix.cancelled": "Bytestestet avbröts.",
+  "switch_matrix.halted": "Bytestestet stoppades i förtid. Öppna loggen för att se orsaken.",
   "switch_matrix.interrupted": "Bytestestet avbröts oväntat. Rensning kräver åtgärd.",
   "switch_matrix.needs_attention": "Rensning efter bytestestet kräver åtgärd.",
   "switch_matrix.recovered": "Återställning och rensning är klara.",

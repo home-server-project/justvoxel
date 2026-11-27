@@ -3362,6 +3362,7 @@
   "switch_matrix.completed": "Teste de troca concluído.",
   "switch_matrix.completed_failures": "Teste de troca concluído com falhas.",
   "switch_matrix.cancelled": "Teste de troca cancelado.",
+  "switch_matrix.halted": "O teste de troca foi interrompido antes de terminar. Abra o registro para ver o motivo.",
   "switch_matrix.interrupted": "Teste de troca interrompido. A limpeza requer atenção.",
   "switch_matrix.needs_attention": "A limpeza do teste de troca requer atenção.",
   "switch_matrix.recovered": "Recuperação e limpeza do teste de troca concluídas.",

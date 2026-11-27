@@ -32,6 +32,7 @@ type switchMatrixCaseResult struct {
 	FinalState     string                     `json:"final_state_verification,omitempty"`
 	Recovery       string                     `json:"recovery,omitempty"`
 	Cleanup        string                     `json:"cleanup,omitempty"`
+	ClosureReason  string                     `json:"closure_reason,omitempty"`
 	StartedAt      time.Time                  `json:"started_at,omitzero"`
 	DurationMS     int64                      `json:"duration_ms"`
 }
@@ -41,6 +42,9 @@ type switchMatrixRun struct {
 	ID              string                   `json:"operation_id"`
 	State           string                   `json:"state"`
 	CancelRequested bool                     `json:"cancel_requested"`
+	CatalogIssue    string                   `json:"catalog_issue,omitempty"`
+	SmokeCase       string                   `json:"smoke_case,omitempty"`
+	HaltReason      string                   `json:"halt_reason,omitempty"`
 	Catalog         map[string][]string      `json:"candidate_versions,omitempty"`
 	Cases           []switchMatrixCase       `json:"cases"`
 	Results         []switchMatrixCaseResult `json:"results"`
@@ -64,9 +68,21 @@ type switchMatrixProgress struct {
 	DiagnosticID       string            `json:"diagnostic_id"`
 }
 
+func newSwitchMatrixResults(cases []switchMatrixCase) []switchMatrixCaseResult {
+	results := make([]switchMatrixCaseResult, len(cases))
+	for i, c := range cases {
+		result := switchMatrixCaseResult{Outcome: matrixPending}
+		if c.Disposition != "" {
+			result.Outcome, result.Stage, result.Reason = c.Disposition, "manifest", c.Reason
+		}
+		results[i] = result
+	}
+	return results
+}
+
 func (r switchMatrixRun) progress() switchMatrixProgress {
 	p := switchMatrixProgress{ID: r.ID, State: r.State, Total: len(r.Cases),
-		ManifestReady:   r.Cases != nil || r.Catalog != nil || r.State == "running" || r.State == "completed",
+		ManifestReady:   r.Cases != nil || r.Catalog != nil || r.State == "running" || r.State == "completed" || r.State == "halted",
 		CancelRequested: r.CancelRequested, DiagnosticCategory: "migration", DiagnosticID: r.ID}
 	for i, result := range r.Results {
 		switch result.Outcome {

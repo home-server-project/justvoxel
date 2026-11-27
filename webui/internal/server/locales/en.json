@@ -3362,6 +3362,7 @@
   "switch_matrix.completed": "Switch matrix test completed.",
   "switch_matrix.completed_failures": "Switch matrix test completed with failures.",
   "switch_matrix.cancelled": "Switch matrix test cancelled.",
+  "switch_matrix.halted": "The Switch test stopped early. Open the log for the reason.",
   "switch_matrix.interrupted": "Switch matrix test interrupted. Cleanup needs attention.",
   "switch_matrix.needs_attention": "Switch matrix cleanup needs attention.",
   "switch_matrix.recovered": "Switch matrix cleanup recovered.",

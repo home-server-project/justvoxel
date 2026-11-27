@@ -3362,6 +3362,7 @@
   "switch_matrix.completed": "Prueba de cambio completada.",
   "switch_matrix.completed_failures": "Prueba de cambio completada con errores.",
   "switch_matrix.cancelled": "Prueba de cambio cancelada.",
+  "switch_matrix.halted": "La prueba de cambio se detuvo antes de terminar. Abre el registro para ver el motivo.",
   "switch_matrix.interrupted": "Prueba de cambio interrumpida. La limpieza requiere atención.",
   "switch_matrix.needs_attention": "La limpieza de la prueba de cambio requiere atención.",
   "switch_matrix.recovered": "Se completó la recuperación y limpieza de la prueba de cambio.",

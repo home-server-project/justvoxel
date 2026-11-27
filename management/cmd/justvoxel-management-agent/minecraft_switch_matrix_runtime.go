@@ -27,7 +27,11 @@ const (
 	switchMatrixWorldBudget = 1 << 30
 )
 
+// The test fixture supplies filesystem statistics at the host syscall boundary.
+var switchMatrixStatfs = unix.Statfs
+
 var errSwitchMatrixWorldMarkers = errors.New("Minecraft world marker verification failed")
+var errSwitchMatrixStartup = errors.New("Minecraft startup failed")
 
 func bindSwitchMatrixImages(ctx context.Context, cases []switchMatrixCase) {
 	images := map[string]string{}
@@ -56,14 +60,16 @@ func bindSwitchMatrixImages(ctx context.Context, cases []switchMatrixCase) {
 
 func checkSwitchMatrixFreeSpace(path string) error {
 	var fs unix.Statfs_t
-	if err := unix.Statfs(path, &fs); err != nil || fs.Bsize <= 0 ||
+	if err := switchMatrixStatfs(path, &fs); err != nil || fs.Bsize <= 0 ||
 		fs.Bavail < uint64(switchMatrixMinFree)/uint64(fs.Bsize) || fs.Ffree < 4096 {
 		return errInstanceBusy
 	}
 	return nil
 }
 
-func (s *server) prepareSwitchMatrixSource(ctx context.Context, c switchMatrixCase) (minecraftInstanceRuntimeConfig, minecraftInstanceRuntimeContext, error) {
+func (s *server) prepareSwitchMatrixSource(ctx context.Context, c switchMatrixCase) (_ minecraftInstanceRuntimeConfig, _ minecraftInstanceRuntimeContext, result error) {
+	stage := matrixFixtureStorage
+	defer func() { result = wrapSwitchMatrixFixtureError(stage, result) }()
 	b := instanceRuntimes
 	snapshot, uid, gid, err := b.snapshot(ctx)
 	if err != nil {
@@ -73,14 +79,16 @@ func (s *server) prepareSwitchMatrixSource(ctx context.Context, c switchMatrixCa
 	if c.Action == "clone" {
 		required *= 2
 	}
+	stage = matrixFixtureOwnership
 	records, err := b.records()
 	if err != nil {
 		return minecraftInstanceRuntimeConfig{}, snapshot, err
 	}
 	if err = b.admitMemory(ctx, snapshot.TotalMemoryMiB, records,
 		minecraftInstanceRuntimeConfig{ContainerMemory: strconv.Itoa(required) + "M"}, false); err != nil {
-		return minecraftInstanceRuntimeConfig{}, snapshot, err
+		return minecraftInstanceRuntimeConfig{}, snapshot, wrapSwitchMatrixFixtureError("resource_admission", err)
 	}
+	stage = matrixFixtureStorage
 	root := filepath.Join(s.operations.baseDir, "switch-matrix-fixtures")
 	backups := filepath.Join(root, "backups")
 	graph, err := b.command(ctx, "podman", "info", "--format", "{{.Store.GraphRoot}}")
@@ -108,21 +116,27 @@ func (s *server) prepareSwitchMatrixSource(ctx context.Context, c switchMatrixCa
 	snapshot.StorageRoot, snapshot.MountPoint, snapshot.ExpectedUUID, snapshot.ExpectedSource = root, "", "", ""
 	snapshot.BackupPath = backups
 	snapshot.BackupPlacement = &instanceRuntimeBackupStorage{Type: "system", Root: backups}
-	secret, err := randomToken(24)
+	stage = matrixFixtureCredential
+	secret, err := newInstanceRCONPassword()
 	if err != nil {
 		return minecraftInstanceRuntimeConfig{}, snapshot, err
 	}
+	stage = matrixFixtureSoftware
 	channel, err := b.command(ctx, instanceRuntimeHelper, "channel", c.Source, c.Version, "pinned")
 	if err != nil {
 		return minecraftInstanceRuntimeConfig{}, snapshot, err
 	}
 	r := c.SourceRelease.Runtime
+	if r == nil {
+		return minecraftInstanceRuntimeConfig{}, snapshot, errInstanceRecovery
+	}
 	config := minecraftInstanceRuntimeConfig{MatrixFixture: true, PreserveContent: !c.Crossplay,
 		Software: c.Source, Version: c.Version, VersionPolicy: "pinned", LoaderVersion: r.Loader,
 		ImageTag: r.Image, ImageDigest: r.ImageDigest, PufferfishBuild: r.PufferfishBuild, MatrixLeafBuild: r.Build, PaperChannel: strings.TrimSpace(string(channel)),
 		JavaMemory: switchMatrixHeap, ContainerMemory: switchMatrixMemory, UID: uid, GID: gid, BedrockEnabled: c.Crossplay,
 		EULAAccepted: true, GameMode: "creative", Difficulty: "peaceful", MaxPlayers: 1, Whitelist: true, EnforceWhitelist: true,
 		MOTD: "JustVoxel Switch test fixture", RCONPassword: secret}
+	stage = matrixFixturePorts
 	err = switchClonePorts(records, &config)
 	return config, snapshot, err
 }
@@ -160,7 +174,7 @@ func (s *server) withSwitchMatrixRuntime(ctx context.Context, parent, id, requir
 	o, b := s.operations, instanceRuntimes
 	lock, err := acquirePluginMaintenanceLock()
 	if err != nil {
-		return err
+		return wrapSwitchMatrixFixtureError(matrixFixtureOwnership, err)
 	}
 	defer func() { err = errors.Join(err, lock.Close()) }()
 	o.mu.Lock()
@@ -169,22 +183,22 @@ func (s *server) withSwitchMatrixRuntime(ctx context.Context, parent, id, requir
 	childActive := o.activeSwitchMatrixChild(parent)
 	o.mu.Unlock()
 	if fixturePhase != nil && switchPhase != nil || childActive {
-		return errInstanceRecovery
+		return wrapSwitchMatrixFixtureError(matrixFixtureOwnership, errInstanceRecovery)
 	}
 	record, err := o.switchMatrixOwnedRuntime(ctx, parent, id)
 	if err != nil {
-		return err
+		return wrapSwitchMatrixFixtureError(matrixFixtureOwnership, err)
 	}
 	state, err := b.observeRaw(ctx, id)
 	if err != nil || state.State != requiredState {
-		return errInstanceRecovery
+		return errors.Join(errSwitchMatrixStartup, errInstanceRecovery, err)
 	}
 	if requiredState == "stopped" {
 		if err = lock.start(ctx, id); err != nil {
-			return err
+			return errors.Join(errSwitchMatrixStartup, err)
 		}
 		if _, err = o.switchMatrixOwnedRuntime(ctx, parent, id); err != nil {
-			return err
+			return wrapSwitchMatrixFixtureError(matrixFixtureOwnership, err)
 		}
 	}
 	return verify(ctx, record)
@@ -307,16 +321,18 @@ func verifySwitchMatrixRuntime(ctx context.Context, record instanceRuntimeRecord
 		c.LoaderVersion != release.Loader || c.ImageTag != release.Image || c.ImageDigest != release.ImageDigest ||
 		c.PufferfishBuild != release.PufferfishBuild || c.MatrixLeafBuild != release.Build ||
 		c.BedrockEnabled != crossplay || c.StartOnBoot || !c.MatrixFixture {
-		return errInstanceRecovery
+		return &pluginRuntimeVerificationError{switchStatus: switchVerificationConfiguration}
 	}
 	if err := verifyPluginRuntimeMode(ctx, c.ID, c.Version, "--switch"); err != nil {
 		return err
 	}
 	if err := verifySwitchMatrixPorts(ctx, c); err != nil {
-		return err
+		return wrapSwitchMatrixFixtureError(matrixFixturePorts, err)
 	}
 	if software == "leaf" {
-		return verifySwitchMatrixLeafArtifact(record.Storage.DataPath, release)
+		if err := verifySwitchMatrixLeafArtifact(record.Storage.DataPath, release); err != nil {
+			return &pluginRuntimeVerificationError{switchStatus: switchVerificationSoftware}
+		}
 	}
 	return nil
 }
@@ -464,8 +480,9 @@ func (s *server) executeSwitchMatrixCase(parent string, c switchMatrixCase) (res
 		if err != nil {
 			result.Cleanup = "unresolved"
 			result.Outcome = matrixFailed
+			result.ClosureReason = switchMatrixClosureDiagnostic(child, err)
 			if result.Stage == "" {
-				fail("cleanup", "fixture_closure_unverified")
+				fail("cleanup", result.ClosureReason)
 			}
 			unresolved = err
 			return
@@ -474,7 +491,7 @@ func (s *server) executeSwitchMatrixCase(parent string, c switchMatrixCase) (res
 	}()
 
 	if _, err = o.transition(parent, operationRunning, "fixtures", "Preparing a new Switch matrix fixture."); err != nil {
-		fail("ownership", "parent_reservation_unverified")
+		fail(string(matrixFixtureOwnership), "parent_reservation_unverified")
 		return
 	}
 	if c.SourceRelease.Runtime == nil || c.TargetRelease.Runtime == nil ||
@@ -484,13 +501,13 @@ func (s *server) executeSwitchMatrixCase(parent string, c switchMatrixCase) (res
 	}
 	config, snapshot, err := s.prepareSwitchMatrixSource(ctx, c)
 	if err != nil {
-		fail("resource_admission", "fixture_capacity_or_placement_unverified")
+		result.Stage, result.Reason = switchMatrixFixtureDiagnostic(err)
 		return
 	}
 	id, err := o.createSwitchMatrixFixture(ctx, parent, config,
 		fmt.Sprintf("Switch test %s %04d", parent[:8], len(j.MatrixFixtures)+1), snapshot)
 	if err != nil {
-		fail("fixture_creation", "production_fixture_creation_failed")
+		result.Stage, result.Reason = switchMatrixFixtureDiagnostic(err)
 		return
 	}
 	var original instanceRuntimeRecord
@@ -510,7 +527,7 @@ func (s *server) executeSwitchMatrixCase(parent string, c switchMatrixCase) (res
 	}
 	if err != nil {
 		result.Runtime = "source_failed"
-		fail("source_start", "exact_source_runtime_unverified")
+		result.Stage, result.Reason = switchMatrixStartupDiagnostic("source", err)
 		return
 	}
 	result.Runtime = "source_verified"
@@ -528,7 +545,7 @@ func (s *server) executeSwitchMatrixCase(parent string, c switchMatrixCase) (res
 		return
 	}
 	if _, err = o.transition(parent, operationRunning, "switch", "Reviewing and applying production Switch."); err != nil {
-		fail("ownership", "parent_reservation_unverified")
+		fail(string(matrixFixtureOwnership), "parent_reservation_unverified")
 		return
 	}
 	applyCtx, done := context.WithTimeout(ctx, 45*time.Minute)
@@ -558,6 +575,9 @@ func (s *server) executeSwitchMatrixCase(parent string, c switchMatrixCase) (res
 		var failure *switchMatrixChildFailure
 		if errors.As(err, &failure) && len(failure.Stage) <= 48 && operationStagePattern.MatchString(failure.Stage) {
 			result.Stage = "switch_" + failure.Stage
+			if failure.RuntimeDiagnostic != "" {
+				result.Reason = failure.RuntimeDiagnostic
+			}
 		}
 		return
 	}
@@ -578,7 +598,7 @@ func (s *server) executeSwitchMatrixCase(parent string, c switchMatrixCase) (res
 		}
 		result.Runtime = "verified"
 		if err := switchMatrixCheckWorldBudget(ctx, record.Storage.DataPath); err != nil {
-			return err
+			return wrapSwitchMatrixFixtureError("resource_admission", err)
 		}
 		return verifySwitchMatrixMarkers(ctx, switchMatrixRCON(target), false)
 	})
@@ -590,7 +610,7 @@ func (s *server) executeSwitchMatrixCase(parent string, c switchMatrixCase) (res
 	}
 	if err != nil {
 		result.Runtime = "target_failed"
-		fail("target_runtime", "exact_target_runtime_or_state_unverified")
+		result.Stage, result.Reason = switchMatrixStartupDiagnostic("target", err)
 		return
 	}
 	result.World = "verified_overworld_nether_end"
@@ -610,7 +630,7 @@ func (s *server) executeSwitchMatrixCase(parent string, c switchMatrixCase) (res
 		originalProbe, done := context.WithTimeout(ctx, 17*time.Minute)
 		err = s.withSwitchMatrixRuntime(originalProbe, parent, id, c.SourceState, func(ctx context.Context, record instanceRuntimeRecord) error {
 			if !reflect.DeepEqual(original, record) {
-				return errInstanceRecovery
+				return &pluginRuntimeVerificationError{switchStatus: switchVerificationConfiguration}
 			}
 			if err := verifySwitchMatrixRuntime(ctx, record, c.Source, c.SourceRelease.Runtime, c.Crossplay); err != nil {
 				return err
@@ -624,6 +644,9 @@ func (s *server) executeSwitchMatrixCase(parent string, c switchMatrixCase) (res
 		state, stateErr := b.observeRaw(ctx, id)
 		if err != nil || stateErr != nil || state.State != c.SourceState {
 			fail("original_source", "original_configuration_world_or_state_unverified")
+			if diagnostic := switchMatrixRuntimeDiagnostic(err); diagnostic != "" {
+				result.Reason = diagnostic
+			}
 			return
 		}
 		result.Original = "verified"
@@ -632,4 +655,69 @@ func (s *server) executeSwitchMatrixCase(parent string, c switchMatrixCase) (res
 	}
 	result.Outcome = matrixPassed
 	return
+}
+
+func switchMatrixFixtureDiagnostic(err error) (stage, reason string) {
+	var failure *switchMatrixFixtureError
+	if errors.As(err, &failure) {
+		switch failure.stage {
+		case matrixFixtureConfiguration:
+			return string(failure.stage), "fixture_runtime_configuration_invalid"
+		case matrixFixtureCredential:
+			if errors.Is(err, errInstanceRuntimeCredential) {
+				return string(failure.stage), "fixture_rcon_credential_invalid"
+			}
+			return string(failure.stage), "fixture_rcon_generation_failed"
+		case matrixFixtureStorage:
+			return string(failure.stage), "fixture_storage_placement_unverified"
+		case matrixFixtureSoftware:
+			return string(failure.stage), "fixture_software_version_unverified"
+		case matrixFixturePorts:
+			return string(failure.stage), "fixture_port_reservation_failed"
+		case matrixFixtureOwnership:
+			return string(failure.stage), "fixture_ownership_reservation_failed"
+		case matrixFixturePublication:
+			return string(failure.stage), "fixture_runtime_publication_failed"
+		case matrixFixtureBinding:
+			return string(failure.stage), "fixture_ownership_binding_failed"
+		case "resource_admission":
+			return string(failure.stage), "fixture_capacity_unverified"
+		}
+	}
+	return "fixture_creation", "fixture_creation_unclassified"
+}
+
+func switchMatrixRuntimeDiagnostic(err error) string {
+	var failure *switchMatrixFixtureError
+	if errors.As(err, &failure) && failure.stage == matrixFixturePorts {
+		return "runtime_port_binding_unverified"
+	}
+	return switchRuntimeDiagnostic(err)
+}
+
+func switchMatrixStartupDiagnostic(role string, err error) (stage, reason string) {
+	var failure *switchMatrixFixtureError
+	if code := switchMatrixRuntimeDiagnostic(err); code != "" {
+		return role + "_runtime", code
+	}
+	switch {
+	case errors.As(err, &failure) && failure.stage == "resource_admission":
+		return "resource_admission", "world_budget_unverified"
+	case errors.As(err, &failure) && failure.stage == matrixFixtureOwnership:
+		return role + "_ownership", "bound_fixture_ownership_unverified"
+	case errors.Is(err, errSwitchMatrixStartup):
+		return role + "_start", "runtime_start_unverified"
+	default:
+		return role + "_readiness", "runtime_readiness_unverified"
+	}
+}
+
+func switchMatrixClosureDiagnostic(child operationJournal, err error) string {
+	if err == nil {
+		return ""
+	}
+	if child.OperationID != "" && child.State != operationResolved {
+		return "switch_child_recovery_unverified"
+	}
+	return "fixture_closure_unverified"
 }

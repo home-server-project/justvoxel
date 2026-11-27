@@ -3362,6 +3362,7 @@
   "switch_matrix.completed": "Wisseltest voltooid.",
   "switch_matrix.completed_failures": "Wisseltest voltooid met fouten.",
   "switch_matrix.cancelled": "Wisseltest geannuleerd.",
+  "switch_matrix.halted": "De wisseltest is voortijdig gestopt. Open het logboek voor de reden.",
   "switch_matrix.interrupted": "Wisseltest onderbroken. Opruiming vereist aandacht.",
   "switch_matrix.needs_attention": "Opruiming van de wisseltest vereist aandacht.",
   "switch_matrix.recovered": "Herstel en opruiming van de wisseltest voltooid.",

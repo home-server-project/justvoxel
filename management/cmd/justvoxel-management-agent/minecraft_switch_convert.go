@@ -202,7 +202,7 @@ func (s *server) convertMinecraftSwitch(ctx context.Context, e *minecraftSwitchE
 	}
 	if p.Runtime.CrossplayEnabled {
 		if err = b.verifySwitchPaperCrossplay(ctx, next, p.ManagedArtifacts); err != nil {
-			return err
+			return errors.Join(err, &pluginRuntimeVerificationError{switchStatus: switchVerificationCrossplay})
 		}
 	}
 	if !e.OriginallyRunning {
@@ -230,15 +230,15 @@ func (b *instanceRuntimeBackend) verifySwitchTargetImage(ctx context.Context, id
 		record.Runtime.ImageTag != p.Runtime.ImageTag || record.Runtime.LoaderVersion != p.Runtime.LoaderVersion ||
 		record.Runtime.PufferfishBuild != p.Runtime.PufferfishBuild || record.Runtime.BedrockEnabled != p.Runtime.CrossplayEnabled ||
 		!record.Runtime.PreserveContent || record.Runtime.VersionPolicy != "pinned" {
-		return errInstanceRecovery
+		return errors.Join(errInstanceRecovery, &pluginRuntimeVerificationError{switchStatus: switchVerificationConfiguration})
 	}
 	if err = b.verifyLive(record); err != nil {
-		return err
+		return errors.Join(err, &pluginRuntimeVerificationError{switchStatus: switchVerificationConfiguration})
 	}
 	expected, e1 := b.command(ctx, "podman", "image", "inspect", instanceRuntimeImage(record.Runtime), "--format", "{{.Id}}")
 	actual, e2 := b.command(ctx, "podman", "inspect", "minecraft-"+id, "--format", "{{.Image}}")
 	if e1 != nil || e2 != nil || strings.TrimSpace(string(expected)) == "" || strings.TrimSpace(string(expected)) != strings.TrimSpace(string(actual)) {
-		return errInstanceRecovery
+		return errors.Join(errInstanceRecovery, &pluginRuntimeVerificationError{switchStatus: switchVerificationImage})
 	}
 	return nil
 }

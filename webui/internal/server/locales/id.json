@@ -3362,6 +3362,7 @@
   "switch_matrix.completed": "Uji peralihan selesai.",
   "switch_matrix.completed_failures": "Uji peralihan selesai dengan kegagalan.",
   "switch_matrix.cancelled": "Uji peralihan dibatalkan.",
+  "switch_matrix.halted": "Uji peralihan berhenti sebelum selesai. Buka log untuk mengetahui alasannya.",
   "switch_matrix.interrupted": "Uji peralihan terputus. Pembersihan memerlukan tindakan.",
   "switch_matrix.needs_attention": "Pembersihan uji peralihan memerlukan tindakan.",
   "switch_matrix.recovered": "Pemulihan dan pembersihan uji peralihan selesai.",

@@ -737,11 +737,11 @@ func (s *operationStore) latestUnresolvedMinecraftSwitch(id string) *operationJo
 	return latest
 }
 
-func (s *server) runMinecraftSwitch(ctx context.Context, j operationJournal, p minecraftSwitchPlan, r minecraftSwitchRequest) string {
+func (s *server) runMinecraftSwitch(ctx context.Context, j operationJournal, p minecraftSwitchPlan, r minecraftSwitchRequest) (stage, runtimeDiagnostic string) {
 	e := minecraftSwitchEvidence{Schema: 1, OperationID: j.OperationID, Source: j.InstanceID, Target: p.Target, Version: p.Version, Action: r.Action, Stage: "validating"}
 	if j.MatrixParent != "" {
 		if !s.operations.authorizeQueuedMatrixSwitch(j) {
-			return "ownership"
+			return "ownership", ""
 		}
 		ctx = context.WithValue(ctx, switchMatrixChildKey{}, j)
 	}
@@ -759,7 +759,7 @@ func (s *server) runMinecraftSwitch(ctx context.Context, j operationJournal, p m
 	if _, transitionErr := s.operations.transition(j.OperationID, operationValidating, "validating", "Revalidating Switch at the same Minecraft version."); transitionErr != nil {
 		_ = lock.Close()
 		s.operations.recordSwitchFailure(e, errors.Join(err, transitionErr))
-		return "validating"
+		return "validating", ""
 	}
 	if lock != nil {
 		if err == nil {
@@ -807,7 +807,7 @@ func (s *server) runMinecraftSwitch(ctx context.Context, j operationJournal, p m
 				_ = lock.Close()
 				s.operations.recordSwitchFailure(e, bindErr)
 				_, _ = s.operations.transition(j.OperationID, operationNeedsAttention, "fixture_binding", "Verified Switch fixture ownership could not be finalized. Recovery evidence was preserved.")
-				return "fixture_binding"
+				return "fixture_binding", ""
 			}
 		}
 		err = errors.Join(err, lock.Close())
@@ -840,16 +840,16 @@ func (s *server) runMinecraftSwitch(ctx context.Context, j operationJournal, p m
 			}
 			_, _ = s.operations.transition(j.OperationID, operationResolved, "resolved", message)
 		}
-		return failureStage
+		return failureStage, switchRuntimeDiagnostic(err)
 	}
 	_, err = s.operations.transition(j.OperationID, operationVerifying, "verifying", "Exact target Minecraft runtime verified.")
 	if err == nil {
 		_, err = s.operations.transition(j.OperationID, operationSucceeded, "complete", "Switch completed at Minecraft "+p.Version+".")
 	}
 	if err != nil {
-		return "journal_finalization"
+		return "journal_finalization", ""
 	}
-	return ""
+	return "", ""
 }
 
 func (s *server) minecraftSwitchRecover(w http.ResponseWriter, r *http.Request) {

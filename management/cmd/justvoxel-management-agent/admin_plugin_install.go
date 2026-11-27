@@ -1323,7 +1323,11 @@ func verifyPluginInstallRuntime(ctx context.Context, id, version string) error {
 }
 
 func verifyPluginRuntimeMode(ctx context.Context, id, version, mode string) error {
+	switchMode := mode == "--switch" || mode == "--switch-clone"
 	if err := validatePluginInstance(id, ""); err != nil {
+		if switchMode {
+			return errors.Join(err, &pluginRuntimeVerificationError{switchStatus: switchVerificationConfiguration})
+		}
 		return err
 	}
 	deadline := time.NewTimer(900 * time.Second)
@@ -1343,6 +1347,13 @@ func verifyPluginRuntimeMode(ctx context.Context, id, version, mode string) erro
 			return ctx.Err()
 		case <-deadline.C:
 			timer.Stop()
+			if switchMode {
+				status := switchVerificationInspection
+				if err != nil {
+					status = switchVerificationRCON
+				}
+				return &pluginRuntimeVerificationError{switchStatus: status}
+			}
 			return errors.New("Minecraft runtime readiness timed out")
 		case <-timer.C:
 		}
@@ -1356,7 +1367,16 @@ func verifyPluginRuntimeMode(ctx context.Context, id, version, mode string) erro
 	args = append(args, version)
 	output, err := pluginInstallCommand(verify, "/usr/libexec/justvoxel/mjust/verify-minecraft-stack", args...)
 	if err != nil {
-		return &pluginRuntimeVerificationError{cause: err, output: string(output[:min(len(output), 64<<10)])}
+		if switchMode {
+			// Only the helper's exit status crosses the Switch diagnostic boundary.
+			var exit interface{ ExitCode() int }
+			failure := &pluginRuntimeVerificationError{}
+			if errors.As(err, &exit) {
+				failure.switchStatus = exit.ExitCode()
+			}
+			return failure
+		}
+		return &pluginRuntimeVerificationError{output: string(output[:min(len(output), 64<<10)])}
 	}
 	return nil
 }

@@ -272,19 +272,25 @@ func (s *operationStore) checkSwitchMatrixFixture(ctx context.Context, parent, i
 
 func (s *operationStore) createSwitchMatrixFixture(ctx context.Context, parent string, c minecraftInstanceRuntimeConfig, name string, snapshot minecraftInstanceRuntimeContext) (string, error) {
 	if !s.switchMatrixMu.TryLock() {
-		return "", errInstanceBusy
+		return "", wrapSwitchMatrixFixtureError(matrixFixtureOwnership, errInstanceBusy)
 	}
 	defer s.switchMatrixMu.Unlock()
 	s.mu.Lock()
 	_, err := s.switchMatrixParent(parent, "fixtures", false)
 	busy := s.activeSwitchMatrixChild(parent)
 	s.mu.Unlock()
-	if err != nil || busy || c.StartOnBoot || c.ID != "" || snapshot.BackupPlacement == nil {
-		return "", errInstanceRecovery
+	if err != nil || busy {
+		return "", wrapSwitchMatrixFixtureError(matrixFixtureOwnership, errInstanceRecovery)
+	}
+	if c.StartOnBoot || c.ID != "" {
+		return "", wrapSwitchMatrixFixtureError(matrixFixtureConfiguration, errInstanceRecovery)
+	}
+	if snapshot.BackupPlacement == nil {
+		return "", wrapSwitchMatrixFixtureError(matrixFixtureStorage, errInstanceRecovery)
 	}
 	lock, err := acquirePluginMaintenanceLock()
 	if err != nil {
-		return "", err
+		return "", wrapSwitchMatrixFixtureError(matrixFixtureOwnership, err)
 	}
 	defer lock.Close()
 	id, err := instanceRuntimes.createTrackedCandidate(ctx, c, name, snapshot, func(record instanceRuntimeRecord) error {
@@ -293,7 +299,7 @@ func (s *operationStore) createSwitchMatrixFixture(ctx context.Context, parent s
 	if err != nil {
 		return id, err
 	}
-	return id, s.bindSwitchMatrixFixture(ctx, parent, id)
+	return id, wrapSwitchMatrixFixtureError(matrixFixtureBinding, s.bindSwitchMatrixFixture(ctx, parent, id))
 }
 
 func (s *operationStore) refreshSwitchMatrixFixture(ctx context.Context, parent string, e minecraftSwitchEvidence, recovered bool) error {

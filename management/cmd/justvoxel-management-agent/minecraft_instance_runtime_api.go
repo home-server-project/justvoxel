@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"net/http"
 	"os"
@@ -141,9 +139,9 @@ func (s *server) instanceRuntimeCreate(w http.ResponseWriter, r *http.Request) {
 	snapshot, uid, gid, err := instanceRuntimes.snapshot(ctx)
 	id := ""
 	if err == nil {
-		var secret [24]byte
-		if _, err = rand.Read(secret[:]); err == nil {
-			c := request.Runtime.runtime("", uid, gid, hex.EncodeToString(secret[:]))
+		var secret string
+		if secret, err = newInstanceRCONPassword(); err == nil {
+			c := request.Runtime.runtime("", uid, gid, secret)
 			id, err = instanceRuntimes.create(ctx, c, request.DisplayName, snapshot)
 		}
 	}
@@ -216,11 +214,11 @@ func (s *server) instanceRuntimeConfigure(w http.ResponseWriter, r *http.Request
 }
 func (b *instanceRuntimeBackend) configureRegistered(ctx context.Context, id string, settings instanceRuntimeSettings, snapshot minecraftInstanceRuntimeContext, uid, gid uint32) error {
 	return b.configureRegisteredCandidate(ctx, id, snapshot, func() (instanceRuntimeRecord, error) {
-		var secret [24]byte
-		if _, err := rand.Read(secret[:]); err != nil {
+		secret, err := newInstanceRCONPassword()
+		if err != nil {
 			return instanceRuntimeRecord{}, err
 		}
-		return instanceRuntimeRecord{SchemaVersion: 1, Runtime: settings.runtime(id, uid, gid, hex.EncodeToString(secret[:])),
+		return instanceRuntimeRecord{SchemaVersion: 1, Runtime: settings.runtime(id, uid, gid, secret),
 			Storage: instanceStorageFor(snapshot, id), Backups: instanceBackupsFor(snapshot, id), Firewall: []instanceFirewallRule{}}, nil
 	})
 }

@@ -3362,6 +3362,7 @@
   "switch_matrix.completed": "Skiftetest fuldført.",
   "switch_matrix.completed_failures": "Skiftetest fuldført med fejl.",
   "switch_matrix.cancelled": "Skiftetest annulleret.",
+  "switch_matrix.halted": "Skiftetesten stoppede før tid. Åbn loggen for at se årsagen.",
   "switch_matrix.interrupted": "Skiftetesten blev afbrudt. Oprydning kræver handling.",
   "switch_matrix.needs_attention": "Oprydning efter skiftetesten kræver handling.",
   "switch_matrix.recovered": "Oprydning efter skiftetesten er gennemført.",

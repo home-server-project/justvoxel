@@ -3362,6 +3362,7 @@
   "switch_matrix.completed": "전환 테스트가 완료되었습니다.",
   "switch_matrix.completed_failures": "일부 전환 테스트가 실패했습니다.",
   "switch_matrix.cancelled": "전환 테스트가 취소되었습니다.",
+  "switch_matrix.halted": "전환 테스트가 완료되기 전에 중단되었습니다. 로그에서 이유를 확인하세요.",
   "switch_matrix.interrupted": "전환 테스트가 중단되었습니다. 정리가 필요합니다.",
   "switch_matrix.needs_attention": "전환 테스트 정리에 조치가 필요합니다.",
   "switch_matrix.recovered": "전환 테스트 복구 및 정리가 완료되었습니다.",

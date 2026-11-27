@@ -460,6 +460,9 @@ func (b *instanceRuntimeBackend) renderCandidate(ctx minecraftInstanceRuntimeCon
 	configs := make([]minecraftInstanceRuntimeConfig, 0, len(records))
 	for _, r := range records {
 		if err := validateInstanceRecordPlacement(r); err != nil {
+			if r.Runtime.MatrixFixture {
+				err = wrapSwitchMatrixFixtureError(matrixFixtureStorage, err)
+			}
 			return nil, err
 		}
 		ctx.Placements[r.Runtime.ID] = r
@@ -642,6 +645,10 @@ func (b *instanceRuntimeBackend) apply(ctx context.Context, previous instanceRun
 // Ordinary configuration callers retain their existing stopped-only rules.
 func (b *instanceRuntimeBackend) applyVersion(ctx context.Context, previous instanceRuntimeRecord, records []instanceRuntimeRecord, snapshot minecraftInstanceRuntimeContext, maintenance bool, imageOnly ...bool) (result error) {
 	id := previous.Runtime.ID
+	stage := matrixFixturePublication
+	if previous.Runtime.MatrixFixture && previous.EnvironmentSHA256 == "" {
+		defer func() { result = wrapSwitchMatrixFixtureError(stage, result) }()
+	}
 	for _, record := range records {
 		pending, err := b.pending(record.Runtime.ID)
 		if err != nil || pending {
@@ -652,6 +659,7 @@ func (b *instanceRuntimeBackend) applyVersion(ctx context.Context, previous inst
 	if err != nil || pending {
 		return errInstanceRecovery
 	}
+	stage = matrixFixtureConfiguration
 	all, err := b.render(snapshot, records)
 	if err != nil {
 		return err
@@ -676,9 +684,11 @@ func (b *instanceRuntimeBackend) applyVersion(ctx context.Context, previous inst
 	if next.Runtime.ID == "" || files.ID == "" {
 		return errInstanceNotFound
 	}
+	stage = matrixFixtureStorage
 	if err = b.storage(ctx, "preflight", next); err != nil {
 		return err
 	}
+	stage = matrixFixturePublication
 	migration, _ := ctx.Value(reviewedMigrationInstanceKey{}).(reviewedMigrationInstance)
 	reviewedMigration := maintenance && migration.id == id && previous.Runtime.Software == next.Runtime.Software
 	if !reviewedMigration && (previous.Runtime.Software == "bedrock" || next.Runtime.Software == "bedrock") && (previous.Runtime.Software != next.Runtime.Software || previous.Runtime.Version != next.Runtime.Version) {
@@ -801,6 +811,7 @@ func (b *instanceRuntimeBackend) applyVersion(ctx context.Context, previous inst
 			return instanceRuntimeFailure("Loader changes on existing data require separate compatibility support. No loader was changed.")
 		}
 	}
+	stage = matrixFixturePorts
 	if !next.NetworkMember && !bootOnly && !channelOnly && !whitelistOnly && next.Runtime.BedrockEnabled {
 		heldUDP, e := instanceHoldCrossplayPort(next.Runtime.BedrockPort)
 		if e != nil {
@@ -851,16 +862,18 @@ func (b *instanceRuntimeBackend) applyVersion(ctx context.Context, previous inst
 	validated, hasCreateProof := ctx.Value(instanceCreateSoftwareProofKey{}).(minecraftInstanceRuntimeConfig)
 	createVerified := hasCreateProof && !maintenance && previous.EnvironmentSHA256 == "" && next.EnvironmentSHA256 == "" &&
 		validated == previous.Runtime && validated == next.Runtime
+	stage = matrixFixtureSoftware
 	if !bootOnly && !whitelistOnly && !containerOnly && !createVerified {
 		if err = b.validateSoftware(ctx, next.Runtime); err != nil {
 			return err
 		}
 	}
-	stage, err := b.privateDirectory(b.staging, true)
+	stage = matrixFixturePublication
+	staging, err := b.privateDirectory(b.staging, true)
 	if err != nil {
 		return err
 	}
-	stage.Close()
+	staging.Close()
 	var entropy [16]byte
 	if _, err = rand.Read(entropy[:]); err != nil {
 		return err
@@ -956,12 +969,14 @@ func (b *instanceRuntimeBackend) applyVersion(ctx context.Context, previous inst
 			return fail()
 		}
 	}
+	stage = matrixFixtureStorage
 	if err = b.storage(ctx, "provision", next); err != nil {
 		return fail()
 	}
 	if err = b.storage(ctx, "validate", next); err != nil {
 		return fail()
 	}
+	stage = matrixFixturePublication
 	for _, change := range changes {
 		if err = b.changeFirewall(ctx, change); err != nil {
 			return fail()

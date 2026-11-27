@@ -3362,6 +3362,7 @@
   "switch_matrix.completed": "切り替えテストが完了しました。",
   "switch_matrix.completed_failures": "一部の切り替えテストが失敗しました。",
   "switch_matrix.cancelled": "切り替えテストをキャンセルしました。",
+  "switch_matrix.halted": "切り替えテストは途中で停止しました。理由はログを開いて確認してください。",
   "switch_matrix.interrupted": "切り替えテストが中断されました。後処理が必要です。",
   "switch_matrix.needs_attention": "切り替えテストの後処理が必要です。",
   "switch_matrix.recovered": "切り替えテストの復旧と後処理が完了しました。",

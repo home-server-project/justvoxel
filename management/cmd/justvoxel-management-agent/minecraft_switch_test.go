@@ -481,16 +481,34 @@ func TestSwitchRuntimeGuardPreservesNormalRendering(t *testing.T) {
 	}
 }
 
+type switchCloneTestExitError struct {
+	status int
+	error
+}
+
+func (e switchCloneTestExitError) ExitCode() int { return e.status }
+
 func TestSwitchCloneRuntimeVerificationAndRecovery(t *testing.T) {
+	const (
+		softwareMismatch = "minecraft_software_or_loader_mismatch"
+		verifierDetail   = "verification stopped at "
+		verifierDecoy    = "image_identity_mismatch"
+		verifierOutput   = verifierDetail + "internal-node.example\ntoken=verification-secret\n" + verifierDecoy + "\n"
+		verifierError    = "target software failed exact verification"
+	)
+	untypedFailure := errors.New(verifierError)
+	softwareFailure := switchCloneTestExitError{status: 48, error: untypedFailure}
 	for _, tc := range []struct {
-		name, from, target string
-		success, interrupt bool
+		name, from, target, reason string
+		verifierErr                error
+		success, interrupt         bool
 	}{
-		{name: "Paper to Purpur failure", from: "paper", target: "purpur"},
-		{name: "Paper to Vanilla failure", from: "paper", target: "vanilla"},
-		{name: "Paper to Fabric failure", from: "paper", target: "fabric"},
+		{name: "Paper to Purpur failure", from: "paper", target: "purpur", verifierErr: softwareFailure, reason: softwareMismatch},
+		{name: "Paper to Vanilla failure", from: "paper", target: "vanilla", verifierErr: softwareFailure, reason: softwareMismatch},
+		{name: "Paper to Fabric failure", from: "paper", target: "fabric", verifierErr: softwareFailure, reason: softwareMismatch},
 		{name: "Vanilla to Purpur Java only", from: "vanilla", target: "purpur", success: true},
-		{name: "retry interrupted cleanup", from: "paper", target: "purpur", interrupt: true},
+		{name: "retry interrupted cleanup", from: "paper", target: "purpur", verifierErr: softwareFailure, reason: softwareMismatch, interrupt: true},
+		{name: "untyped verifier failure", from: "paper", target: "purpur", verifierErr: untypedFailure, reason: "exact_runtime_unverified"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			target := tc.target
@@ -551,6 +569,9 @@ func TestSwitchCloneRuntimeVerificationAndRecovery(t *testing.T) {
 						t.Fatal(err)
 					}
 					rcon = clone.Runtime.RCONPassword
+					if rcon == "" {
+						t.Fatal("clone fixture is missing its RCON credential")
+					}
 					return []byte("clone startup diagnostic\npassword=journal-secret\nopaque " + rcon + "\n"), nil
 				default:
 					t.Fatal("unexpected evidence command", command)
@@ -748,7 +769,7 @@ func TestSwitchCloneRuntimeVerificationAndRecovery(t *testing.T) {
 						}
 						return []byte("Minecraft version: Purpur 1.21.4\n"), nil
 					}
-					return []byte("verification stopped at internal-node.example\ntoken=verification-secret\n"), errors.New("target software failed exact verification")
+					return []byte(verifierOutput), tc.verifierErr
 				}
 				t.Fatal("unexpected runtime command", command, args)
 				return nil, nil
@@ -812,15 +833,16 @@ func TestSwitchCloneRuntimeVerificationAndRecovery(t *testing.T) {
 			if tc.interrupt {
 				recoveryResult = `result="failed"`
 			}
-			for _, want := range []string{"target software failed exact verification", `stage="verifying_clone"`, `target="` + target + `"`,
-				`action="clone"`, `version="1.21.4"`, `clone_id="` + cloneID + `"`, recoveryResult, "<HOSTNAME-REDACTED>"} {
+			for _, want := range []string{`reason="` + tc.reason + `"`, `stage="verifying_clone"`, `target="` + target + `"`,
+				`action="clone"`, `version="1.21.4"`, `clone_id="` + cloneID + `"`, recoveryResult} {
 				if !strings.Contains(log, want) {
 					t.Errorf("migration diagnostic missing %q", want)
 				}
 			}
-			for _, secret := range []string{"internal-node.example", "verification-secret", "journal-secret", "oversized output", rcon} {
-				if secret != "" && strings.Contains(log, secret) {
-					t.Fatal("migration diagnostic retained private or oversized evidence")
+			for _, discarded := range []string{verifierDetail, verifierDecoy, verifierError, "internal-node.example", "verification-secret",
+				"journal-secret", "oversized output", rcon} {
+				if discarded != "" && strings.Contains(log, discarded) {
+					t.Fatal("migration diagnostic retained verifier text, private data, or oversized evidence")
 				}
 			}
 			if target == "vanilla" {

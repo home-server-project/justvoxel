@@ -3362,6 +3362,7 @@
   "switch_matrix.completed": "Test zmiany zakończony.",
   "switch_matrix.completed_failures": "Test zmiany zakończony z błędami.",
   "switch_matrix.cancelled": "Test zmiany anulowany.",
+  "switch_matrix.halted": "Test zmiany zakończył się przedwcześnie. Otwórz dziennik, aby sprawdzić przyczynę.",
   "switch_matrix.interrupted": "Test zmiany został przerwany. Wymagane jest porządkowanie.",
   "switch_matrix.needs_attention": "Porządkowanie po teście zmiany wymaga interwencji.",
   "switch_matrix.recovered": "Odzyskiwanie i porządkowanie po teście zakończone.",

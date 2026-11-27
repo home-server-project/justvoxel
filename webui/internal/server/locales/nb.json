@@ -3362,6 +3362,7 @@
   "switch_matrix.completed": "Byttetesten er fullført.",
   "switch_matrix.completed_failures": "Byttetesten ble fullført med feil.",
   "switch_matrix.cancelled": "Byttetesten ble avbrutt.",
+  "switch_matrix.halted": "Byttetesten stoppet før den var ferdig. Åpne loggen for å se årsaken.",
   "switch_matrix.interrupted": "Byttetesten ble avbrutt uventet. Opprydding krever handling.",
   "switch_matrix.needs_attention": "Opprydding etter byttetesten krever handling.",
   "switch_matrix.recovered": "Gjenoppretting og opprydding er fullført.",

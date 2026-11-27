@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +20,16 @@ import (
 
 	"golang.org/x/sys/unix"
 )
+
+func newInstanceRCONPassword() (string, error) {
+	var entropy [24]byte
+	if _, err := rand.Read(entropy[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(entropy[:]), nil
+}
+
+var errInstanceRuntimeCredential = errors.New("invalid startup configuration")
 
 // Internal Phase 2 inputs. No HTTP route, identity creation, world creation,
 // service reload/start, or active runtime publication is attached to this code.
@@ -403,12 +415,19 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 		// The backend verifies its original environment after the network overlay.
 		legacyPeer := c.Software == "pufferfish" && c.PufferfishBuild == 0 && c.ID != candidate && ctx.Placements[c.ID].EnvironmentSHA256 != ""
 		if !legacyPeer && !validPufferfishBuild(c.Software, c.PufferfishBuild) {
-			return nil, errors.New("invalid Pufferfish build")
+			err := errors.New("invalid Pufferfish build")
+			if c.MatrixFixture {
+				err = wrapSwitchMatrixFixtureError(matrixFixtureSoftware, err)
+			}
+			return nil, err
 		}
 		if (c.ImageDigest != "" && !operationFingerprintPattern.MatchString(c.ImageDigest)) || (c.VersionPolicy != "" && c.VersionPolicy != "pinned" && c.VersionPolicy != "recommended" && c.VersionPolicy != "latest") || !validSetupServerType(c.Software) || !(instanceRuntimeVersionPattern.MatchString(c.Version) || c.Software == "bedrock" && bedrockVersionPattern.MatchString(c.Version)) || !imageTagInputPattern.MatchString(c.ImageTag) {
 			return nil, errors.New("invalid Minecraft software, version, or image tag")
 		}
 		if err := validateJavaServerSelection(c.Software, c.VersionPolicy, c.Version, c.LoaderVersion, c.ImageTag, c.BedrockEnabled); err != nil {
+			if c.MatrixFixture {
+				err = wrapSwitchMatrixFixtureError(matrixFixtureSoftware, err)
+			}
 			return nil, err
 		}
 		if c.PaperChannel != "default" && c.PaperChannel != "experimental" {
@@ -432,7 +451,10 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 		if c.Difficulty != "peaceful" && c.Difficulty != "easy" && c.Difficulty != "normal" && c.Difficulty != "hard" {
 			return nil, errors.New("invalid difficulty")
 		}
-		if c.MaxPlayers < 1 || c.MaxPlayers > 1000 || !instanceRuntimeText(c.MOTD, 1024) || !instanceRuntimeSecretPattern.MatchString(c.RCONPassword) {
+		if !instanceRuntimeSecretPattern.MatchString(c.RCONPassword) {
+			return nil, errInstanceRuntimeCredential
+		}
+		if c.MaxPlayers < 1 || c.MaxPlayers > 1000 || !instanceRuntimeText(c.MOTD, 1024) {
 			return nil, errors.New("invalid startup configuration")
 		}
 

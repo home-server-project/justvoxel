@@ -3362,6 +3362,7 @@
   "switch_matrix.completed": "Geçiş testi tamamlandı.",
   "switch_matrix.completed_failures": "Geçiş testi hatalarla tamamlandı.",
   "switch_matrix.cancelled": "Geçiş testi iptal edildi.",
+  "switch_matrix.halted": "Geçiş testi tamamlanmadan durdu. Nedenini görmek için günlüğü açın.",
   "switch_matrix.interrupted": "Geçiş testi kesintiye uğradı. Temizlik için işlem gerekiyor.",
   "switch_matrix.needs_attention": "Geçiş testi temizliği için işlem gerekiyor.",
   "switch_matrix.recovered": "Geçiş testi kurtarıldı ve temizlendi.",

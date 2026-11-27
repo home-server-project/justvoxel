@@ -267,7 +267,7 @@ func (s *server) cloneMinecraftSwitch(ctx context.Context, e *minecraftSwitchEvi
 	}
 	if target.Runtime.BedrockEnabled {
 		if err = b.verifySwitchPaperCrossplay(ctx, target, p.ManagedArtifacts); err != nil {
-			return err
+			return errors.Join(err, &pluginRuntimeVerificationError{switchStatus: switchVerificationCrossplay})
 		}
 	}
 	if err = s.clearSwitchSourceContent(ctx, e); err != nil {
@@ -290,25 +290,28 @@ func (b *instanceRuntimeBackend) verifySwitchCloneRuntime(ctx context.Context, e
 		record.Runtime.LoaderVersion != p.Runtime.LoaderVersion || record.Runtime.PufferfishBuild != p.Runtime.PufferfishBuild ||
 		record.Runtime.BedrockEnabled != e.CloneRecord.Runtime.BedrockEnabled || !record.Runtime.PreserveContent ||
 		record.NetworkMember || record.Storage != e.CloneRecord.Storage {
-		return errInstanceRecovery
+		return errors.Join(errInstanceRecovery, &pluginRuntimeVerificationError{switchStatus: switchVerificationConfiguration})
 	}
 	if err := b.verifyLive(record); err != nil {
-		return err
+		return errors.Join(err, &pluginRuntimeVerificationError{switchStatus: switchVerificationConfiguration})
 	}
 	if err := verifyPluginRuntimeMode(ctx, e.CloneID, p.Version, "--switch"); err != nil {
 		return err
 	}
 	state, err := b.observeRaw(ctx, e.CloneID)
-	if err != nil || state.State != "running" {
-		return errInstanceRecovery
+	if err != nil {
+		return errors.Join(errInstanceRecovery, &pluginRuntimeVerificationError{switchStatus: switchVerificationInspection})
+	}
+	if state.State != "running" {
+		return errors.Join(errInstanceRecovery, &pluginRuntimeVerificationError{switchStatus: switchVerificationSession})
 	}
 	if _, err := b.players(ctx, e.CloneID); err != nil {
-		return err
+		return errors.Join(err, &pluginRuntimeVerificationError{switchStatus: switchVerificationRCON})
 	}
 	expected, imageErr := b.command(ctx, "podman", "image", "inspect", instanceRuntimeImage(record.Runtime), "--format", "{{.Id}}")
 	actual, runningErr := b.command(ctx, "podman", "inspect", "minecraft-"+e.CloneID, "--format", "{{.Image}}")
 	if imageErr != nil || runningErr != nil || strings.TrimSpace(string(expected)) == "" || strings.TrimSpace(string(expected)) != strings.TrimSpace(string(actual)) {
-		return errInstanceRecovery
+		return errors.Join(errInstanceRecovery, &pluginRuntimeVerificationError{switchStatus: switchVerificationImage})
 	}
 	return nil
 }

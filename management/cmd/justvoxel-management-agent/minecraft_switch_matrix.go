@@ -14,7 +14,7 @@ type switchMatrixChildKey struct{}
 var errSwitchMatrixPolicy = errors.New("production Switch policy blocked this case")
 var errSwitchMatrixReleaseChanged = errors.New("reviewed exact runtime changed")
 
-type switchMatrixChildFailure struct{ Stage string }
+type switchMatrixChildFailure struct{ Stage, RuntimeDiagnostic string }
 
 func (*switchMatrixChildFailure) Error() string { return "production Switch failed" }
 
@@ -276,12 +276,12 @@ func (s *server) switchMatrixApply(ctx context.Context, parent, id, target, vers
 	if err != nil {
 		return operationJournal{}, release.Outcome, err
 	}
-	stage := s.runMinecraftSwitch(ctx, j, plan, req)
+	stage, diagnostic := s.runMinecraftSwitch(ctx, j, plan, req)
 	o.mu.Lock()
 	result := o.operations[j.OperationID]
 	o.mu.Unlock()
 	if stage != "" {
-		return result, release.Outcome, &switchMatrixChildFailure{Stage: stage}
+		return result, release.Outcome, &switchMatrixChildFailure{Stage: stage, RuntimeDiagnostic: diagnostic}
 	}
 	return result, release.Outcome, nil
 }

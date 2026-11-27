@@ -5,7 +5,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"reflect"
 	"slices"
@@ -132,6 +136,7 @@ func TestSwitchMatrixManifest(t *testing.T) {
 			{`{"outcome":"AVAILABLE","runtime":{"game":"26.3","loader":"","image":"java25","reason":"password=private-value"}}`, switchMatrixReleaseUnverified},
 			{`{"outcome":"AVAILABLE","runtime":{"game":"26.2","loader":"","image":"java25"}}`, switchMatrixReleaseUnverified},
 			{`{"outcome":"ERROR"}`, switchMatrixReleaseUnverified},
+			{`{"outcome":"UNSUPPORTED","verification":"private-value"}`, switchMatrixReleaseUnverified},
 		} {
 			r := decodeSwitchMatrixRelease("paper", "26.3", []byte(scenario.raw))
 			if r.Outcome != scenario.want || r.Outcome != switchMatrixReleaseAvailable && r.Runtime != nil {
@@ -150,6 +155,14 @@ func matrixRunnerPassed(c switchMatrixCase) switchMatrixCaseResult {
 		Original: original, FinalState: "verified", Cleanup: "verified"}
 }
 
+func matrixRunnerTestManifest(t *testing.T) switchMatrixRun {
+	t.Helper()
+	catalog := switchMatrixVersions([]string{"26.2", "1.21.11"})
+	cases := buildSwitchMatrixCases(context.Background(), catalog, matrixRunnerTestRelease,
+		func(context.Context, string, string, *switchMatrixRuntime) bool { return true })
+	return switchMatrixRun{Catalog: catalog, Cases: cases, Results: newSwitchMatrixResults(cases)}
+}
+
 func newMatrixRunnerTest(t *testing.T, n int) (*server, operationJournal, switchMatrixRun) {
 	t.Helper()
 	f := newInstanceActivationFixture(t)
@@ -162,13 +175,21 @@ func newMatrixRunnerTest(t *testing.T, n int) (*server, operationJournal, switch
 		t.Fatal(err)
 	}
 	r := switchMatrixRun{Schema: 1, ID: j.OperationID, State: "running"}
-	for _, c := range buildSwitchMatrixCases(context.Background(), map[string][]string{switchMatrixLegacy: {"1.21.11"}}, matrixRunnerTestRelease,
-		func(context.Context, string, string, *switchMatrixRuntime) bool { return true }) {
-		if c.Disposition != "" || len(r.Cases) == n {
-			continue
+	manifest := matrixRunnerTestManifest(t)
+	smoke, reason := selectSwitchMatrixSmoke(manifest)
+	if smoke < 0 {
+		t.Fatal("test manifest missing smoke case", reason)
+	}
+	r.Cases = append(r.Cases, manifest.Cases[smoke])
+	r.Results = append(r.Results, switchMatrixCaseResult{Outcome: matrixPending})
+	for i, c := range manifest.Cases {
+		if len(r.Cases) == n {
+			break
 		}
-		r.Cases = append(r.Cases, c)
-		r.Results = append(r.Results, switchMatrixCaseResult{Outcome: matrixPending})
+		if i != smoke && c.Disposition == "" {
+			r.Cases = append(r.Cases, c)
+			r.Results = append(r.Results, switchMatrixCaseResult{Outcome: matrixPending})
+		}
 	}
 	if len(r.Cases) != n {
 		t.Fatal("insufficient test cases")
@@ -251,17 +272,18 @@ func TestSwitchMatrixExecution(t *testing.T) {
 		}
 	})
 	t.Run("recovered_failure_continues", func(t *testing.T) {
-		s, j, _ := newMatrixRunnerTest(t, 2)
+		s, j, _ := newMatrixRunnerTest(t, 3)
 		count := 0
 		err := s.operations.runSwitchMatrixCases(j.OperationID, func(c switchMatrixCase) (switchMatrixCaseResult, error) {
 			count++
-			if count == 1 {
-				return switchMatrixCaseResult{Outcome: matrixFailed, Recovery: "verified", Cleanup: "verified"}, nil
+			if count == 2 {
+				return switchMatrixCaseResult{Outcome: matrixFailed, Stage: string(matrixFixtureSoftware),
+					Reason: "fixture_software_version_unverified", Recovery: "verified", Cleanup: "verified"}, nil
 			}
 			return matrixRunnerPassed(c), nil
 		})
 		p, readErr := s.operations.switchMatrixProgress(j.OperationID)
-		if err != nil || readErr != nil || count != 2 || p.Failed != 1 || p.Passed != 1 {
+		if err != nil || readErr != nil || count != 3 || p.Failed != 1 || p.Passed != 2 {
 			t.Fatalf("recovered failure stranded the next case: %+v %v %v", p, err, readErr)
 		}
 	})
@@ -304,6 +326,162 @@ func TestSwitchMatrixExecution(t *testing.T) {
 			t.Fatalf("unresolved cleanup advanced or released the run: %+v %v %v %v", p, err, readErr, activeErr)
 		}
 	})
+}
+
+type matrixRuntimeTestExit struct {
+	status int
+	error
+}
+
+func (e matrixRuntimeTestExit) ExitCode() int { return e.status }
+
+func TestSwitchMatrixRuntimeVerificationDiagnostics(t *testing.T) {
+	f := newInstanceActivationFixture(t)
+	f.activateBoth()
+	o := matrixTestStore(t, f.backend)
+	j, err := o.beginSwitchMatrix(switchMatrixRunnerFingerprint())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = o.transition(j.OperationID, operationValidating, "manifest", "Discovering releases."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = o.transition(j.OperationID, operationRunning, "fixtures", "Working on fixtures."); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	record, err := f.backend.readRecord(f.configs[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	credential := record.Runtime.RCONPassword
+	if credential == "" {
+		t.Fatal("fixture does not have a credential")
+	}
+	// Put a misleading code and a real fixture credential in both channels.
+	raw := "image_identity_mismatch: subprocess detail " + credential
+	private := errors.New(raw)
+	originalCommand := pluginInstallCommand
+	t.Cleanup(func() { pluginInstallCommand = originalCommand })
+	var commandErr error
+	pluginInstallCommand = func(_ context.Context, command string, args ...string) ([]byte, error) {
+		switch {
+		case command == "podman" && reflect.DeepEqual(args, []string{"exec", "minecraft-" + record.Runtime.ID, "rcon-cli", "list"}):
+			return []byte("There are 0 of a max of 20 players online:"), nil
+		case command == "systemctl" && reflect.DeepEqual(args, []string{"is-active", "minecraft-" + record.Runtime.ID + ".service"}):
+			return []byte("active"), nil
+		case command == "/usr/libexec/justvoxel/mjust/verify-minecraft-stack" &&
+			reflect.DeepEqual(args, []string{"--instance", record.Runtime.ID, "--switch", record.Runtime.Version}):
+			return []byte(raw), commandErr
+		default:
+			t.Fatalf("unexpected runtime verifier command: %s %v", command, args)
+			return nil, nil
+		}
+	}
+
+	for _, tc := range []struct {
+		status int
+		reason string
+	}{
+		{40, "committed_runtime_configuration_mismatch"},
+		{41, "container_session_inspection_failed"},
+		{42, "container_session_identity_invalid"},
+		{43, "container_session_changed"},
+		{44, "current_session_startup_evidence_missing"},
+		{45, "image_identity_mismatch"},
+		{46, "minecraft_status_probe_failed"},
+		{47, "minecraft_game_version_mismatch"},
+		{48, "minecraft_software_or_loader_mismatch"},
+		{49, "runtime_rcon_failed"},
+		{50, "managed_crossplay_verification_failed"},
+		{99, "exact_runtime_unverified"},
+	} {
+		commandErr = matrixRuntimeTestExit{status: tc.status, error: private}
+		err = verifyPluginRuntimeMode(ctx, record.Runtime.ID, record.Runtime.Version, "--switch")
+		stage, reason := switchMatrixStartupDiagnostic("source", errors.Join(err, private))
+		if stage != "source_runtime" || reason != tc.reason {
+			t.Errorf("exit %d classified as %s/%s, want source_runtime/%s", tc.status, stage, reason, tc.reason)
+		}
+	}
+	backendCommand := f.backend.command
+	t.Cleanup(func() { f.backend.command = backendCommand })
+	publishedHost := "127.0.0.1"
+	f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+		if command == "podman" && reflect.DeepEqual(args, []string{"port", "minecraft-" + record.Runtime.ID}) {
+			return fmt.Appendf(nil, "25565/tcp -> %s:%d\n", publishedHost, record.Runtime.JavaPort), nil
+		}
+		return backendCommand(ctx, command, args...)
+	}
+	if err := verifySwitchMatrixPorts(ctx, record.Runtime); err != nil {
+		t.Fatal("Podman loopback port mapping was rejected", err)
+	}
+	publishedHost = "0.0.0.0"
+	portErr := verifySwitchMatrixPorts(ctx, record.Runtime)
+	if portErr == nil {
+		t.Fatal("non-loopback port mapping passed verification")
+	}
+	stage, reason := switchMatrixStartupDiagnostic("target", wrapSwitchMatrixFixtureError(matrixFixturePorts, portErr))
+	if stage != "target_runtime" || reason != "runtime_port_binding_unverified" {
+		t.Fatalf("published port failure classified as %s/%s", stage, reason)
+	}
+
+	manifest := matrixRunnerTestManifest(t)
+	smoke, missing := selectSwitchMatrixSmoke(manifest)
+	if smoke < 0 {
+		t.Fatal("test manifest missing smoke case", missing)
+	}
+	cases := []switchMatrixCase{manifest.Cases[smoke]}
+	if err := o.saveSwitchMatrixRun(switchMatrixRun{
+		Schema: 1, ID: j.OperationID, State: "running", Cases: cases, Results: newSwitchMatrixResults(cases),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	commandErr = matrixRuntimeTestExit{status: 42, error: private}
+	if err := o.runSwitchMatrixCases(j.OperationID, func(switchMatrixCase) (switchMatrixCaseResult, error) {
+		err := verifyPluginRuntimeMode(ctx, record.Runtime.ID, record.Runtime.Version, "--switch")
+		var failure *pluginRuntimeVerificationError
+		if !errors.As(err, &failure) || failure.output != "" {
+			t.Fatal("Switch retained raw runtime verification output or lost the typed failure")
+		}
+		stage, reason := switchMatrixStartupDiagnostic("source", errors.Join(err, private))
+		return switchMatrixCaseResult{Outcome: matrixFailed, Stage: stage, Reason: reason, Cleanup: "verified"}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	s := adminServerForTest()
+	s.operations = o
+	mux := http.NewServeMux()
+	registerSwitchMatrixRoutes(mux, s)
+	registerAdminDiagnosticLogRoutes(mux, s)
+	request := func(path string) *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, authorizedRequest(http.MethodGet, path, ""))
+		if w.Code != http.StatusOK || strings.Contains(w.Body.String(), credential) ||
+			strings.Contains(w.Body.String(), "subprocess detail") {
+			t.Fatalf("unsafe or unavailable response for %s (HTTP %d)", path, w.Code)
+		}
+		return w
+	}
+	report := request("/v1/admin/logs/migration/" + j.OperationID + "?download=1")
+	var run switchMatrixRun
+	if err := json.Unmarshal(report.Body.Bytes(), &run); err != nil {
+		t.Fatal(err)
+	}
+	if report.Header().Get("Content-Disposition") == "" || len(run.Results) != 1 ||
+		run.Results[0].Stage != "source_runtime" || run.Results[0].Reason != "container_session_identity_invalid" {
+		t.Fatal("download did not preserve the verified diagnostic classification")
+	}
+	progress := request(switchMatrixAPIPath + "?operation_id=" + j.OperationID)
+	var response switchMatrixAPIResponse
+	if err := json.Unmarshal(progress.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Operation == nil || response.Operation.State != "halted" ||
+		response.Operation.Progress == nil || response.Operation.Progress.Failed != 1 {
+		t.Fatal("public progress did not reflect the halted verification failure")
+	}
 }
 
 func TestSwitchMatrixCancellation(t *testing.T) {
@@ -433,5 +611,154 @@ func TestSwitchMatrixResultAccounting(t *testing.T) {
 	raw, err := os.ReadFile(o.diagnosticCategoryDirectory("migration") + "/" + j.OperationID + ".log")
 	if err != nil || !bytes.Equal(raw, before) || bytes.Contains(raw, []byte("rcon_password")) {
 		t.Fatalf("unexpected downloadable diagnostic: %v", err)
+	}
+}
+
+func TestSwitchMatrixSmokeGate(t *testing.T) {
+	for _, scenario := range []struct {
+		name, state, reason string
+	}{
+		{"passes", "completed", ""},
+		{"fails", "halted", "smoke_case_failed"},
+		{"unverified_pass", "halted", "smoke_case_failed"},
+		{"publisher_unavailable", "halted", "smoke_exact_release_unverified"},
+		{"cleanup_unresolved", "needs_attention", "smoke_case_failed"},
+		{"cancelled", "cancelled", ""},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			s, j, _ := newMatrixRunnerTest(t, 2)
+			o := s.operations
+			manifest := matrixRunnerTestManifest(t)
+			smoke, reason := selectSwitchMatrixSmoke(manifest)
+			if smoke <= 0 || reason != "" {
+				t.Fatal("expected a verified smoke case later in the generated manifest")
+			}
+			smokeCase := manifest.Cases[smoke]
+			if scenario.name == "publisher_unavailable" {
+				catalog := manifest.Catalog
+				manifest.Cases = buildSwitchMatrixCases(context.Background(), catalog,
+					func(ctx context.Context, software, version string) switchMatrixRelease {
+						if software == "purpur" && java25GameReleasePattern.MatchString(version) {
+							return switchMatrixRelease{Outcome: switchMatrixReleaseUnverified, Verification: "publisher_request_timeout"}
+						}
+						return matrixRunnerTestRelease(ctx, software, version)
+					}, func(context.Context, string, string, *switchMatrixRuntime) bool { return true })
+				manifest.Results = newSwitchMatrixResults(manifest.Cases)
+			}
+			manifest.Schema, manifest.ID, manifest.State = 1, j.OperationID, "running"
+			if err := o.saveSwitchMatrixRun(manifest); err != nil {
+				t.Fatal(err)
+			}
+			seen := map[string]bool{}
+			err := o.runSwitchMatrixCases(j.OperationID, func(c switchMatrixCase) (switchMatrixCaseResult, error) {
+				if seen[c.ID] {
+					t.Fatal("case admitted twice", c.ID)
+				}
+				if len(seen) == 0 && c.ID != smokeCase.ID {
+					t.Fatal("first case was not the selected smoke case", c.ID)
+				}
+				seen[c.ID] = true
+				switch scenario.name {
+				case "fails":
+					return switchMatrixCaseResult{Outcome: matrixFailed, Stage: "target_world",
+						Reason: "world_markers_unverified", Cleanup: "verified"}, nil
+				case "unverified_pass":
+					result := matrixRunnerPassed(c)
+					result.Original = ""
+					return result, nil
+				case "cleanup_unresolved":
+					return switchMatrixCaseResult{Outcome: matrixFailed, Stage: "cleanup",
+						Reason: "fixture_closure_unverified", Cleanup: "unresolved"}, errInstanceRecovery
+				case "cancelled":
+					if err := o.stopSwitchMatrixRun(j.OperationID); err != nil {
+						t.Fatal(err)
+					}
+					p, err := o.switchMatrixProgress(j.OperationID)
+					if err != nil || p.Current == nil || p.Current.ID != smokeCase.ID || !p.CancelRequested {
+						t.Fatal("cancellation interrupted the admitted smoke case", err)
+					}
+				}
+				return matrixRunnerPassed(c), nil
+			})
+			wantRecovery := scenario.name == "cleanup_unresolved"
+			if (err != nil) != wantRecovery {
+				t.Fatalf("unexpected runner error: %v", err)
+			}
+			if wantRecovery {
+				o.holdSwitchMatrixRun(j.OperationID)
+			}
+			run, err := o.readSwitchMatrixRun(j.OperationID)
+			if err != nil || run.State != scenario.state || run.HaltReason != scenario.reason ||
+				!reflect.DeepEqual(run.Cases, manifest.Cases) || run.Progress.Total != len(manifest.Cases) {
+				t.Fatalf("manifest or halt state changed: %s %s %v", run.State, run.HaltReason, err)
+			}
+			active, err := o.currentMinecraftMaintenance()
+			if err != nil || (active != nil) != wantRecovery {
+				t.Fatal("incorrect maintenance reservation", err)
+			}
+			wantAdmissions := 1
+			switch scenario.name {
+			case "passes":
+				wantAdmissions = len(manifest.Cases) - manifest.progress().Completed
+			case "publisher_unavailable":
+				wantAdmissions = 0
+			}
+			if len(seen) != wantAdmissions || (wantAdmissions != 0 && run.SmokeCase != smokeCase.ID) ||
+				(wantAdmissions == 0 && (run.SmokeCase != "" || run.Progress.Passed != 0)) {
+				t.Fatal("unexpected smoke admission or result", len(seen), run.Progress)
+			}
+			if scenario.name == "publisher_unavailable" && !slices.ContainsFunc(run.Cases, func(c switchMatrixCase) bool {
+				return c.Source == "vanilla" && c.Target == "purpur" && c.Action == "clone" &&
+					c.Family == switchMatrixModern && c.TargetRelease.Verification == "publisher_request_timeout"
+			}) {
+				t.Fatal("publisher verification cause was lost from the manifest")
+			}
+			if scenario.name == "fails" && (run.Results[smoke].Reason != "world_markers_unverified" ||
+				run.Results[smoke].Cleanup != "verified") {
+				t.Fatal("smoke failure evidence was lost")
+			}
+			if scenario.name == "unverified_pass" && (run.Progress.Passed != 0 ||
+				run.Results[smoke].Reason != "case_verification_incomplete") {
+				t.Fatal("incomplete evidence was accepted as a smoke pass")
+			}
+			if scenario.name == "cancelled" && run.Results[smoke].Outcome != matrixPassed {
+				t.Fatal("the completed smoke result was lost on cancellation")
+			}
+			for i, c := range run.Cases {
+				if !seen[c.ID] && manifest.Results[i].Outcome == matrixPending {
+					want := matrixPending
+					if scenario.name == "cancelled" {
+						want = matrixCancelled
+					}
+					if run.Results[i].Outcome != want {
+						t.Fatalf("case %s was never admitted and has outcome %s", c.ID, run.Results[i].Outcome)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestSwitchMatrixInfrastructureFailureStopsRun(t *testing.T) {
+	s, j, manifest := newMatrixRunnerTest(t, 4)
+	o := s.operations
+	var admitted []string
+	err := o.runSwitchMatrixCases(j.OperationID, func(c switchMatrixCase) (switchMatrixCaseResult, error) {
+		admitted = append(admitted, c.ID)
+		if len(admitted) == 1 {
+			return matrixRunnerPassed(c), nil
+		}
+		stage, reason := switchMatrixFixtureDiagnostic(wrapSwitchMatrixFixtureError(matrixFixturePublication, errInstanceRecovery))
+		return switchMatrixCaseResult{Outcome: matrixFailed, Stage: stage, Reason: reason, Cleanup: "verified"}, nil
+	})
+	run, readErr := o.readSwitchMatrixRun(j.OperationID)
+	summary, statusErr := o.switchMatrixSummary(j.OperationID)
+	if err != nil || readErr != nil || statusErr != nil || len(admitted) != 2 || !reflect.DeepEqual(run.Cases, manifest.Cases) ||
+		run.State != "halted" || run.HaltReason != "common_fixture_infrastructure_failed" ||
+		run.Progress.Passed != 1 || run.Progress.Failed != 1 || run.Progress.Unfinished != 2 ||
+		run.Results[1].Stage != "runtime_publication" || run.Results[1].Reason != "fixture_runtime_publication_failed" ||
+		run.Results[2].Outcome != matrixPending || run.Results[3].Outcome != matrixPending ||
+		summary == nil || summary.State != "halted" || summary.ReservationActive || summary.RecoveryRequired {
+		t.Fatalf("common failure did not close with the complete partial result: %+v %v %v %v", run.Progress, err, readErr, statusErr)
 	}
 }
