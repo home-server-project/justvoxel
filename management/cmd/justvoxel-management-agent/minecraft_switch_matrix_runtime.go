@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -54,6 +55,11 @@ func bindSwitchMatrixImages(ctx context.Context, cases []switchMatrixCase) {
 			}
 			r.ImageDigest = digest
 			release.Runtime = &r
+		}
+		if c.Disposition == "" &&
+			(c.SourceRelease.Runtime == nil || c.SourceRelease.Runtime.ImageDigest == "" ||
+				c.TargetRelease.Runtime == nil || c.TargetRelease.Runtime.ImageDigest == "") {
+			c.Disposition, c.Reason = matrixFailed, "runtime_image_unverified"
 		}
 	}
 }
@@ -228,7 +234,13 @@ func (s *server) stopSwitchMatrixFixtureForRetirement(ctx context.Context, paren
 	b := instanceRuntimes
 	r, err := s.operations.switchMatrixOwnedRuntime(ctx, parent, id)
 	if err != nil {
-		return err
+		if err = s.operations.restoreSwitchMatrixFirewallEncoding(ctx, f); err != nil {
+			return err
+		}
+		r, err = s.operations.switchMatrixOwnedRuntime(ctx, parent, id)
+		if err != nil {
+			return err
+		}
 	}
 	state, err := b.observeRaw(ctx, id)
 	if err != nil {
@@ -251,6 +263,66 @@ func (s *server) stopSwitchMatrixFixtureForRetirement(ctx context.Context, paren
 	default:
 		return errInstanceRecovery
 	}
+}
+
+// Called under the runtime maintenance lock during retirement. The receipt
+// stays authoritative even when a completed legacy Clone changed [] to null.
+func (o *operationStore) restoreSwitchMatrixFirewallEncoding(ctx context.Context, f switchMatrixFixture) error {
+	o.mu.Lock()
+	parent, err := o.switchMatrixParent(f.Parent, "retirement", true)
+	var child operationJournal
+	for _, j := range o.operations {
+		if j.MatrixParent == f.Parent && j.InstanceID == f.ID && j.OperationType == operationTypeMinecraftSwitch {
+			if child.OperationID != "" {
+				err = errInstanceRecovery
+				break
+			}
+			child = j
+		}
+	}
+	busy := o.activeSwitchMatrixChild(f.Parent)
+	o.mu.Unlock()
+	if err != nil || busy || parent.State != operationNeedsAttention || parent.PlanFingerprint != switchMatrixRunnerFingerprint() ||
+		f.Stage != "owned" || !slices.Contains(parent.MatrixFixtures, f.ID) ||
+		child.State != operationSucceeded || child.Stage != "complete" {
+		return errInstanceRecovery
+	}
+	e, err := readSwitchEvidence(child)
+	if err != nil || e.Action != "clone" || e.Stage != "complete" || e.CloneID == "" ||
+		e.SourceStopped || e.SourceContentChanged || e.WorldChanged || !slices.Contains(parent.MatrixFixtures, e.CloneID) {
+		return errInstanceRecovery
+	}
+	clone, err := readSwitchMatrixFixture(f.Parent, e.CloneID)
+	if err != nil || clone.Stage != "retired" || clone.ConfigSHA256 == "" {
+		return errInstanceRecovery
+	}
+	b := instanceRuntimes
+	saved := *e.SourceRecord
+	current, err := b.readRecord(f.ID)
+	if err != nil || !current.Runtime.MatrixFixture || !operationFingerprintPattern.MatchString(current.Runtime.ImageDigest) ||
+		f.checkRecord(current) != nil || len(current.Firewall) != 0 || len(saved.Firewall) != 0 ||
+		(current.Firewall == nil) == (saved.Firewall == nil) {
+		return errInstanceRecovery
+	}
+	savedBytes := append(mustSwitchJSON(saved), '\n')
+	if instanceHash(savedBytes) != f.ConfigSHA256 {
+		return errInstanceRecovery
+	}
+	dir, _, _ := b.paths(f.ID)
+	path := filepath.Join(dir, "config.json")
+	raw, err := b.readPrivate(path)
+	// Require the actual on-disk bytes to be exactly the known serialization
+	// with the alternate encoding, including every other field and newline.
+	alternate := saved
+	alternate.Firewall = current.Firewall
+	if err != nil || !bytes.Equal(raw, append(mustSwitchJSON(alternate), '\n')) ||
+		b.verifyLive(current) != nil || f.checkData(ctx, current) != nil {
+		return errInstanceRecovery
+	}
+	if _, err = f.backupStorage(ctx, "matrix-placement"); err != nil {
+		return err
+	}
+	return b.writeJSON(path, saved, true)
 }
 
 // A source can be interrupted after its initial configuration is durable but
@@ -551,17 +623,17 @@ func (s *server) executeSwitchMatrixCase(parent string, c switchMatrixCase) (res
 	applyCtx, done := context.WithTimeout(ctx, 45*time.Minute)
 	child, release, err := s.switchMatrixApply(applyCtx, parent, id, c.Target, c.Version, c.Action, c)
 	done()
-	result.ChildOperation, result.ReleaseOutcome = child.OperationID, release
+	result.ChildOperation, result.ReleaseOutcome, result.ReleaseVerification = child.OperationID, release.Outcome, release.Verification
 	switch {
 	case errors.Is(err, errSwitchMatrixPolicy):
 		result.Outcome = matrixBlocked
 		fail("switch_review", "production_switch_policy")
 		return
-	case release == switchMatrixReleaseUnsupported:
+	case release.Outcome == switchMatrixReleaseUnsupported:
 		result.Outcome = matrixUnsupported
 		fail("switch_review", "exact_release_unsupported")
 		return
-	case release == switchMatrixReleaseUnverified:
+	case release.Outcome == switchMatrixReleaseUnverified:
 		fail("switch_review", "exact_release_unverified")
 		return
 	case child.OperationID == "":

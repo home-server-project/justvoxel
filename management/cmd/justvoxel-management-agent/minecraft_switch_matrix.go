@@ -12,7 +12,6 @@ import (
 type switchMatrixChildKey struct{}
 
 var errSwitchMatrixPolicy = errors.New("production Switch policy blocked this case")
-var errSwitchMatrixReleaseChanged = errors.New("reviewed exact runtime changed")
 
 type switchMatrixChildFailure struct{ Stage, RuntimeDiagnostic string }
 
@@ -223,23 +222,23 @@ func (s *operationStore) authorizeQueuedMatrixSwitch(j operationJournal) bool {
 
 // Called by the matrix orchestrator after classification. The normal plan,
 // Switch worker, startup handoff and recovery remain authoritative.
-func (s *server) switchMatrixApply(ctx context.Context, parent, id, target, version, action string, reviewed ...switchMatrixCase) (operationJournal, switchMatrixReleaseOutcome, error) {
+func (s *server) switchMatrixApply(ctx context.Context, parent, id, target, version, action string, reviewed ...switchMatrixCase) (operationJournal, switchMatrixRelease, error) {
 	o := s.operations
 	if !o.switchMatrixMu.TryLock() {
-		return operationJournal{}, "", errInstanceBusy
+		return operationJournal{}, switchMatrixRelease{}, errInstanceBusy
 	}
 	defer o.switchMatrixMu.Unlock()
 	if action != "clone" && action != "convert" {
-		return operationJournal{}, "", errInstanceRecovery
+		return operationJournal{}, switchMatrixRelease{}, errInstanceRecovery
 	}
 	o.mu.Lock()
 	p, err := o.switchMatrixParent(parent, "switch", false)
 	o.mu.Unlock()
 	if err != nil || !slices.Contains(p.MatrixFixtures, id) {
-		return operationJournal{}, "", errInstanceID
+		return operationJournal{}, switchMatrixRelease{}, errInstanceID
 	}
 	if err = o.checkSwitchMatrixFixture(ctx, parent, id); err != nil {
-		return operationJournal{}, "", err
+		return operationJournal{}, switchMatrixRelease{}, err
 	}
 	release := resolveSwitchMatrixRelease(ctx, target, version)
 	if p.PlanFingerprint != switchMatrixRunnerFingerprint() {
@@ -247,26 +246,26 @@ func (s *server) switchMatrixApply(ctx context.Context, parent, id, target, vers
 			map[string]string{"software": target, "version": version, "outcome": string(release.Outcome)})
 	}
 	if release.Outcome != switchMatrixReleaseAvailable {
-		return operationJournal{}, release.Outcome, nil
+		return operationJournal{}, release, nil
 	}
 	if len(reviewed) == 1 && !sameSwitchMatrixRuntime(release.Runtime, reviewed[0].TargetRelease.Runtime) {
-		return operationJournal{}, switchMatrixReleaseUnverified, errSwitchMatrixReleaseChanged
+		return operationJournal{}, switchMatrixRelease{Outcome: switchMatrixReleaseUnverified, Verification: "publisher_selection_changed"}, errInstanceRecovery
 	}
 	plan, err := planMinecraftSwitch(ctx, id, target)
 	if err != nil {
-		return operationJournal{}, release.Outcome, err
+		return operationJournal{}, release, err
 	}
 	if (action == "clone" && !plan.Clone || action == "convert" && !plan.Convert) && plan.MatrixPolicyBlocked {
-		return operationJournal{}, release.Outcome, errSwitchMatrixPolicy
+		return operationJournal{}, release, errSwitchMatrixPolicy
 	}
 	if plan.Version != release.Runtime.Game || plan.Runtime.LoaderVersion != release.Runtime.Loader ||
 		plan.Runtime.ImageTag != release.Runtime.Image || plan.Runtime.PufferfishBuild != release.Runtime.PufferfishBuild ||
 		(action == "clone" && !plan.Clone) || (action == "convert" && !plan.Convert) {
-		return operationJournal{}, release.Outcome, errInstanceRecovery
+		return operationJournal{}, release, errInstanceRecovery
 	}
 	if len(reviewed) == 1 && (plan.RuntimeDigest != reviewed[0].TargetRelease.Runtime.ImageDigest ||
 		plan.Current != reviewed[0].Source || plan.Runtime.CrossplayEnabled != reviewed[0].TargetCrossplay) {
-		return operationJournal{}, switchMatrixReleaseUnverified, errSwitchMatrixReleaseChanged
+		return operationJournal{}, switchMatrixRelease{Outcome: switchMatrixReleaseUnverified, Verification: "production_target_selection_changed"}, errInstanceRecovery
 	}
 	if len(reviewed) == 1 {
 		plan.MatrixLeafBuild = reviewed[0].TargetRelease.Runtime.Build
@@ -274,16 +273,16 @@ func (s *server) switchMatrixApply(ctx context.Context, parent, id, target, vers
 	req := minecraftSwitchRequest{Target: target, Action: action, Fingerprint: plan.Fingerprint, Confirm: true}
 	j, err := o.beginSwitchMatrixChild(parent, id, switchActionFingerprint(req))
 	if err != nil {
-		return operationJournal{}, release.Outcome, err
+		return operationJournal{}, release, err
 	}
 	stage, diagnostic := s.runMinecraftSwitch(ctx, j, plan, req)
 	o.mu.Lock()
 	result := o.operations[j.OperationID]
 	o.mu.Unlock()
 	if stage != "" {
-		return result, release.Outcome, &switchMatrixChildFailure{Stage: stage, RuntimeDiagnostic: diagnostic}
+		return result, release, &switchMatrixChildFailure{Stage: stage, RuntimeDiagnostic: diagnostic}
 	}
-	return result, release.Outcome, nil
+	return result, release, nil
 }
 
 func (s *server) recoverSwitchMatrixChild(ctx context.Context, parent, child string) error {

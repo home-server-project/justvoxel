@@ -190,6 +190,8 @@ func selectSwitchMatrixSmoke(r switchMatrixRun) (int, string) {
 			reason = "smoke_exact_release_unsupported"
 		case c.ReleaseReason == "exact_release_unverified":
 			reason = "smoke_exact_release_unverified"
+		case c.Reason == "runtime_image_unverified":
+			reason = "smoke_runtime_image_unverified"
 		case c.Disposition != "" || r.Results[i].Outcome != matrixPending:
 			reason = "smoke_case_unavailable"
 		case !java25GameReleasePattern.MatchString(c.Version) ||
@@ -273,6 +275,7 @@ func (s *server) recoverSwitchMatrixRun(id string) error {
 				}
 			}
 			result.Cleanup = "verified"
+			result.ClosureReason = ""
 			if cleanupErr != nil {
 				result.Cleanup = "unresolved"
 				result.ClosureReason = switchMatrixClosureDiagnostic(child, cleanupErr)

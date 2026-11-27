@@ -80,6 +80,7 @@ class InstanceBackups(unittest.TestCase):
 
     def test_matrix_backup_retirement_exact_identity_and_retry(self):
         import hashlib
+        import stat
 
         identity = 'jv-aaaaaa'
         other = 'jv-bbbbbb'
@@ -111,6 +112,21 @@ class InstanceBackups(unittest.TestCase):
                                     capture_output=True,text=True,timeout=20)
             self.assertEqual(result.returncode == 0, ok, result.stdout+result.stderr)
             return result.stdout
+
+        def snapshot():
+            evidence = {}
+            for path in (self.root, *self.root.rglob('*')):
+                info = path.lstat()
+                # Reads may update atime.
+                content = path.read_bytes() if stat.S_ISREG(info.st_mode) else None
+                evidence[path] = (info.st_dev, info.st_ino, info.st_mode, info.st_uid,
+                                  info.st_gid, info.st_mtime_ns, info.st_ctime_ns, content)
+            return evidence
+
+        def assert_read_only(action, ok=True):
+            before = snapshot()
+            matrix(action, ok=ok)
+            self.assertEqual(snapshot(), before)
 
         matrix('matrix-prepare', other, ok=False)
         reservation.update(state='needs_attention', stage='interrupted')
@@ -152,12 +168,66 @@ class InstanceBackups(unittest.TestCase):
         self.assertFalse(staged.exists())
         self.assertEqual([folder.stat().st_dev, folder.stat().st_ino], prepared['directory'])
         fixture.update(stage='owned')
-        reservation['state'] = 'running'
-        reservation['stage'] = 'retirement'
-        self.private(parent_path, json.dumps(reservation))
         self.private(fixture_path, json.dumps(fixture))
         for archive in saved_archives.iterdir():
             archive.rename(folder/archive.name)
+        archive = next(p for p in folder.iterdir() if p.name.endswith('.tar.gz'))
+
+        assert_read_only('matrix-placement')
+        changed_config = config.replace(b'"1.21.4"', b'"1.21.5"').decode()
+        self.assertNotEqual(hashlib.sha256(changed_config.encode()).hexdigest(), fixture['config_sha256'])
+        self.private(config_path, changed_config)
+        assert_read_only('matrix-placement')
+        assert_read_only('matrix-inventory', ok=False)
+        self.private(config_path, config.decode())
+
+        for field, value in (('parent', '01234567-89ab-4cde-8fab-0123456789ac'), ('id', other)):
+            with self.subTest(receipt_identity=field):
+                self.private(fixture_path, json.dumps(dict(fixture, **{field: value})))
+                assert_read_only('matrix-placement', ok=False)
+        self.private(fixture_path, json.dumps(fixture))
+
+        reservation.update(state='running', stage='retirement')
+        self.private(parent_path, json.dumps(reservation))
+        assert_read_only('matrix-placement', ok=False)
+        reservation.update(state='needs_attention', stage='interrupted')
+        self.private(parent_path, json.dumps(reservation))
+
+        original_root = self.root/'original-backups'
+        self.backups.rename(original_root)
+        self.backups.mkdir(mode=0o700)
+        (original_root/identity).rename(folder)
+        assert_read_only('matrix-placement', ok=False)
+        folder.rename(original_root/identity)
+        self.backups.rmdir()
+        original_root.rename(self.backups)
+
+        moved = folder.with_name('original')
+        folder.rename(moved)
+        folder.mkdir(mode=0o700)
+        assert_read_only('matrix-placement', ok=False)
+        folder.rmdir()
+        moved.rename(folder)
+
+        changed_backups = dict(record['backups'], type='nfs', mount_point=str(self.backups),
+                               source='fixture:/exports/backups')
+        storage_root = self.root/'other-storage'
+        storage_data = storage_root/'minecraft-instances'/identity/'data'
+        storage_data.mkdir(parents=True)
+        changed_storage = dict(record['storage'], root=str(storage_root), data_path=str(storage_data))
+        for field, value in (('backups', changed_backups), ('storage', changed_storage)):
+            with self.subTest(changed_placement=field):
+                self.private(config_path, json.dumps(dict(record, **{field: value})))
+                assert_read_only('matrix-placement', ok=False)
+        self.private(config_path, config.decode())
+
+        staged.mkdir(mode=0o700)
+        assert_read_only('matrix-placement', ok=False)
+        staged.rmdir()
+        assert_read_only('matrix-placement')
+
+        reservation.update(state='running', stage='retirement')
+        self.private(parent_path, json.dumps(reservation))
         foreign_folder = self.backups/other
         foreign_before = {p.name:p.read_bytes() for p in foreign_folder.iterdir()}
         unexpected = folder/'unknown.json'
@@ -166,15 +236,24 @@ class InstanceBackups(unittest.TestCase):
         self.assertTrue(unexpected.exists())
         unexpected.unlink()
 
+        archive_bytes = archive.read_bytes()
+        changed_archive = bytes([archive_bytes[0] ^ 1]) + archive_bytes[1:]
+        archive.write_bytes(changed_archive)
+        assert_read_only('matrix-inventory', ok=False)
+        archive.write_bytes(archive_bytes)
         fixture.update(stage='intent', backups=json.loads(matrix('matrix-inventory')))
         self.private(fixture_path, json.dumps(fixture))
-        moved = folder.with_name('original')
+        self.private(config_path, changed_config)
+        assert_read_only('matrix-retire', ok=False)
+        self.private(config_path, config.decode())
+        archive.write_bytes(changed_archive)
+        assert_read_only('matrix-retire', ok=False)
+        archive.write_bytes(archive_bytes)
         folder.rename(moved)
         folder.mkdir(mode=0o700)
         matrix('matrix-retire', ok=False)
         folder.rmdir()
         moved.rename(folder)
-        archive = next(p for p in folder.iterdir() if p.name.endswith('.tar.gz'))
         # Emulate loss of the process between archive and sidecar unlink.
         archive.unlink()
         matrix('matrix-retire')

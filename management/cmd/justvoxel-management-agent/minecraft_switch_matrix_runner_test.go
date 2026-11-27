@@ -42,8 +42,11 @@ func TestSwitchMatrixManifest(t *testing.T) {
 		t.Fatalf("unexpected discovery catalog: %v", versions)
 	}
 	ctx := context.Background()
-	stack := func(_ context.Context, _ string, version string, _ *switchMatrixRuntime) bool {
-		return version != "26.3"
+	stack := func(_ context.Context, _ string, version string, _ *switchMatrixRuntime) string {
+		if version == "26.3" {
+			return "geyser_java_target_mismatch"
+		}
+		return ""
 	}
 	lookups := map[switchMatrixReleaseKey]int{}
 	cases := buildSwitchMatrixCases(ctx, versions, func(ctx context.Context, name, version string) switchMatrixRelease {
@@ -124,6 +127,26 @@ func TestSwitchMatrixManifest(t *testing.T) {
 			t.Fatalf("authoritative absence lost: %+v %s", target, reason)
 		}
 	})
+	t.Run("crossplay_evidence_is_logged_per_role", func(t *testing.T) {
+		rows := buildSwitchMatrixCases(ctx, map[string][]string{switchMatrixModern: {"26.3"}}, matrixRunnerTestRelease,
+			func(_ context.Context, name, _ string, _ *switchMatrixRuntime) string {
+				if name == "paper" {
+					return "geyser_request_timeout"
+				}
+				return "floodgate_artifact_unverified"
+			})
+		for i, c := range rows {
+			if c.Source == "paper" && c.Target == "purpur" && c.Family == switchMatrixModern && c.Crossplay && c.Action == "clone" {
+				result := newSwitchMatrixResults(rows)[i]
+				if result.Outcome != matrixFailed || result.Reason != "managed_crossplay_stack_unverified" ||
+					c.SourceCrossplayCheck != "geyser_request_timeout" || c.TargetCrossplayCheck != "floodgate_artifact_unverified" {
+					t.Fatalf("lost per-role managed stack evidence: %+v %+v", c, result)
+				}
+				return
+			}
+		}
+		t.Fatal("expected managed cross-play row")
+	})
 	t.Run("publisher_protocol_rejects_untrusted_details", func(t *testing.T) {
 		for _, scenario := range []struct {
 			raw  string
@@ -135,12 +158,26 @@ func TestSwitchMatrixManifest(t *testing.T) {
 			{`{"outcome":"UNSUPPORTED","runtime":{"game":"26.3","loader":"","image":"java25"}}`, switchMatrixReleaseUnverified},
 			{`{"outcome":"AVAILABLE","runtime":{"game":"26.3","loader":"","image":"java25","reason":"password=private-value"}}`, switchMatrixReleaseUnverified},
 			{`{"outcome":"AVAILABLE","runtime":{"game":"26.2","loader":"","image":"java25"}}`, switchMatrixReleaseUnverified},
+			{`{"outcome":"AVAILABLE","runtime":{"game":"26.3","loader":"","image":"java21"}}`, switchMatrixReleaseUnverified},
 			{`{"outcome":"ERROR"}`, switchMatrixReleaseUnverified},
 			{`{"outcome":"UNSUPPORTED","verification":"private-value"}`, switchMatrixReleaseUnverified},
 		} {
 			r := decodeSwitchMatrixRelease("paper", "26.3", []byte(scenario.raw))
 			if r.Outcome != scenario.want || r.Outcome != switchMatrixReleaseAvailable && r.Runtime != nil {
 				t.Fatalf("bad publisher classification: %+v", r)
+			}
+		}
+	})
+	t.Run("crossplay_helper_codes_are_allowlisted", func(t *testing.T) {
+		for raw, want := range map[string]string{
+			`{"compatible":true,"reason":""}`:                             "",
+			`{"compatible":false,"reason":"viaversion_response_invalid"}`: "viaversion_response_invalid",
+			`{"compatible":true,"reason":"unexpected credentials"}`:       "crossplay_response_invalid",
+			`{"compatible":false,"reason":"unexpected credentials"}`:      "crossplay_response_invalid",
+			`{}`: "crossplay_response_invalid",
+		} {
+			if reason := decodeSwitchMatrixCrossplayCheck([]byte(raw)); reason != want {
+				t.Errorf("got %q, want %q", reason, want)
 			}
 		}
 	})
@@ -159,7 +196,7 @@ func matrixRunnerTestManifest(t *testing.T) switchMatrixRun {
 	t.Helper()
 	catalog := switchMatrixVersions([]string{"26.2", "1.21.11"})
 	cases := buildSwitchMatrixCases(context.Background(), catalog, matrixRunnerTestRelease,
-		func(context.Context, string, string, *switchMatrixRuntime) bool { return true })
+		func(context.Context, string, string, *switchMatrixRuntime) string { return "" })
 	return switchMatrixRun{Catalog: catalog, Cases: cases, Results: newSwitchMatrixResults(cases)}
 }
 
@@ -548,7 +585,7 @@ func TestSwitchMatrixResultAccounting(t *testing.T) {
 	s, j, r := newMatrixRunnerTest(t, 1)
 	o := s.operations
 	r.Cases = buildSwitchMatrixCases(context.Background(), map[string][]string{switchMatrixLegacy: {"1.21.11"}, switchMatrixModern: {"26.3"}},
-		matrixRunnerTestRelease, func(context.Context, string, string, *switchMatrixRuntime) bool { return true })
+		matrixRunnerTestRelease, func(context.Context, string, string, *switchMatrixRuntime) string { return "" })
 	r.Results = make([]switchMatrixCaseResult, len(r.Cases))
 	outcomes := []string{matrixPassed, matrixFailed, matrixUnsupported, matrixBlocked, matrixInterrupted, matrixCancelled, matrixPending}
 	expected := map[string]int{}
@@ -642,7 +679,7 @@ func TestSwitchMatrixSmokeGate(t *testing.T) {
 							return switchMatrixRelease{Outcome: switchMatrixReleaseUnverified, Verification: "publisher_request_timeout"}
 						}
 						return matrixRunnerTestRelease(ctx, software, version)
-					}, func(context.Context, string, string, *switchMatrixRuntime) bool { return true })
+					}, func(context.Context, string, string, *switchMatrixRuntime) string { return "" })
 				manifest.Results = newSwitchMatrixResults(manifest.Cases)
 			}
 			manifest.Schema, manifest.ID, manifest.State = 1, j.OperationID, "running"

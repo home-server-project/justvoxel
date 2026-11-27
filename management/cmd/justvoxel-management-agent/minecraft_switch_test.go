@@ -779,6 +779,10 @@ func TestSwitchCloneRuntimeVerificationAndRecovery(t *testing.T) {
 				t.Fatal(err)
 			}
 			source, _ := f.backend.readRecord(sourceID)
+			sourceHash, err := switchMatrixConfigHash(sourceID)
+			if err != nil {
+				t.Fatal(err)
+			}
 			sourceContainer := f.containers[sourceID]
 			s := surfaceTestServer(t, roleAdministrator)
 			s.operations = openTestOperationStore(t)
@@ -793,6 +797,12 @@ func TestSwitchCloneRuntimeVerificationAndRecovery(t *testing.T) {
 				if err != nil || result.State != operationSucceeded || verificationCalls != 1 || imageChecks != 2 || cleanupCalls != 0 ||
 					f.states[cloneID] != "inactive" || len(diagnostics) != 0 {
 					t.Fatalf("Java-only clone did not complete and stop cleanly: %+v %v", result, err)
+				}
+				afterHash, hashErr := switchMatrixConfigHash(sourceID)
+				evidence, evidenceErr := readSwitchEvidence(result)
+				if hashErr != nil || evidenceErr != nil || evidence.SourceRecord == nil ||
+					afterHash != sourceHash || instanceHash(append(mustSwitchJSON(evidence.SourceRecord), '\n')) != sourceHash {
+					t.Fatal("production Clone did not restore the exact original configuration", hashErr, evidenceErr)
 				}
 				return
 			}

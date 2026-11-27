@@ -20,21 +20,22 @@ const (
 )
 
 type switchMatrixCaseResult struct {
-	CaseID         string                     `json:"case_id"`
-	Outcome        string                     `json:"outcome"`
-	Stage          string                     `json:"failure_stage,omitempty"`
-	Reason         string                     `json:"reason,omitempty"`
-	ReleaseOutcome switchMatrixReleaseOutcome `json:"observed_release_outcome,omitempty"`
-	ChildOperation string                     `json:"switch_operation,omitempty"`
-	Runtime        string                     `json:"runtime_verification,omitempty"`
-	World          string                     `json:"world_marker_verification,omitempty"`
-	Original       string                     `json:"original_source_verification,omitempty"`
-	FinalState     string                     `json:"final_state_verification,omitempty"`
-	Recovery       string                     `json:"recovery,omitempty"`
-	Cleanup        string                     `json:"cleanup,omitempty"`
-	ClosureReason  string                     `json:"closure_reason,omitempty"`
-	StartedAt      time.Time                  `json:"started_at,omitzero"`
-	DurationMS     int64                      `json:"duration_ms"`
+	CaseID              string                     `json:"case_id"`
+	Outcome             string                     `json:"outcome"`
+	Stage               string                     `json:"failure_stage,omitempty"`
+	Reason              string                     `json:"reason,omitempty"`
+	ReleaseOutcome      switchMatrixReleaseOutcome `json:"observed_release_outcome,omitempty"`
+	ReleaseVerification string                     `json:"observed_release_verification,omitempty"`
+	ChildOperation      string                     `json:"switch_operation,omitempty"`
+	Runtime             string                     `json:"runtime_verification,omitempty"`
+	World               string                     `json:"world_marker_verification,omitempty"`
+	Original            string                     `json:"original_source_verification,omitempty"`
+	FinalState          string                     `json:"final_state_verification,omitempty"`
+	Recovery            string                     `json:"recovery,omitempty"`
+	Cleanup             string                     `json:"cleanup,omitempty"`
+	ClosureReason       string                     `json:"closure_reason,omitempty"`
+	StartedAt           time.Time                  `json:"started_at,omitzero"`
+	DurationMS          int64                      `json:"duration_ms"`
 }
 
 type switchMatrixRun struct {

@@ -11,7 +11,7 @@ if [[ ${action} == run ]]; then
         --header 'Content-Type: application/json' --data '{}' \
         "http://localhost/v1/minecraft/instances/${id}/backups/run"
 fi
-case ${action} in inventory|preflight|create|retain|matrix-prepare|matrix-bind|matrix-absent|matrix-inventory|matrix-check|matrix-retire) ;; *) fail ;; esac
+case ${action} in inventory|preflight|create|retain|matrix-prepare|matrix-bind|matrix-absent|matrix-inventory|matrix-check|matrix-retire|matrix-placement) ;; *) fail ;; esac
 source /usr/libexec/justvoxel/mjust/backup-common.sh
 # Matrix absence checks use the reservation receipt when no committed runtime
 # exists. All other actions still require the committed runtime.
@@ -208,6 +208,7 @@ def matrix_backup_storage(root_fd):
                action == 'matrix-bind' and binding and fixture['stage'] == 'binding' or
                action == 'matrix-absent' and retirement and fixture['stage'] in ('reserved', 'binding', 'intent') or
                action == 'matrix-inventory' and (active and phase == 'switch' or retirement) and fixture['stage'] == 'owned' or
+               action == 'matrix-placement' and interrupted and fixture['stage'] == 'owned' or
                action == 'matrix-check' and retirement and fixture['stage'] in ('binding', 'intent') or
                action == 'matrix-retire' and retirement and fixture['stage'] == 'intent')
     if not allowed or parent['operation_id'] != parent_id or parent['operation_type'] != 'switch_matrix' or identity not in parent['matrix_fixtures']:
@@ -226,7 +227,8 @@ def matrix_backup_storage(root_fd):
         return
     if fixture['placement'] != record.get('backups') or fixture['storage'] != record['storage']:
         raise ValueError('matrix fixture placement changed')
-    if fixture['config_sha256'] != hashlib.sha256(record_raw).hexdigest():
+    # Recovery uses this read-only check before restoring the exact config hash.
+    if action != 'matrix-placement' and fixture['config_sha256'] != hashlib.sha256(record_raw).hexdigest():
         raise ValueError('matrix fixture configuration changed')
     if action == 'matrix-retire':
         try:
@@ -271,7 +273,7 @@ def matrix_backup_storage(root_fd):
         return
     namespace = identity
     if not missing_at(root_fd, staged):
-        if action == 'matrix-inventory' or not missing_at(root_fd, identity):
+        if action in ('matrix-inventory', 'matrix-placement') or not missing_at(root_fd, identity):
             raise ValueError('multiple backup namespaces')
         namespace = staged
     try:
@@ -284,9 +286,11 @@ def matrix_backup_storage(root_fd):
         raise
     try:
         directory = storage_identity(fd)
-        info = os.fstat(fd)
         if expected['directory'] != directory:
             raise ValueError('backup directory replaced')
+        if action == 'matrix-placement':
+            return
+        info = os.fstat(fd)
         with os.scandir(fd) as reader:
             entries = []
             for entry in reader:

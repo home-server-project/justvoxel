@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"slices"
 	"strings"
 	"time"
@@ -16,20 +15,22 @@ const (
 )
 
 type switchMatrixCase struct {
-	ID              string              `json:"id"`
-	Source          string              `json:"source"`
-	Target          string              `json:"target"`
-	Family          string              `json:"world_layout_family,omitempty"`
-	Version         string              `json:"minecraft_version,omitempty"`
-	Action          string              `json:"action,omitempty"`
-	Crossplay       bool                `json:"source_crossplay"`
-	TargetCrossplay bool                `json:"target_crossplay"`
-	SourceState     string              `json:"original_state,omitempty"`
-	SourceRelease   switchMatrixRelease `json:"source_release,omitzero"`
-	TargetRelease   switchMatrixRelease `json:"target_release,omitzero"`
-	Disposition     string              `json:"disposition,omitempty"`
-	Reason          string              `json:"reason,omitempty"`
-	ReleaseReason   string              `json:"release_reason,omitempty"`
+	ID                   string              `json:"id"`
+	Source               string              `json:"source"`
+	Target               string              `json:"target"`
+	Family               string              `json:"world_layout_family,omitempty"`
+	Version              string              `json:"minecraft_version,omitempty"`
+	Action               string              `json:"action,omitempty"`
+	Crossplay            bool                `json:"source_crossplay"`
+	TargetCrossplay      bool                `json:"target_crossplay"`
+	SourceState          string              `json:"original_state,omitempty"`
+	SourceRelease        switchMatrixRelease `json:"source_release,omitzero"`
+	TargetRelease        switchMatrixRelease `json:"target_release,omitzero"`
+	Disposition          string              `json:"disposition,omitempty"`
+	Reason               string              `json:"reason,omitempty"`
+	ReleaseReason        string              `json:"release_reason,omitempty"`
+	SourceCrossplayCheck string              `json:"source_crossplay_verification,omitempty"`
+	TargetCrossplayCheck string              `json:"target_crossplay_verification,omitempty"`
 }
 
 func switchMatrixVersions(catalog []string) map[string][]string {
@@ -69,27 +70,56 @@ func discoverSwitchMatrixVersions(ctx context.Context) (map[string][]string, str
 
 type switchMatrixReleaseKey struct{ Software, Version string }
 
-func verifySwitchMatrixCrossplaySelection(ctx context.Context, software, version string, r *switchMatrixRuntime) bool {
+// An empty diagnostic means the exact managed selection was verified.
+func verifySwitchMatrixCrossplaySelection(ctx context.Context, software, version string, r *switchMatrixRuntime) string {
 	probe, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
-	raw, err := instanceRuntimeCommand(probe, switchMatrixVersionHelper, "--server-type", software, "pinned", version, "yes")
-	var selection adminVersionStatus
-	return err == nil && len(raw) <= 256<<10 && json.Unmarshal(raw, &selection) == nil &&
-		selection.SelectedCandidate == version && selection.ServerType == software &&
-		selection.LoaderVersion == r.Loader && selection.PufferfishBuild == r.PufferfishBuild &&
-		selection.ImageTag == r.Image && selection.ServerSupported &&
-		selection.CrossplayEnabled && selection.CrossplayCompatible
+	raw, err := instanceRuntimeCommand(probe, switchMatrixVersionHelper, "matrix-crossplay", software, version, r.Loader)
+	if probe.Err() != nil {
+		return "crossplay_probe_timeout"
+	}
+	if err != nil {
+		return "crossplay_helper_failed"
+	}
+	return decodeSwitchMatrixCrossplayCheck(raw)
+}
+
+func decodeSwitchMatrixCrossplayCheck(raw []byte) string {
+	var reply struct {
+		Compatible *bool  `json:"compatible"`
+		Reason     string `json:"reason"`
+	}
+	const invalid = "crossplay_response_invalid"
+	if len(raw) > 256 || instanceDecode(raw, &reply) != nil || reply.Compatible == nil {
+		return invalid
+	}
+	if *reply.Compatible {
+		if reply.Reason == "" {
+			return ""
+		}
+		return invalid
+	}
+	switch reply.Reason {
+	case "crossplay_helper_failed", "crossplay_selection_invalid", "crossplay_loader_missing", "geyser_java_target_mismatch",
+		"geyser_request_timeout", "geyser_request_failed", "geyser_response_invalid",
+		"viaversion_request_timeout", "viaversion_request_failed", "viaversion_response_invalid",
+		"viaversion_release_unverified", "crossplay_mod_artifacts_unverified", "crossplay_mod_request_timeout",
+		"geyser_artifact_unverified", "floodgate_artifact_unverified":
+		return reply.Reason
+	default:
+		return invalid
+	}
 }
 
 func buildSwitchMatrixCases(ctx context.Context, versions map[string][]string, lookup func(context.Context, string, string) switchMatrixRelease,
-	managed func(context.Context, string, string, *switchMatrixRuntime) bool) []switchMatrixCase {
+	managed func(context.Context, string, string, *switchMatrixRuntime) string) []switchMatrixCase {
 	software := []string{"bedrock"}
 	for name := range javaServerCapabilityTable {
 		software = append(software, name)
 	}
 	slices.Sort(software)
 	cached := map[switchMatrixReleaseKey]switchMatrixRelease{}
-	stacks := map[switchMatrixReleaseKey]bool{}
+	stacks := map[switchMatrixReleaseKey]string{}
 	get := func(name, version string) switchMatrixRelease {
 		key := switchMatrixReleaseKey{name, version}
 		if result, ok := cached[key]; ok {
@@ -102,14 +132,17 @@ func buildSwitchMatrixCases(ctx context.Context, versions map[string][]string, l
 		cached[key] = result
 		return result
 	}
-	stackOK := func(name, version string, r *switchMatrixRuntime) bool {
+	stackCheck := func(name, version string, r *switchMatrixRuntime) string {
 		key := switchMatrixReleaseKey{name, version}
-		if ok, known := stacks[key]; known {
-			return ok
+		if diagnostic, known := stacks[key]; known {
+			return diagnostic
 		}
-		ok := ctx.Err() == nil && managed(ctx, name, version, r)
-		stacks[key] = ok
-		return ok
+		diagnostic := "crossplay_discovery_deadline"
+		if ctx.Err() == nil {
+			diagnostic = managed(ctx, name, version, r)
+		}
+		stacks[key] = diagnostic
+		return diagnostic
 	}
 	var cases []switchMatrixCase
 	add := func(c switchMatrixCase) {
@@ -144,8 +177,17 @@ func buildSwitchMatrixCases(ctx context.Context, versions map[string][]string, l
 					if crossplay && pair.ReleaseReason == "" && !switchRejectsCrossplayPlatform(source, target, true) {
 						selection.Version, selection.SourceRelease, selection.TargetRelease, selection.ReleaseReason =
 							selectSwitchMatrixPair(versions[family], source, target, get, func(version string, a, b *switchMatrixRuntime) bool {
-								return stackOK(source, version, a) && (!javaServerCrossplay(target) || stackOK(target, version, b))
+								from := stackCheck(source, version, a)
+								to := ""
+								if javaServerCrossplay(target) {
+									to = stackCheck(target, version, b)
+								}
+								return from == "" && to == ""
 							})
+						if selection.ReleaseReason == "managed_crossplay_stack_unverified" {
+							selection.SourceCrossplayCheck = stacks[switchMatrixReleaseKey{source, selection.Version}]
+							selection.TargetCrossplayCheck = stacks[switchMatrixReleaseKey{target, selection.Version}]
+						}
 					}
 					for _, action := range []string{"clone", "convert"} {
 						c := selection

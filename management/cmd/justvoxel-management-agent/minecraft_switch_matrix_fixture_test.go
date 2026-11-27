@@ -26,7 +26,16 @@ func TestSwitchMatrixProductionFixtureCreation(t *testing.T) {
 	b.networkRoot = filepath.Join(t.TempDir(), "network")
 	o := matrixTestStore(t, b)
 	s := &server{operations: o}
-	j := matrixTestBegin(t, o, "fixtures")
+	j, err := o.beginSwitchMatrix(switchMatrixRunnerFingerprint())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = o.transition(j.OperationID, operationValidating, "manifest", "Reviewing fixtures."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = o.transition(j.OperationID, operationRunning, "fixtures", "Preparing fixtures."); err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 
 	// Keep the real registry, renderer, activation and receipt files. Replace
@@ -53,7 +62,9 @@ func TestSwitchMatrixProductionFixtureCreation(t *testing.T) {
 		data := inode(path)
 		return fmt.Sprintf("%d:%d", data[0], data[1])
 	}
-	substituted := ""
+	substituted, replacedData := "", ""
+	backupReplaced := false
+	var shutdownHash string
 	provisioned := map[string]bool{}
 	verifiedVersion := map[string]int{}
 	b.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
@@ -66,6 +77,18 @@ func TestSwitchMatrixProductionFixtureCreation(t *testing.T) {
 			switch args[0] {
 			case "info":
 				return []byte(f.snapshot.StorageRoot), nil
+			case "image", "inspect":
+				if args[len(args)-1] == "{{.Id}}" || args[len(args)-1] == "{{.Image}}" {
+					return []byte("exact-fixture-image\n"), nil
+				}
+			case "kill":
+				if shutdownHash != "" {
+					id := strings.TrimPrefix(args[len(args)-1], "minecraft-")
+					hash, err := switchMatrixConfigHash(id)
+					if err != nil || hash != shutdownHash {
+						t.Fatal("graceful shutdown started before the original configuration was restored", err)
+					}
+				}
 			case "rm":
 				id := strings.TrimPrefix(args[len(args)-1], "minecraft-")
 				if !provisioned[id] {
@@ -107,7 +130,11 @@ func TestSwitchMatrixProductionFixtureCreation(t *testing.T) {
 					if id == substituted {
 						parent[1]++
 					}
-					return mustSwitchJSON(switchMatrixDataIdentity{Data: dataIdentity(path), Parent: parent}), nil
+					data := dataIdentity(path)
+					if id == replacedData {
+						data = "99:123"
+					}
+					return mustSwitchJSON(switchMatrixDataIdentity{Data: data, Parent: parent}), nil
 				case "inspect":
 					return mustSwitchJSON(map[string]string{"identity": dataIdentity(path)}), nil
 				case "remove":
@@ -149,13 +176,19 @@ func TestSwitchMatrixProductionFixtureCreation(t *testing.T) {
 			fallthrough
 		case "matrix-inventory":
 			return mustSwitchJSON(switchMatrixBackups{Root: inode(backupRoot), Directory: inode(path), Files: map[string]switchMatrixBackupFile{}}), nil
-		case "matrix-bind", "matrix-retire":
+		case "matrix-bind", "matrix-retire", "matrix-placement":
 			receipt, err := readSwitchMatrixFixture(j.OperationID, id)
 			if err != nil || receipt.Backups.Root != inode(backupRoot) || receipt.Backups.Directory != inode(path) {
 				t.Fatal("backup publication or retirement lacked exact ownership", err)
 			}
 			if args[3] == "matrix-retire" {
 				return nil, os.Remove(path)
+			}
+			if args[3] == "matrix-placement" {
+				if backupReplaced || receipt.Stage != "owned" {
+					return nil, errInstanceRecovery
+				}
+				return nil, nil
 			}
 			if receipt.Stage != "binding" {
 				t.Fatal("backup namespace published before its binding was recorded")
@@ -171,20 +204,30 @@ func TestSwitchMatrixProductionFixtureCreation(t *testing.T) {
 	if smoke < 0 {
 		t.Fatal("smoke case unavailable", reason)
 	}
-	paper := slices.IndexFunc(manifest.Cases, func(c switchMatrixCase) bool {
-		return c.Source == "paper" && c.Family == switchMatrixModern && !c.Crossplay && c.Disposition == ""
+	targetFixture := slices.IndexFunc(manifest.Cases, func(c switchMatrixCase) bool {
+		return c.Source == manifest.Cases[smoke].Target && c.Family == switchMatrixModern && !c.Crossplay && c.Disposition == ""
 	})
-	if paper < 0 {
-		t.Fatal("expected an executable Paper source")
+	if targetFixture < 0 {
+		t.Fatal("expected a fixture for the smoke case target")
 	}
 	passwords := map[string]bool{}
 	var ids []string
 	var paths []string
+	var originals []instanceRuntimeRecord
+	startCommand := pluginInstallCommand
+	t.Cleanup(func() { pluginInstallCommand = startCommand })
+	pluginInstallCommand = func(_ context.Context, command string, args ...string) ([]byte, error) {
+		if len(ids) != 2 || command != "systemctl" || !slices.Equal(args, []string{"start", "minecraft-" + ids[1] + ".service"}) {
+			t.Fatal("unexpected fixture start", command, args)
+		}
+		f.states[ids[1]], f.containers[ids[1]] = "active", "running"
+		return nil, nil
+	}
 	foreignBefore, err := b.readRecord(f.configs[0].ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, c := range []switchMatrixCase{manifest.Cases[smoke], manifest.Cases[paper]} {
+	for _, c := range []switchMatrixCase{manifest.Cases[smoke], manifest.Cases[targetFixture]} {
 		config, snapshot, err := s.prepareSwitchMatrixSource(ctx, c)
 		if err != nil {
 			t.Fatal("matrix source preparation failed", err)
@@ -219,22 +262,175 @@ func TestSwitchMatrixProductionFixtureCreation(t *testing.T) {
 			!bytes.Contains(env, []byte("RCON_PASSWORD="+config.RCONPassword+"\n")) ||
 			bytes.Contains(env, []byte("MODRINTH_PROJECTS=")) ||
 			!bytes.Contains(quadlet, []byte("PublishPort=127.0.0.1:"+strconv.Itoa(config.JavaPort)+":25565/tcp")) ||
-			bytes.Contains(quadlet, []byte("[Install]")) || len(record.Firewall) != 0 {
+			bytes.Contains(quadlet, []byte("[Install]")) || record.Firewall == nil || len(record.Firewall) != 0 {
 			t.Fatal("production environment, Quadlet or service contract was not published", envErr, quadletErr, statusErr)
 		}
 		ids = append(ids, id)
+		originals = append(originals, record)
 		paths = append(paths, envPath, quadletPath, record.Storage.DataPath, record.Backups.Path)
+
+		beforeHash, err := switchMatrixConfigHash(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = b.prepareSwitchSourceCopy(ctx, id, c.Version); err != nil {
+			t.Fatal("prepare source copy", err)
+		}
+		state := "stopped"
+		if id == ids[0] {
+			// Production Clone restarts an originally running source before
+			// clearing its temporary configuration.
+			f.states[id], f.containers[id], state = "active", "running", "running"
+		}
+		e := minecraftSwitchEvidence{OperationID: j.OperationID, Source: id, SourceRecord: &record, SourceContentChanged: true}
+		if err = s.clearSwitchSourceContent(ctx, &e); err != nil {
+			t.Fatal("clear temporary source configuration", err)
+		}
+		afterHash, err := switchMatrixConfigHash(id)
+		if err != nil || afterHash != beforeHash {
+			t.Fatal("source configuration no longer matches its original SHA256", err)
+		}
+		if err = s.withSwitchMatrixRuntime(ctx, j.OperationID, id, state, func(_ context.Context, current instanceRuntimeRecord) error {
+			if !bytes.Equal(mustSwitchJSON(current), mustSwitchJSON(record)) {
+				return errInstanceRecovery
+			}
+			return nil
+		}); err != nil {
+			t.Fatal("original source verification refused its committed receipt", err)
+		}
+		if state == "stopped" {
+			if err = s.stopSwitchMatrixFixtureForRetirement(ctx, j.OperationID, id); err != nil {
+				t.Fatal("could not return verified fixture to stopped state", err)
+			}
+		}
+	}
+	source, cloneID := originals[0], ids[1]
+	if _, err = o.transition(j.OperationID, operationRunning, "switch", "Reviewing Switch."); err != nil {
+		t.Fatal(err)
+	}
+	child, err := o.beginSwitchMatrixChild(j.OperationID, source.Runtime.ID, switchMatrixRunnerFingerprint())
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := minecraftSwitchEvidence{Schema: 1, OperationID: child.OperationID, Source: source.Runtime.ID, SourceRecord: &source,
+		Target: originals[1].Runtime.Software, Version: source.Runtime.Version, Action: "clone", Stage: "complete",
+		CloneID: cloneID, CloneRecord: &originals[1], OriginallyRunning: true}
+	if err = saveSwitchEvidence(e); err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range []struct {
+		state operationState
+		stage string
+	}{{operationValidating, "validating"}, {operationRunning, "converting"}, {operationVerifying, "verifying"}, {operationSucceeded, "complete"}} {
+		if _, err = o.transition(child.OperationID, step.state, step.stage, "Fixture Switch transaction."); err != nil {
+			t.Fatal(err)
+		}
 	}
 	substituted = ids[len(ids)-1]
 	if _, err := s.closeSwitchMatrixCase(ctx, j.OperationID, 0); !errors.Is(err, errInstanceRecovery) {
 		t.Fatal("cleanup accepted substituted fixture storage", err)
 	}
 	substituted = ""
-	if _, err := s.closeSwitchMatrixCase(ctx, j.OperationID, 0); err != nil {
-		t.Fatal("exact fixture cleanup failed", err)
+	if _, err := s.closeSwitchMatrixCase(ctx, j.OperationID, 1); err != nil {
+		t.Fatal("exact clone fixture cleanup failed", err)
 	}
-	if err := o.checkSwitchMatrixRunClosure(j.OperationID); err != nil {
-		t.Fatal("parent closure could not be verified", err)
+	o.holdSwitchMatrixRun(j.OperationID)
+	cases := []switchMatrixCase{manifest.Cases[smoke]}
+	if err = o.saveSwitchMatrixRun(switchMatrixRun{Schema: 1, ID: j.OperationID, State: "needs_attention", Cases: cases,
+		Results: []switchMatrixCaseResult{{Outcome: matrixFailed, ChildOperation: child.OperationID, Original: "failed", Cleanup: "unresolved"}}}); err != nil {
+		t.Fatal(err)
+	}
+	dir, envPath, quadletPath := b.paths(source.Runtime.ID)
+	configPath := filepath.Join(dir, "config.json")
+	legacy := source
+	legacy.Firewall = nil
+	if err = b.writeJSON(configPath, legacy, true); err != nil {
+		t.Fatal(err)
+	}
+	reject := func() {
+		t.Helper()
+		before, err := switchMatrixConfigHash(source.Runtime.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = s.recoverSwitchMatrixRun(j.OperationID); !errors.Is(err, errInstanceRecovery) {
+			t.Fatal("recovery accepted unverified evidence", err)
+		}
+		after, err := switchMatrixConfigHash(source.Runtime.ID)
+		if err != nil || after != before || f.states[source.Runtime.ID] != "active" {
+			t.Fatal("recovery modified a fixture before verifying ownership", err)
+		}
+	}
+	changed := legacy
+	changed.Runtime.MaxPlayers++
+	if err = b.writeJSON(configPath, changed, true); err != nil {
+		t.Fatal(err)
+	}
+	reject()
+	if err = b.writeJSON(configPath, legacy, true); err != nil {
+		t.Fatal(err)
+	}
+	substituted = source.Runtime.ID
+	reject()
+	substituted = ""
+	replacedData = source.Runtime.ID
+	reject()
+	replacedData = ""
+	backupReplaced = true
+	reject()
+	backupReplaced = false
+	for _, path := range []string{envPath, quadletPath} {
+		raw, err := b.readPrivate(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = b.writePrivate(path, append(slices.Clone(raw), '\n'), true); err != nil {
+			t.Fatal(err)
+		}
+		reject()
+		if err = b.writePrivate(path, raw, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	unrelated := e
+	unrelated.OperationID = j.OperationID
+	if err = b.writeJSON(switchEvidencePath(child.OperationID), unrelated, true); err != nil {
+		t.Fatal(err)
+	}
+	reject()
+	if err = saveSwitchEvidence(e); err != nil {
+		t.Fatal(err)
+	}
+	wrongSaved := source
+	wrongSaved.Firewall = nil
+	unrelated = e
+	unrelated.SourceRecord = &wrongSaved
+	if err = saveSwitchEvidence(unrelated); err != nil {
+		t.Fatal(err)
+	}
+	reject()
+	if err = saveSwitchEvidence(e); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = o.switchMatrixOwnedRuntime(ctx, j.OperationID, source.Runtime.ID); !errors.Is(err, errInstanceRecovery) {
+		t.Fatal("legacy fixture passed strict ownership before repair", err)
+	}
+	shutdownHash = instanceHash(append(mustSwitchJSON(source), '\n'))
+	if err = s.recoverSwitchMatrixRun(j.OperationID); err != nil {
+		t.Fatal("exact legacy source recovery and retirement failed", err)
+	}
+	run, err := o.readSwitchMatrixRun(j.OperationID)
+	if err != nil || run.State != "recovered" || run.Results[0].Outcome != matrixFailed ||
+		run.Results[0].Original != "failed" || run.Results[0].Cleanup != "verified" {
+		t.Fatal("recovery did not preserve the historical failure and verify cleanup", err)
+	}
+	completed, err := o.get(child.OperationID)
+	if err != nil || completed.State != operationSucceeded {
+		t.Fatal("recovery altered the completed Clone", err)
+	}
+	active, err := o.currentMinecraftMaintenance()
+	if err != nil || active != nil {
+		t.Fatal("verified closure retained the parent reservation", err)
 	}
 	for _, path := range paths {
 		if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {

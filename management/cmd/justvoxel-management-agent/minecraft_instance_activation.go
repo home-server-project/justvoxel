@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -932,7 +933,7 @@ func (b *instanceRuntimeBackend) applyVersion(ctx context.Context, previous inst
 	next.EnvironmentSHA256 = instanceHash(files.Environment)
 	next.QuadletSHA256 = instanceHash(files.Quadlet)
 	var changes []instanceFirewallChange
-	owned := append([]instanceFirewallRule(nil), previous.Firewall...)
+	owned := slices.Clone(previous.Firewall)
 	if !bootOnly && !containerOnly {
 		changes, owned, err = b.planFirewall(ctx, previous, next)
 		if err != nil {

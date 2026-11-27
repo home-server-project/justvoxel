@@ -544,6 +544,9 @@ The Migration log records the halt reason, the selected smoke case when
 available, and any case or publisher verification diagnostics. Runtime failures
 record fixed reasons for the failed check, such as a changed container session,
 missing startup evidence, an image mismatch, or an unexpected published port.
+Discovery records confirmed release absence separately from request failures
+and unverified selections. For managed cross-play, the manifest records the
+source and target compatibility failures where applicable.
 
 Cases run sequentially with a fresh source and at most one clone. Fixtures use
 private local data and backup directories, loopback-only published ports, and no
@@ -577,6 +580,10 @@ immediately. The admitted case completes
 or recovers and retires its fixtures before the runner stops. An Agent restart
 preserves the manifest and marks interrupted work. **Recover Switch Test**
 verifies fixture closure and leaves interrupted or unstarted cases unfinished.
+It can also restore an older Clone source's original empty firewall encoding
+when the saved Clone record reproduces the fixture receipt exactly and the live
+definitions and storage identities still match. The historical case outcome is
+preserved.
 Unresolved cleanup keeps maintenance reserved and leaves recovery available.
 
 Fixture retirement uses the immutable instances recorded by the parent.

@@ -88,6 +88,10 @@ reject java_server_version_available fabric 26.3 0.99.0
 curl() {
     local exact=no response
     [[ ${1:-} != --write-out ]] || { exact=yes; shift 2; }
+    case "${matrix_lookup:-}:${*: -1}" in
+        missing_pair:*/server/json) [[ ${exact} != yes ]] || printf '\n404'; return 22 ;;
+        missing_pair:*) ;;
+    esac
     case "${matrix_lookup:-}" in
         timeout) [[ ${exact} != yes ]] || printf '\n000'; return 28 ;;
         rate_limit) [[ ${exact} != yes ]] || printf '\n429'; return 22 ;;
@@ -110,7 +114,16 @@ jq -e '.outcome == "UNSUPPORTED" and (has("runtime") | not)' \
     <<< "$(resolve_switch_matrix_java_release purpur 1.21.8)" >/dev/null
 jq -e '.outcome == "UNSUPPORTED" and (has("runtime") | not)' \
     <<< "$(matrix_lookup=absent resolve_switch_matrix_java_release paper 26.3)" >/dev/null
+jq -e '.outcome == "UNVERIFIED" and .verification == "publisher_request_failed"' \
+    <<< "$(matrix_lookup=absent resolve_switch_matrix_java_release vanilla 26.3)" >/dev/null
+jq -e '.outcome == "UNVERIFIED" and .verification == "publisher_selection_unverified"' \
+    <<< "$(matrix_lookup=missing_pair resolve_switch_matrix_java_release fabric 26.3)" >/dev/null
 for failure in timeout rate_limit malformed; do
-    jq -e '.outcome == "UNVERIFIED" and (has("runtime") | not)' \
+    case "${failure}" in
+        timeout) reason=publisher_request_timeout ;;
+        rate_limit) reason=publisher_request_failed ;;
+        malformed) reason=publisher_response_invalid ;;
+    esac
+    jq -e --arg reason "${reason}" '.outcome == "UNVERIFIED" and .verification == $reason and (has("runtime") | not)' \
         <<< "$(matrix_lookup=${failure} resolve_switch_matrix_java_release paper 26.3)" >/dev/null
 done

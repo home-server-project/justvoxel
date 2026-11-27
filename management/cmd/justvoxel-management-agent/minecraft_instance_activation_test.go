@@ -23,6 +23,58 @@ type instanceTestExit struct{}
 func (instanceTestExit) Error() string { return "mock exit 1" }
 func (instanceTestExit) ExitCode() int { return 1 }
 
+func TestActivationPreservesUnchangedEmptyFirewallEncoding(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		rules []instanceFirewallRule
+	}{
+		{"empty array", []instanceFirewallRule{}},
+		{"null", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newInstanceActivationFixture(t)
+			f.activateBoth()
+			b, id := f.backend, f.configs[0].ID
+			ctx := context.Background()
+			record, err := b.readRecord(id)
+			if err != nil || len(record.Firewall) == 0 {
+				t.Fatal("test runtime must have actual firewall rules", err)
+			}
+			// The rules remain present in firewalld and are externally owned.
+			record.Firewall = tc.rules
+			dir, _, _ := b.paths(id)
+			path := filepath.Join(dir, "config.json")
+			if err = b.writeJSON(path, record, true); err != nil {
+				t.Fatal(err)
+			}
+			original, err := b.readPrivate(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			current := record
+			for _, temporary := range []bool{!record.Runtime.PreserveContent, record.Runtime.PreserveContent} {
+				next := current
+				next.Runtime.PreserveContent = temporary
+				records, err := b.records()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err = b.applyVersion(ctx, current, instanceReplaceRecord(records, next), f.snapshot, true); err != nil {
+					t.Fatal(err)
+				}
+				current, err = b.readRecord(id)
+				if err != nil || !reflect.DeepEqual(current.Firewall, tc.rules) {
+					t.Fatal("activation changed exact empty firewall ownership", err)
+				}
+			}
+			restored, err := b.readPrivate(path)
+			if err != nil || instanceHash(restored) != instanceHash(original) {
+				t.Fatal("temporary activation did not restore the exact committed hash", err)
+			}
+		})
+	}
+}
+
 type instanceActivationFixture struct {
 	t           *testing.T
 	backend     *instanceRuntimeBackend

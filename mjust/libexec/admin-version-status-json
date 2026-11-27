@@ -21,6 +21,32 @@ if [[ ${1:-} == matrix-release ]]; then
     resolve_switch_matrix_java_release "$2" "$3"
     exit
 fi
+if [[ ${1:-} == matrix-crossplay ]]; then
+    [[ $# == 4 ]] || exit 1
+    software="$2" game="$3" loader="$4"
+    image="$(setup_java_image "${game}")"
+    validate_java_server_selection "${software}" pinned "${game}" "${loader}" "${image}" || exit 1
+    geyser_status=0
+    geyser="$(resolve_geyser_supported_java_version)" || geyser_status=$?
+    case "${geyser_status}" in
+        0) reason="$(jv_managed_crossplay_check "${software}" "${game}" "${loader}" "${geyser}" 2>/dev/null)" ||
+            reason="${reason:-crossplay_helper_failed}" ;;
+        4) reason=geyser_request_timeout ;;
+        6) reason=geyser_response_invalid ;;
+        *) reason=geyser_request_failed ;;
+    esac
+    if [[ -z ${reason} ]] && server_supports_viaversion "${software}"; then
+        # A fresh fixture needs the same publisher artifacts as standalone
+        # startup and the production Paper-family Switch review.
+        if ! jv_crossplay_metadata geyser >/dev/null 2>&1; then
+            reason=geyser_artifact_unverified
+        elif ! jv_crossplay_metadata floodgate >/dev/null 2>&1; then
+            reason=floodgate_artifact_unverified
+        fi
+    fi
+    jq -cn --arg reason "${reason}" '{compatible:($reason == ""),reason:$reason}'
+    exit
+fi
 instance_args=()
 if [[ ${1:-} == --instance ]]; then
     [[ $# -ge 2 ]] || exit 1

@@ -56,10 +56,10 @@ func decodeSwitchMatrixRelease(software, version string, raw []byte) switchMatri
 		!java21GameReleasePattern.MatchString(version) && !java25GameReleasePattern.MatchString(version) {
 		return unverified
 	}
-	// The helper protocol does not accept diagnostic fields from outside Go.
 	var reply struct {
-		Outcome switchMatrixReleaseOutcome `json:"outcome"`
-		Runtime *switchMatrixRuntime       `json:"runtime,omitempty"`
+		Outcome      switchMatrixReleaseOutcome `json:"outcome"`
+		Runtime      *switchMatrixRuntime       `json:"runtime,omitempty"`
+		Verification string                     `json:"verification,omitempty"`
 	}
 	if len(raw) > 1024 || instanceDecode(raw, &reply) != nil {
 		return unverified
@@ -68,20 +68,32 @@ func decodeSwitchMatrixRelease(software, version string, raw []byte) switchMatri
 	switch result.Outcome {
 	case switchMatrixReleaseUnverified:
 		if reply.Runtime == nil {
-			unverified.Verification = "publisher_exact_release_inconclusive"
+			switch reply.Verification {
+			case "", "publisher_exact_release_inconclusive":
+				unverified.Verification = "publisher_exact_release_inconclusive"
+			case "publisher_request_timeout", "publisher_request_failed", "publisher_response_invalid", "publisher_selection_unverified":
+				unverified.Verification = reply.Verification
+			}
 		}
 		return unverified
 	case switchMatrixReleaseUnsupported:
-		if result.Runtime == nil {
+		if result.Runtime == nil && reply.Verification == "" {
 			return result
 		}
 	case switchMatrixReleaseAvailable:
 		r := result.Runtime
-		if r != nil && r.Game == version && (r.Image == "java21" || r.Image == "java25") &&
+		expectedImage := "java21"
+		if java25GameReleasePattern.MatchString(version) {
+			expectedImage = "java25"
+		}
+		if r != nil && r.Game == version && r.Image == expectedImage && reply.Verification == "" &&
 			r.ImageDigest == "" && r.Reason == "" && switchMatrixPublisherIdentity(software, r) &&
 			validPufferfishBuild(software, r.PufferfishBuild) &&
 			validateJavaServerSelection(software, "pinned", r.Game, r.Loader, r.Image, false) == nil {
 			return result
+		}
+		if r != nil && r.ImageDigest == "" && r.Reason == "" && reply.Verification == "" {
+			unverified.Verification = "publisher_runtime_selection_invalid"
 		}
 	}
 	return unverified

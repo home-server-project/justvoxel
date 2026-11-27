@@ -7,8 +7,10 @@ fixture_dir="$(mktemp -d)"
 trap 'rm -rf "${fixture_dir}"' EXIT
 
 cat > "${fixture_dir}/common.sh" <<'EOF'
+JV_PAPER_USER_AGENT=JustVoxel-fixture
 require_root() { :; }
 require_config() { :; }
+curl() { return 1; }
 resolve_latest_stable_paper_version() { printf '%s' "${STABLE_VERSION}"; }
 resolve_latest_available_paper_version() { printf '%s' "${NEWEST_VERSION}"; }
 resolve_geyser_supported_java_version() { printf '%s' "${GEYSER_VERSION-${STABLE_VERSION}}"; }
@@ -30,6 +32,8 @@ jv_crossplay_artifact_state() { printf unavailable; }
 EOF
 # Use the shared compatibility resolver with fixture publisher responses.
 sed -n '/^jv_crossplay_viaversion_supports() {/,/^paper_version_has_stable_build() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/common.sh"
+sed -n '/^java_exact_publisher_response() {/,/^paper_version_build_channel() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' > "${fixture_dir}/publisher-helpers.sh"
+cat "${fixture_dir}/publisher-helpers.sh" >> "${fixture_dir}/common.sh"
 sed -n '/^validate_server_type() {/,/^render_runtime_files() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/common.sh"
 sed -e "s|^source /usr/libexec/justvoxel/mjust/common.sh$|source ${fixture_dir}/common.sh|" \
     -e '\|^source /usr/libexec/justvoxel/mjust/managed-crossplay.sh$|d' \
@@ -112,7 +116,9 @@ if grep -Fq 'Version: LATEST' "${repo_root}/webui/internal/server/templates/setu
 # Exercise the planner separately from the browser preview. The selected policy
 # and Bedrock choice must survive a compatible plan; mismatches must be errors.
 cat > "${fixture_dir}/planner-common.sh" <<'EOF'
+JV_PAPER_USER_AGENT=JustVoxel-fixture
 require_root() { :; }
+curl() { return 1; }
 resolve_minecraft_ids() { printf '1000 1000 fixture\n'; }
 validate_nonroot_id() { [[ $1 -ge 1000 ]]; }
 validate_simple_text() { [[ $1 != *$'\n'* ]]; }
@@ -133,7 +139,7 @@ daily_backup_schedule_from_time() { printf '*-*-* %s:00' "$1"; }
 EOF
 sed -n '/^jv_crossplay_viaversion_supports() {/,/^paper_version_has_stable_build() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/planner-common.sh"
 # Keep the exact release helpers wired to the fixture curl responses below.
-sed -n '/^java_exact_publisher_response() {/,/^paper_version_build_channel() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/planner-common.sh"
+cat "${fixture_dir}/publisher-helpers.sh" >> "${fixture_dir}/planner-common.sh"
 sed -n '/^validate_server_type() {/,/^render_runtime_files() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/planner-common.sh"
 touch "${fixture_dir}/planner-storage.sh"
 cat > "${fixture_dir}/planner-crossplay.sh" <<'STUB'
@@ -228,7 +234,6 @@ done
 sed -n '/^geyser_supported_java_version_from_json() {/,/^bedrock_crossplay_supports_version() {/p' \
     "${repo_root}/mjust/libexec/common.sh" | sed '$d' > "${fixture_dir}/publishers.sh"
 cat >> "${fixture_dir}/publishers.sh" <<'STUB'
-JV_PAPER_USER_AGENT=JustVoxel-fixture
 JV_GEYSER_VERSIONS_URL=https://raw.githubusercontent.com/GeyserMC/GeyserWebsite/refs/heads/master/src/data/versions.json
 resolve_latest_stable_paper_version() { printf '%s' "${OLDER}"; }
 resolve_latest_available_paper_version() { printf '%s' "${NEWER}"; }
@@ -386,3 +391,18 @@ stale_request="$(jq -c --arg game "${TARGET}" '.minecraft.version = $game' <<< "
 result="$(env JV_CONFIG="${fixture_dir}/absent-config" JV_QUADLET="${fixture_dir}/absent-quadlet" VIA_MODE=match \
     bash "${fixture_dir}/planner" <<< "${stale_request}")"
 jq -e '(.ok | not) and .code == "bedrock_version_unsupported" and (.error | contains("does not match"))' <<< "${result}" >/dev/null
+
+# A matrix probe uses the reviewed Java pin even on an appliance where Setup
+# defaults to the "stable" tag. The same publisher failures remain visible.
+cat >> "${fixture_dir}/common.sh" <<'STUB'
+jv_crossplay_metadata() { [[ $1 != "${FAILED_ARTIFACT:-}" ]]; }
+STUB
+export OLDER=26.2 TARGET=26.3 NEWER=26.4 MINECRAFT_IMAGE_TAG=stable
+for software in paper purpur; do
+    result="$(VIA_MODE=match bash "${fixture_dir}/status" matrix-crossplay "${software}" "${OLDER}" '')"
+    jq -e '.compatible and .reason == ""' <<< "${result}" >/dev/null
+done
+result="$(VIA_MODE=invalid_json bash "${fixture_dir}/status" matrix-crossplay paper "${OLDER}" '')"
+jq -e '(.compatible | not) and .reason == "viaversion_response_invalid"' <<< "${result}" >/dev/null
+result="$(FAILED_ARTIFACT=floodgate bash "${fixture_dir}/status" matrix-crossplay purpur "${TARGET}" '')"
+jq -e '(.compatible | not) and .reason == "floodgate_artifact_unverified"' <<< "${result}" >/dev/null

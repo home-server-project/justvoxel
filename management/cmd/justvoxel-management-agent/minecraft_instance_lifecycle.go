@@ -8,6 +8,7 @@ import (
 	"io"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -439,7 +440,7 @@ func (b *instanceRuntimeBackend) planFirewall(ctx context.Context, old, next ins
 		if len(old.Firewall) != 0 || len(next.Firewall) != 0 {
 			return nil, nil, errInstanceRecovery
 		}
-		return changes, owned, nil
+		return changes, slices.Clone(old.Firewall), nil
 	}
 	output, err := b.command(ctx, "firewall-cmd", "--get-default-zone")
 	zone := strings.TrimSpace(string(output))
@@ -484,6 +485,10 @@ func (b *instanceRuntimeBackend) planFirewall(ctx context.Context, old, next ins
 				owned = append(owned, rule)
 			}
 		}
+	}
+	// Keep the exact committed encoding when ownership was and remains empty.
+	if len(old.Firewall) == 0 && len(owned) == 0 {
+		owned = slices.Clone(old.Firewall)
 	}
 	return changes, owned, nil
 }

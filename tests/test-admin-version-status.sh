@@ -4,6 +4,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fixture_dir="$(mktemp -d)"
 trap 'rm -rf -- "${fixture_dir}"' EXIT
 cat > "${fixture_dir}/common.sh" <<'STUB'
+JV_PAPER_USER_AGENT=JustVoxel-fixture
 require_root() { :; }
 require_config() { echo "Legacy config loaded" >&2; exit 91; }
 curl() { return 1; }
@@ -36,6 +37,7 @@ jv_crossplay_artifact_state() {
 STUB
 # Copy the real compatibility helpers; publisher metadata is stubbed.
 sed -n '/^jv_crossplay_viaversion_supports() {/,/^paper_version_has_stable_build() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/common.sh"
+sed -n '/^java_exact_publisher_response() {/,/^paper_version_build_channel() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/common.sh"
 sed -n '/^validate_server_type() {/,/^render_runtime_files() {/p' "${repo_root}/mjust/libexec/common.sh" | sed '$d' >> "${fixture_dir}/common.sh"
 sed -e "s|^source /usr/libexec/justvoxel/mjust/common.sh$|source ${fixture_dir}/common.sh|" \
     -e '\|^source /usr/libexec/justvoxel/mjust/managed-crossplay.sh$|d' \
@@ -258,7 +260,6 @@ done
 # Keep the real committed-instance loader, Version/Switch status, and
 # ViaVersion metadata parser. Stub only publisher and runtime boundaries.
 cat >> "${fixture_dir}/common.sh" <<'STUB'
-JV_PAPER_USER_AGENT=JustVoxel-fixture
 JV_MINECRAFT_IMAGE_REPO=docker.io/itzg/minecraft-server
 fixture_game_available() {
     [[ $1 == "${OLDER}" || ( $1 == "${TARGET}" && ${TARGET_EXISTS:-yes} == yes ) ]]
