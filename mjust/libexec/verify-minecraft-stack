@@ -39,10 +39,15 @@ if [[ ${JUSTVOXEL_MAINTENANCE_LOCK_HELD:-0} != 1 ]]; then
     exec 9>"${JV_MAINTENANCE_LOCK}"
     flock -n 9 || { echo 'ERROR: another Minecraft maintenance operation is running.' >&2; exit 1; }
 fi
-systemctl is-active --quiet "${JV_INSTANCE_UNIT}" || verification_failed 41 'ERROR: Minecraft service is not active.'
 rcon_timeout=60
 case "${MINECRAFT_SERVER_TYPE-paper}" in spigot|forge|neoforge|fabric|quilt) rcon_timeout=900 ;; esac
-wait_for_rcon "${rcon_timeout}" || verification_failed 49 'ERROR: Minecraft RCON is not ready.'
+if [[ ${switch_verification} == yes ]]; then rcon_timeout=900; fi
+wait_for_rcon "${rcon_timeout}" || {
+    if [[ $? == 2 ]]; then
+        verification_failed 51 'ERROR: Minecraft service stopped before RCON became ready.'
+    fi
+    verification_failed 49 'ERROR: Minecraft RCON is not ready.'
+}
 expected_version="${1:-${MINECRAFT_VERSION}}"
 probe_container="${JV_INSTANCE_CONTAINER}"
 if [[ ${switch_verification} == yes ]]; then

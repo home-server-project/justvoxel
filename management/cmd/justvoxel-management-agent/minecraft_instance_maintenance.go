@@ -142,7 +142,6 @@ func (b *instanceRuntimeBackend) shutdownAnnouncement(ctx context.Context, id st
 	return nil
 }
 
-// NeoForge needs the systemd stop job queued before the graceful signal.
 func (b *instanceRuntimeBackend) stopGracefully(ctx context.Context, id string) error {
 	if !instanceIDPattern.MatchString(id) {
 		return errInstanceID
@@ -162,18 +161,20 @@ func (b *instanceRuntimeBackend) stopGracefully(ctx context.Context, id string) 
 		if _, err = b.rcon(ctx, id, "stop"); err != nil {
 			return err
 		}
-	case !neoForge:
+	case !neoForge && record.Runtime.Software != "leaf":
 		if err = signal(); err != nil {
 			return signalFailure
 		}
 	}
+	// For Leaf, let the unit stop drive the runner's graceful shutdown once.
+	// NeoForge needs the systemd stop job queued before the graceful signal.
 	unit := "minecraft-" + id + ".service"
 	if _, err = b.command(ctx, "systemctl", "--no-block", "stop", "--", unit); err != nil {
 		return instanceRuntimeFailure("Instance graceful stop request failed.")
 	}
 	if neoForge && signal() != nil {
 		// The stop job may have finished before the signal could be delivered.
-		state, err := b.observeRaw(ctx, id)
+		state, err := b.observeShutdown(ctx, id)
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
 		}
@@ -188,11 +189,18 @@ func (b *instanceRuntimeBackend) stopGracefully(ctx context.Context, id string) 
 		}
 		return signalFailure
 	}
+	return b.waitForGracefulShutdown(ctx, id)
+}
+
+func (b *instanceRuntimeBackend) waitForGracefulShutdown(ctx context.Context, id string) error {
 	for {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		state, err := b.observeRaw(ctx, id)
+		state, err := b.observeShutdown(ctx, id)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		if err != nil {
 			return instanceRuntimeFailure("Graceful shutdown state is unavailable.")
 		}
@@ -204,6 +212,20 @@ func (b *instanceRuntimeBackend) stopGracefully(ctx context.Context, id string) 
 		}
 		if err = b.waitMaintenance(ctx, time.Second); err != nil {
 			return err
+		}
+	}
+}
+
+// Retry snapshots that can straddle container removal only after shutdown
+// has been authorized. Exhausted or invalid evidence stays unverified.
+func (b *instanceRuntimeBackend) observeShutdown(ctx context.Context, id string) (instanceRuntimeStatus, error) {
+	for attempt := 0; ; attempt++ {
+		state, err := b.observeRaw(ctx, id)
+		if !state.shutdownObservationTransient || attempt == 3 {
+			return state, err
+		}
+		if err = b.waitMaintenance(ctx, time.Second); err != nil {
+			return state, err
 		}
 	}
 }
@@ -224,7 +246,7 @@ func (b *instanceRuntimeBackend) normalizeStoppedFailure(ctx context.Context, ob
 	if err != nil {
 		return instanceRuntimeFailure("Failed instance unit could not be stopped.")
 	}
-	state, err := b.observeRaw(ctx, id)
+	state, err := b.observeShutdown(ctx, id)
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return ctxErr
 	}

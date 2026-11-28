@@ -11,6 +11,7 @@ const switchMatrixAPIPath = "/v1/minecraft/switch-matrix"
 const switchMatrixProductionDiagnostic = "Switch matrix cleanup is unresolved. Maintenance remains reserved. Return to a JustVoxel development image to recover the operation from Server Migration → Switch."
 
 type switchMatrixSummary struct {
+	Targeted          bool                     `json:"targeted,omitempty"`
 	OperationID       string                   `json:"operation_id"`
 	State             string                   `json:"state"`
 	ReservationActive bool                     `json:"reservation_active"`
@@ -107,6 +108,7 @@ func (o *operationStore) switchMatrixSummary(id string) (*switchMatrixSummary, e
 		ReservationActive: active, RecoveryRequired: j.State == operationNeedsAttention,
 	}
 	if err == nil {
+		summary.Targeted = progress.Targeted
 		switch progress.State {
 		case "preparing", "running", "completed", "cancelled", "halted", "interrupted", "needs_attention", "recovered":
 			summary.State = progress.State

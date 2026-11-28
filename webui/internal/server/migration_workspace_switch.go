@@ -9,7 +9,7 @@ import (
 )
 
 type migrationSwitchAPI interface {
-	MinecraftInstanceSwitchPlan(context.Context, string, string, string) (api.MinecraftSwitchPlan, error)
+	MinecraftInstanceSwitchPlan(context.Context, string, string, string, string) (api.MinecraftSwitchPlan, error)
 	MinecraftInstanceSwitchApply(context.Context, string, string, api.MinecraftSwitchRequest) (api.MinecraftSwitchOperation, error)
 	MinecraftInstanceSwitchOperation(context.Context, string, string, string) (api.MinecraftSwitchOperation, error)
 	MinecraftInstanceSwitchRecover(context.Context, string, string, string) (api.MinecraftSwitchOperation, error)
@@ -58,7 +58,7 @@ func (a *App) migrationSwitchAPI(w http.ResponseWriter, r *http.Request) {
 	action := r.PathValue("action")
 	if r.Method == http.MethodGet {
 		if action == "plan" {
-			plan, err := client.MinecraftInstanceSwitchPlan(r.Context(), session, selected.ID, r.URL.Query().Get("target"))
+			plan, err := client.MinecraftInstanceSwitchPlan(r.Context(), session, selected.ID, r.URL.Query().Get("target"), r.URL.Query().Get("crossplay"))
 			if err != nil {
 				a.writeMinecraftWorkspaceAPIError(w, err, ui(w, "ui.a99ea29239db"))
 				return
@@ -98,7 +98,7 @@ func (a *App) migrationSwitchAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for key, values := range r.PostForm {
-		if !slices.Contains([]string{"csrf", "target", "action", "plan_fingerprint", "confirm", "operation_id"}, key) || len(values) != 1 {
+		if !slices.Contains([]string{"csrf", "target", "action", "plan_fingerprint", "confirm", "operation_id", "crossplay", "accept_exclusions"}, key) || len(values) != 1 {
 			writeMinecraftWorkspaceError(w, 400, ui(w, "ui.35e44579c835"))
 			return
 		}
@@ -111,7 +111,12 @@ func (a *App) migrationSwitchAPI(w http.ResponseWriter, r *http.Request) {
 	var err error
 	switch action {
 	case "apply":
-		operation, err = client.MinecraftInstanceSwitchApply(r.Context(), session, selected.ID, api.MinecraftSwitchRequest{Target: r.FormValue("target"), Action: r.FormValue("action"), Fingerprint: r.FormValue("plan_fingerprint"), Confirm: true})
+		choice, consent := r.PostForm.Get("crossplay"), r.PostForm.Get("accept_exclusions")
+		if (choice != "" && choice != "java" && choice != "preserve") || (consent != "" && consent != "yes") {
+			writeMinecraftWorkspaceError(w, 400, ui(w, "ui.35e44579c835"))
+			return
+		}
+		operation, err = client.MinecraftInstanceSwitchApply(r.Context(), session, selected.ID, api.MinecraftSwitchRequest{Target: r.FormValue("target"), Action: r.FormValue("action"), Fingerprint: r.FormValue("plan_fingerprint"), Confirm: true, Crossplay: choice, AcceptExclusions: consent == "yes"})
 	case "recover":
 		operation, err = client.MinecraftInstanceSwitchRecover(r.Context(), session, selected.ID, r.FormValue("operation_id"))
 	default:

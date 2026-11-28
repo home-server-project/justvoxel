@@ -92,8 +92,8 @@ func TestSwitchMatrixManifest(t *testing.T) {
 							continue
 						}
 						states = append(states, c.SourceState)
-						wantBlocked := action == "convert" && switchWorldRisk(k[0], k[1]) ||
-							enabled && switchRejectsCrossplayPlatform(k[0], k[1], true)
+						wantBlocked := action == "convert" && (switchWorldRisk(k[0], k[1]) ||
+							enabled && (switchRejectsCrossplayPlatform(k[0], k[1], true) || switchNeedsVerifiedJavaOnlyMods(k[0], k[1], true)))
 						if wantBlocked && c.Disposition != matrixBlocked || !wantBlocked && c.Disposition != "" {
 							t.Fatalf("bad policy for %+v", c)
 						}
@@ -154,6 +154,8 @@ func TestSwitchMatrixManifest(t *testing.T) {
 		}{
 			{`{"outcome":"AVAILABLE","runtime":{"game":"26.3","loader":"","image":"java25"}}`, switchMatrixReleaseAvailable},
 			{`{"outcome":"UNSUPPORTED"}`, switchMatrixReleaseUnsupported},
+			{`{"outcome":"UNAVAILABLE"}`, switchMatrixReleaseUnavailable},
+			{`{"outcome":"UNAVAILABLE","runtime":{"game":"26.3","loader":"","image":"java25"}}`, switchMatrixReleaseUnverified},
 			{`{"outcome":"UNVERIFIED"}`, switchMatrixReleaseUnverified},
 			{`{"outcome":"UNSUPPORTED","runtime":{"game":"26.3","loader":"","image":"java25"}}`, switchMatrixReleaseUnverified},
 			{`{"outcome":"AVAILABLE","runtime":{"game":"26.3","loader":"","image":"java25","reason":"password=private-value"}}`, switchMatrixReleaseUnverified},
@@ -273,17 +275,25 @@ func TestSwitchMatrixExecution(t *testing.T) {
 		}
 	})
 	t.Run("marker_probe_requires_all_dimensions_and_save", func(t *testing.T) {
-		written := map[string]bool{}
+		written, forced := map[string]bool{}, map[string]bool{}
 		var saved bool
 		rcon := func(ctx context.Context, command string) ([]byte, error) {
 			for _, m := range switchMatrixMarkers {
 				prefix := "execute in minecraft:" + m.Dimension + " "
 				switch command {
 				case prefix + "run forceload add 8 8", prefix + "run forceload add 9 9", prefix + "run forceload add 10 10":
-					return []byte("Marked chunk"), nil
+					if forced[m.Dimension] {
+						return []byte("No chunks were marked for force loading"), nil
+					}
+					forced[m.Dimension] = true
+					return []byte("Marked chunk [0, 0] in minecraft:" + m.Dimension + " to be force loaded"), nil
+				case prefix + "run forceload query 8 8", prefix + "run forceload query 9 9", prefix + "run forceload query 10 10":
+					return []byte("Chunk at [0, 0] in minecraft:" + m.Dimension + " is marked for force loading"), nil
+				case prefix + "if loaded " + m.Position:
+					return []byte("Test passed"), nil
 				case prefix + "run setblock " + m.Position + " minecraft:" + m.Block + " replace":
 					written[m.Dimension] = true
-					return []byte("Changed the block"), nil
+					return []byte("Changed the block at " + strings.ReplaceAll(m.Position, " ", ", ")), nil
 				case prefix + "if block " + m.Position + " minecraft:" + m.Block:
 					if written[m.Dimension] {
 						return []byte("Test passed"), nil
@@ -293,7 +303,7 @@ func TestSwitchMatrixExecution(t *testing.T) {
 			}
 			if command == "save-all flush" {
 				saved = true
-				return []byte("Saved the game"), nil
+				return []byte("Saving the game (this may take a moment!)Saved the game"), nil
 			}
 			t.Fatalf("unexpected RCON command: %q", command)
 			return nil, nil
@@ -302,25 +312,29 @@ func TestSwitchMatrixExecution(t *testing.T) {
 			t.Fatalf("failed real marker command contract: %v", err)
 		}
 		delete(written, "the_end")
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		if err := verifySwitchMatrixMarkers(ctx, rcon, false); !errors.Is(err, errSwitchMatrixWorldMarkers) {
-			t.Fatalf("missing End marker passed verification: %v", err)
+		var failure *switchMatrixMarkerFailure
+		if err := verifySwitchMatrixMarkers(context.Background(), rcon, false); !errors.As(err, &failure) ||
+			failure.Stage != "compare" || failure.Dimension != "the_end" || failure.Outcome != "block_mismatch" {
+			t.Fatalf("missing End marker passed verification or lost evidence: %v", err)
 		}
 	})
 	t.Run("recovered_failure_continues", func(t *testing.T) {
-		s, j, _ := newMatrixRunnerTest(t, 3)
+		s, j, _ := newMatrixRunnerTest(t, 4)
 		count := 0
 		err := s.operations.runSwitchMatrixCases(j.OperationID, func(c switchMatrixCase) (switchMatrixCaseResult, error) {
 			count++
 			if count == 2 {
+				return switchMatrixCaseResult{Outcome: matrixFailed, Stage: "source_world", Reason: "setblock_rejected",
+					World: "source_markers_failed", Cleanup: "verified"}, nil
+			}
+			if count == 3 {
 				return switchMatrixCaseResult{Outcome: matrixFailed, Stage: string(matrixFixtureSoftware),
 					Reason: "fixture_software_version_unverified", Recovery: "verified", Cleanup: "verified"}, nil
 			}
 			return matrixRunnerPassed(c), nil
 		})
 		p, readErr := s.operations.switchMatrixProgress(j.OperationID)
-		if err != nil || readErr != nil || count != 3 || p.Failed != 1 || p.Passed != 2 {
+		if err != nil || readErr != nil || count != 4 || p.Failed != 2 || p.Passed != 2 {
 			t.Fatalf("recovered failure stranded the next case: %+v %v %v", p, err, readErr)
 		}
 	})
@@ -403,10 +417,6 @@ func TestSwitchMatrixRuntimeVerificationDiagnostics(t *testing.T) {
 	var commandErr error
 	pluginInstallCommand = func(_ context.Context, command string, args ...string) ([]byte, error) {
 		switch {
-		case command == "podman" && reflect.DeepEqual(args, []string{"exec", "minecraft-" + record.Runtime.ID, "rcon-cli", "list"}):
-			return []byte("There are 0 of a max of 20 players online:"), nil
-		case command == "systemctl" && reflect.DeepEqual(args, []string{"is-active", "minecraft-" + record.Runtime.ID + ".service"}):
-			return []byte("active"), nil
 		case command == "/usr/libexec/justvoxel/mjust/verify-minecraft-stack" &&
 			reflect.DeepEqual(args, []string{"--instance", record.Runtime.ID, "--switch", record.Runtime.Version}):
 			return []byte(raw), commandErr
@@ -431,6 +441,7 @@ func TestSwitchMatrixRuntimeVerificationDiagnostics(t *testing.T) {
 		{48, "minecraft_software_or_loader_mismatch"},
 		{49, "runtime_rcon_failed"},
 		{50, "managed_crossplay_verification_failed"},
+		{51, "runtime_startup_terminated"},
 		{99, "exact_runtime_unverified"},
 	} {
 		commandErr = matrixRuntimeTestExit{status: tc.status, error: private}
@@ -797,5 +808,115 @@ func TestSwitchMatrixInfrastructureFailureStopsRun(t *testing.T) {
 		run.Results[2].Outcome != matrixPending || run.Results[3].Outcome != matrixPending ||
 		summary == nil || summary.State != "halted" || summary.ReservationActive || summary.RecoveryRequired {
 		t.Fatalf("common failure did not close with the complete partial result: %+v %v %v %v", run.Progress, err, readErr, statusErr)
+	}
+}
+
+func TestSwitchMatrixMarkerDiagnostics(t *testing.T) {
+	for _, scenario := range []struct {
+		stage, outcome, reason, reply string
+		err                           error
+	}{
+		{"forceload_add", "transport_error", "rcon_transport_failure", "", errors.New("private transport output")},
+		{"forceload_add", "unknown_dimension", "dimension_unavailable", "Unknown dimension 'minecraft:overworld'", nil},
+		{"forceload_add", "ticket_unverified", "chunk_loading_failed", "", nil},
+		{"chunk_ready", "command_deadline", "timeout", "", context.DeadlineExceeded},
+		{"setblock", "block_change_unconfirmed", "setblock_rejected", "Could not set the block", nil},
+		{"setblock", "unexpected_response", "setblock_unverified", "", nil},
+		{"compare", "block_mismatch", "marker_comparison_failed", "Test failed", nil},
+		{"compare", "position_unloaded", "chunk_loading_failed", "That position is not loaded", nil},
+		{"save_flush", "save_rejected", "save_flush_failed", "Unable to save the game (is there enough disk space?)", nil},
+		{"save_flush", "save_not_confirmed", "save_flush_unverified", "Saving the game (this may take a moment!)", nil},
+		{"post_save_compare", "block_mismatch", "marker_comparison_failed", "Test failed", nil},
+	} {
+		t.Run(scenario.stage+"/"+scenario.outcome, func(t *testing.T) {
+			saved := false
+			rcon := func(_ context.Context, cmd string) ([]byte, error) {
+				if cmd == "save-all flush" {
+					saved = true
+					if scenario.stage == "save_flush" {
+						return []byte(scenario.reply), scenario.err
+					}
+					return []byte("Saved the game"), nil
+				}
+				for _, m := range switchMatrixMarkers {
+					prefix := "execute in minecraft:" + m.Dimension + " "
+					if !strings.HasPrefix(cmd, prefix) {
+						continue
+					}
+					var stage, reply string
+					switch {
+					case strings.Contains(cmd, "forceload add"):
+						stage, reply = "forceload_add", "Marked chunk [0, 0] in minecraft:"+m.Dimension+" to be force loaded"
+					case strings.Contains(cmd, "if loaded"):
+						stage, reply = "chunk_ready", "Test passed"
+					case strings.Contains(cmd, "setblock"):
+						stage, reply = "setblock", "Changed the block at "+strings.ReplaceAll(m.Position, " ", ", ")
+					case strings.Contains(cmd, "if block"):
+						stage, reply = "compare", "Test passed"
+					default:
+						t.Fatal("unexpected marker command", cmd)
+					}
+					if saved {
+						stage = "post_save_" + stage
+					}
+					if stage == scenario.stage {
+						return []byte(scenario.reply), scenario.err
+					}
+					return []byte(reply), nil
+				}
+				t.Fatal("unexpected marker command", cmd)
+				return nil, nil
+			}
+			err := verifySwitchMatrixMarkers(context.Background(), rcon, true)
+			var detail *switchMatrixMarkerFailure
+			if !errors.Is(err, errSwitchMatrixWorldMarkers) || !errors.As(err, &detail) ||
+				detail.Stage != scenario.stage || detail.Reason != scenario.reason || detail.Outcome != scenario.outcome {
+				t.Fatalf("incorrect marker diagnostic: %+v (%v)", detail, err)
+			}
+			wantDimension := "overworld"
+			if scenario.stage == "save_flush" {
+				wantDimension = ""
+			}
+			if detail.Dimension != wantDimension || bytes.Contains(mustSwitchJSON(detail), []byte("private transport output")) {
+				t.Fatalf("invalid or unsafe marker diagnostic: %+v", detail)
+			}
+		})
+	}
+}
+
+func TestSwitchMatrixDoesNotContinueAfterUnverifiedRecovery(t *testing.T) {
+	for _, scenario := range []struct {
+		name, stage string
+		cause       error
+		wantRetries int
+	}{
+		{"closure", "source_world", errInstanceRecovery, 0},
+		{"ownership", "source_ownership", &switchMatrixRetryableClosure{reason: "fixture_shutdown_unverified", cause: errInstanceBusy}, 0},
+		{"retry_cannot_verify_closure", "source_world", &switchMatrixRetryableClosure{reason: "fixture_shutdown_unverified", cause: errInstanceBusy}, 1},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			s, j, _ := newMatrixRunnerTest(t, 3)
+			o := s.operations
+			admitted, retries := 0, 0
+			err := o.runSwitchMatrixCases(j.OperationID, func(c switchMatrixCase) (switchMatrixCaseResult, error) {
+				admitted++
+				if admitted == 1 {
+					return matrixRunnerPassed(c), nil
+				}
+				return switchMatrixCaseResult{Outcome: matrixFailed, Stage: scenario.stage, Cleanup: "unresolved",
+					ClosureReason: "fixture_shutdown_unverified"}, scenario.cause
+			}, func() (operationJournal, error) {
+				retries++
+				return operationJournal{}, errInstanceRecovery
+			})
+			o.holdSwitchMatrixRun(j.OperationID)
+			run, readErr := o.readSwitchMatrixRun(j.OperationID)
+			active, activeErr := o.currentMinecraftMaintenance()
+			if err == nil || readErr != nil || activeErr != nil || active == nil || admitted != 2 || retries != scenario.wantRetries ||
+				run.State != "needs_attention" || run.Results[1].ClosureReason != "fixture_shutdown_unverified" ||
+				run.Results[1].Cleanup != "unresolved" || run.Results[2].Outcome != matrixPending {
+				t.Fatalf("unsafe continuation or lost diagnostics: %+v admissions=%d retries=%d errors=%v %v %v", run, admitted, retries, err, readErr, activeErr)
+			}
+		})
 	}
 }

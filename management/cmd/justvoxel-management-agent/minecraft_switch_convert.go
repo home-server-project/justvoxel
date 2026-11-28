@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"time"
 )
 
 // This capability is bound to one exact publication, never to a Version caller.
@@ -191,13 +192,21 @@ func (s *server) convertMinecraftSwitch(ctx context.Context, e *minecraftSwitchE
 	if err = b.applySwitchRuntime(ctx, record, instanceReplaceRecord(records, next), snapshot, *e, &p); err != nil {
 		return err
 	}
+	launched := time.Now()
 	if err = lock.start(ctx, e.Source); err != nil {
+		return err
+	}
+	session, err := s.confirmSwitchStartupMigration(ctx, *e, p, next, e.ColdArchive, launched)
+	if err != nil {
 		return err
 	}
 	if err = verifyPluginRuntimeMode(ctx, e.Source, p.Version, "--switch"); err != nil {
 		return err
 	}
 	if err = b.verifySwitchTargetImage(ctx, e.Source, p); err != nil {
+		return err
+	}
+	if err = b.verifySwitchStartupSession(ctx, next, session); err != nil {
 		return err
 	}
 	if p.Runtime.CrossplayEnabled {

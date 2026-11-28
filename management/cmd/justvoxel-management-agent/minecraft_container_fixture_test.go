@@ -106,7 +106,22 @@ podman(){
  *) return 94;;esac
 }
 `
-	f.write("common.sh", common)
+	// Use the production readiness function with the fixture's mocked commands.
+	shared, err := os.ReadFile(filepath.Join("../../../mjust/libexec", "common.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const readinessStart = "\nwait_for_rcon() {\n"
+	const functionEnd = "\n}\n"
+	_, readiness, ok := strings.Cut(string(shared), readinessStart)
+	if !ok {
+		t.Fatal("common.sh is missing wait_for_rcon")
+	}
+	readiness, _, ok = strings.Cut(readiness, functionEnd)
+	if !ok {
+		t.Fatal("common.sh is missing the end of wait_for_rcon")
+	}
+	f.write("common.sh", common+readinessStart+readiness+functionEnd)
 	f.write("update-policy.sh", `jv_remote_platform_digest(){ cat "$FIXTURE_ROOT/remote"; }`)
 	for _, name := range []string{"minecraft-container-update", "minecraft-container-plan.sh", "instance-context.sh", "migration-instance.sh", "interrupt-safety.sh", "operation-trace.sh"} {
 		data, err := os.ReadFile(filepath.Join("../../../mjust/libexec", name))

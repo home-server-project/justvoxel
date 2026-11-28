@@ -436,7 +436,7 @@ bedrock_crossplay_supports_version() {
 }
 
 jv_crossplay_viaversion_supports() {
-    local game="$1" geyser="$2" metadata result status project=P1OZGk5p
+    local game="$1" geyser="$2" metadata result status project=P1OZGk5p mode="${3:-compatible}"
     [[ ${game} =~ ^[0-9]+[.][0-9]+([.][0-9]+)?$ && ${geyser} =~ ^[0-9]+[.][0-9]+([.][0-9]+)?$ ]] || return 1
     metadata="$(curl --connect-timeout 3 --max-time 6 --max-filesize 2097152 -fsS --get \
         -H "User-Agent: ${JV_PAPER_USER_AGENT}" \
@@ -447,21 +447,47 @@ jv_crossplay_viaversion_supports() {
         if (( status == 28 )); then return 4; fi
         return 5
     }
-    result="$(jq -ers --arg project "${project}" --arg game "${game}" --arg geyser "${geyser}" '
+    result="$(jq -ers --arg project "${project}" --arg game "${game}" --arg geyser "${geyser}" --arg mode "${mode}" '
+        def compatible_release:
+            .status == "listed" and .version_type == "release" and
+            (.game_versions | index($game) != null and index($geyser) != null) and
+            (.loaders | index("paper") != null);
+        def primary_file:
+            type == "object" and .primary == true and
+            (.filename | type == "string" and endswith(".jar")) and
+            (.size | type == "number" and . > 0) and
+            (.url | type == "string" and startswith("https://cdn.modrinth.com/data/" + $project + "/"));
         def strings: type == "array" and all(.[]; type == "string");
         select(length == 1) | .[0] | select(type == "array" and
             all(.[]; type == "object" and .project_id == $project and
                 (.status | type == "string") and (.version_type | type == "string") and
                 (.game_versions | strings) and (.loaders | strings) and (.files | type == "array"))) |
-            any(.[]; .status == "listed" and .version_type == "release" and
-                (.game_versions | index($game) != null and index($geyser) != null) and
-                (.loaders | index("paper") != null) and
-                any(.files[]; type == "object" and .primary == true and
-                    (.filename | type == "string" and endswith(".jar")) and
-                    (.size | type == "number" and . > 0) and
-                    (.url | type == "string" and startswith("https://cdn.modrinth.com/data/" + $project + "/")))) | tostring
+        if $mode == "artifact" then
+            map(select(compatible_release and
+                (.id | type == "string" and test("^[A-Za-z0-9]{8}$")) and
+                (.date_published | type == "string") and
+                (.dependencies | type == "array" and all(.[]; .dependency_type == "optional" or .dependency_type == "embedded")))) |
+            sort_by(.date_published, .id) | reverse |
+            map(.id as $id | [.files[] | select(primary_file)] | select(length == 1) | .[0] |
+                select(.filename | test("^[A-Za-z0-9._+-]{1,195}[.]jar$")) |
+                select(.url == ("https://cdn.modrinth.com/data/" + $project + "/versions/" + $id + "/" + .filename)) |
+                select(.size <= 67108864 and (.hashes.sha512 | type == "string" and test("^[a-f0-9]{128}$"))) |
+                {project:"viaversion", url, sha512:.hashes.sha512}) | .[0] // empty | @json
+        else
+            if any(.[]; compatible_release and any(.files[]; primary_file)) then "verified"
+            elif any(.[]; compatible_release) then "artifact_unverified"
+            else "unsupported" end
+        end
     ' <<< "${metadata}" 2>/dev/null)" || return 6
-    [[ ${result} == true ]] || return 7
+    if [[ ${mode} == artifact ]]; then
+        printf '%s\n' "${result}"
+    else
+        case "${result}" in
+            verified) return 0 ;;
+            unsupported) return 8 ;;
+            *) return 7 ;;
+        esac
+    fi
 }
 
 # Verify an exact runtime against the current Geyser Java target.
@@ -486,6 +512,7 @@ jv_managed_crossplay_check() {
                 4) reason=viaversion_request_timeout ;;
                 5) reason=viaversion_request_failed ;;
                 6) reason=viaversion_response_invalid ;;
+                8) reason=viaversion_exact_release_unsupported ;;
                 *) reason=viaversion_release_unverified ;;
             esac
         fi
@@ -516,19 +543,27 @@ paper_version_has_stable_build() {
 
 # Exit 3 requires authoritative absence. Transport errors are unverified.
 java_exact_publisher_response() {
-    local response status
+    local response status attempt attempts=1
     if [[ ${classify_exact_release:-0} != 1 ]]; then
         curl "$@"
         return
     fi
-    response="$(curl --write-out $'\n%{http_code}' --max-redirs 3 --proto '=https' --proto-redir '=https' --connect-timeout 5 --max-time 20 "$@")" || {
-        status=$?
+    [[ ${java_retry_catalog_transport:-0} != 1 ]] || attempts=2
+    for ((attempt=1; attempt<=attempts; attempt++)); do
+        if response="$(curl --write-out $'\n%{http_code}' --max-redirs 3 --proto '=https' --proto-redir '=https' --connect-timeout 5 --max-time 20 "$@")"; then
+            [[ ${response##*$'\n'} == 200 ]] || return 5
+            printf '%s\n' "${response%$'\n'*}"
+            return
+        else
+            status=$?
+        fi
         [[ ${status} == 22 && ${response##*$'\n'} == 404 ]] && return 3
-        if (( status == 28 )); then return 4; fi
-        return 5
-    }
-    [[ ${response##*$'\n'} == 200 ]] || return 5
-    printf '%s\n' "${response%$'\n'*}"
+        # NeoForge catalog reads may retry timeout and TLS handshake failures.
+        # Certificate verification, HTTP and malformed-body failures never retry.
+        case "${status}" in 28|35) ;; *) return 5 ;; esac
+    done
+    if (( status == 28 )); then return 4; fi
+    return 5
 }
 
 java_publisher_catalog_response() {
@@ -659,6 +694,29 @@ validate_java_server_selection() {
     fi
 }
 
+pufferfish_job_branches() {
+    local catalog
+    catalog="$(java_publisher_catalog_response --connect-timeout 3 --max-time 12 -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" \
+        'https://ci.pufferfish.host/api/json?tree=jobs%5Bname%5D')" || return "$?"
+    jq -ces --arg exact "${classify_exact_release:-0}" '
+        select(length == 1) | .[0].jobs | select(type == "array") |
+        select($exact != "1" or all(.[]; .name | type == "string" and length > 0)) |
+        [.[] | .name | strings | select(test("^Pufferfish-[0-9]+[.][0-9]+$")) |
+            ltrimstr("Pufferfish-")] | unique |
+        sort_by(split(".") | map(tonumber)) | reverse' <<< "${catalog}" || return 6
+}
+
+# A missing latest-build alias alone says nothing about historical artifacts.
+# A validated catalog that lacks the branch can corroborate a branch 404.
+pufferfish_missing_branch() {
+    local branch="$1" branches
+    branches="$(pufferfish_job_branches)" || return "$?"
+    if jq -e --arg branch "${branch}" 'length > 0 and index($branch) == null' <<< "${branches}" >/dev/null; then
+        return 3
+    fi
+    return 7
+}
+
 # Read only safe archived server identities from the last successful Jenkins build.
 pufferfish_build_metadata() {
     local branch="$1" build="${2:-lastSuccessfulBuild}" response
@@ -666,6 +724,11 @@ pufferfish_build_metadata() {
     [[ ${branch} =~ ^[0-9]+[.][0-9]+$ ]] || return 1
     response="$(java_exact_publisher_response --connect-timeout 3 --max-time 12 -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" \
         "https://ci.pufferfish.host/job/Pufferfish-${branch}/${build}/api/json")" || return "$?"
+    pufferfish_build_identity "${build}" <<< "${response}"
+}
+
+pufferfish_build_identity() {
+    local build="$1"
     jq -esc --arg build "${build}" '
         select(length == 1) | .[0] | select(.artifacts | type == "array") |
         .number as $number | select($build == "lastSuccessfulBuild" or ($number | tostring) == $build) |
@@ -679,7 +742,59 @@ pufferfish_build_metadata() {
                 (split("/") | all(.[]; . != ".." and . != ".")) and
                 (endswith("/" + $name) or . == $name)))) |
         map(.fileName | capture("^pufferfish-paperclip-(?<version>[0-9]+[.][0-9]+([.][0-9]+)?)-R0").version) |
-        unique | select(length == 1) | {game:.[0],pufferfish_build:$number}' <<< "${response}" || return 6
+        unique | select(length == 1) | {game:.[0],pufferfish_build:$number}' || return 6
+}
+
+# Patches share a Jenkins job. A different game at lastSuccessfulBuild
+# establishes neither support nor absence for the requested exact patch.
+pufferfish_exact_build() {
+    local branch="$1" game="$2" latest status history entries entry resolved selected='' incomplete=no
+    latest="$(pufferfish_build_metadata "${branch}")" || {
+        status=$?
+        if [[ ${classify_exact_release:-0} == 1 ]] && (( status == 3 )); then
+            pufferfish_missing_branch "${branch}" || status=$?
+            (( status == 7 )) || return "${status}"
+        else
+            return "${status}"
+        fi
+    }
+    if [[ -n ${latest} ]] && jq -e --arg game "${game}" '.game == $game' <<< "${latest}" >/dev/null; then
+        printf '%s\n' "${latest}"
+        return
+    fi
+    # The extra row distinguishes a complete retained inventory from a prefix.
+    history="$(java_publisher_catalog_response --connect-timeout 3 --max-time 12 --max-filesize 1048576 -fsSG \
+        --data-urlencode 'tree=name,builds[number,result,artifacts[fileName,relativePath]]{0,17}' \
+        -H "User-Agent: ${JV_PAPER_USER_AGENT}" "https://ci.pufferfish.host/job/Pufferfish-${branch}/api/json")" || return "$?"
+    entries="$(jq -ces --arg name "Pufferfish-${branch}" '
+        select(length == 1) | .[0] | select(.name == $name) | .builds | select(type == "array" and
+            all(.[]; type == "object" and
+                (.number | type == "number" and . > 0 and . <= 2147483647 and floor == .) and
+                has("result") and (.result == null or .result == "SUCCESS" or .result == "FAILURE" or
+                    .result == "UNSTABLE" or .result == "ABORTED" or .result == "NOT_BUILT"))) |
+        select((map(.number) | unique | length) == length)' <<< "${history}")" || return 6
+    [[ $(jq -r length <<< "${entries}") -le 16 ]] || incomplete=yes
+    if [[ -n ${latest} ]] && ! jq -e --argjson latest "${latest}" '
+        any(.[]; .number == $latest.pufferfish_build and .result == "SUCCESS")' <<< "${entries}" >/dev/null; then
+        incomplete=yes
+    fi
+    while IFS= read -r entry; do
+        resolved="$(pufferfish_build_identity "$(jq -r .number <<< "${entry}")" <<< "${entry}")" || {
+            incomplete=yes
+            continue
+        }
+        if jq -e --arg game "${game}" '.game == $game' <<< "${resolved}" >/dev/null; then
+            selected="${resolved}"
+            break
+        fi
+    done < <(jq -c 'sort_by(.number) | reverse | .[:16][] | select(.result == "SUCCESS")' <<< "${entries}")
+    if [[ -n ${selected} ]]; then
+        printf '%s\n' "${selected}"
+    elif [[ ${incomplete} == yes ]]; then
+        return 7
+    else
+        return 8
+    fi
 }
 
 setup_java_image() {
@@ -872,7 +987,12 @@ resolve_setup_loader() {
                         (.stable == null or (.stable | type == "boolean"))))' <<< "${metadata}")" || return 6
                 [[ ${metadata} != '[]' ]] || return 3
             fi
-            jq -er --arg software "${software}" '[.[] | .loader | select(if $software == "fabric" then .stable == true else .stable != false end) | .version | select(test("^[0-9]+([.][0-9]+){1,3}$"))][0] // empty' <<< "${metadata}" || return 7
+            jq -er --arg software "${software}" '
+                [.[] | .loader
+                    | select(if $software == "fabric" then .stable == true else .stable != false end)
+                    | .version | select(test("^[0-9]+([.][0-9]+){1,3}$"))]
+                | if $software == "quilt" then sort_by(split(".") | map(tonumber)) | last else first end
+                // empty' <<< "${metadata}" || return 7
             ;;
         forge)
             metadata="$(java_publisher_catalog_response --connect-timeout 3 --max-time 8 -fsSL https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json)" || return "$?"
@@ -885,9 +1005,8 @@ resolve_setup_loader() {
             elif [[ ${game} =~ ^1\.(20|21)(\.([0-9]+))?$ ]]; then
                 prefix="${BASH_REMATCH[1]}.${BASH_REMATCH[3]:-0}."
             else return 1; fi
-            metadata="$(java_publisher_catalog_response --connect-timeout 3 --max-time 8 -fsSL https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml)" || return "$?"
-            if [[ ${classify_exact_release:-0} == 1 ]]; then
-                metadata="$(python3 -c '
+            metadata="$(java_retry_catalog_transport=1 java_publisher_catalog_response --connect-timeout 3 --max-time 8 -fsSL https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml)" || return "$?"
+            python3 -c '
 import re, sys, xml.etree.ElementTree as xml
 raw = sys.stdin.read(4 * 1024 * 1024 + 1)
 if len(raw) > 4 * 1024 * 1024 or "<!" in raw:
@@ -899,21 +1018,20 @@ except xml.ParseError:
 catalogs = root.findall("./versioning/versions")
 if root.tag != "metadata" or len(catalogs) != 1 or not len(catalogs[0]):
     sys.exit(6)
-versions = []
+matched = []
 for element in catalogs[0]:
-    if element.tag != "version" or len(element) or not re.fullmatch(r"[0-9]+(?:[.][0-9]+){1,3}(?:-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*)?", element.text or ""):
+    if element.tag != "version" or len(element) or not (element.text or "").strip():
         sys.exit(6)
-    versions.append(element.text)
-matched = [version for version in versions if version.startswith(sys.argv[1])]
+    if element.text.startswith(sys.argv[1]):
+        matched.append(element.text)
 if not matched:
     sys.exit(3)
-print("\n".join(matched))
-' "${prefix}" <<< "${metadata}")" || return "$?"
-            else
-                metadata="$(printf '%s\n' "${metadata}" | sed 's/<version>/\n<version>/g' | sed -n 's/.*<version>\([0-9][0-9.]*\)<\/version>.*/\1/p')" || return 1
-            fi
-            jq -Rrs --arg prefix "${prefix}" 'split("\n") | map(select(startswith($prefix) and test("^[0-9]+([.][0-9]+){2,3}$"))) |
-                sort_by(split(".") | map(tonumber)) | last // empty' <<< "${metadata}" || return 7
+stable = [version for version in matched if re.fullmatch(r"[0-9]+(?:[.][0-9]+){2,3}", version)]
+if not stable:
+    sys.exit(7)
+stable.sort(key=lambda version: tuple(map(int, version.split("."))))
+print(stable[-1])
+' "${prefix}" <<< "${metadata}"
             ;;
         *) return 1 ;;
     esac
@@ -935,12 +1053,8 @@ resolve_setup_java_runtime() {
             pufferfish)
                 # Ask Jenkins which jobs actually exist. Probing every Mojang
                 # release branch can exhaust the preview deadline on absent jobs.
-                branches="$(curl --connect-timeout 3 --max-time 12 -fsSL -H "User-Agent: ${JV_PAPER_USER_AGENT}" \
-                    'https://ci.pufferfish.host/api/json?tree=jobs%5Bname%5D' |
-                    jq -er '[.jobs[] | .name | select(type == "string") |
-                        select(test("^Pufferfish-[0-9]+[.][0-9]+$")) |
-                        ltrimstr("Pufferfish-")] | unique |
-                        sort_by(split(".") | map(tonumber)) | reverse | .[0:4][]')" || return 1
+                branches="$(pufferfish_job_branches)" || return 1
+                branches="$(jq -er '.[0:4][]' <<< "${branches}")" || return 1
                 releases=''
                 while IFS= read -r branch; do
                     pufferfish="$(pufferfish_build_metadata "${branch}")" || continue
@@ -975,12 +1089,9 @@ resolve_setup_java_runtime() {
         if [[ ${software} == pufferfish ]]; then
             if [[ ${policy} == pinned ]]; then
                 branch="$(cut -d. -f1,2 <<< "${game}")"
-                pufferfish="$(pufferfish_build_metadata "${branch}")" || {
+                pufferfish="$(pufferfish_exact_build "${branch}" "${game}")" || {
                     outcome=$?
                     if [[ ${classify_exact_release:-0} == 1 ]]; then
-                        # The last-successful-build endpoint cannot establish
-                        # that the exact game has no historical artifact.
-                        if (( outcome == 3 )); then return 7; fi
                         return "${outcome}"
                     fi
                     continue
@@ -1024,6 +1135,7 @@ resolve_switch_matrix_java_release() {
             5) reason=publisher_request_failed ;;
             6) reason=publisher_response_invalid ;;
             7) reason=publisher_selection_unverified ;;
+            8) printf '%s\n' '{"outcome":"UNAVAILABLE"}'; return ;;
             *) reason=publisher_exact_release_inconclusive ;;
         esac
         jq -cn --arg verification "${reason}" '{outcome:"UNVERIFIED",verification:$verification}'
@@ -1282,11 +1394,29 @@ update_firewall_ports() {
 
 wait_for_rcon() {
     local timeout="${1:-900}" elapsed=0
+    local container="${JV_INSTANCE_CONTAINER:-minecraft}" unit="${JV_INSTANCE_UNIT:-minecraft.service}"
+    local properties key value loaded active sub job
     while (( elapsed < timeout )); do
         # A stopping container can still answer RCON; check the unit after the probe.
-        if podman exec minecraft rcon-cli 'list' >/dev/null 2>&1 &&
-            systemctl is-active --quiet minecraft.service; then
+        if podman exec "${container}" rcon-cli list >/dev/null 2>&1 &&
+            systemctl is-active --quiet "${unit}"; then
             return 0
+        fi
+        # A queued start or automatic restart can still make progress.
+        if properties="$(systemctl show --all --property=LoadState,ActiveState,SubState,Job -- "${unit}" 2>/dev/null)"; then
+            loaded= active= sub= job=unknown
+            while IFS='=' read -r key value; do
+                case "${key}" in
+                    LoadState) loaded="${value}" ;;
+                    ActiveState) active="${value}" ;;
+                    SubState) sub="${value}" ;;
+                    Job) job="${value}" ;;
+                esac
+            done <<< "${properties}"
+            if [[ ${loaded} == loaded && ( -z ${job} || ${job} == 0 ) &&
+                  ( ${active}:${sub} == failed:failed || ${active}:${sub} == inactive:dead ) ]]; then
+                return 2
+            fi
         fi
         sleep 5
         elapsed=$((elapsed + 5))

@@ -11,6 +11,9 @@ import (
 )
 
 type switchRuntimeKey struct{}
+type switchInstalledKey struct{}
+type switchInitialPreviewKey struct{}
+type switchCrossplayPreviewKey struct{}
 
 type adminVersionStatus struct {
 	BedrockTCPPort            int    `json:"bedrock_tcp_port,omitempty"`
@@ -67,8 +70,18 @@ func versionCommandOutput(ctx context.Context, executable string, args ...string
 
 var runAdminVersionStatus = func(ctx context.Context, policy, version, serverType, imageTag string) ([]byte, error) {
 	args := []string{policy, version}
+	if installed, _ := ctx.Value(switchInstalledKey{}).(bool); installed {
+		args = []string{"--switch-installed"}
+	}
+	if choice, _ := ctx.Value(switchCrossplayPreviewKey{}).(string); choice != "" {
+		args = append([]string{"--switch-crossplay", choice}, args...)
+	}
 	if exact, _ := ctx.Value(switchRuntimeKey{}).(bool); exact {
-		args = append([]string{"--switch-preview", "yes"}, args...)
+		preview := "yes"
+		if initial, _ := ctx.Value(switchInitialPreviewKey{}).(bool); initial {
+			preview = "uninitialized"
+		}
+		args = append([]string{"--switch-preview", preview}, args...)
 	}
 	if imageTag != "" {
 		args = append([]string{"--image-tag", imageTag}, args...)

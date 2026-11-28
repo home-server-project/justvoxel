@@ -12,7 +12,7 @@ import (
 
 type switchDefinitionVerificationKey struct{}
 
-func (b *instanceRuntimeBackend) switchTargetConfig(ctx context.Context, source minecraftInstanceRuntimeConfig, p minecraftSwitchPlan) (minecraftInstanceRuntimeConfig, error) {
+func (b *instanceRuntimeBackend) switchTargetConfig(ctx context.Context, source minecraftInstanceRuntimeConfig, p minecraftSwitchPlan, forClone bool) (minecraftInstanceRuntimeConfig, error) {
 	c := source
 	c.Software, c.Version, c.VersionPolicy = p.Target, p.Version, "pinned"
 	c.LoaderVersion, c.PufferfishBuild = p.Runtime.LoaderVersion, p.Runtime.PufferfishBuild
@@ -24,8 +24,16 @@ func (b *instanceRuntimeBackend) switchTargetConfig(ctx context.Context, source 
 	if !c.BedrockEnabled {
 		c.BedrockPort = 0
 	}
+	expectedCrossplay := source.BedrockEnabled && javaServerCrossplay(c.Software)
+	if forClone && p.CrossplayChoice != "" {
+		if !source.BedrockEnabled || (p.CrossplayChoice != "java" && p.CrossplayChoice != "preserve") ||
+			p.CrossplayChoice == "preserve" && !javaServerCrossplay(c.Software) {
+			return c, errInstanceRecovery
+		}
+		expectedCrossplay = p.CrossplayChoice == "preserve"
+	}
 	if !switchStructuralPath(source.Software, c.Software) || c.Version == "LATEST" ||
-		c.BedrockEnabled != (source.BedrockEnabled && javaServerCrossplay(c.Software)) ||
+		c.BedrockEnabled != expectedCrossplay ||
 		!operationFingerprintPattern.MatchString(c.ImageDigest) || !validPufferfishBuild(c.Software, c.PufferfishBuild) {
 		return c, errInstanceRecovery
 	}
@@ -52,7 +60,7 @@ func (b *instanceRuntimeBackend) prepareSwitchTarget(ctx context.Context, source
 		return instanceRuntimeRecord{}, snapshot, err
 	}
 	next := source
-	next.Runtime, err = b.switchTargetConfig(ctx, source.Runtime, p)
+	next.Runtime, err = b.switchTargetConfig(ctx, source.Runtime, p, clone)
 	if err != nil {
 		return next, snapshot, err
 	}
@@ -69,6 +77,7 @@ func (b *instanceRuntimeBackend) prepareSwitchTarget(ctx context.Context, source
 		candidate, storageCheck = "jv-"+hex.EncodeToString(id[:]), "preflight-new"
 		c := &next.Runtime
 		c.ID, c.RCONPassword, c.StartOnBoot = candidate, secret, false
+		c.SwitchCloneExclusions = c.SwitchCloneExclusions || p.RequiresExclusionConsent
 		if err = switchClonePorts(records, c); err != nil {
 			return next, snapshot, err
 		}

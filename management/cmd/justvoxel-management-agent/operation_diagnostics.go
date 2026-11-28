@@ -376,6 +376,7 @@ const (
 	switchVerificationSoftware      = 48
 	switchVerificationRCON          = 49
 	switchVerificationCrossplay     = 50
+	switchVerificationTerminalStart = 51
 )
 
 // Command output is only retained for non-Switch plugin diagnostics.
@@ -412,6 +413,8 @@ func (e *pluginRuntimeVerificationError) diagnosticCode() string {
 		return "runtime_rcon_failed"
 	case switchVerificationCrossplay:
 		return "managed_crossplay_verification_failed"
+	case switchVerificationTerminalStart:
+		return "runtime_startup_terminated"
 	default:
 		return "exact_runtime_unverified"
 	}
@@ -422,7 +425,7 @@ func switchRuntimeDiagnostic(err error) string {
 	if errors.As(err, &verification) {
 		return verification.diagnosticCode()
 	}
-	return ""
+	return restoreValidationCode(err)
 }
 
 func recordPluginFailure(store *operationStore, id, stage string, cause error) {
@@ -615,6 +618,16 @@ func (s *operationStore) recordSwitchFailure(e minecraftSwitchEvidence, cause er
 	_ = s.appendOperationDiagnostic(e.OperationID, operationTypeMinecraftSwitch, "switch_failure", "Minecraft Switch failed before recovery", values)
 	if start != nil {
 		s.recordSwitchCommandEvidence(e, "systemctl_start", start.output)
+	}
+}
+
+func (s *operationStore) recordSwitchCloneExclusions(e minecraftSwitchEvidence, p minecraftSwitchPlan) {
+	for _, item := range p.Content {
+		if item.CloneDisposition == "exclude" || item.CloneDisposition == "absent" {
+			_ = s.appendOperationDiagnostic(e.OperationID, operationTypeMinecraftSwitch, "clone_content", "Executable excluded from clone",
+				map[string]string{"clone_id": e.CloneID, "directory": item.Directory, "filename": s.switchDiagnosticReason(e, errors.New(item.Filename)), "compatibility": item.Compatibility,
+					"reason": s.switchDiagnosticReason(e, errors.New(item.Reason)), "sha512": item.SHA512, "crossplay": p.CrossplayChoice})
+		}
 	}
 }
 

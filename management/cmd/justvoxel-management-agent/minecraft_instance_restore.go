@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
@@ -65,7 +64,8 @@ type instanceRestoreInspection struct {
 	Fingerprint                     string                 `json:"fingerprint"`
 }
 type instanceRestorePlan struct {
-	CloneSourceID string `json:"-"`
+	CloneSourceID       string `json:"-"`
+	CloneInitialization string `json:"-"`
 	instanceRestoreInspection
 	PlanID                      string          `json:"plan_id"`
 	RuntimeState                string          `json:"runtime_state"`
@@ -116,6 +116,41 @@ func (b *instanceRuntimeBackend) requireNoInstanceRestore() error {
 	}
 	return nil
 }
+
+type instanceRestoreValidationError struct {
+	code  string
+	cause error
+}
+
+func (e *instanceRestoreValidationError) Error() string { return e.cause.Error() }
+func (e *instanceRestoreValidationError) Unwrap() error { return e.cause }
+
+func restoreValidationMessage(code string) string {
+	switch code {
+	case "invalid_archive_ownership":
+		return "The archive contains unexpected user or group ownership."
+	case "invalid_archive_mode":
+		return "The archive contains unsafe file permissions."
+	case "invalid_archive_checksum":
+		return "The archive size or checksum does not match the backup metadata."
+	case "invalid_archive_entries":
+		return "The archive contains invalid or unreadable entries."
+	case "invalid_archive_world":
+		return "The archive has missing or invalid world metadata."
+	case "invalid_initialization_evidence":
+		return "The archive or source no longer matches the reviewed initial server data."
+	}
+	return ""
+}
+
+func restoreValidationCode(err error) string {
+	var validation *instanceRestoreValidationError
+	if errors.As(err, &validation) {
+		return validation.code
+	}
+	return ""
+}
+
 func (b *instanceRuntimeBackend) restoreStorage(ctx context.Context, action, id, archive, fingerprint string, running bool) ([]byte, error) {
 	if !instanceIDPattern.MatchString(id) {
 		return nil, errInstanceID
@@ -125,7 +160,10 @@ func (b *instanceRuntimeBackend) restoreStorage(ctx context.Context, action, id,
 		var refusal struct {
 			Error string `json:"error"`
 		}
-		if json.Unmarshal(out, &refusal) == nil {
+		if len(out) <= 256 && instanceDecode(out, &refusal) == nil {
+			if message := restoreValidationMessage(refusal.Error); message != "" && refusal.Error != "invalid_initialization_evidence" {
+				return nil, &instanceRestoreValidationError{code: refusal.Error, cause: instanceRuntimeFailure(message)}
+			}
 			switch refusal.Error {
 			case "incompatible_software_version":
 				return nil, instanceRuntimeFailure("Restore requires the same software and exact pinned Minecraft version. Version conversion and downgrade are unsupported.")
@@ -226,28 +264,41 @@ func (s *server) instanceRestoreStatus(w http.ResponseWriter, r *http.Request) {
 	j, err := instanceRuntimes.restoreJournal(id)
 	activeID := instanceRestoreActiveID.Load()
 	active := activeID != nil && *activeID == id
+	var result struct {
+		State   string `json:"state"`
+		Message string `json:"message"`
+		Reason  string `json:"reason,omitempty"`
+	}
+	var resultErr error
+	if !active {
+		var raw []byte
+		raw, resultErr = instanceRuntimes.readPrivate(instanceRuntimes.backupPath(id, "restore-result"))
+		if resultErr == nil && instanceDecode(raw, &result) != nil {
+			resultErr = errInstanceRecovery
+		}
+	}
+	reason := ""
+	if resultErr == nil && result.State == "failed" && restoreValidationMessage(result.Reason) != "" {
+		reason = result.Reason
+	}
 	if errors.Is(err, os.ErrNotExist) {
 		state := "idle"
 		if active {
 			state = "validating"
-		} else if raw, e := instanceRuntimes.readPrivate(instanceRuntimes.backupPath(id, "restore-result")); e == nil {
-			var result struct {
-				State   string `json:"state"`
-				Message string `json:"message"`
-			}
-			if instanceDecode(raw, &result) != nil {
-				instanceRuntimeError(w, errInstanceRecovery, id)
-				return
-			}
+		} else if resultErr == nil {
 			state = result.State
 			if state == "preparing" {
 				state = "interrupted"
 			}
-		} else if !errors.Is(e, os.ErrNotExist) {
-			instanceRuntimeError(w, e, id)
+		} else if !errors.Is(resultErr, os.ErrNotExist) {
+			instanceRuntimeError(w, resultErr, id)
 			return
 		}
-		writeJSON(w, 200, map[string]any{"id": id, "state": state})
+		response := map[string]any{"id": id, "state": state}
+		if reason != "" {
+			response["reason"] = reason
+		}
+		writeJSON(w, 200, response)
 		return
 	}
 	if err != nil {
@@ -262,7 +313,11 @@ func (s *server) instanceRestoreStatus(w http.ResponseWriter, r *http.Request) {
 	if required {
 		state = "recovery_required"
 	}
-	writeJSON(w, 200, map[string]any{"id": id, "state": state, "stage": j.Stage, "archive": j.Archive, "originally_running": j.OriginallyRunning, "recovery_required": required})
+	response := map[string]any{"id": id, "state": state, "stage": j.Stage, "archive": j.Archive, "originally_running": j.OriginallyRunning, "recovery_required": required}
+	if reason != "" {
+		response["reason"] = reason
+	}
+	writeJSON(w, 200, response)
 }
 
 // The fixed root-private exclusion is shared with the legacy worker. Never
@@ -481,7 +536,7 @@ func (s *server) runInstanceRestore(ctx context.Context, id string, plan instanc
 	step := func(action string) error {
 		var e error
 		if action == "prepare" && plan.CloneSourceID != "" {
-			_, e = b.switchCloneRestoreStorage(ctx, action, id, plan.CloneSourceID, plan.Metadata.Archive, plan.Fingerprint)
+			_, e = b.switchCloneRestoreStorage(ctx, action, id, plan.CloneSourceID, plan.Metadata.Archive, plan.Fingerprint, plan.CloneInitialization)
 		} else {
 			_, e = b.restoreStorage(ctx, action, id, plan.Metadata.Archive, plan.Fingerprint, running)
 		}
@@ -529,7 +584,11 @@ func (s *server) saveInstanceRestoreResult(id string, result error) {
 		state = "failed"
 		message = "Restore did not complete. Check recovery_required and retry Restore Recovery when required."
 	}
-	if err := instanceRuntimes.writeJSON(instanceRuntimes.backupPath(id, "restore-result"), map[string]any{"state": state, "message": message}, true); err != nil {
+	diagnostic := map[string]any{"state": state, "message": message}
+	if reason := restoreValidationCode(result); reason != "" {
+		diagnostic["reason"] = reason
+	}
+	if err := instanceRuntimes.writeJSON(instanceRuntimes.backupPath(id, "restore-result"), diagnostic, true); err != nil {
 		// Journals remain authoritative if the separate diagnostic cannot be saved.
 		log.Print("Independent restore result could not be persisted")
 	}

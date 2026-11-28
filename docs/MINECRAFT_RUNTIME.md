@@ -260,8 +260,9 @@ JSON decoder. Selected-instance Stop and Restart refuse failed/unparseable
 RCON responses or uncertain service/container evidence. Phase 3B administrators
 may interrupt online players with a mandatory warning/countdown; operators
 continue to require an empty server. There is no force stop. JustVoxel owns
-player-warning timing. Java uses itzg's graceful SIGUSR1 delay bypass afterward;
-native Bedrock uses its console `stop` command.
+player-warning timing. Most Java servers use itzg's graceful SIGUSR1 delay
+bypass afterward. Leaf uses the service's graceful shutdown, and native
+Bedrock uses its console `stop` command.
 Podman StopTimeout=180 and systemd TimeoutStopSec=240 remain unchanged.
 
 Full settings applies require the selected instance to be stopped, or failed
@@ -357,7 +358,9 @@ and any subsequent start request. Occupied instances remain running for the
 normally sends SIGUSR1 before requesting a nonblocking service stop for Java instances.
 For NeoForge, JustVoxel queues the nonblocking service stop first and immediately
 sends SIGUSR1. This order also applies to managed host shutdown and update reboot.
-JustVoxel verifies the stopped state. SIGUSR1 bypasses the Java image's
+For Leaf, the service stop initiates the runner's graceful shutdown.
+JustVoxel verifies both the terminal service state and the container state,
+with bounded retries if the container is being removed. SIGUSR1 bypasses the Java image's
 synchronous RCON announcement and additional delay while retaining world saving.
 Empty instances begin that graceful shutdown immediately, without warning sleeps. The stop uses
 the caller's context rather than a separate 150-second lifecycle deadline.
@@ -598,7 +601,7 @@ Administrator-only routes beneath `/v1/minecraft/instances/{id}/backups/restore`
 | --- | --- | --- |
 | POST | `/plan` | `archive`; returns reviewed `plan_id`, immutable ID, integrity, compatibility, capacity, running intent and player interruption requirements |
 | POST | `/apply` | `archive`, reviewed `plan_id`, `confirm_destructive: true`, and `confirm_players: true` when running; returns 202 acceptance |
-| GET | `/status` | Current stage, selected archive, running intent and `recovery_required` |
+| GET | `/status` | Current stage, selected archive, running intent, `recovery_required` and a validation `reason` when available |
 | POST | `/recover` | `confirm_players: true`; returns 202 for retryable rollback and runtime verification |
 
 Only an archive belonging to the original immutable Instance ID is accepted.
@@ -615,6 +618,22 @@ The private helper validates committed runtime/configuration, registry ownership
 source/destination mount identity, root-owned private archive/metadata, size and
 SHA-256, full gzip CRC/trailer, tar headers/end markers, paths, duplicates,
 ancestor conflicts, links, special files, permissions and bounded expansion.
+Restore resolves the Management Agent's `justvoxel-web` primary group through
+the system account database. Archive members using that group outside the
+ordinary root/runtime ownership rules must match the Agent's root-owned plugin
+or mod JARs and private plugin state by path and mode. Restore preserves private
+manifests and transaction directories and keeps managed JARs readable by the
+runtime with their original root ownership and read permissions. Backup keeps
+the source files and archives as written.
+
+Validation refusals use bounded reason codes for ownership
+(`invalid_archive_ownership`), permission mode (`invalid_archive_mode`), size or
+checksum (`invalid_archive_checksum`), archive structure (`invalid_archive_entries`)
+and missing or malformed world metadata (`invalid_archive_world`). Switch records
+these codes in its existing Migration diagnostics. The internal Switch Clone path
+can stage a worldless archive only when it matches the verified initial data from
+the exact pinned source. Ordinary Restore continues to require a verified world.
+
 Planning requires staging capacity for the compressed copy, expanded replacement,
 entry overhead and 64 MiB headroom. Rollback uses renames, preserving the original
 without requiring a second world-sized copy. A disconnected archive source cannot

@@ -15,6 +15,7 @@ jv_crossplay_directory() {
 jv_crossplay_projects() {
     printf 'geyser floodgate'
     [[ ${MINECRAFT_SERVER_TYPE:-paper} != fabric ]] || printf ' fabric-api'
+    [[ ${JV_SWITCH_VIAVERSION:-no} != yes || $(jv_crossplay_directory) != plugins ]] || printf ' viaversion'
     printf '\n'
 }
 jv_crossplay_mod_compatible() {
@@ -51,7 +52,7 @@ jv_crossplay_jar_name() {
     local platform
     platform="$(jv_crossplay_platform)" || return 1
     case "$1:${platform}" in
-        geyser:spigot) printf Geyser-Spigot.jar ;; floodgate:spigot) printf floodgate-spigot.jar ;;
+        geyser:spigot) printf Geyser-Spigot.jar ;; floodgate:spigot) printf floodgate-spigot.jar ;; viaversion:spigot) printf ViaVersion.jar ;;
         geyser:fabric) printf Geyser-Fabric.jar ;; floodgate:fabric) printf floodgate-fabric.jar ;;
         geyser:neoforge) printf Geyser-NeoForge.jar ;; floodgate:neoforge) printf floodgate-neoforge.jar ;;
         fabric-api:fabric) printf fabric-api.jar ;; *) return 1 ;;
@@ -76,12 +77,24 @@ jv_crossplay_artifact_state() {
 
 # Prepare BOTH downloads away from the live plugin root before any replacement.
 jv_crossplay_prepare() {
-    local staging="$1" project metadata expected url
+    local staging="$1" project metadata expected url geyser
     case "${MINECRAFT_SERVER_TYPE:-paper}" in fabric|neoforge)
         /usr/libexec/justvoxel/mjust/managed-crossplay-mods "${MINECRAFT_SERVER_TYPE}" "${MINECRAFT_VERSION}" "${MINECRAFT_LOADER_VERSION}" "${staging}"
         return ;;
     esac
     for project in $(jv_crossplay_projects); do
+        if [[ ${project} == viaversion ]]; then
+            geyser="$(resolve_geyser_supported_java_version)" || return 1
+            metadata="$(jv_crossplay_viaversion_supports "${MINECRAFT_VERSION}" "${geyser}" artifact)" || return 1
+            expected="$(jq -er .sha512 <<< "${metadata}")" || return 1
+            url="$(jq -er .url <<< "${metadata}")" || return 1
+            curl --connect-timeout 10 --max-time 180 --max-filesize 67108864 -fsS --proto '=https' \
+                -H "User-Agent: ${JV_PAPER_USER_AGENT}" -o "${staging}/viaversion.jar" "${url}" || return 1
+            [[ $(sha512sum -- "${staging}/viaversion.jar" | cut -d ' ' -f1) == "${expected}" ]] || return 1
+            jq -e --arg sha256 "$(sha256sum -- "${staging}/viaversion.jar" | cut -d ' ' -f1)" \
+                '{project,sha512,$sha256}' <<< "${metadata}" > "${staging}/viaversion.json" || return 1
+            continue
+        fi
         metadata="$(jv_crossplay_metadata "${project}")" || { echo "ERROR: ${project} release information is unavailable." >&2; return 1; }
         printf '%s\n' "${metadata}" > "${staging}/${project}.json" || return 1
         expected="$(jq -r '.sha256' <<< "${metadata}")"
@@ -97,6 +110,31 @@ jv_crossplay_prepare() {
         }
     done
 }
+
+# Switch review uses the same exact publisher selection as normal setup and
+# startup. Only digests leave staging, and apply rechecks all of them.
+jv_crossplay_switch_digests() {
+    jq -Sce -s 'map({key:.project,value:(if .project == "viaversion" then {sha512} else {sha256} end)}) | from_entries' "$@"
+}
+
+jv_crossplay_switch_review() (
+    local geyser="$1" staging project
+    [[ -n ${geyser} ]] || return 1
+    if [[ $(jv_crossplay_directory) == plugins ]]; then
+        jv_managed_crossplay_compatible "${MINECRAFT_SERVER_TYPE}" "${MINECRAFT_VERSION}" "${MINECRAFT_LOADER_VERSION}" "${geyser}" || return 1
+        {
+            for project in geyser floodgate; do
+                jv_crossplay_metadata "${project}" || return 1
+            done
+            jv_crossplay_viaversion_supports "${MINECRAFT_VERSION}" "${geyser}" artifact || return 1
+        } | jv_crossplay_switch_digests
+    else
+        staging="$(mktemp -d)" || return 1
+        trap 'rm -rf -- "${staging}"' EXIT
+        jv_crossplay_prepare "${staging}" || return 1
+        jv_crossplay_switch_digests "${staging}"/*.json
+    fi
+)
 
 # Save only the canonical managed pair, never configuration or identity material.
 jv_crossplay_preserve() {

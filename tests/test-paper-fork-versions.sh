@@ -146,3 +146,69 @@ done
 
 fixture=no-jobs
 reject resolve_setup_java_runtime pufferfish recommended ''
+
+# The exact matrix lookup requires both an absent endpoint and a valid
+# authoritative catalog that lists other Pufferfish jobs.
+curl() {
+    local exact=no
+    if [[ ${1:-} == --write-out ]]; then exact=yes; shift 2; fi
+    case "${*: -1}" in
+        */version_manifest_v2.json)
+            printf '%s' '{"latest":{"release":"26.45.7"},"versions":[{"id":"26.45.7","type":"release"},{"id":"26.3","type":"release"},{"id":"1.21.11","type":"release"},{"id":"1.21.10","type":"release"},{"id":"1.21.8","type":"release"}]}' ;;
+        https://ci.pufferfish.host/job/Pufferfish-26.3/lastSuccessfulBuild/api/json)
+            printf '\n404'
+            return 22 ;;
+        'https://ci.pufferfish.host/api/json?tree=jobs%5Bname%5D')
+            case "${catalog_fixture:-valid}" in
+                valid) printf '%s' '{"jobs":[{"name":"Pufferfish-1.21"},{"name":"Pufferfish-26.45"}]}' ;;
+                listed) printf '%s' '{"jobs":[{"name":"Pufferfish-1.21"},{"name":"Pufferfish-26.3"}]}' ;;
+                incomplete) printf '%s' '{"jobs":[]}' ;;
+                malformed) printf '%s' '{"jobs":[{"name":4}]}' ;;
+                timeout) printf '\n000'; return 28 ;;
+            esac ;;
+        https://ci.pufferfish.host/job/Pufferfish-1.21/lastSuccessfulBuild/api/json)
+            printf '%s' '{"result":"SUCCESS","number":39,"artifacts":[{"fileName":"pufferfish-paperclip-1.21.10-R0.1-SNAPSHOT-mojmap.jar","relativePath":"build/libs/pufferfish-paperclip-1.21.10-R0.1-SNAPSHOT-mojmap.jar"}]}' ;;
+        https://ci.pufferfish.host/job/Pufferfish-1.21/api/json)
+            case "${history_fixture:-incomplete}" in
+                incomplete) jq -nc '{name:"Pufferfish-1.21",builds:[range(23;40)|{number:.,result:"SUCCESS",artifacts:[]}]}' ;;
+                complete) printf '%s' '{"name":"Pufferfish-1.21","builds":[{"number":39,"result":"SUCCESS","artifacts":[{"fileName":"pufferfish-paperclip-1.21.10-R0.1-SNAPSHOT-mojmap.jar","relativePath":"build/libs/pufferfish-paperclip-1.21.10-R0.1-SNAPSHOT-mojmap.jar"}]},{"number":32,"result":"SUCCESS","artifacts":[{"fileName":"pufferfish-paperclip-1.21.8-R0.1-SNAPSHOT-mojmap.jar","relativePath":"build/libs/pufferfish-paperclip-1.21.8-R0.1-SNAPSHOT-mojmap.jar"}]}]}' ;;
+                malformed) printf '%s' '{"name":"different-job","builds":[]}' ;;
+                timeout) printf '\n000'; return 28 ;;
+            esac ;;
+        https://ci.pufferfish.host/job/Pufferfish-26.3/api/json)
+            jq -nc '{name:"Pufferfish-26.3",builds:[range(1;18)|{number:.,result:"SUCCESS",artifacts:[]}]}' ;;
+        https://ci.pufferfish.host/job/Pufferfish-26.45/lastSuccessfulBuild/api/json)
+            printf '%s' '{"result":"SUCCESS","number":87,"artifacts":[{"fileName":"pufferfish-paperclip-26.45.7-R0.1-SNAPSHOT-mojmap.jar","relativePath":"build/libs/pufferfish-paperclip-26.45.7-R0.1-SNAPSHOT-mojmap.jar"}]}' ;;
+        *) return 22 ;;
+    esac
+    if [[ ${exact} == yes ]]; then printf '\n200'; fi
+}
+jq -e '.outcome == "UNSUPPORTED"' <<< "$(resolve_switch_matrix_java_release pufferfish 26.3)" >/dev/null
+jq -e '.outcome == "AVAILABLE" and .runtime.pufferfish_build == 39' <<< "$(resolve_switch_matrix_java_release pufferfish 1.21.10)" >/dev/null
+jq -e '.verification == "publisher_selection_unverified"' <<< "$(resolve_switch_matrix_java_release pufferfish 1.21.11)" >/dev/null
+jq -e '.outcome == "UNAVAILABLE"' <<< "$(history_fixture=complete resolve_switch_matrix_java_release pufferfish 1.21.11)" >/dev/null
+jq -e '.outcome == "AVAILABLE" and .runtime.game == "1.21.8" and .runtime.pufferfish_build == 32' \
+    <<< "$(history_fixture=complete resolve_switch_matrix_java_release pufferfish 1.21.8)" >/dev/null
+jq -e '.game == "1.21.8" and .pufferfish_build == 32' \
+    <<< "$(history_fixture=complete resolve_setup_java_runtime pufferfish pinned 1.21.8)" >/dev/null
+for issue in malformed timeout; do
+    case "${issue}" in
+        malformed) reason=publisher_response_invalid ;;
+        timeout) reason=publisher_request_timeout ;;
+    esac
+    jq -e --arg reason "${reason}" '.outcome == "UNVERIFIED" and .verification == $reason' \
+        <<< "$(history_fixture=${issue} resolve_switch_matrix_java_release pufferfish 1.21.11)" >/dev/null
+done
+recommended="$(resolve_setup_java_runtime pufferfish recommended '')"
+jq -e --argjson recommended "${recommended}" '
+    .outcome == "AVAILABLE" and .runtime == $recommended and .runtime.game == "26.45.7" and .runtime.pufferfish_build == 87' \
+    <<< "$(resolve_switch_matrix_java_release pufferfish 26.45.7)" >/dev/null
+for issue in listed incomplete malformed timeout; do
+    case "${issue}" in
+        listed|incomplete) reason=publisher_selection_unverified ;;
+        malformed) reason=publisher_response_invalid ;;
+        timeout) reason=publisher_request_timeout ;;
+    esac
+    jq -e --arg reason "${reason}" '.outcome == "UNVERIFIED" and .verification == $reason' \
+        <<< "$(catalog_fixture=${issue} resolve_switch_matrix_java_release pufferfish 26.3)" >/dev/null
+done

@@ -115,7 +115,7 @@ func instanceVersionCommand(ctx context.Context, args []string) error {
 			}
 			ctx = context.WithValue(ctx, reviewedMigrationInstanceKey{}, reviewedMigrationInstance{id: id, preflight: preflight})
 		} else if !containerOnly {
-			next.Runtime.PreserveContent = os.Getenv("JUSTVOXEL_SWITCH_PRESERVE_CONTENT") == "yes"
+			next.Runtime.PreserveContent = previous.Runtime.SwitchCloneExclusions || os.Getenv("JUSTVOXEL_SWITCH_PRESERVE_CONTENT") == "yes"
 		}
 		if args[2] != "pufferfish" {
 			next.Runtime.PufferfishBuild = 0

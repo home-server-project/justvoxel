@@ -10,6 +10,7 @@ type switchMatrixReleaseOutcome string
 const (
 	switchMatrixReleaseAvailable   switchMatrixReleaseOutcome = "AVAILABLE"
 	switchMatrixReleaseUnsupported switchMatrixReleaseOutcome = "UNSUPPORTED"
+	switchMatrixReleaseUnavailable switchMatrixReleaseOutcome = "UNAVAILABLE"
 	switchMatrixReleaseUnverified  switchMatrixReleaseOutcome = "UNVERIFIED"
 )
 
@@ -76,7 +77,7 @@ func decodeSwitchMatrixRelease(software, version string, raw []byte) switchMatri
 			}
 		}
 		return unverified
-	case switchMatrixReleaseUnsupported:
+	case switchMatrixReleaseUnsupported, switchMatrixReleaseUnavailable:
 		if result.Runtime == nil && reply.Verification == "" {
 			return result
 		}

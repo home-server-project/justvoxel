@@ -837,8 +837,12 @@ func hashPluginAt(root *os.File, name string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 func readPluginManifest(dataPath string) (pluginManifest, []byte, error) {
+	return readPluginManifestAt(unix.AT_FDCWD, filepath.Join(dataPath, ".justvoxel"))
+}
+
+func readPluginManifestAt(dataFD int, directory string) (pluginManifest, []byte, error) {
 	empty := pluginManifest{SchemaVersion: "v1", Artifacts: []pluginManifestEntry{}}
-	fd, err := unix.Open(filepath.Join(dataPath, ".justvoxel"), unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	fd, err := unix.Openat(dataFD, directory, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if errors.Is(err, unix.ENOENT) {
 		return empty, nil, nil
 	}
@@ -1330,35 +1334,34 @@ func verifyPluginRuntimeMode(ctx context.Context, id, version, mode string) erro
 		}
 		return err
 	}
-	deadline := time.NewTimer(900 * time.Second)
-	defer deadline.Stop()
-	for {
-		probe, cancel := context.WithTimeout(ctx, 10*time.Second)
-		_, err := pluginInstallCommand(probe, "podman", "exec", "minecraft-"+id, "rcon-cli", "list")
-		active, stateErr := pluginServiceActive(probe, id)
-		cancel()
-		if err == nil && stateErr == nil && active {
-			break
-		}
-		timer := time.NewTimer(5 * time.Second)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-deadline.C:
-			timer.Stop()
-			if switchMode {
-				status := switchVerificationInspection
-				if err != nil {
-					status = switchVerificationRCON
-				}
-				return &pluginRuntimeVerificationError{switchStatus: status}
+	verifyTimeout := 2 * time.Minute
+	if switchMode {
+		// Switch's verifier owns both readiness and exact session checks.
+		verifyTimeout = 17 * time.Minute
+	} else {
+		deadline := time.NewTimer(900 * time.Second)
+		defer deadline.Stop()
+		for {
+			probe, cancel := context.WithTimeout(ctx, 10*time.Second)
+			_, err := pluginInstallCommand(probe, "podman", "exec", "minecraft-"+id, "rcon-cli", "list")
+			active, stateErr := pluginServiceActive(probe, id)
+			cancel()
+			if err == nil && stateErr == nil && active {
+				break
 			}
-			return errors.New("Minecraft runtime readiness timed out")
-		case <-timer.C:
+			timer := time.NewTimer(5 * time.Second)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-deadline.C:
+				timer.Stop()
+				return errors.New("Minecraft runtime readiness timed out")
+			case <-timer.C:
+			}
 		}
 	}
-	verify, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	verify, cancel := context.WithTimeout(ctx, verifyTimeout)
 	defer cancel()
 	args := []string{"--instance", id}
 	if mode != "" {
@@ -1368,6 +1371,9 @@ func verifyPluginRuntimeMode(ctx context.Context, id, version, mode string) erro
 	output, err := pluginInstallCommand(verify, "/usr/libexec/justvoxel/mjust/verify-minecraft-stack", args...)
 	if err != nil {
 		if switchMode {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
 			// Only the helper's exit status crosses the Switch diagnostic boundary.
 			var exit interface{ ExitCode() int }
 			failure := &pluginRuntimeVerificationError{}
@@ -2201,18 +2207,22 @@ func commitPluginManifest(dataPath string, previous []byte, manifest pluginManif
 	return commitPluginManifestContent(dataPath, previous, manifest, nil)
 }
 func commitPluginManifestContent(dataPath string, previous []byte, manifest pluginManifest, exactRaw []byte) (bool, error) {
-	if err := validatePluginManifest(manifest); err != nil {
-		return false, err
-	}
-	_, raw, err := readPluginManifest(dataPath)
-	if err != nil || !bytes.Equal(raw, previous) {
-		return false, errors.New("Ownership manifest changed")
-	}
 	dataFD, err := unix.Open(dataPath, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return false, err
 	}
 	defer unix.Close(dataFD)
+	return commitPluginManifestAt(dataFD, previous, manifest, exactRaw)
+}
+
+func commitPluginManifestAt(dataFD int, previous []byte, manifest pluginManifest, exactRaw []byte) (bool, error) {
+	if err := validatePluginManifest(manifest); err != nil {
+		return false, err
+	}
+	_, raw, err := readPluginManifestAt(dataFD, ".justvoxel")
+	if err != nil || !bytes.Equal(raw, previous) {
+		return false, errors.New("Ownership manifest changed")
+	}
 	if err := unix.Mkdirat(dataFD, ".justvoxel", 0700); err != nil && !errors.Is(err, unix.EEXIST) {
 		return false, err
 	}
@@ -2260,7 +2270,7 @@ func commitPluginManifestContent(dataPath string, previous []byte, manifest plug
 		return false, closeErr
 	}
 	// Validate the existing manifest again immediately before the atomic replacement.
-	_, current, err := readPluginManifest(dataPath)
+	_, current, err := readPluginManifestAt(dataFD, ".justvoxel")
 	if err != nil || !bytes.Equal(current, previous) {
 		return false, errors.New("Ownership manifest changed")
 	}

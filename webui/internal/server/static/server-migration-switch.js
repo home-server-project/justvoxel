@@ -303,7 +303,7 @@
           }, 2000);
         }
       };
-      const select = async (target) => {
+      const select = async (target, crossplay = "") => {
         if (busy || matrixBlocksSwitch()) return;
         const ticket = ++sequence;
         cards.forEach((node) => node.classList.toggle("is-selected", node.dataset.switchTarget === target));
@@ -317,16 +317,42 @@
         try {
           // Selection always re-reads authoritative inventory, even if a prior
           // catalogue response had made this card available.
-          const plan = await request("plan", { target });
+          const plan = await request("plan", { target, ...(crossplay && { crossplay }) });
           if (!current() || ticket !== sequence) return;
-          showCard(cards.find((node) => node.dataset.switchTarget === target), plan);
+          if (!crossplay) showCard(cards.find((node) => node.dataset.switchTarget === target), plan);
           review.replaceChildren();
           review.append(paragraph(jvT("ui.3101457ed8e3", {v0: (plan.current)})), paragraph(jvT("ui.740cb666e20a", {v0: (plan.target)})), paragraph(jvT("ui.6a5ef5b0f8c1", {v0: (plan.version || jvT("ui.33c8e8de41c3"))})),
             paragraph(jvT("ui.9ccd64d18f1e", {v0: (plan.convert ? jvT("ui.e674447337e8") : jvT("ui.ca1844969742"))})), paragraph(jvT("ui.b985dbadc276", {v0: (plan.clone ? jvT("ui.e674447337e8") : jvT("ui.ca1844969742"))})));
           if (plan.reason) review.appendChild(paragraph(plan.reason, "notice warning"));
+          if (plan.convert_reason) review.appendChild(paragraph(plan.convert_reason, "notice warning"));
+          if (plan.crossplay_choice) {
+            const crossplayLabel = (choice) => choice === "preserve" ? jvT("switch.preserve_crossplay") : jvT("switch.java_only");
+            review.appendChild(paragraph([jvT("ui.90b908765b19"), crossplayLabel(plan.crossplay_choice)].join(" · ")));
+            const alternatives = (plan.crossplay_options || []).filter(choice => choice !== plan.crossplay_choice);
+            if (alternatives.length) {
+              const choices = actionRow();
+              for (const choice of alternatives) {
+                const button = document.createElement("button"); button.type = "button"; button.className = "secondary";
+                button.textContent = crossplayLabel(choice);
+                button.addEventListener("click", () => {
+                  if (current() && ticket === sequence && !review.hidden) void select(target, choice);
+                });
+                choices.appendChild(button);
+              }
+              review.appendChild(choices);
+            }
+          }
+          for (const file of plan.crossplay_install || []) {
+            review.appendChild(paragraph(jvT("switch.install", { v0: file.directory + "/" + file.filename })));
+          }
           for (const item of plan.content || []) {
             const label = { verified: jvT("ui.630d4989d81c"), incompatible: jvT("ui.8777e3a9e3ec"), unknown: jvT("ui.1a31290e493f") }[item.compatibility] || jvT("ui.1a31290e493f");
-            review.appendChild(paragraph(jvT("ui.31d29868e4e3", {v0: (item.name), v1: (item.filename), v2: (label), v3: (item.reason)}), item.compatibility === "verified" ? "muted" : "notice warning"));
+            const disposition = {
+              retain: jvT("switch.retained"), exclude: jvT("switch.excluded"), absent: jvT("switch.excluded"),
+            }[item.clone_disposition];
+            const filename = item.directory ? item.directory + "/" + item.filename : item.filename;
+            review.appendChild(paragraph(jvT("ui.31d29868e4e3", {v0: item.name, v1: filename, v2: [label, disposition].filter(Boolean).join(" · "), v3: item.reason}),
+              item.compatibility === "verified" ? "muted" : "notice warning"));
           }
           for (const warning of plan.warnings || []) review.appendChild(paragraph(warning, "notice warning"));
           const plugins = document.createElement("button"); plugins.type = "button"; plugins.className = "secondary"; plugins.textContent = jvT("ui.70171ec7a356");
@@ -342,18 +368,30 @@
             const consent = document.createElement("input"); consent.type = "checkbox"; consent.setAttribute("role", "switch");
             const confirmation = document.createElement("span"); confirmation.textContent = jvT("ui.1ee40e71974c");
             label.append(confirmation, consent); review.appendChild(label);
+            let exclusions = null;
+            if (plan.clone && plan.requires_exclusion_consent) {
+              const exclusionLabel = document.createElement("label"); exclusionLabel.className = label.className;
+              exclusions = document.createElement("input"); exclusions.type = "checkbox"; exclusions.setAttribute("role", "switch");
+              const text = document.createElement("span"); text.textContent = jvT("switch.accept_exclusions");
+              exclusionLabel.append(text, exclusions); review.appendChild(exclusionLabel);
+            }
             const updateApplyButtons = [];
             syncReview = () => updateApplyButtons.forEach((update) => update());
             consent.addEventListener("change", syncReview);
+            exclusions?.addEventListener("change", syncReview);
             for (const [action, text, allowed] of [["convert", jvT("ui.5abb6e80374e"), plan.convert], ["clone", jvT("ui.90b908765b19"), plan.clone]]) {
               const button = document.createElement("button"); button.type = "button"; button.textContent = text; button.disabled = true;
-              if (!allowed) button.title = plan.reason || jvT("ui.f4239cda81ee");
-              updateApplyButtons.push(() => { button.disabled = !allowed || !consent.checked || busy || matrixBlocksSwitch(); });
+              if (!allowed) button.title = (action === "convert" && plan.convert_reason) || plan.reason || jvT("ui.f4239cda81ee");
+              const needsExclusions = action === "clone" && Boolean(exclusions);
+              updateApplyButtons.push(() => { button.disabled = !allowed || !consent.checked || (needsExclusions && !exclusions.checked) || busy || matrixBlocksSwitch(); });
               button.addEventListener("click", async () => {
                 if (!current() || ticket !== sequence || !allowed || !consent.checked || busy || matrixBlocksSwitch() || button.disabled) return;
                 setBusy(true);
                 try {
-                  const result = await request("apply", { target, action, plan_fingerprint: plan.plan_fingerprint, confirm: "yes" }, true);
+                  const result = await request("apply", { target, action, plan_fingerprint: plan.plan_fingerprint, confirm: "yes",
+                    ...(plan.crossplay_choice && { crossplay: plan.crossplay_choice }),
+                    ...(needsExclusions && { accept_exclusions: "yes" }),
+                  }, true);
                   if (!current() || ticket !== sequence) return;
                   if (!result.operation?.operation_id) throw new Error(jvT("ui.d8bcc288b463"));
                   review.hidden = true; await reconnect(result.operation.operation_id);

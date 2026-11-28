@@ -98,6 +98,7 @@ func TestSwitchProductionTargetConfigurationMatrix(t *testing.T) {
 						for _, jar := range []struct{ project, name, main string }{
 							{"geyser", "Geyser-Spigot", "org.geysermc.geyser.platform.spigot.GeyserSpigotPlugin"},
 							{"floodgate", "floodgate-spigot", "org.geysermc.floodgate.SpigotPlugin"},
+							{"viaversion", "ViaVersion", "com.viaversion.viaversion.ViaVersionPlugin"},
 						} {
 							path := filepath.Join(plugins, jar.name+".jar")
 							pluginTestJar(t, path, map[string]string{"plugin.yml": "name: " + jar.name + "\nversion: 1\nmain: " + jar.main + "\n"})
@@ -114,25 +115,26 @@ func TestSwitchProductionTargetConfigurationMatrix(t *testing.T) {
 						return nil, errors.New("no external catalog in fixture")
 					})}
 					t.Cleanup(func() { pluginCatalogClient = oldClient })
-					resolver := func(target string) ([]byte, error) {
-						p := switchMatrixSelection(target, version, bedrock)
+					resolver := func(target string, enabled bool) ([]byte, error) {
+						p := switchMatrixSelection(target, version, enabled)
 						return json.Marshal(struct {
 							adminVersionStatus
 							Digest    string                           `json:"managed_image_digest"`
 							Artifacts map[string]switchManagedArtifact `json:"managed_artifacts"`
 						}{p, testMinecraftResetFingerprint, artifacts})
 					}
-					runAdminVersionStatus = func(_ context.Context, policy, selected, target, image string) ([]byte, error) {
+					runAdminVersionStatus = func(ctx context.Context, policy, selected, target, image string) ([]byte, error) {
 						if target == "" {
 							return json.Marshal(adminVersionStatus{Installed: version})
 						}
 						if policy != "pinned" || selected != version {
 							t.Fatal("planner changed the exact game version")
 						}
-						return resolver(target)
+						choice, _ := ctx.Value(switchCrossplayPreviewKey{}).(string)
+						return resolver(target, bedrock && choice != "java")
 					}
 					runSetupVersionPreview = func(_ context.Context, policy, selected, enabled, target string) ([]byte, error) {
-						return resolver(target)
+						return resolver(target, enabled == "yes")
 					}
 					for _, running := range []bool{false, true} {
 						state := "inactive"
@@ -150,23 +152,24 @@ func TestSwitchProductionTargetConfigurationMatrix(t *testing.T) {
 									t.Fatal(err)
 								}
 								blockedPlatform := bedrock && javaServerCrossplay(to) && switchCrossplayPlatform(from) != switchCrossplayPlatform(to)
-								if blockedPlatform {
-									if plan.Clone || plan.Convert || !strings.Contains(plan.Reason, "different managed cross-play artifacts") {
-										t.Fatalf("invalid cross-play platform review: %+v", plan)
-									}
-									return
+								if blockedPlatform && (plan.Convert || !plan.Clone || plan.CrossplayChoice != "java" || plan.Runtime.CrossplayEnabled) {
+									t.Fatalf("invalid cross-play platform review: %+v", plan)
 								}
 								if !plan.Clone || plan.Version != version || plan.Fingerprint == "" {
 									t.Fatalf("missing exact fixture plan: %+v", plan)
 								}
 								for _, clone := range []bool{true, false} {
-									// Render both target contracts even when content or world policy forbids Convert.
+									// Render eligible configurations; a Java-only clone cannot
+									// supply Convert's required cross-play setting.
+									if !clone && blockedPlatform {
+										continue
+									}
 									target, snapshot, err := f.backend.prepareSwitchTarget(ctx, source, plan, clone)
 									if err != nil {
 										t.Fatal(err)
 									}
 									c := target.Runtime
-									want := switchMatrixSelection(to, version, bedrock)
+									want := switchMatrixSelection(to, version, bedrock && !blockedPlatform)
 									if c.VersionPolicy != "pinned" || !c.PreserveContent || c.Software != to || c.Version != version ||
 										c.BedrockEnabled != want.CrossplayEnabled || c.LoaderVersion != want.LoaderVersion ||
 										c.PufferfishBuild != want.PufferfishBuild || c.ImageTag != want.ImageTag || c.ImageDigest != testMinecraftResetFingerprint {
@@ -411,15 +414,23 @@ func TestSwitchNeoForgeManagedArtifactsStayBoundToSourceLoader(t *testing.T) {
 	if err = os.WriteFile(ownership, raw, 0600); err != nil {
 		t.Fatal(err)
 	}
-	blocked, err := planMinecraftSwitch(ctx, source.Runtime.ID, "quilt")
-	if err != nil || blocked.Clone || blocked.Convert || len(blocked.Content) != len(artifacts) ||
-		!strings.Contains(blocked.Reason, "Java-only target loader") {
-		t.Fatalf("NeoForge-owned artifacts offered for launch on Quilt: %+v %v", blocked, err)
+	reviewed, err := planMinecraftSwitch(ctx, source.Runtime.ID, "quilt")
+	if err != nil || !reviewed.Clone || reviewed.Convert || !reviewed.RequiresExclusionConsent ||
+		reviewed.CrossplayChoice != "java" || len(reviewed.Content) != len(artifacts) {
+		t.Fatalf("Java-only Clone did not review NeoForge-owned exclusions: %+v %v", reviewed, err)
 	}
-	for _, artifact := range blocked.Content {
-		if artifact.Compatibility != "incompatible" || !strings.Contains(artifact.Reason, "source loader") {
+	for _, artifact := range reviewed.Content {
+		if artifact.Compatibility != "incompatible" || artifact.CloneDisposition != "exclude" || !strings.Contains(artifact.Reason, "Java-only clone") {
 			t.Fatalf("missing source ownership in review: %+v", artifact)
 		}
+	}
+	unavailable, err := planMinecraftSwitch(ctx, source.Runtime.ID, "quilt", "preserve")
+	if err != nil || unavailable.Clone || unavailable.Convert || unavailable.Fingerprint != "" {
+		t.Fatalf("unsupported Bedrock selection silently downgraded: %+v %v", unavailable, err)
+	}
+	excluded, _, err := f.backend.prepareSwitchTarget(ctx, source, reviewed, true)
+	if err != nil || !excluded.Runtime.SwitchCloneExclusions || !excluded.Runtime.PreserveContent || source.Runtime.SwitchCloneExclusions {
+		t.Fatal("reviewed exclusions were not made durable on just the clone", err)
 	}
 	if _, err = os.Lstat(filepath.Join(f.backend.root, clone.Runtime.ID, "crossplay-mods.json")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("planning published target mod ownership", err)
@@ -427,5 +438,78 @@ func TestSwitchNeoForgeManagedArtifactsStayBoundToSourceLoader(t *testing.T) {
 	current, err := os.ReadFile(ownership)
 	if err != nil || string(current) != string(raw) {
 		t.Fatal("planning changed private source ownership", err)
+	}
+}
+
+func TestSwitchCloneReviewsExactDestinationCrossplayArtifacts(t *testing.T) {
+	ctx := context.Background()
+	f := switchPlannerFixture(t, "paper")
+	source, err := f.backend.readRecord("jv-a1b2c3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := source
+	candidate.Runtime.BedrockEnabled = true
+	for candidate.Runtime.BedrockPort == 0 || candidate.Runtime.BedrockPort == f.configs[0].JavaPort || candidate.Runtime.BedrockPort == f.configs[1].JavaPort {
+		candidate.Runtime.BedrockPort = instanceTestPort(t)
+	}
+	records, err := f.backend.records()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.backend.apply(ctx, source, instanceReplaceRecord(records, candidate), f.snapshot); err != nil {
+		t.Fatal(err)
+	}
+	source, err = f.backend.readRecord("jv-a1b2c3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	switchWorldFixture(t, source.Storage.DataPath, "1.21.4", "world")
+	base := f.backend.command
+	f.backend.command = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if name == instanceRuntimeHelper && args[0] == "crossplay" {
+			return nil, nil
+		}
+		return base(ctx, name, args...)
+	}
+	digest := func(value string) string { return instanceHash([]byte(value)) }
+	artifacts := map[string]switchManagedArtifact{
+		"geyser":     {SHA256: digest("destination Geyser")},
+		"floodgate":  {SHA256: digest("destination Floodgate")},
+		"fabric-api": {SHA256: digest("destination Fabric API")},
+	}
+	runAdminVersionStatus = func(ctx context.Context, _, _, target, _ string) ([]byte, error) {
+		if target == "" {
+			return json.Marshal(adminVersionStatus{Installed: "1.21.4"})
+		}
+		choice, _ := ctx.Value(switchCrossplayPreviewKey{}).(string)
+		return json.Marshal(struct {
+			adminVersionStatus
+			Image     string                           `json:"managed_image_digest"`
+			Artifacts map[string]switchManagedArtifact `json:"managed_artifacts"`
+		}{switchMatrixSelection(target, "1.21.4", choice == "preserve"), testMinecraftResetFingerprint, artifacts})
+	}
+	java, err := planMinecraftSwitch(ctx, source.Runtime.ID, "fabric", "java")
+	if err != nil || !java.Clone || java.Convert || java.Runtime.CrossplayEnabled || len(java.CrossplayInstall) != 0 {
+		t.Fatalf("Java-only choice did not retain its own plan: %+v %v", java, err)
+	}
+	bedrock, err := planMinecraftSwitch(ctx, source.Runtime.ID, "fabric", "preserve")
+	if err != nil || !bedrock.Clone || bedrock.Convert || !bedrock.Runtime.CrossplayEnabled || bedrock.Fingerprint == java.Fingerprint ||
+		len(bedrock.CrossplayInstall) != 3 || bedrock.CrossplayInstall[0].Filename != "Geyser-Fabric.jar" {
+		t.Fatalf("missing reviewed destination stack: %+v %v", bedrock, err)
+	}
+	target, _, err := f.backend.prepareSwitchTarget(ctx, source, bedrock, true)
+	if err != nil || !target.Runtime.BedrockEnabled || target.Runtime.BedrockPort == source.Runtime.BedrockPort {
+		t.Fatalf("clone did not render reviewed independent cross-play: %+v %v", target.Runtime.Software, err)
+	}
+	artifacts["geyser"] = switchManagedArtifact{SHA256: digest("replacement after review")}
+	changed, err := planMinecraftSwitch(ctx, source.Runtime.ID, "fabric", "preserve")
+	if err != nil || !changed.Clone || changed.Fingerprint == bedrock.Fingerprint {
+		t.Fatalf("changed artifact did not invalidate review: %+v %v", changed, err)
+	}
+	delete(artifacts, "geyser")
+	unavailable, err := planMinecraftSwitch(ctx, source.Runtime.ID, "fabric", "preserve")
+	if err != nil || unavailable.Clone || unavailable.Fingerprint != "" || unavailable.CrossplayChoice != "preserve" {
+		t.Fatalf("unverified managed cross-play selection fell back: %+v %v", unavailable, err)
 	}
 }

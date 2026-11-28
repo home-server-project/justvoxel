@@ -130,6 +130,9 @@ func openDisabledPluginDirectory(dataPath string, create bool) (*os.File, error)
 		return nil, err
 	}
 	defer data.Close()
+	return openDisabledPluginDirectoryAt(data, create)
+}
+func openDisabledPluginDirectoryAt(data *os.File, create bool) (*os.File, error) {
 	owned, err := openPrivatePluginChild(data, ".justvoxel", create)
 	if err != nil {
 		return nil, err
@@ -535,14 +538,18 @@ func createPluginManageEvidence(store *operationStore, id string, tx pluginManag
 	return dir, nil
 }
 func openPluginOperationStaging(path, id string, create bool) (*os.File, error) {
-	if !validOperationID(id) {
-		return nil, errors.New("Invalid staging operation identity")
-	}
 	data, err := openPluginDataDirectory(path)
 	if err != nil {
 		return nil, err
 	}
 	defer data.Close()
+	return openPluginOperationStagingAt(data, id, create)
+}
+
+func openPluginOperationStagingAt(data *os.File, id string, create bool) (*os.File, error) {
+	if !validOperationID(id) {
+		return nil, errors.New("Invalid staging operation identity")
+	}
 	owned, err := openPrivatePluginChild(data, ".justvoxel", create)
 	if err != nil {
 		return nil, err

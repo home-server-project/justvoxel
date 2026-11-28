@@ -493,12 +493,14 @@ func (b *instanceRuntimeBackend) renderCandidate(ctx minecraftInstanceRuntimeCon
 	return files, nil
 }
 
+var errInstanceRuntimeStorageIdentity = instanceRuntimeFailure("Instance storage or mount identity validation failed.")
+
 func (b *instanceRuntimeBackend) storage(ctx context.Context, action string, record instanceRuntimeRecord) error {
 	c := record.Runtime
 	s := record.Storage
 	_, err := b.command(ctx, "nsenter", "--mount=/proc/1/ns/mnt", "--", instanceRuntimeHelper, action, c.ID, s.Root, s.DataPath, s.MountPoint, s.UUID, s.Source, strconv.FormatUint(uint64(c.UID), 10), strconv.FormatUint(uint64(c.GID), 10))
 	if err != nil {
-		return instanceRuntimeFailure("Instance storage or mount identity validation failed.")
+		return errInstanceRuntimeStorageIdentity
 	}
 	return nil
 }

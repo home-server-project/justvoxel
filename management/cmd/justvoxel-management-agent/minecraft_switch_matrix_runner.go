@@ -12,7 +12,14 @@ import (
 
 // The Management API authorizes this appliance-wide operation. No request
 // context, server selection, runtime options, or resource IDs enter the worker.
-func (s *server) startSwitchMatrixRun() (operationJournal, error) {
+func (s *server) startSwitchMatrixRun(selected ...string) (operationJournal, error) {
+	targeted := len(selected) != 0
+	if targeted {
+		if err := validateSwitchMatrixSelection(selected); err != nil {
+			return operationJournal{}, err
+		}
+		selected = slices.Clone(selected)
+	}
 	o := s.operations
 	if o == nil || !o.switchMatrixWorkerMu.TryLock() {
 		return operationJournal{}, errInstanceBusy
@@ -22,21 +29,21 @@ func (s *server) startSwitchMatrixRun() (operationJournal, error) {
 		o.switchMatrixWorkerMu.Unlock()
 		return j, err
 	}
-	if err = o.saveSwitchMatrixRun(switchMatrixRun{Schema: 1, ID: j.OperationID, State: "preparing"}); err != nil {
+	if err = o.saveSwitchMatrixRun(switchMatrixRun{Schema: 1, ID: j.OperationID, State: "preparing", Targeted: targeted}); err != nil {
 		o.holdSwitchMatrixRun(j.OperationID)
 		o.switchMatrixWorkerMu.Unlock()
 		return j, err
 	}
 	go func() {
 		defer o.switchMatrixWorkerMu.Unlock()
-		if err := s.runSwitchMatrix(j); err != nil {
+		if err := s.runSwitchMatrix(j, selected...); err != nil {
 			o.holdSwitchMatrixRun(j.OperationID)
 		}
 	}()
 	return j, nil
 }
 
-func (s *server) runSwitchMatrix(j operationJournal) error {
+func (s *server) runSwitchMatrix(j operationJournal, selected ...string) error {
 	o := s.operations
 	id := j.OperationID
 	if _, err := o.transition(id, operationValidating, "manifest", "Discovering exact Switch matrix releases."); err != nil {
@@ -45,7 +52,12 @@ func (s *server) runSwitchMatrix(j operationJournal) error {
 	discovery, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
 	defer cancel()
 	catalog, catalogIssue := discoverSwitchMatrixVersions(discovery)
-	cases := buildSwitchMatrixCases(discovery, catalog, resolveSwitchMatrixRelease, verifySwitchMatrixCrossplaySelection)
+	cases := buildSwitchMatrixCases(discovery, catalog, resolveSwitchMatrixRelease, verifySwitchMatrixCrossplaySelection, selected...)
+	if len(selected) > 0 {
+		cases = orderTargetedSwitchMatrixCases(selected, cases)
+	} else {
+		cases = addSwitchMatrixCoverage(cases)
+	}
 	bindSwitchMatrixImages(discovery, cases)
 	cancel()
 
@@ -62,6 +74,8 @@ func (s *server) runSwitchMatrix(j operationJournal) error {
 	}
 	return o.runSwitchMatrixCases(id, func(c switchMatrixCase) (switchMatrixCaseResult, error) {
 		return s.executeSwitchMatrixCase(id, c)
+	}, func() (operationJournal, error) {
+		return s.recoverSwitchMatrixClosure(id, true)
 	})
 }
 
@@ -69,24 +83,41 @@ type switchMatrixCaseWorker func(switchMatrixCase) (switchMatrixCaseResult, erro
 
 var errSwitchMatrixStopAdmission = errors.New("Switch matrix cancellation requested")
 
-func (o *operationStore) runSwitchMatrixCases(id string, execute switchMatrixCaseWorker) error {
+func (o *operationStore) runSwitchMatrixCases(id string, execute switchMatrixCaseWorker, recoverClosure ...func() (operationJournal, error)) error {
 	manifest, err := o.readSwitchMatrixRun(id)
 	if err != nil {
 		return err
 	}
-	smoke, haltReason := selectSwitchMatrixSmoke(manifest)
+	smoke, haltReason := -1, ""
 	var order []int
-	if smoke >= 0 {
-		if err := o.updateSwitchMatrixRun(id, func(r *switchMatrixRun) error {
-			r.SmokeCase = r.Cases[smoke].ID
-			return nil
-		}); err != nil {
-			return err
-		}
-		order = append(order, smoke)
+	if manifest.Targeted {
 		for i, result := range manifest.Results {
-			if i != smoke && result.Outcome == matrixPending {
-				order = append(order, i)
+			if result.Outcome != matrixPending {
+				haltReason = "targeted_selection_unavailable"
+				order = nil
+				break
+			}
+			order = append(order, i)
+		}
+	} else {
+		smoke, haltReason = selectSwitchMatrixSmoke(manifest)
+		if smoke >= 0 {
+			if err := o.updateSwitchMatrixRun(id, func(r *switchMatrixRun) error {
+				r.SmokeCase = r.Cases[smoke].ID
+				return nil
+			}); err != nil {
+				return err
+			}
+			order = append(order, smoke)
+			for i, result := range manifest.Results {
+				if manifest.Cases[i].Profile != "" && result.Outcome == matrixPending {
+					order = append(order, i)
+				}
+			}
+			for i, result := range manifest.Results {
+				if i != smoke && manifest.Cases[i].Profile == "" && result.Outcome == matrixPending {
+					order = append(order, i)
+				}
 			}
 		}
 	}
@@ -125,17 +156,39 @@ func (o *operationStore) runSwitchMatrixCases(id string, execute switchMatrixCas
 		case switchMatrixCommonFixtureFailure(result):
 			haltReason = "common_fixture_infrastructure_failed"
 		}
+		_, retryable := unresolved.(*switchMatrixRetryableClosure)
+		autoRecover := len(recoverClosure) == 1 && retryable && !switchMatrixCommonFixtureFailure(result)
 		result.StartedAt, result.DurationMS = started, max(0, o.now().Sub(started).Milliseconds())
 		err = o.updateSwitchMatrixRun(id, func(r *switchMatrixRun) error {
 			r.Results[i] = result
 			r.HaltReason = haltReason
-			if unresolved != nil {
+			if unresolved != nil && !autoRecover {
 				r.State = "needs_attention"
 			}
 			return nil
 		})
-		if err != nil || unresolved != nil {
+		if err != nil {
 			return errors.Join(err, unresolved)
+		}
+		if autoRecover {
+			// The first failure is already durable. Retry closure once under
+			// the same worker and maintenance reservation.
+			child, recoveryErr := recoverClosure[0]()
+			result.recordClosureRecovery(child, recoveryErr)
+			result.DurationMS = max(0, o.now().Sub(started).Milliseconds())
+			if err = o.updateSwitchMatrixRun(id, func(r *switchMatrixRun) error {
+				r.Results[i] = result
+				if recoveryErr != nil {
+					r.State = "needs_attention"
+				}
+				return nil
+			}); err != nil {
+				return errors.Join(err, recoveryErr)
+			}
+			unresolved = recoveryErr
+		}
+		if unresolved != nil {
+			return unresolved
 		}
 		if haltReason != "" {
 			break
@@ -169,6 +222,12 @@ func (o *operationStore) runSwitchMatrixCases(id string, execute switchMatrixCas
 	if halted {
 		stage, status = "halted", "Switch matrix stopped early. All test resources were retired. See the Migration log for the reason."
 	}
+	if manifest.Targeted {
+		status = "Targeted Switch test closed. See the Migration log for the selected case results."
+		if halted {
+			status = "Targeted Switch test stopped early. All test resources were retired. See the Migration log for the reason."
+		}
+	}
 	_, err = o.transition(id, operationSucceeded, stage, status)
 	return err
 }
@@ -180,7 +239,7 @@ func selectSwitchMatrixSmoke(r switchMatrixRun) (int, string) {
 	reason := "smoke_case_missing"
 	for i, c := range r.Cases {
 		if c.Source != "vanilla" || c.Target != "purpur" || c.Action != "clone" ||
-			c.Family != switchMatrixModern || c.Crossplay || c.TargetCrossplay {
+			c.Family != switchMatrixModern || c.Crossplay || c.TargetCrossplay || c.Profile != "" {
 			continue
 		}
 		switch {
@@ -188,6 +247,8 @@ func selectSwitchMatrixSmoke(r switchMatrixRun) (int, string) {
 			reason = "smoke_modern_catalog_empty"
 		case c.ReleaseReason == "exact_release_unsupported":
 			reason = "smoke_exact_release_unsupported"
+		case c.ReleaseReason == "exact_release_unavailable":
+			reason = "smoke_exact_release_unavailable"
 		case c.ReleaseReason == "exact_release_unverified":
 			reason = "smoke_exact_release_unverified"
 		case c.Reason == "runtime_image_unverified":
@@ -215,6 +276,17 @@ func switchMatrixSmokeReleaseMatches(release switchMatrixRelease, version string
 func switchMatrixCommonFixtureFailure(result switchMatrixCaseResult) bool {
 	if result.Outcome != matrixFailed {
 		return false
+	}
+	switch result.Stage {
+	case "ownership", "source_ownership", "target_ownership", "original_ownership",
+		"switch_ownership", "switch_fixture_binding", "switch_journal_finalization":
+		return true
+	}
+	if result.Reason == "switch_journal_persistence_failed" {
+		return true
+	}
+	if result.Stage == "resource_admission" && result.Reason == "fixture_capacity_unverified" {
+		return true
 	}
 	switch switchMatrixFixtureStage(result.Stage) {
 	case matrixFixtureConfiguration, matrixFixtureCredential, matrixFixtureStorage,
@@ -250,12 +322,7 @@ func (s *server) recoverSwitchMatrixRun(id string) error {
 	if err != nil {
 		return err
 	}
-	cleanup, cancel := context.WithTimeout(context.Background(), 35*time.Minute)
-	defer cancel()
-	child, cleanupErr := s.closeSwitchMatrixCase(cleanup, id, 0)
-	if cleanupErr == nil {
-		cleanupErr = o.checkSwitchMatrixRunClosure(id)
-	}
+	child, cleanupErr := s.recoverSwitchMatrixClosure(id, false)
 	if err = o.updateSwitchMatrixRun(id, func(run *switchMatrixRun) error {
 		for i := len(run.Results) - 1; i >= 0; i-- {
 			result := &run.Results[i]
@@ -267,19 +334,7 @@ func (s *server) recoverSwitchMatrixRun(id string) error {
 				result.Outcome, result.Reason = matrixInterrupted, "worker_interrupted"
 				result.DurationMS = max(0, o.now().Sub(result.StartedAt).Milliseconds())
 			}
-			if child.OperationID != "" {
-				result.ChildOperation = child.OperationID
-				result.Recovery = "unresolved"
-				if child.State == operationResolved {
-					result.Recovery = "verified"
-				}
-			}
-			result.Cleanup = "verified"
-			result.ClosureReason = ""
-			if cleanupErr != nil {
-				result.Cleanup = "unresolved"
-				result.ClosureReason = switchMatrixClosureDiagnostic(child, cleanupErr)
-			}
+			result.recordClosureRecovery(child, cleanupErr)
 			break
 		}
 		if cleanupErr == nil {
@@ -295,6 +350,38 @@ func (s *server) recoverSwitchMatrixRun(id string) error {
 	return err
 }
 
+func (s *server) recoverSwitchMatrixClosure(id string, continuing bool) (operationJournal, error) {
+	cleanup, cancel := context.WithTimeout(context.Background(), 35*time.Minute)
+	defer cancel()
+	child, err := s.closeSwitchMatrixCase(cleanup, id, 0)
+	if err != nil || !continuing {
+		return child, err
+	}
+	lock, err := acquirePluginMaintenanceLock()
+	if err != nil {
+		return child, err
+	}
+	err = s.operations.checkSwitchMatrixRunClosure(id)
+	if err == nil {
+		err = instanceRuntimes.requireNoInstanceRestore()
+	}
+	return child, errors.Join(err, lock.Close())
+}
+
+func (r *switchMatrixCaseResult) recordClosureRecovery(child operationJournal, err error) {
+	if child.OperationID != "" {
+		r.ChildOperation, r.Recovery = child.OperationID, "unresolved"
+		if child.State == operationResolved {
+			r.Recovery = "verified"
+		}
+	}
+	r.Cleanup, r.ClosureRecovery, r.RecoveryReason = "verified", "verified", ""
+	if err != nil {
+		r.Cleanup, r.ClosureRecovery = "unresolved", "unresolved"
+		r.RecoveryReason = switchMatrixClosureDiagnostic(child, err)
+	}
+}
+
 func (o *operationStore) switchMatrixCurrentChild(parent string) operationJournal {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -307,12 +394,18 @@ func (o *operationStore) switchMatrixCurrentChild(parent string) operationJourna
 }
 
 func (o *operationStore) checkSwitchMatrixRunClosure(id string) error {
+	return o.checkSwitchMatrixClosureFrom(id, 0)
+}
+
+func (o *operationStore) checkSwitchMatrixClosureFrom(id string, offset int) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	j := o.operations[id]
-	if o.currentMinecraftResetID != id || j.OperationType != operationTypeSwitchMatrix {
+	if o.currentMinecraftResetID != id || j.OperationType != operationTypeSwitchMatrix ||
+		o.switchMatrixExclusion == nil || offset < 0 || offset > len(j.MatrixFixtures) {
 		return errInstanceRecovery
 	}
+	j.MatrixFixtures = j.MatrixFixtures[offset:]
 	return o.verifySwitchMatrixClosure(j)
 }
 
@@ -367,5 +460,5 @@ func (s *server) closeSwitchMatrixCase(ctx context.Context, id string, offset in
 			return child, err
 		}
 	}
-	return child, nil
+	return child, o.checkSwitchMatrixClosureFrom(id, offset)
 }

@@ -10,29 +10,43 @@ import (
 )
 
 type SwitchContent struct {
-	Name          string `json:"name"`
-	Filename      string `json:"filename"`
-	Compatibility string `json:"compatibility"`
-	Reason        string `json:"reason"`
+	Directory        string `json:"directory"`
+	CloneDisposition string `json:"clone_disposition"`
+	Name             string `json:"name"`
+	Filename         string `json:"filename"`
+	Compatibility    string `json:"compatibility"`
+	Reason           string `json:"reason"`
+}
+type SwitchCrossplayInstall struct {
+	Directory string `json:"directory"`
+	Filename  string `json:"filename"`
 }
 type MinecraftSwitchPlan struct {
-	InstanceID  string          `json:"instance_id"`
-	Current     string          `json:"current"`
-	Target      string          `json:"target"`
-	Version     string          `json:"version"`
-	Convert     bool            `json:"convert"`
-	Clone       bool            `json:"clone"`
-	Reason      string          `json:"reason"`
-	Content     []SwitchContent `json:"content"`
-	Warnings    []string        `json:"warnings"`
-	Fingerprint string          `json:"plan_fingerprint"`
+	CrossplayChoice          string                   `json:"crossplay_choice,omitempty"`
+	CrossplayOptions         []string                 `json:"crossplay_options,omitempty"`
+	CrossplayInstall         []SwitchCrossplayInstall `json:"crossplay_install,omitempty"`
+	RequiresExclusionConsent bool                     `json:"requires_exclusion_consent"`
+	ConvertReason            string                   `json:"convert_reason,omitempty"`
+	InstanceID               string                   `json:"instance_id"`
+	Current                  string                   `json:"current"`
+	Target                   string                   `json:"target"`
+	Version                  string                   `json:"version"`
+	SourceUninitialized      bool                     `json:"source_uninitialized,omitempty"`
+	Convert                  bool                     `json:"convert"`
+	Clone                    bool                     `json:"clone"`
+	Reason                   string                   `json:"reason"`
+	Content                  []SwitchContent          `json:"content"`
+	Warnings                 []string                 `json:"warnings"`
+	Fingerprint              string                   `json:"plan_fingerprint"`
 }
 type MinecraftSwitchRequest struct {
-	Target      string `json:"target"`
-	Action      string `json:"action"`
-	Fingerprint string `json:"plan_fingerprint"`
-	Confirm     bool   `json:"confirm"`
-	OperationID string `json:"operation_id,omitempty"`
+	Crossplay        string `json:"crossplay,omitempty"`
+	AcceptExclusions bool   `json:"accept_exclusions,omitempty"`
+	Target           string `json:"target"`
+	Action           string `json:"action"`
+	Fingerprint      string `json:"plan_fingerprint"`
+	Confirm          bool   `json:"confirm"`
+	OperationID      string `json:"operation_id,omitempty"`
 }
 type MinecraftSwitchOperation struct {
 	PersistentOperationResponse
@@ -81,9 +95,9 @@ func (c *Client) minecraftSwitch(ctx context.Context, session, id, action string
 	}
 	return json.NewDecoder(response.Body).Decode(out)
 }
-func (c *Client) MinecraftInstanceSwitchPlan(ctx context.Context, session, id, target string) (MinecraftSwitchPlan, error) {
+func (c *Client) MinecraftInstanceSwitchPlan(ctx context.Context, session, id, target, crossplay string) (MinecraftSwitchPlan, error) {
 	var out MinecraftSwitchPlan
-	err := c.minecraftSwitch(ctx, session, id, "plan?target="+url.QueryEscape(target), nil, &out)
+	err := c.minecraftSwitch(ctx, session, id, "plan?"+url.Values{"target": {target}, "crossplay": {crossplay}}.Encode(), nil, &out)
 	return out, err
 }
 func (c *Client) MinecraftInstanceSwitchApply(ctx context.Context, session, id string, request MinecraftSwitchRequest) (MinecraftSwitchOperation, error) {

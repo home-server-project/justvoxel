@@ -2,6 +2,16 @@ package main
 
 import "errors"
 
+// Transient shutdown and idle-job observations can be retried before any
+// destructive retirement step or journal write.
+type switchMatrixRetryableClosure struct {
+	reason string
+	cause  error
+}
+
+func (e *switchMatrixRetryableClosure) Error() string { return e.reason }
+func (e *switchMatrixRetryableClosure) Unwrap() error { return e.cause }
+
 type switchMatrixFixtureStage string
 
 const (

@@ -3,9 +3,10 @@
 set -Eeuo pipefail
 umask 0077
 fail() { echo 'ERROR: independent restore validation or storage operation failed.' >&2; exit 1; }
-[[ $EUID == 0 && ( $# == 5 || $# == 6 ) && $2 =~ ^jv-[a-z0-9]{6,12}$ ]] || fail
+[[ $EUID == 0 && ( $# == 5 || $# == 6 || $# == 7 ) && $2 =~ ^jv-[a-z0-9]{6,12}$ ]] || fail
 action=$1 id=$2 archive=$3 fingerprint=$4 running=$5
 clone_source=${6:-}
+initialization=${7:-}
 refuse_clone() {
     if [[ -n ${clone_source} ]]; then printf '{"error":"%s"}\n' "$1"; fi
     fail
@@ -14,21 +15,38 @@ if [[ -n ${clone_source} ]]; then
     [[ ${clone_source} =~ ^jv-[a-z0-9]{6,12}$ && ${clone_source} != "${id}" && ( ${action} == plan || ${action} == prepare ) && ${running} == false ]] || refuse_clone invalid_clone_identity
     /usr/libexec/justvoxel/mjust/validate-instance-runtime-commit "${clone_source}" >/dev/null 2>&1 || refuse_clone invalid_clone_identity
 fi
-case ${action} in plan|prepare|activate|rollback|shutdown|verifying|rollback-verifying|completed|rolled-back|recovery-required) ;; *) fail ;; esac
+if (( $# == 7 )); then
+    [[ -n ${clone_source} && ${initialization} =~ ^[a-f0-9]{64}$ ]] || refuse_clone invalid_clone_identity
+fi
+case ${action} in plan|prepare|activate|rollback|shutdown|verifying|rollback-verifying|completed|rolled-back|recovery-required|switch-initial-data) ;; *) fail ;; esac
+if [[ ${action} == switch-initial-data ]]; then
+    [[ $# == 5 && -z ${archive} && -z ${fingerprint} && ${running} == false ]] || fail
+    /usr/libexec/justvoxel/mjust/validate-instance-runtime-commit "${id}" >/dev/null 2>&1 || fail
+fi
 [[ ${running} == true || ${running} == false ]] || fail
 # Recovery must work with backup storage disconnected and even when data has
 # been moved aside. restore-validate checks mount and protected parents without
 # imposing a provisioning free-space requirement on recovery.
-mapfile -t fields < <(jq -er '[.runtime.id,.storage.root,.storage.data_path,.storage.mount_point,.storage.uuid,.storage.source,(.runtime.uid|tostring),(.runtime.gid|tostring)] | .[]' "/etc/justvoxel/instances/${id}/config.json")
-[[ ${#fields[@]} == 8 && ${fields[0]} == "${id}" ]] || refuse_clone invalid_clone_identity
-/usr/libexec/justvoxel/mjust/instance-runtime-prerequisites restore-validate "${fields[@]}" >/dev/null 2>&1 || refuse_clone invalid_clone_identity
+validate_storage() {
+    local selected=$1 check=$2
+    local -a fields
+    mapfile -t fields < <(jq -er '[.runtime.id,.storage.root,.storage.data_path,.storage.mount_point,.storage.uuid,.storage.source,(.runtime.uid|tostring),(.runtime.gid|tostring)] | .[]' "/etc/justvoxel/instances/${selected}/config.json")
+    [[ ${#fields[@]} == 8 && ${fields[0]} == "${selected}" ]] || return 1
+    /usr/libexec/justvoxel/mjust/instance-runtime-prerequisites "${check}" "${fields[@]}" >/dev/null 2>&1
+}
+validate_storage "${id}" restore-validate || refuse_clone invalid_clone_identity
+if [[ ${action} == switch-initial-data ]]; then
+    validate_storage "${id}" validate || fail
+elif [[ -n ${initialization} ]]; then
+    validate_storage "${clone_source}" validate || refuse_clone invalid_initialization_evidence
+fi
 if [[ ${action} == plan || ${action} == prepare ]]; then
     /usr/libexec/justvoxel/mjust/validate-instance-runtime-commit "${id}" >/dev/null 2>&1 || refuse_clone invalid_clone_identity
     source /usr/libexec/justvoxel/mjust/backup-common.sh
     jv_instance_backup_load_target "${clone_source:-${id}}" || refuse_clone invalid_metadata_binding
 fi
-python3 - "${action}" "${id}" "${archive}" "${fingerprint}" "${running}" "${clone_source}" <<'PY'
-import ctypes, datetime, gzip, hashlib, io, json, os, re, secrets, shutil, stat, struct, sys, tarfile, unicodedata, zlib
+python3 - "${action}" "${id}" "${archive}" "${fingerprint}" "${running}" "${clone_source}" "${initialization}" <<'PY'
+import ctypes, datetime, grp, gzip, hashlib, io, json, os, re, secrets, shutil, stat, struct, sys, tarfile, unicodedata, zlib
 
 CONFIG_ROOT = '/etc/justvoxel/instances'
 REGISTRY = '/var/lib/justvoxel/instances'
@@ -51,6 +69,167 @@ TERMINAL = ('completed','rolled_back')
 
 class Refusal(Exception):
     pass
+
+try:
+    MANAGEMENT_GID = grp.getgrnam('justvoxel-web').gr_gid
+except KeyError:
+    MANAGEMENT_GID = None
+
+OPERATION = re.compile(r'[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}')
+
+def jar_name(name):
+    return 4 < len(name.encode()) <= 200 and name.lower().endswith('.jar')
+
+def managed_entry(parts, is_dir):
+    # Modes used by the Agent for private plugin state and placed artifacts.
+    if parts[1:2] == ['.justvoxel']:
+        local = parts[2:]
+        if is_dir and local in ([], ['disabled-plugins'], ['plugin-transactions']):
+            return 0o700
+        if not is_dir and local in (['plugins.json'], ['plugin-addons.json']):
+            return 0o600
+        if len(local) == 2 and local[0] == 'disabled-plugins' and not is_dir and jar_name(local[1]):
+            return 0o644
+        if len(local) >= 2 and local[0] == 'plugin-transactions' and OPERATION.fullmatch(local[1]):
+            if is_dir and (len(local) == 2 or len(local) == 3 and local[2] in ('plugins', 'mods')):
+                return 0o700
+            if not is_dir and jar_name(local[-1]) and (len(local) == 3 or len(local) == 4 and local[2] in ('plugins', 'mods')):
+                return 0o644
+    if len(parts) == 3 and parts[1] in ('plugins', 'mods') and not is_dir and jar_name(parts[2]):
+        return 0o644
+    return None
+
+def archive_ownership(parts, is_dir, uid, gid, mode):
+    if mode & ~0o777 or mode & 0o002:
+        raise Refusal('invalid_archive_mode')
+    managed_mode = managed_entry(parts, is_dir)
+    private = parts[1:2] == ['.justvoxel']
+    if gid == MANAGEMENT_GID and uid == 0 and managed_mode is not None and mode == managed_mode:
+        return (uid, gid, mode)
+    if gid not in (0, runtime['gid']):
+        if gid == MANAGEMENT_GID and uid == 0 and managed_mode is not None:
+            raise Refusal('invalid_archive_mode')
+        raise Refusal('invalid_archive_ownership')
+    if uid not in (0, runtime['uid']):
+        raise Refusal('invalid_archive_ownership')
+    if private and uid == 0 and managed_mode is not None and mode == managed_mode:
+        return (uid, gid, mode)
+    if clone_source and private:
+        # Existing Clone archives used root or runtime group IDs.
+        return (uid, gid, mode & 0o770)
+    return None
+
+INITIAL_FILES = {'eula.txt', '.rcon-cli.env', '.rcon-cli.yaml'}
+INITIAL_RCON_FILES = {'data/.rcon-cli.env', 'data/.rcon-cli.yaml'}
+INITIAL_CONFIG_EXTENSIONS = {'.cfg', '.conf', '.json', '.properties', '.toml', '.txt', '.yaml', '.yml'}
+
+def initial_entry(parts, is_dir):
+    if len(parts) == 1:
+        return is_dir
+    if len(parts) == 2 and parts[1] in INITIAL_FILES:
+        return not is_dir
+    if parts[1] == '.justvoxel':
+        return managed_entry(parts, is_dir) is not None
+    if parts[1] not in ('plugins', 'mods', 'config'):
+        return False
+    if len(parts) == 2:
+        return is_dir
+    # Switch reviews executable JARs only in the direct plugin/mod folders.
+    if not is_dir and len(parts) == 3 and parts[1] in ('plugins', 'mods') and jar_name(parts[2]):
+        return True
+    if any(part.lower() in ('logs', 'crash-reports', 'world', 'worlds', 'region', 'dimensions', 'playerdata', 'libraries', 'versions', 'cache')
+           or part.lower().endswith(('_nether', '_the_end', '.jar')) for part in parts[2:]):
+        return False
+    return is_dir or os.path.splitext(parts[-1])[1].lower() in INITIAL_CONFIG_EXTENSIONS
+
+def entry_path(parts):
+    path = '/'.join(parts)
+    return (len(path.encode()) <= 4096 and all(len(p.encode()) <= 255 and p not in ('', '.', '..') for p in parts)
+            and '\\' not in path and not any(ord(c) < 32 or ord(c) == 127 for c in path))
+
+def reject_data_mounts(path):
+    with open('/proc/self/mountinfo') as mountinfo:
+        for line in mountinfo:
+            target = line.split()[4]
+            if target == path or target.startswith(path+'/'): raise ValueError('nested mount')
+
+def hash_initial_file(source, size, output=None):
+    h = hashlib.sha256()
+    remaining = size
+    while remaining:
+        block = source.read(min(remaining, 1024*1024))
+        if not block: raise Refusal('invalid_initialization_evidence')
+        h.update(block)
+        if output is not None: output.write(block)
+        remaining -= len(block)
+    if source.read(1): raise Refusal('invalid_initialization_evidence')
+    return h.hexdigest()
+
+def initial_identity(st):
+    return (st.st_dev, st.st_ino, st.st_ctime_ns, st.st_mtime_ns)
+
+def initial_data(owner, raw):
+    c, storage = owner['runtime'], owner['storage']
+    path = storage['root']+'/minecraft-instances/'+c['id']+'/data'
+    if (storage['data_path'] != path or c['version_policy'] != 'pinned'
+        or not re.fullmatch(r'[0-9]+\.[0-9]+(?:\.[0-9]+)?', c['version'])
+        or c['software'] in ('bedrock', 'spigot') or owner.get('network_member', False)):
+        raise Refusal('invalid_initialization_evidence')
+    reject_data_mounts(path)
+    parent_fd = directory(os.path.dirname(path))
+    try:
+        data_fd = checked_dir(parent_fd, 'data')
+        try:
+            root_stat = os.fstat(data_fd)
+            if (root_stat.st_uid, root_stat.st_gid) != (c['uid'], c['gid']):
+                raise Refusal('invalid_initialization_evidence')
+            inventory, identities = {}, {}
+            total = 0
+            def traversal_error(error): raise error
+            for folder, dirs, files, fd in os.fwalk('.', dir_fd=data_fd, onerror=traversal_error):
+                parts = ['data'] + ([] if folder == '.' else folder[2:].split('/'))
+                if folder != '.' and identities.get('/'.join(parts)) != initial_identity(os.fstat(fd)):
+                    raise Refusal('invalid_initialization_evidence')
+                for name in (['.'] if folder == '.' else []) + dirs + files:
+                    current = parts if name == '.' else parts+[name]
+                    st = os.stat(name, dir_fd=fd, follow_symlinks=False)
+                    is_dir = stat.S_ISDIR(st.st_mode)
+                    mode = stat.S_IMODE(st.st_mode)
+                    if (len(inventory) >= MAX_ENTRIES or len(current) > 16 or not entry_path(current)
+                        or st.st_dev != root_stat.st_dev or not initial_entry(current, is_dir)
+                        or not (is_dir or stat.S_ISREG(st.st_mode) and st.st_nlink == 1)):
+                        raise Refusal('invalid_initialization_evidence')
+                    ownership = archive_ownership(current, is_dir, st.st_uid, st.st_gid, mode)
+                    if current[1:2] == ['.justvoxel'] and is_dir and (ownership is None or ownership[0] != 0 or ownership[2] != 0o700):
+                        raise Refusal('invalid_initialization_evidence')
+                    entry = '/'.join(current)
+                    identities[entry] = initial_identity(st)
+                    value = None
+                    if not is_dir:
+                        total += st.st_size
+                        if total > MAX_BYTES or len(current) == 2 and not 0 < st.st_size <= 65536:
+                            raise Refusal('invalid_initialization_evidence')
+                        handle = os.open(name, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW, dir_fd=fd)
+                        with os.fdopen(handle, 'rb') as source:
+                            if initial_identity(os.fstat(source.fileno())) != identities[entry]:
+                                raise Refusal('invalid_initialization_evidence')
+                            if entry == 'data/eula.txt':
+                                values = re.findall(rb'^eula=(true|false)\r?$', source.read(), re.M)
+                                if len(values) != 1: raise Refusal('invalid_initialization_evidence')
+                                source.seek(0)
+                            value = hash_initial_file(source, st.st_size)
+                            if os.fstat(source.fileno()).st_ctime_ns != st.st_ctime_ns:
+                                raise Refusal('invalid_initialization_evidence')
+                    inventory[entry] = (st.st_uid, st.st_gid, mode, value)
+            if (not all('data/'+name in inventory for name in INITIAL_FILES)
+                or os.fstat(data_fd).st_ctime_ns != root_stat.st_ctime_ns
+                or os.stat('data', dir_fd=parent_fd, follow_symlinks=False).st_ino != root_stat.st_ino):
+                raise Refusal('invalid_initialization_evidence')
+            return inventory, digest(encoded([digest(raw), inode(parent_fd), inventory, identities]))
+        finally:
+            os.close(data_fd)
+    finally:
+        os.close(parent_fd)
 
 def directory(path):
     if not path.startswith('/') or os.path.normpath(path) != path:
@@ -105,8 +284,12 @@ def stage(j, state):
 def open_archive(fd, name):
     f = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
     s = os.fstat(f)
-    if not stat.S_ISREG(s.st_mode) or s.st_nlink != 1 or s.st_uid != 0 or stat.S_IMODE(s.st_mode) != 0o600:
-        os.close(f); raise ValueError('archive ownership')
+    if not stat.S_ISREG(s.st_mode) or s.st_nlink != 1:
+        os.close(f); raise Refusal('invalid_archive_entries')
+    if s.st_uid != 0:
+        os.close(f); raise Refusal('invalid_archive_ownership')
+    if stat.S_IMODE(s.st_mode) != 0o600:
+        os.close(f); raise Refusal('invalid_archive_mode')
     return os.fdopen(f,'rb')
 
 class BoundedGzip:
@@ -174,15 +357,17 @@ def world_version(source):
     if type(data['DataVersion']) != int or data['DataVersion'] <= 0 or version['Id'] != data['DataVersion'] or version['Name'] != runtime['version'] or version.get('Snapshot',0) != 0:
         raise Refusal('incompatible_software_version')
 
-def inspect_archive(raw, m, destination=None):
+def inspect_archive(raw, m, destination=None, initial_inventory=None):
     raw.seek(0)
     h = hashlib.sha256(); size = 0
     while block := raw.read(1024*1024): h.update(block); size += len(block)
-    if size != m['size'] or h.hexdigest() != m['sha256']: raise ValueError('sha256')
+    if size != m['size'] or h.hexdigest() != m['sha256']: raise Refusal('invalid_archive_checksum')
     raw.seek(0)
     stream = BoundedGzip(raw)
     seen = {}; parents = set(); total = 0; count = 0; worlds = 0
-    clone_private_ownership = {}
+    preserved_ownership = {}
+    private_parents = set()
+    initial_seen = set()
     # Streaming parsing bounds both tar headers and gzip output. No extractall,
     # archive links, supplied ownership, or unchecked host-path concatenation.
     with tarfile.open(fileobj=stream, mode='r|') as tf:
@@ -190,15 +375,14 @@ def inspect_archive(raw, m, destination=None):
             count += 1
             path = member.name
             parts = path.split('/')
-            if count > MAX_ENTRIES or len(path.encode()) > 4096 or any(len(p.encode()) > 255 for p in parts): raise ValueError('entry limit')
-            if parts[0] != 'data' or any(p in ('','.', '..') for p in parts) or '\\' in path or any(ord(c)<32 or ord(c)==127 for c in path): raise ValueError('path')
+            if count > MAX_ENTRIES or parts[0] != 'data' or not entry_path(parts): raise ValueError('archive entry path or limit')
             if path in seen or not (member.isdir() or member.isfile()) or member.linkname or member.sparse is not None: raise ValueError('entry type or duplicate')
-            if member.uid not in (0, runtime['uid']) or member.gid not in (0, runtime['gid']) or member.mode & ~0o777 or member.mode & 0o002: raise ValueError('ownership or mode')
+            ownership = archive_ownership(parts, member.isdir(), member.uid, member.gid, member.mode)
             if member.size < 0 or (member.isdir() and member.size): raise ValueError('size')
-            if clone_source and len(parts)>1 and parts[1]=='.justvoxel':
-                # Preserve existing root-private Plugins & Mods ownership evidence
-                # on the new clone; normal Restore keeps its deployed behavior.
-                clone_private_ownership[path]=(member.uid,member.gid,member.mode & 0o770)
+            if ownership is not None:
+                preserved_ownership[path] = ownership
+                if member.gid not in (0, runtime['gid']) and parts[1:2] == ['.justvoxel']:
+                    private_parents.update('/'.join(parts[:n]) for n in range(2, len(parts)))
             for n in range(1,len(parts)):
                 if seen.get('/'.join(parts[:n])) == 'file': raise ValueError('conflict')
             if member.isfile() and path in parents: raise ValueError('conflict')
@@ -206,27 +390,44 @@ def inspect_archive(raw, m, destination=None):
             seen[path] = 'directory' if member.isdir() else 'file'
             total += member.size
             if total > MAX_BYTES: raise ValueError('expanded limit')
+            if initial_inventory is not None:
+                expected = initial_inventory.get(path)
+                if expected is None or expected[:3] != (member.uid, member.gid, member.mode) or member.isdir() != (expected[3] is None):
+                    raise Refusal('invalid_initialization_evidence')
+                initial_seen.add(path)
             content = None
             if member.isfile() and len(parts) >= 3 and parts[-1] == 'level.dat':
-                if member.size > 16 * 1024**2: raise ValueError('world metadata limit')
-                with tf.extractfile(member) as source: content = source.read(16 * 1024**2 + 1)
-                if runtime['software'] == 'bedrock':
-                    # Bedrock level.dat has a little-endian header, never Java gzip NBT.
-                    if len(parts) != 4 or parts[1] != 'worlds' or len(content) < 8: raise ValueError('bedrock world metadata')
-                    header, length = struct.unpack('<II', content[:8])
-                    if not 1 <= header <= 10 or length != len(content)-8 or not length: raise ValueError('bedrock world metadata')
-                else:
-                    world_version(io.BytesIO(content))
+                try:
+                    if member.size > 16 * 1024**2: raise ValueError('world metadata limit')
+                    with tf.extractfile(member) as source: content = source.read(16 * 1024**2 + 1)
+                    if runtime['software'] == 'bedrock':
+                        # Bedrock level.dat has a little-endian header, never Java gzip NBT.
+                        if len(parts) != 4 or parts[1] != 'worlds' or len(content) < 8: raise ValueError('bedrock world metadata')
+                        header, length = struct.unpack('<II', content[:8])
+                        if not 1 <= header <= 10 or length != len(content)-8 or not length: raise ValueError('bedrock world metadata')
+                    else:
+                        world_version(io.BytesIO(content))
+                except (ValueError, TypeError, KeyError, OSError, EOFError, struct.error, zlib.error):
+                    raise Refusal('invalid_archive_world') from None
                 worlds += 1
-            if destination is not None:
+            # RCON client files are generated for the destination's own secret.
+            keep = initial_inventory is None or path not in INITIAL_RCON_FILES
+            if destination is not None and keep:
                 target = os.path.join(destination, *parts)
                 os.makedirs(os.path.dirname(target), mode=0o750, exist_ok=True)
                 if member.isdir(): os.makedirs(target, mode=0o750, exist_ok=True)
                 else:
                     with (io.BytesIO(content) if content is not None else tf.extractfile(member)) as source, open(target,'xb') as output:
-                        shutil.copyfileobj(source, output, 1024*1024)
+                        if initial_inventory is None:
+                            shutil.copyfileobj(source, output, 1024*1024)
+                        elif hash_initial_file(source, member.size, output) != expected[3]:
+                            raise Refusal('invalid_initialization_evidence')
                         output.flush(); os.fsync(output.fileno())
                     os.chmod(target, member.mode & 0o770)
+            elif initial_inventory is not None and member.isfile():
+                with tf.extractfile(member) as source:
+                    if hash_initial_file(source, member.size) != expected[3]:
+                        raise Refusal('invalid_initialization_evidence')
         end = tf.offset
     # Tarfile stops at the first EOF and can buffer beyond it. Re-read the
     # bounded gzip stream to require two zero blocks and only zero padding
@@ -242,7 +443,15 @@ def inspect_archive(raw, m, destination=None):
             padding += len(tail)
         position += len(block)
     if padding < 1024 or position % 512: raise ValueError('tar end markers')
-    if seen.get('data') != 'directory' or count < 2 or worlds == 0: raise ValueError('missing world')
+    for path in private_parents:
+        owner = preserved_ownership.get(path)
+        if seen.get(path) != 'directory' or owner is None or owner[0] != 0 or owner[2] != 0o700:
+            raise Refusal('invalid_archive_ownership')
+    if seen.get('data') != 'directory': raise Refusal('invalid_archive_entries')
+    if initial_inventory is None:
+        if worlds == 0: raise Refusal('invalid_archive_world')
+    elif worlds or initial_seen != initial_inventory.keys():
+        raise Refusal('invalid_initialization_evidence')
     if destination is not None:
         # All parents were created by this extraction in a private root. Chown
         # only this new tree; preserve the existing Podman :Z labeling model.
@@ -250,8 +459,8 @@ def inspect_archive(raw, m, destination=None):
             for name in files + dirs:
                 p = os.path.join(parent,name)
                 relative=os.path.relpath(p,destination)
-                if relative in clone_private_ownership:
-                    uid,gid,mode=clone_private_ownership[relative]
+                if relative in preserved_ownership:
+                    uid,gid,mode=preserved_ownership[relative]
                     os.chown(p,uid,gid,follow_symlinks=False); os.chmod(p,mode)
                 else:
                     os.chown(p, runtime['uid'], runtime['gid'], follow_symlinks=False)
@@ -286,7 +495,7 @@ def metadata(fd, name):
     elif (m['software'],m['version']) != (runtime['software'],runtime['version']): raise Refusal('incompatible_software_version')
     return m
 
-def inspect():
+def inspect(initial_inventory):
     root = os.environ['JV_INSTANCE_BACKUP_ROOT']
     # The selected archive belongs to the source. The destination's own
     # backup settings only govern its future independent backups.
@@ -303,17 +512,17 @@ def inspect():
             raise
         try:
             with open_archive(backup,archive) as raw:
-                details = inspect_archive(raw,m)
+                details = inspect_archive(raw,m,initial_inventory=initial_inventory)
                 archive_stat = os.fstat(raw.fileno())
         except (ValueError, TypeError, KeyError, OSError, EOFError, tarfile.TarError, struct.error, zlib.error):
-            if clone_source: raise Refusal('invalid_archive_integrity') from None
-            raise
+            raise Refusal('invalid_archive_entries') from None
         available = os.fstatvfs(parent)
         # Original data is preserved by rename, requiring no second copy. Leave
         # additional headroom for runtime writes and the failed replacement.
         required = m['size'] + details['expanded_bytes'] + details['entries']*8192 + MARGIN
         if (available.f_favail and available.f_favail < details['entries'] + 32) or available.f_bavail * available.f_frsize < required: raise Refusal('insufficient_staging_capacity')
         evidence = dict(metadata=m,config_sha256=digest(record_raw),parent=inode(parent),source=inode(directory_data),backup=inode(backup),archive_identity=[archive_stat.st_dev,archive_stat.st_ino,archive_stat.st_size,archive_stat.st_mtime_ns,archive_stat.st_ctime_ns])
+        if initialization: evidence['initialization'] = initialization
         result = dict(metadata=m,current_software=runtime['software'],current_version=runtime['version'],integrity='verified',source_available=True,destination_available=True,compatibility='same_software_and_pinned_version',destructive_confirmation_required=True,required_bytes=required,**details)
         result['fingerprint'] = digest(encoded(evidence))
         return result, backup
@@ -342,7 +551,7 @@ def move(src, name, dst, target):
     os.fsync(src); os.fsync(dst)
 
 try:
-    action, identity, archive, fingerprint, running, clone_source = sys.argv[1:]
+    action, identity, archive, fingerprint, running, clone_source, initialization = sys.argv[1:]
     if os.geteuid()!=0 or not re.fullmatch(r'jv-[a-z0-9]{6,12}',identity): raise ValueError('identity')
     record_raw = private(CONFIG_ROOT+'/'+identity+'/config.json')
     record = json.loads(record_raw); runtime = record['runtime']; storage = record['storage']
@@ -353,20 +562,26 @@ try:
         source_raw = private(CONFIG_ROOT+'/'+clone_source+'/config.json')
         source_record = json.loads(source_raw)
         if json.loads(private(REGISTRY+'/'+clone_source+'.json')) != {'id':clone_source} or source_record['runtime']['id'] != clone_source or source_record['storage']['root'] != storage['root'] or source_record['runtime']['uid'] != runtime['uid'] or source_record['runtime']['gid'] != runtime['gid'] or runtime['start_on_boot'] is not False or record.get('network_member',False): raise Refusal('invalid_clone_identity')
+    if action == 'switch-initial-data':
+        _, proof = initial_data(record, record_raw)
+        print(json.dumps({'fingerprint':proof},separators=(',',':')))
+        raise SystemExit(0)
     data = storage['root']+'/minecraft-instances/'+identity+'/data'
     if storage['data_path'] != data: raise ValueError('data path')
     parent = directory(os.path.dirname(data)); cfg = directory(CONFIG_ROOT+'/'+identity)
     # Reject nested mounts and direct data mountpoints before any rename.
-    with open('/proc/self/mountinfo') as mountinfo:
-        for line in mountinfo:
-            target = line.split()[4]
-            if target == data or target.startswith(data+'/'): raise ValueError('nested mount')
+    reject_data_mounts(data)
     if action in ('plan','prepare'):
         if exists(cfg,'restore-journal.json') and load_journal()['stage'] not in TERMINAL:
             if clone_source: raise Refusal('recovery_required')
             raise ValueError('recovery required')
         directory_data = checked_dir(parent,'data')
-        result, backup = inspect()
+        initial_inventory = None
+        if initialization:
+            initial_inventory, proof = initial_data(source_record, source_raw)
+            if proof != initialization or runtime.get('version_policy') != 'pinned':
+                raise Refusal('invalid_initialization_evidence')
+        result, backup = inspect(initial_inventory)
         if action == 'plan': print(json.dumps(result,separators=(',',':')))
         else:
             if result['fingerprint'] != fingerprint: raise Refusal('stale_plan')
@@ -382,7 +597,7 @@ try:
                     copied = 0
                     while block := src.read(1024*1024):
                         copied += len(block)
-                        if copied > result['metadata']['size']: raise ValueError('source grew')
+                        if copied > result['metadata']['size']: raise Refusal('invalid_archive_checksum')
                         dst.write(block)
                     dst.flush(); os.fsync(dst.fileno())
             os.fsync(txfd)
@@ -390,7 +605,10 @@ try:
             dest = os.path.dirname(data)+'/'+txname+'/replacement'
             os.mkdir(dest,0o700)
             with open_archive(txfd,'archive.tar.gz') as staged:
-                inspect_archive(staged,result['metadata'],dest)
+                try:
+                    inspect_archive(staged,result['metadata'],dest,initial_inventory)
+                except (ValueError, TypeError, KeyError, EOFError, tarfile.TarError, struct.error, zlib.error):
+                    raise Refusal('invalid_archive_entries') from None
             newfd = directory(dest+'/data'); j['replacement']=inode(newfd); os.close(newfd)
             os.fsync(txfd); stage(j,'ready_to_apply')
         os.close(backup)

@@ -181,7 +181,7 @@ func TestMigrationSwitchSelectionAndReviewSource(t *testing.T) {
 	}
 	selectTarget := regexp.MustCompile(`(?s)const select = .*?const load =`).FindString(string(script))
 	selection := strings.Index(selectTarget, `node.classList.toggle("is-selected", node.dataset.switchTarget === target)`)
-	request := strings.Index(selectTarget, `await request("plan", { target })`)
+	request := strings.Index(selectTarget, `await request("plan", { target, ...(crossplay && { crossplay }) })`)
 	guard := strings.Index(selectTarget, `if (!current() || ticket !== sequence) return;`)
 	update := strings.Index(selectTarget, "showCard(")
 	if selection < 0 || request <= selection || guard <= request || update <= guard ||

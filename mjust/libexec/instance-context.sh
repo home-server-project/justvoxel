@@ -41,13 +41,4 @@ jv_load_instance() {
     JV_NETWORK_MEMBER="$(jq -r 'if .network_member then "yes" else "no" end' "${record}")" || return 1
     BEDROCK_MANAGED_PLUGINS=yes
     validate_server_capabilities || return 1
-    wait_for_rcon() {
-        local timeout="${1:-900}" elapsed=0
-        while (( elapsed < timeout )); do
-            if podman exec "${JV_INSTANCE_CONTAINER}" rcon-cli list >/dev/null 2>&1 && systemctl is-active --quiet "${JV_INSTANCE_UNIT}"; then return 0; fi
-            sleep 5
-            elapsed=$((elapsed + 5))
-        done
-        return 1
-    }
 }

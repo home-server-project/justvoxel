@@ -1236,6 +1236,7 @@ func TestGracefulStopTerminalState(t *testing.T) {
 		containerAfterReset string
 		resetErr            error
 		cancelDuringReset   bool
+		retryObservation    bool
 		wantResets          int
 		wantObservations    int
 		wantErr             string
@@ -1248,9 +1249,9 @@ func TestGracefulStopTerminalState(t *testing.T) {
 		{name: "inactive unit with live container after reset", terminalState: "failed", stateAfterReset: "inactive", containerAfterReset: "running", wantResets: 1, wantObservations: 3, wantErr: unconfirmed},
 		{name: "failed unit with running container", terminalState: "failed", container: "running", wantObservations: 2, wantErr: unavailable},
 		{name: "failed unit with paused container", terminalState: "failed", container: "paused", wantObservations: 2, wantErr: unavailable},
-		{name: "failed unit with stopping container", terminalState: "failed", container: "stopping", wantObservations: 2, wantErr: unavailable},
+		{name: "failed unit with stopping container", terminalState: "failed", container: "stopping", retryObservation: true, wantObservations: 5, wantErr: unavailable},
 		{name: "failed unit with ambiguous container", terminalState: "failed", container: "unknown", wantObservations: 2, wantErr: unconfirmed},
-		{name: "active unit missing its container", terminalState: "active", wantObservations: 2, wantErr: unconfirmed},
+		{name: "active unit missing its container", terminalState: "active", retryObservation: true, wantObservations: 5, wantErr: unconfirmed},
 		{name: "caller canceled during normalization", terminalState: "failed", stateAfterReset: "inactive", cancelDuringReset: true, wantResets: 1, wantObservations: 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1293,6 +1294,9 @@ func TestGracefulStopTerminalState(t *testing.T) {
 			}
 			f.backend.pause = func(_ context.Context, d time.Duration) error {
 				waits++
+				if waits > 1 && tc.retryObservation && d == time.Second {
+					return nil
+				}
 				if waits != 1 || observations != 1 || f.states[id] != "deactivating" || d != time.Second {
 					t.Fatal("unexpected graceful-stop wait", waits, observations, f.states[id], d)
 				}
@@ -1313,8 +1317,87 @@ func TestGracefulStopTerminalState(t *testing.T) {
 			case err != nil:
 				t.Fatal(err)
 			}
-			if observations != tc.wantObservations || resets != tc.wantResets || waits != 1 {
-				t.Fatalf("got %d observations, %d checked resets, and %d waits, want %d, %d, and 1", observations, resets, waits, tc.wantObservations, tc.wantResets)
+			wantWaits := 1
+			if tc.retryObservation {
+				wantWaits += 3
+			}
+			if observations != tc.wantObservations || resets != tc.wantResets || waits != wantWaits {
+				t.Fatalf("got %d observations, %d checked resets, and %d waits, want %d, %d, and %d", observations, resets, waits, tc.wantObservations, tc.wantResets, wantWaits)
+			}
+		})
+	}
+}
+
+func TestLeafGracefulStopObservesContainerRemoval(t *testing.T) {
+	for _, resetFailed := range []bool{false, true} {
+		name := "after stop request"
+		if resetFailed {
+			name = "after failed unit reset"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newInstanceActivationFixture(t)
+			id := f.configs[0].ID
+			record, err := f.backend.readRecord(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			record.Runtime.Software = "leaf"
+			dir, _, _ := f.backend.paths(id)
+			if err = f.backend.writeJSON(filepath.Join(dir, "config.json"), record, true); err != nil {
+				t.Fatal(err)
+			}
+			f.states[id], f.containers[id] = "active", "running"
+			stops, resets, inspections, waits := 0, 0, 0, 0
+			warnings := 0
+			var countdown time.Duration
+			base := f.backend.command
+			f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+				switch {
+				case command == "podman" && args[0] == "exec" && strings.HasPrefix(args[3], "say Server shutting down in "):
+					warnings++
+					return nil, nil
+				case command == "systemctl" && args[0] == "--no-block":
+					stops++
+					if resetFailed {
+						f.states[id], f.containers[id] = "failed", "exited"
+					} else {
+						f.states[id], f.containers[id] = "inactive", "exited"
+					}
+					return nil, nil
+				case command == "systemctl" && args[0] == "reset-failed":
+					resets++
+					f.states[id] = "inactive"
+					return nil, nil
+				case command == "podman" && args[0] == "kill":
+					t.Fatal("Leaf received a second graceful shutdown request")
+				case command == "podman" && args[0] == "inspect" && f.states[id] == "inactive":
+					inspections++
+					delete(f.containers, id)
+					return nil, errors.New("container vanished after podman ps")
+				}
+				return base(ctx, command, args...)
+			}
+			f.backend.pause = func(_ context.Context, delay time.Duration) error {
+				if stops == 0 {
+					countdown += delay
+				} else {
+					waits++
+				}
+				return nil
+			}
+			stop := f.backend.stopWithWarnings
+			if resetFailed {
+				stop = f.backend.stopGracefully
+			}
+			if err = stop(context.Background(), id); err != nil {
+				t.Fatal(err)
+			}
+			if !resetFailed && (warnings != 9 || countdown != time.Minute) {
+				t.Fatal("Leaf shutdown lost its player warning countdown", warnings, countdown)
+			}
+			if stops != 1 || inspections != 1 || waits != 1 || (resets == 1) != resetFailed ||
+				f.states[id] != "inactive" || f.containers[id] != "" {
+				t.Fatal("shutdown did not verify the terminal state", stops, resets, inspections, waits)
 			}
 		})
 	}

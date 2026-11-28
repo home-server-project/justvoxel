@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestSwitchTransitionMatrix(t *testing.T) {
@@ -69,9 +71,13 @@ func TestSwitchTransitionMatrix(t *testing.T) {
 	}
 }
 
-func switchSourceFixture(t *testing.T, from string) *instanceActivationFixture {
+func switchSourceFixture(t *testing.T, from string, versions ...string) *instanceActivationFixture {
 	t.Helper()
-	f := newInstanceActivationFixtureFor(t, from, "1.21.4")
+	version := "1.21.4"
+	if len(versions) != 0 {
+		version = versions[0]
+	}
+	f := newInstanceActivationFixtureFor(t, from, version)
 	// Configure the source before its first activation; this is fixture creation,
 	// not an ordinary Version operation on an existing server.
 	record, err := f.backend.readRecord("jv-a1b2c3")
@@ -81,6 +87,9 @@ func switchSourceFixture(t *testing.T, from string) *instanceActivationFixture {
 	record.Runtime.VersionPolicy, record.Runtime.BedrockEnabled = "pinned", false
 	if caps, _ := javaServerSoftware(from); caps.ModLoader {
 		record.Runtime.LoaderVersion, record.Runtime.ImageTag = "0.16.10", "java21"
+	}
+	if java25GameReleasePattern.MatchString(version) {
+		record.Runtime.ImageTag = "java25"
 	}
 	if err = f.backend.writeJSON(filepath.Join(f.backend.root, record.Runtime.ID, "config.json"), record, true); err != nil {
 		t.Fatal(err)
@@ -174,7 +183,7 @@ func TestSwitchUnknownContentBlocksConvertAndPreservesFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	plan, err := planMinecraftSwitch(context.Background(), record.Runtime.ID, "purpur")
-	if err != nil || plan.Convert || !plan.Clone || len(plan.Content) != 1 || plan.Content[0].Compatibility != "unknown" || plan.Content[0].Name != "FamilyTools" {
+	if err != nil || plan.Convert || !plan.Clone || len(plan.Content) != 1 || plan.Content[0].Compatibility != "unknown" || plan.Content[0].Name != "FamilyTools" || plan.Content[0].CloneDisposition != "exclude" || !plan.RequiresExclusionConsent {
 		t.Fatalf("unmanaged content accepted: %+v %v", plan, err)
 	}
 	after, _ := os.ReadFile(jar)
@@ -224,7 +233,7 @@ func TestSwitchIncompatibleManagedReleaseNamesBlocker(t *testing.T) {
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"id":"ijklmnop","project_id":"abcdefgh","game_versions":["1.21.5"],"loaders":["paper"],"files":[]}`)), Header: make(http.Header)}, nil
 	})}
 	plan, err := planMinecraftSwitch(context.Background(), record.Runtime.ID, "purpur")
-	if err != nil || plan.Convert || len(plan.Content) != 1 || plan.Content[0].Compatibility != "incompatible" || plan.Content[0].Name != "FamilyTools" {
+	if err != nil || plan.Convert || len(plan.Content) != 1 || plan.Content[0].Compatibility != "incompatible" || plan.Content[0].Name != "FamilyTools" || plan.Content[0].CloneDisposition != "exclude" || !plan.RequiresExclusionConsent {
 		t.Fatalf("missing incompatible blocker: %+v %v", plan, err)
 	}
 	_, copyFingerprint, copyErr := switchContentEvidence(context.Background(), record, "", plan.Version)
@@ -499,21 +508,50 @@ func TestSwitchCloneRuntimeVerificationAndRecovery(t *testing.T) {
 	untypedFailure := errors.New(verifierError)
 	softwareFailure := switchCloneTestExitError{status: 48, error: untypedFailure}
 	for _, tc := range []struct {
-		name, from, target, reason string
-		verifierErr                error
-		success, interrupt         bool
+		name, from, target, reason              string
+		verifierErr                             error
+		success, interrupt, crossplay, preserve bool
+		initial                                 bool
 	}{
 		{name: "Paper to Purpur failure", from: "paper", target: "purpur", verifierErr: softwareFailure, reason: softwareMismatch},
 		{name: "Paper to Vanilla failure", from: "paper", target: "vanilla", verifierErr: softwareFailure, reason: softwareMismatch},
 		{name: "Paper to Fabric failure", from: "paper", target: "fabric", verifierErr: softwareFailure, reason: softwareMismatch},
 		{name: "Vanilla to Purpur Java only", from: "vanilla", target: "purpur", success: true},
+		{name: "Paper cross-play to Fabric Java only", from: "paper", target: "fabric", success: true, crossplay: true},
+		{name: "Paper cross-play to Fabric reviewed replacement", from: "paper", target: "fabric", success: true, crossplay: true, preserve: true},
 		{name: "retry interrupted cleanup", from: "paper", target: "purpur", verifierErr: softwareFailure, reason: softwareMismatch, interrupt: true},
 		{name: "untyped verifier failure", from: "paper", target: "purpur", verifierErr: untypedFailure, reason: "exact_runtime_unverified"},
+		{name: "uninitialized Leaf to Fabric", from: "leaf", target: "fabric", initial: true, success: true},
+		{name: "uninitialized Leaf failure retires clone", from: "leaf", target: "fabric", initial: true, verifierErr: softwareFailure, reason: softwareMismatch},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			target := tc.target
+			version := "1.21.4"
 			var f *instanceActivationFixture
-			if tc.from == "paper" {
+			if tc.initial {
+				version = "26.3"
+				f = switchSourceFixture(t, tc.from, version)
+				oldVersion, oldCatalog := runAdminVersionStatus, pluginCatalogClient
+				t.Cleanup(func() { runAdminVersionStatus, pluginCatalogClient = oldVersion, oldCatalog })
+				pluginCatalogClient = &http.Client{Transport: pluginTestTransport(func(*http.Request) (*http.Response, error) {
+					return nil, errors.New("catalogue unavailable")
+				})}
+				runAdminVersionStatus = func(ctx context.Context, policy, selected, software, image string) ([]byte, error) {
+					if software == "" {
+						return []byte(`{"installed":""}`), nil
+					}
+					initial, _ := ctx.Value(switchInitialPreviewKey{}).(bool)
+					if !initial || policy != "pinned" || selected != version || software != target {
+						t.Fatal("preview lost the committed source pin or initialization state")
+					}
+					status := switchMatrixSelection(software, selected, false)
+					status.Installed = ""
+					return json.Marshal(struct {
+						adminVersionStatus
+						Image string `json:"managed_image_digest"`
+					}{status, testMinecraftResetFingerprint})
+				}
+			} else if tc.from == "paper" {
 				f = switchPlannerFixture(t)
 			} else {
 				f = switchPlannerFixture(t, tc.from)
@@ -532,7 +570,66 @@ func TestSwitchCloneRuntimeVerificationAndRecovery(t *testing.T) {
 			if readErr != nil {
 				t.Fatal(readErr)
 			}
-			switchWorldFixture(t, sourceRecord.Storage.DataPath, "1.21.4", "Family")
+			if tc.crossplay {
+				crossplay := sourceRecord
+				crossplay.Runtime.BedrockEnabled = true
+				for crossplay.Runtime.BedrockPort == 0 || crossplay.Runtime.BedrockPort == f.configs[0].JavaPort || crossplay.Runtime.BedrockPort == f.configs[1].JavaPort {
+					crossplay.Runtime.BedrockPort = instanceTestPort(t)
+				}
+				records, err := f.backend.records()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := f.backend.apply(context.Background(), sourceRecord, instanceReplaceRecord(records, crossplay), f.snapshot); err != nil {
+					t.Fatal(err)
+				}
+				sourceRecord, err = f.backend.readRecord(sourceID)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			choice := ""
+			artifacts := map[string]switchManagedArtifact{}
+			replacements := []struct{ component, filename string }{
+				{"geyser", "Geyser-Fabric.jar"}, {"floodgate", "floodgate-fabric.jar"}, {"fabric-api", "fabric-api.jar"},
+			}
+			if tc.preserve {
+				choice = "preserve"
+				for _, artifact := range replacements {
+					artifacts[artifact.component] = switchManagedArtifact{SHA256: instanceHash([]byte(artifact.filename))}
+				}
+				status := runAdminVersionStatus
+				runAdminVersionStatus = func(ctx context.Context, policy, version, software, image string) ([]byte, error) {
+					if software == "" {
+						return status(ctx, policy, version, software, image)
+					}
+					preference, _ := ctx.Value(switchCrossplayPreviewKey{}).(string)
+					return json.Marshal(struct {
+						adminVersionStatus
+						Image     string                           `json:"managed_image_digest"`
+						Artifacts map[string]switchManagedArtifact `json:"managed_artifacts"`
+					}{switchMatrixSelection(software, version, preference == "preserve"), testMinecraftResetFingerprint, artifacts})
+				}
+			} else if tc.crossplay {
+				choice = "java"
+			}
+			if tc.initial {
+				for name, value := range map[string]string{"eula.txt": "eula=true\n", ".rcon-cli.env": "test source", ".rcon-cli.yaml": "test source"} {
+					if err := os.WriteFile(filepath.Join(sourceRecord.Storage.DataPath, name), []byte(value), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+			} else {
+				switchWorldFixture(t, sourceRecord.Storage.DataPath, version, "Family")
+			}
+			sourcePlugins := filepath.Join(sourceRecord.Storage.DataPath, "plugins")
+			if err := os.Mkdir(sourcePlugins, 0755); err != nil {
+				t.Fatal(err)
+			}
+			pluginTestJar(t, filepath.Join(sourcePlugins, "Unverified.jar"), map[string]string{"plugin.yml": "name: Unverified\nversion: 1\nmain: example.Unverified\n"})
+			if tc.crossplay {
+				pluginTestJar(t, filepath.Join(sourcePlugins, "Geyser-Spigot.jar"), map[string]string{"plugin.yml": "name: Geyser\nversion: 1\nmain: org.geysermc.geyser.platform.spigot.GeyserSpigotPlugin\n"})
+			}
 			originalWorld := switchWorldSnapshot(t, sourceRecord.Storage.DataPath)
 			cloneID := ""
 			cleanupCalls, verificationCalls := 0, 0
@@ -579,9 +676,41 @@ func TestSwitchCloneRuntimeVerificationAndRecovery(t *testing.T) {
 				}
 			}
 			base := f.backend.command
+			sourceHistory := ""
 			blockCleanup := tc.interrupt
 			imageChecks := 0
 			f.backend.command = func(ctx context.Context, command string, args ...string) ([]byte, error) {
+				if tc.initial && command == "journalctl" {
+					if !reflect.DeepEqual(args, []string{"--no-pager", "--quiet", "--output=cat", "--unit", "minecraft-" + sourceID + ".service"}) {
+						t.Fatal("source history was not bound to the instance", args)
+					}
+					return []byte(sourceHistory), nil
+				}
+				if command == instanceRuntimeHelper && args[0] == "crossplay" && tc.preserve {
+					return nil, nil
+				}
+				if command == "nsenter" && len(args) == 8 && args[2] == "env" && strings.HasSuffix(args[4], "/instance-crossplay-start") {
+					if !tc.preserve || args[5] != cloneID || args[5] == sourceID || args[6] != "--switch-reviewed" || args[7] != string(mustSwitchJSON(artifacts)) {
+						t.Fatal("installer lost the exact review or clone identity", args)
+					}
+					record, err := f.backend.readRecord(cloneID)
+					if err != nil {
+						return nil, err
+					}
+					if f.states[cloneID] == "active" || !record.Runtime.BedrockEnabled {
+						t.Fatal("managed artifacts must be installed on the stopped cross-play clone")
+					}
+					dir := filepath.Join(record.Storage.DataPath, "mods")
+					if err := os.MkdirAll(dir, 0755); err != nil {
+						return nil, err
+					}
+					for _, artifact := range replacements {
+						if err := os.WriteFile(filepath.Join(dir, artifact.filename), []byte(artifact.filename), 0644); err != nil {
+							return nil, err
+						}
+					}
+					return nil, nil
+				}
 				if command == "podman" && (len(args) == 5 && args[0] == "image" && args[1] == "inspect" ||
 					len(args) == 4 && args[0] == "inspect" && args[3] == "{{.Image}}") {
 					if !tc.success || f.states[cloneID] != "active" {
@@ -657,12 +786,22 @@ func TestSwitchCloneRuntimeVerificationAndRecovery(t *testing.T) {
 				return base(ctx, command, args...)
 			}
 			created := false
-			archive := instanceBackupMetadata{Schema: 1, ID: sourceID, Software: tc.from, Version: "1.21.4", Archive: "Source-backup-" + tc.from + "-2026-03-06-0015.tar.gz"}
+			archive := instanceBackupMetadata{Schema: 1, ID: sourceID, Software: tc.from, Version: version, Archive: "Source-backup-" + tc.from + "-2026-03-06-0015.tar.gz"}
+			initialization := instanceHash([]byte("initial data"))
+			restoreArgs := func(args []string) bool {
+				if tc.initial {
+					return len(args) == 10 && args[8] == sourceID && args[9] == initialization
+				}
+				return len(args) == 9 && args[8] == sourceID
+			}
 			instanceBackupStorageCommand = func(ctx context.Context, command string, args ...string) ([]byte, error) {
 				if command != "nsenter" || len(args) < 5 {
 					t.Fatal("unexpected storage call", command, args)
 				}
 				action, id := args[3], args[4]
+				if tc.initial && args[2] == instanceRestoreHelper && action == "switch-initial-data" && id == sourceID {
+					return json.Marshal(map[string]string{"fingerprint": initialization})
+				}
 				if args[2] == instanceBackupHelper {
 					if id != sourceID {
 						t.Fatal("source backup identity changed")
@@ -688,12 +827,15 @@ func TestSwitchCloneRuntimeVerificationAndRecovery(t *testing.T) {
 						t.Fatal("unexpected clone identity or automatic retry", id)
 					}
 					cloneID = id
-					if len(args) != 9 || args[8] != sourceID {
+					if !restoreArgs(args) {
 						t.Fatal("clone restore omitted its source binding", args)
 					}
 					return json.Marshal(instanceRestoreInspection{Metadata: archive, CurrentSoftware: target, CurrentVersion: archive.Version, Integrity: "verified", Fingerprint: instanceHash([]byte("clone-copy"))})
 				}
 				if action == "prepare" {
+					if !restoreArgs(args) {
+						t.Fatal("clone preparation omitted the reviewed source binding", args)
+					}
 					raw, err := f.backend.readPrivate(filepath.Join(f.backend.root, id, "config.json"))
 					if err != nil {
 						return nil, err
@@ -713,6 +855,18 @@ func TestSwitchCloneRuntimeVerificationAndRecovery(t *testing.T) {
 					if copyErr := os.CopyFS(clone.Storage.DataPath, os.DirFS(sourceRecord.Storage.DataPath)); copyErr != nil {
 						return nil, copyErr
 					}
+					if tc.initial {
+						for _, name := range []string{".rcon-cli.env", ".rcon-cli.yaml"} {
+							if err := os.Remove(filepath.Join(clone.Storage.DataPath, name)); err != nil {
+								return nil, err
+							}
+						}
+					}
+					var data unix.Stat_t
+					if err := unix.Stat(clone.Storage.DataPath, &data); err != nil {
+						return nil, err
+					}
+					journal.Replacement = []uint64{uint64(data.Dev), data.Ino}
 				}
 				journal.Stage = map[string]string{"shutdown": "shutdown", "activate": "replacement_activated", "verifying": "runtime_verification", "completed": "completed"}[action]
 				if journal.Stage == "" {
@@ -727,6 +881,35 @@ func TestSwitchCloneRuntimeVerificationAndRecovery(t *testing.T) {
 					if args[0] == "start" {
 						if id == sourceID {
 							t.Fatal("stopped source started for clone")
+						}
+						record, err := f.backend.readRecord(id)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if _, err := os.Lstat(filepath.Join(record.Storage.DataPath, "plugins", "Unverified.jar")); !errors.Is(err, os.ErrNotExist) {
+							t.Fatal("unreviewed executable was active at first startup", err)
+						}
+						if tc.initial {
+							data := record.Storage.DataPath
+							if raw, err := os.ReadFile(filepath.Join(data, "eula.txt")); err != nil || string(raw) != "eula=true\n" {
+								t.Fatal("initial configuration was lost", err)
+							}
+							if _, err := os.Stat(filepath.Join(data, "world")); !errors.Is(err, os.ErrNotExist) {
+								t.Fatal("destination did not start with initial data", err)
+							}
+							switchWorldFixture(t, data, version, "world")
+						}
+						if tc.crossplay {
+							if _, err := os.Lstat(filepath.Join(record.Storage.DataPath, "plugins", "Geyser-Spigot.jar")); !errors.Is(err, os.ErrNotExist) {
+								t.Fatal("source Geyser was active on the clone", err)
+							}
+						}
+						if tc.preserve {
+							for _, artifact := range replacements {
+								if bytes, err := os.ReadFile(filepath.Join(record.Storage.DataPath, "mods", artifact.filename)); err != nil || string(bytes) != artifact.filename {
+									t.Fatal("missing reviewed destination artifact before first startup", err)
+								}
+							}
 						}
 						f.states[id] = "active"
 						f.containers[id] = "running"
@@ -743,10 +926,10 @@ func TestSwitchCloneRuntimeVerificationAndRecovery(t *testing.T) {
 					return []byte(f.players), nil
 				}
 				if strings.HasSuffix(command, "verify-minecraft-stack") {
-					if cloneID == "" || !reflect.DeepEqual(args, []string{"--instance", cloneID, "--switch", "1.21.4"}) {
+					if cloneID == "" || !reflect.DeepEqual(args, []string{"--instance", cloneID, "--switch", version}) {
 						t.Fatal("runtime verification did not target the exact-version clone", args)
 					}
-					if switchNeedsWorldMove(tc.from, target) {
+					if !tc.initial && switchNeedsWorldMove(tc.from, target) {
 						clone, readErr := f.backend.readRecord(cloneID)
 						if readErr != nil {
 							t.Fatal(readErr)
@@ -756,27 +939,47 @@ func TestSwitchCloneRuntimeVerificationAndRecovery(t *testing.T) {
 						if readErr != nil || string(raw) != "nether chunks" {
 							t.Fatal("target readiness ran before verified relocation", readErr)
 						}
-						if writeErr := os.WriteFile(relocated, []byte("failed target changed chunks"), 0644); writeErr != nil {
-							t.Fatal(writeErr)
+						if !tc.success {
+							if writeErr := os.WriteFile(relocated, []byte("failed target changed chunks"), 0644); writeErr != nil {
+								t.Fatal(writeErr)
+							}
 						}
 					}
 					verificationCalls++
 					verified = true
 					if tc.success {
 						clone, err := f.backend.readRecord(cloneID)
-						if err != nil || clone.Runtime.BedrockEnabled || clone.Runtime.Software != "purpur" || clone.Runtime.Version != "1.21.4" || f.states[cloneID] != "active" {
-							t.Fatal("Java-only target did not start at the planned version", err)
+						if err != nil || clone.Runtime.BedrockEnabled != tc.preserve || clone.Runtime.Software != target || clone.Runtime.Version != version || f.states[cloneID] != "active" {
+							t.Fatal("clone did not start at the reviewed version and cross-play choice", err)
 						}
-						return []byte("Minecraft version: Purpur 1.21.4\n"), nil
+						return []byte("Minecraft version: " + target + " " + version + "\n"), nil
 					}
 					return []byte(verifierOutput), tc.verifierErr
 				}
 				t.Fatal("unexpected runtime command", command, args)
 				return nil, nil
 			}
-			plan, err := planMinecraftSwitch(context.Background(), sourceID, target)
-			if err != nil {
+			plan, err := planMinecraftSwitch(context.Background(), sourceID, target, choice)
+			if err != nil || !plan.Clone {
 				t.Fatal(err)
+			}
+			if tc.initial {
+				if !plan.SourceUninitialized || plan.Runtime.Installed != "" || plan.Version != version || plan.Convert || !plan.RequiresExclusionConsent {
+					t.Fatalf("invalid pinned initial Clone plan: %+v", plan)
+				}
+				sourceHistory = "[Server thread/INFO]: Starting minecraft server version " + version
+				blocked, err := planMinecraftSwitch(context.Background(), sourceID, target, choice)
+				if err != nil || blocked.Clone || blocked.Version != "" {
+					t.Fatalf("historical initialization with missing logs was accepted: %+v %v", blocked, err)
+				}
+				sourceHistory = ""
+				priorProof := initialization
+				initialization = instanceHash([]byte("changed initial data"))
+				changed, err := planMinecraftSwitch(context.Background(), sourceID, target, choice)
+				if err != nil || !changed.Clone || changed.Fingerprint == plan.Fingerprint {
+					t.Fatalf("changed initial proof did not invalidate the review: %+v %v", changed, err)
+				}
+				initialization = priorProof
 			}
 			source, _ := f.backend.readRecord(sourceID)
 			sourceHash, err := switchMatrixConfigHash(sourceID)
@@ -786,7 +989,7 @@ func TestSwitchCloneRuntimeVerificationAndRecovery(t *testing.T) {
 			sourceContainer := f.containers[sourceID]
 			s := surfaceTestServer(t, roleAdministrator)
 			s.operations = openTestOperationStore(t)
-			request := minecraftSwitchRequest{Target: target, Action: "clone", Fingerprint: plan.Fingerprint, Confirm: true}
+			request := minecraftSwitchRequest{Target: target, Action: "clone", Fingerprint: plan.Fingerprint, Confirm: true, AcceptExclusions: true, Crossplay: choice}
 			journal, _, err := s.operations.beginMinecraftMaintenance(switchActionFingerprint(request), operationTypeMinecraftSwitch, sourceID)
 			if err != nil {
 				t.Fatal(err)
@@ -796,7 +999,13 @@ func TestSwitchCloneRuntimeVerificationAndRecovery(t *testing.T) {
 			if tc.success {
 				if err != nil || result.State != operationSucceeded || verificationCalls != 1 || imageChecks != 2 || cleanupCalls != 0 ||
 					f.states[cloneID] != "inactive" || len(diagnostics) != 0 {
-					t.Fatalf("Java-only clone did not complete and stop cleanly: %+v %v", result, err)
+					t.Fatalf("clone did not complete and stop cleanly: %+v %v", result, err)
+				}
+				if _, err := os.Stat(filepath.Join(sourcePlugins, "Unverified.jar")); err != nil {
+					t.Fatal("successful Clone changed the source JAR", err)
+				}
+				if !reflect.DeepEqual(originalWorld, switchWorldSnapshot(t, sourceRecord.Storage.DataPath)) || f.states[sourceID] != "inactive" {
+					t.Fatal("successful Clone changed the original data or stopped state")
 				}
 				afterHash, hashErr := switchMatrixConfigHash(sourceID)
 				evidence, evidenceErr := readSwitchEvidence(result)
@@ -844,7 +1053,7 @@ func TestSwitchCloneRuntimeVerificationAndRecovery(t *testing.T) {
 				recoveryResult = `result="failed"`
 			}
 			for _, want := range []string{`reason="` + tc.reason + `"`, `stage="verifying_clone"`, `target="` + target + `"`,
-				`action="clone"`, `version="1.21.4"`, `clone_id="` + cloneID + `"`, recoveryResult} {
+				`action="clone"`, `version="` + version + `"`, `clone_id="` + cloneID + `"`, recoveryResult} {
 				if !strings.Contains(log, want) {
 					t.Errorf("migration diagnostic missing %q", want)
 				}
@@ -878,7 +1087,7 @@ func TestSwitchCloneRuntimeVerificationAndRecovery(t *testing.T) {
 				t.Fatal("failed clone unit or container remains", state, err)
 			}
 			response := switchTestOperation(t, s, sourceID, "?operation_id="+journal.OperationID)
-			if response["clone_id"] != cloneID || response["target"] != target || response["action"] != "clone" || response["version"] != "1.21.4" {
+			if response["clone_id"] != cloneID || response["target"] != target || response["action"] != "clone" || response["version"] != version {
 				t.Fatal("operation response lost failed clone identity", response)
 			}
 			if err := f.backend.verifyCommittedSwitchState(context.Background(), sourceID); err != nil {
@@ -920,6 +1129,13 @@ func TestSwitchCloneRestoreRefusalIsBounded(t *testing.T) {
 		}
 		if got := switchCloneRestoreFailure([]byte(tc.output)).Error(); got != want || !strings.Contains(got, "The original server is preserved.") {
 			t.Errorf("unexpected clone restore refusal %q, want %q", got, want)
+		}
+	}
+	for _, code := range []string{"invalid_archive_ownership", "invalid_archive_mode", "invalid_archive_checksum", "invalid_archive_entries", "invalid_archive_world", "invalid_initialization_evidence"} {
+		out, _ := json.Marshal(map[string]string{"error": code})
+		err := switchCloneRestoreFailure(out)
+		if switchRuntimeDiagnostic(err) != code || !strings.Contains(err.Error(), restoreValidationMessage(code)) {
+			t.Errorf("archive validation reason was lost: %s: %v", code, err)
 		}
 	}
 }
@@ -1140,5 +1356,47 @@ func TestSwitchPublicationKeepsOrdinaryVersionSoftwareGuard(t *testing.T) {
 				t.Fatal("Switch recovery did not restore exact original runtime", recovered, err)
 			}
 		})
+	}
+}
+
+func TestSwitchApplyBindsCloneExclusionsAndChoice(t *testing.T) {
+	f := switchPlannerFixture(t)
+	record, err := f.backend.readRecord("jv-a1b2c3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(record.Storage.DataPath, "plugins")
+	if err = os.Mkdir(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	jar := filepath.Join(dir, "Manual.jar")
+	pluginTestJar(t, jar, map[string]string{"plugin.yml": "name: Manual\nversion: 1\nmain: example.Manual\n"})
+	plan, err := planMinecraftSwitch(context.Background(), record.Runtime.ID, "purpur")
+	if err != nil || !plan.Clone || plan.Convert || !plan.RequiresExclusionConsent {
+		t.Fatalf("unverified executable did not require consent: %+v %v", plan, err)
+	}
+	s := surfaceTestServer(t, roleAdministrator)
+	s.operations = openTestOperationStore(t)
+	r := minecraftSwitchRequest{Target: plan.Target, Action: "clone", Fingerprint: plan.Fingerprint, Confirm: true}
+	apply := func(request minecraftSwitchRequest, want int) {
+		response := httptest.NewRecorder()
+		httpRequest := surfaceRequest(http.MethodPost, "/v1/minecraft/instances/"+record.Runtime.ID+"/switch/apply", string(mustSwitchJSON(request)))
+		httpRequest.SetPathValue("id", record.Runtime.ID)
+		s.minecraftSwitchApply(response, httpRequest)
+		if response.Code != want {
+			t.Fatalf("apply returned %d, want %d: %s", response.Code, want, response.Body.String())
+		}
+	}
+	apply(r, http.StatusBadRequest)
+	r.AcceptExclusions = true
+	r.Crossplay = "preserve"
+	apply(r, http.StatusConflict)
+	r.Crossplay = ""
+	if err = os.WriteFile(jar, []byte("changed"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	apply(r, http.StatusConflict)
+	if journal, err := s.operations.currentMinecraftMaintenance(); err != nil || journal != nil {
+		t.Fatal("refused Apply created a worker", journal, err)
 	}
 }

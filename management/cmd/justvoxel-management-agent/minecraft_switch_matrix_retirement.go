@@ -421,7 +421,7 @@ func (s *operationStore) retireFailedMatrixCloneMods(ctx context.Context, child 
 	return b.removePrivate(mod)
 }
 
-func (s *operationStore) retireSwitchMatrixFixture(ctx context.Context, parent, id string) error {
+func (s *operationStore) retireSwitchMatrixFixture(ctx context.Context, parent, id string) (result error) {
 	if !s.switchMatrixMu.TryLock() {
 		return errInstanceBusy
 	}
@@ -437,12 +437,17 @@ func (s *operationStore) retireSwitchMatrixFixture(ctx context.Context, parent, 
 	if err != nil {
 		return err
 	}
-	defer lock.Close()
+	defer func() {
+		if err := lock.Close(); err != nil {
+			result = errors.Join(result, err)
+		}
+	}()
 	err = retireSwitchMatrixFixtureLocked(ctx, parent, id)
 	status := "Fixture retirement verified"
 	if err != nil {
 		status = "Fixture retirement incomplete; evidence preserved"
-		if p.State == operationRunning {
+		_, retryable := err.(*switchMatrixRetryableClosure)
+		if p.State == operationRunning && (!retryable || p.PlanFingerprint != switchMatrixRunnerFingerprint()) {
 			_, transitionErr := s.transition(parent, operationNeedsAttention, "fixture_retirement", status)
 			err = errors.Join(err, transitionErr)
 		}
@@ -494,8 +499,14 @@ func retireSwitchMatrixFixtureLocked(ctx context.Context, parent, id string) err
 		return errInstanceRecovery
 	}
 	hash, err := switchMatrixConfigHash(id)
-	if err != nil || hash != f.ConfigSHA256 || b.deleteStopped(ctx, id, false) != nil {
+	if err != nil || hash != f.ConfigSHA256 {
 		return errInstanceRecovery
+	}
+	if err = b.deleteStopped(ctx, id, false); err != nil {
+		if errors.Is(err, errInstanceBusy) {
+			return &switchMatrixRetryableClosure{reason: "fixture_retirement_jobs_unverified", cause: err}
+		}
+		return err
 	}
 	// Refuse unknown private state before changing anything. Ordinary deletion
 	// keeps its original allowlist and never consumes cross-play ownership.

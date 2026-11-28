@@ -33,6 +33,11 @@ func (f *switchMatrixWebTestAPI) StartSwitchMatrix(context.Context, string) (api
 	return api.SwitchMatrixStatus{Enabled: true}, nil
 }
 
+func (f *switchMatrixWebTestAPI) StartTargetedSwitchMatrix(_ context.Context, _ string, ids []string) (api.SwitchMatrixStatus, error) {
+	f.calls = append(f.calls, "targeted "+strings.Join(ids, " "))
+	return api.SwitchMatrixStatus{Enabled: true, Operation: &api.SwitchMatrixOperation{Targeted: true}}, nil
+}
+
 func (f *switchMatrixWebTestAPI) StopSwitchMatrix(_ context.Context, _, id string) (api.SwitchMatrixStatus, error) {
 	f.calls = append(f.calls, "stop "+id)
 	return api.SwitchMatrixStatus{Enabled: true}, nil
@@ -52,6 +57,7 @@ func TestSwitchMatrixWebUIProxyGate(t *testing.T) {
 	handler := app.Handler()
 	const base = "http://example/api/migration/switch-matrix"
 	const csrf = "csrf=csrf-token"
+	const targeted = csrf + "&case_id=fabric.leaf.clone.26_1_plus.java.running&case_id=fabric.leaf.clone.26_1_plus.java.stopped"
 	const id = "a32d4725-8951-44cb-8b41-ace226d184a5"
 	request := func(method, suffix, body string, want int) {
 		t.Helper()
@@ -80,6 +86,7 @@ func TestSwitchMatrixWebUIProxyGate(t *testing.T) {
 		}
 		request(http.MethodPost, action, body, 404)
 	}
+	request(http.MethodPost, "/start", targeted, 404)
 	for _, call := range client.calls {
 		if call != "status " {
 			t.Fatalf("production proxy reached an execution method: %v", client.calls)
@@ -101,6 +108,10 @@ func TestSwitchMatrixWebUIProxyGate(t *testing.T) {
 	}
 	request(http.MethodGet, "?operation_id="+id, "", 200)
 	request(http.MethodPost, "/start", csrf, 202)
+	request(http.MethodPost, "/start", targeted, 202)
+	if got := client.calls[len(client.calls)-1]; got != "targeted fabric.leaf.clone.26_1_plus.java.running fabric.leaf.clone.26_1_plus.java.stopped" {
+		t.Fatal("targeted selection was lost or changed", got)
+	}
 	request(http.MethodPost, "/stop", csrf+"&operation_id="+id, 202)
 	request(http.MethodPost, "/recover", csrf+"&operation_id="+id, 200)
 }

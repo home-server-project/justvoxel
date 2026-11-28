@@ -41,6 +41,45 @@ if wait_for_rcon 1; then
     exit 1
 fi
 
+(
+    JV_INSTANCE_CONTAINER=minecraft-jv-aaaaaa
+    JV_INSTANCE_UNIT="${JV_INSTANCE_CONTAINER}.service"
+    polls=0
+    scenario=failed
+    sleep() { [[ $1 == 5 ]]; polls=$((polls + 1)); }
+    podman() {
+        [[ $* == "exec ${JV_INSTANCE_CONTAINER} rcon-cli list" && ${scenario} == slow && ${polls} == 4 ]]
+    }
+    systemctl() {
+        if [[ $* == "is-active --quiet ${JV_INSTANCE_UNIT}" ]]; then
+            [[ ${scenario} == slow && ${polls} == 4 ]]
+            return
+        fi
+        [[ $* == "show --all --property=LoadState,ActiveState,SubState,Job -- ${JV_INSTANCE_UNIT}" ]] || return 1
+        printf 'LoadState=loaded\n'
+        case "${scenario}:${polls}" in
+            failed:*) printf 'ActiveState=failed\nSubState=failed\nJob=0\n' ;;
+            dead:*) printf 'ActiveState=inactive\nSubState=dead\nJob=\n' ;;
+            slow:0) printf 'ActiveState=inactive\nSubState=dead\nJob=9\n' ;;
+            slow:1) printf 'ActiveState=activating\nSubState=auto-restart\nJob=0\n' ;;
+            slow:2) printf 'ActiveState=activating\nSubState=start\nJob=10\n' ;;
+            *) printf 'ActiveState=active\nSubState=running\nJob=0\n' ;;
+        esac
+    }
+    for scenario in failed dead; do
+        status=0
+        wait_for_rcon 900 || status=$?
+        [[ ${status} == 2 && ${polls} == 0 ]] || { echo 'terminal startup did not fail promptly' >&2; exit 1; }
+    done
+    scenario=slow
+    wait_for_rcon 900
+    [[ ${polls} == 4 ]] || { echo 'slow startup did not retain its readiness wait' >&2; exit 1; }
+    polls=0 scenario=live
+    status=0
+    wait_for_rcon 15 || status=$?
+    [[ ${status} == 1 && ${polls} == 3 ]] || { echo 'live startup did not retain its full timeout' >&2; exit 1; }
+)
+
 grep -Fq 'eula_accepted' "${apply}"
 grep -Fq 'startSetupWorker' "${apply}"
 grep -Fq 'context.WithTimeout(context.Background(), setupWorkerTimeout)' "${worker}"

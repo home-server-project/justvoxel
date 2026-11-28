@@ -103,7 +103,7 @@ function fixture(operation, readPlan = plan, apply, recover, setupNavigation, ma
       const action = url.pathname.split('/').at(-1);
       let result;
       if (action === 'plan') {
-        result = await readPlan(url.searchParams.get('target'));
+        result = await readPlan(url.searchParams.get('target'), url.searchParams.get('crossplay'));
       } else if (action === 'operation') {
         operations.push(url.searchParams.get('operation_id'));
         result = await operation(url.searchParams.get('operation_id'));
@@ -936,4 +936,97 @@ test('Switch matrix Open Logs raises native System Settings, refreshes Migration
   assert.ok(nav.dialog.open);
   assert.deepEqual(nav.selections(), selections);
   assert.equal(nav.location.href, url);
+});
+
+test('Clone-only cards review exact exclusions and bind consent to the selected cross-play option', async () => {
+  const submissions = [];
+  const preserveRequests = [];
+  const reviewPlan = (target, choice) => ({
+    ...plan(target),
+    crossplay_choice: choice || 'java',
+    crossplay_options: ['java', 'preserve'],
+    crossplay_install: choice === 'preserve' ? [{ directory: 'mods', filename: 'Geyser-Fabric.jar' }] : [],
+    requires_exclusion_consent: true,
+    plan_fingerprint: choice === 'preserve' ? 'reviewed-preserve' : 'reviewed-java',
+    content: [
+      { name: 'Working mod', directory: 'mods', filename: 'shared.jar', compatibility: 'verified', clone_disposition: 'retain', reason: 'Publisher verified' },
+      { name: 'Old plugin', directory: 'plugins', filename: 'shared.jar', compatibility: 'unknown', clone_disposition: 'exclude', reason: 'Dependency missing' },
+    ],
+  });
+  const f = fixture(() => ({ operation: null }), (target, choice) => {
+    if (choice === 'preserve') {
+      return new Promise(resolve => preserveRequests.push({ target, resolve }));
+    }
+    return reviewPlan(target, choice);
+  }, body => {
+    submissions.push(body);
+    return { ok: false, json: async () => ({ error: 'Apply rejected' }) };
+  });
+  await flush();
+  assert.equal(f.cards[2].disabled, false);
+  await f.cards[2].click();
+  await flush();
+  assert.ok(f.review.children.some(node => node.textContent?.includes('plugins/shared.jar') && node.textContent.includes('Dependency missing')));
+  assert.ok(f.review.children.some(node => node.textContent?.includes('mods/shared.jar') && node.textContent.includes('Retained in clone')));
+  const reviewCheckboxes = () => f.review.children.filter(node => node.tag === 'label').map(node => node.children[1]);
+  const preserveChoice = () => f.review.children.flatMap(node => node.children).find(node => node.textContent === 'Preserve cross-play');
+  const [previousConfirm, previousExclusions] = reviewCheckboxes();
+  const previousClone = f.review.children.at(-1).children.at(-1);
+  previousConfirm.checked = true;
+  previousConfirm.events.change();
+  previousExclusions.checked = true;
+  previousExclusions.events.change();
+  assert.equal(previousClone.disabled, false);
+
+  const selectCrossplay = preserveChoice();
+  assert.ok(selectCrossplay);
+  selectCrossplay.click();
+  assert.deepEqual(preserveRequests.map(request => request.target), ['fabric']);
+  assert.equal(f.review.hidden, true);
+  await previousClone.click();
+  assert.equal(submissions.length, 0);
+
+  // Start a newer review for the same target and cross-play choice.
+  f.cards[2].click();
+  await flush();
+  preserveChoice().click();
+  assert.deepEqual(preserveRequests.map(request => request.target), ['fabric', 'fabric']);
+  preserveRequests[1].resolve(reviewPlan('fabric', 'preserve'));
+  await flush();
+  assert.ok(f.review.children.some(node => node.textContent?.includes('Install in clone · mods/Geyser-Fabric.jar')));
+  const currentReview = f.review.children.slice();
+  preserveRequests[0].resolve({ ...reviewPlan('fabric', 'preserve'), plan_fingerprint: 'stale-preserve', warnings: ['Stale review'] });
+  await flush();
+  assert.equal(f.review.hidden, false);
+  assert.deepEqual(f.review.children, currentReview);
+  assert.deepEqual(f.selected(), ['fabric']);
+  assert.equal(f.cards[2].disabled, false);
+
+  const [confirm, exclusions] = reviewCheckboxes();
+  assert.notEqual(exclusions, previousExclusions);
+  assert.ok(!confirm.checked);
+  assert.ok(!exclusions.checked);
+  const [convert, clone] = f.review.children.at(-1).children.slice(-2);
+  confirm.checked = true;
+  confirm.events.change();
+  assert.equal(convert.disabled, true);
+  assert.equal(clone.disabled, true);
+  await clone.click();
+  assert.equal(submissions.length, 0);
+  exclusions.checked = true;
+  exclusions.events.change();
+  assert.equal(clone.disabled, false);
+  assert.equal(convert.disabled, true);
+  await convert.click();
+  assert.equal(submissions.length, 0);
+  await previousClone.click();
+  assert.equal(submissions.length, 0);
+  await clone.click();
+  assert.equal(submissions.length, 1);
+  const [body] = submissions;
+  assert.equal(body.get('target'), 'fabric');
+  assert.equal(body.get('action'), 'clone');
+  assert.equal(body.get('plan_fingerprint'), 'reviewed-preserve');
+  assert.equal(body.get('crossplay'), 'preserve');
+  assert.equal(body.get('accept_exclusions'), 'yes');
 });

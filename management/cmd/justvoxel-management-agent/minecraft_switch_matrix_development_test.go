@@ -11,6 +11,23 @@ import (
 )
 
 func TestSwitchMatrixDevelopmentAPI(t *testing.T) {
+	t.Run("rejects invalid and duplicate targeted requests", func(t *testing.T) {
+		s := adminServerForTest()
+		s.operations = matrixTestStore(t, newInstanceActivationFixture(t).backend)
+		mux := http.NewServeMux()
+		registerSwitchMatrixRoutes(mux, s)
+		for _, body := range []string{
+			`{"case_ids":null}`, `{"case_ids":[]}`, `{"case_ids":["unknown/path"]}`,
+			fmt.Sprintf(`{"case_ids":[%q,%q]}`, targetedLeafRunning, targetedLeafRunning),
+			`{"case_ids":["fabric.leaf.clone.26_1_plus.java.running"],"memory":2048}`,
+		} {
+			matrixAPIRequest(t, mux, "POST", "/start", body, 400)
+		}
+		if current, err := s.operations.currentMinecraftMaintenance(); err != nil || current != nil {
+			t.Fatal("invalid request acquired maintenance", err)
+		}
+	})
+
 	t.Run("persistent launch and reconnect", func(t *testing.T) {
 		s := adminServerForTest()
 		f := newInstanceActivationFixture(t)

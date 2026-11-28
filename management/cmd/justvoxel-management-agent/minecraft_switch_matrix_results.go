@@ -29,13 +29,24 @@ type switchMatrixCaseResult struct {
 	ChildOperation      string                     `json:"switch_operation,omitempty"`
 	Runtime             string                     `json:"runtime_verification,omitempty"`
 	World               string                     `json:"world_marker_verification,omitempty"`
+	MarkerFailure       *switchMatrixMarkerFailure `json:"marker_failure,omitempty"`
 	Original            string                     `json:"original_source_verification,omitempty"`
 	FinalState          string                     `json:"final_state_verification,omitempty"`
+	Content             string                     `json:"fixture_content_verification,omitempty"`
 	Recovery            string                     `json:"recovery,omitempty"`
 	Cleanup             string                     `json:"cleanup,omitempty"`
 	ClosureReason       string                     `json:"closure_reason,omitempty"`
+	ClosureRecovery     string                     `json:"closure_recovery,omitempty"`
+	RecoveryReason      string                     `json:"closure_recovery_reason,omitempty"`
 	StartedAt           time.Time                  `json:"started_at,omitzero"`
 	DurationMS          int64                      `json:"duration_ms"`
+}
+
+type switchMatrixMarkerFailure struct {
+	Stage     string `json:"stage"`
+	Dimension string `json:"dimension,omitempty"`
+	Reason    string `json:"reason"`
+	Outcome   string `json:"command_outcome"`
 }
 
 type switchMatrixRun struct {
@@ -44,6 +55,7 @@ type switchMatrixRun struct {
 	State           string                   `json:"state"`
 	CancelRequested bool                     `json:"cancel_requested"`
 	CatalogIssue    string                   `json:"catalog_issue,omitempty"`
+	Targeted        bool                     `json:"targeted,omitempty"`
 	SmokeCase       string                   `json:"smoke_case,omitempty"`
 	HaltReason      string                   `json:"halt_reason,omitempty"`
 	Catalog         map[string][]string      `json:"candidate_versions,omitempty"`
@@ -53,6 +65,7 @@ type switchMatrixRun struct {
 }
 
 type switchMatrixProgress struct {
+	Targeted           bool              `json:"targeted,omitempty"`
 	ManifestReady      bool              `json:"-"`
 	ID                 string            `json:"operation_id"`
 	State              string            `json:"state"`
@@ -82,7 +95,7 @@ func newSwitchMatrixResults(cases []switchMatrixCase) []switchMatrixCaseResult {
 }
 
 func (r switchMatrixRun) progress() switchMatrixProgress {
-	p := switchMatrixProgress{ID: r.ID, State: r.State, Total: len(r.Cases),
+	p := switchMatrixProgress{Targeted: r.Targeted, ID: r.ID, State: r.State, Total: len(r.Cases),
 		ManifestReady:   r.Cases != nil || r.Catalog != nil || r.State == "running" || r.State == "completed" || r.State == "halted",
 		CancelRequested: r.CancelRequested, DiagnosticCategory: "migration", DiagnosticID: r.ID}
 	for i, result := range r.Results {
@@ -106,9 +119,13 @@ func (r switchMatrixRun) progress() switchMatrixProgress {
 }
 
 func (r switchMatrixCaseResult) verifiedPass(c switchMatrixCase) bool {
+	if c.Profile == switchMatrixManagedContent && r.Content != "verified_retention_exclusion_dependency_and_convert_refusal" {
+		return false
+	}
 	return r.Runtime == "verified" && r.World == "verified_overworld_nether_end" &&
 		r.FinalState == "verified" && r.Cleanup == "verified" &&
-		(c.Action == "clone" && r.Original == "verified" || c.Action == "convert" && r.Original == "not_applicable")
+		(c.Action == "clone" && (c.Profile == switchMatrixInitialSource && r.Original == "verified_uninitialized" ||
+			c.Profile != switchMatrixInitialSource && r.Original == "verified") || c.Action == "convert" && r.Original == "not_applicable")
 }
 
 func (s *operationStore) readSwitchMatrixRun(id string) (switchMatrixRun, error) {

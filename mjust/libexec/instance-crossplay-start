@@ -1,11 +1,20 @@
 #!/usr/bin/bash
 set -euo pipefail
-# Called only by the selected generated unit. Never load legacy DATA_PATH.
+# Called by the selected unit or its journaled Switch worker. Never load the legacy DATA_PATH.
 fail() { echo 'ERROR: Instance cross-play preparation failed; startup was refused.' >&2; exit 1; }
-[[ $EUID == 0 && $# == 1 && $1 =~ ^jv-[a-z0-9]{6,12}$ ]] || fail
+[[ $EUID == 0 && ${1:-} =~ ^jv-[a-z0-9]{6,12}$ ]] || fail
 id=$1
-exec 9>/run/justvoxel-minecraft-maintenance.lock
-flock -w 5 9 || fail
+reviewed=''
+if [[ $# == 3 && $2 == --switch-reviewed ]]; then
+    # The Switch worker owns the global lock and a stopped, restored clone.
+    [[ ${JUSTVOXEL_MAINTENANCE_LOCK_HELD:-0} == 1 && ${#3} -le 1024 ]] || fail
+    reviewed=$3
+elif [[ $# == 1 ]]; then
+    exec 9>/run/justvoxel-minecraft-maintenance.lock
+    flock -w 5 9 || fail
+else
+    fail
+fi
 /usr/libexec/justvoxel/mjust/validate-instance-runtime-commit "${id}" || fail
 /usr/libexec/justvoxel/mjust/validate-instance-start-memory "${id}" || fail
 config="/etc/justvoxel/instances/${id}/config.json"
@@ -17,17 +26,28 @@ DATA_PATH=${values[0]} MINECRAFT_UID=${values[1]} MINECRAFT_GID=${values[2]}
 # Network mode has its own Floodgate-only backend preparation. Standalone
 # startup follows the existing path after restoring its saved configuration.
 if jq -e '.network_member == true' "${config}" >/dev/null || [[ -e /etc/justvoxel/instances/${id}/network-before.json || -e ${DATA_PATH}/.justvoxel-network-standalone.json ]]; then
+    [[ -z ${reviewed} ]] || fail
     /usr/libexec/justvoxel/mjust/minecraft-network-runtime backend "${id}" || fail
     if jq -e '.network_member == true' "${config}" >/dev/null; then exit 0; fi
 fi
 # Switch verifies the installed content separately. Its temporary, committed
 # guard prevents startup from adding, deleting or updating plugin/mod files.
-if jq -e '.runtime.preserve_content == true' "${config}" >/dev/null; then exit 0; fi
+if [[ -n ${reviewed} ]]; then
+    jq -e '.runtime.preserve_content == true and .runtime.bedrock_enabled == true and .runtime.version_policy == "pinned" and .runtime.start_on_boot == false and .network_member != true' "${config}" >/dev/null || fail
+elif jq -e '.runtime.preserve_content == true' "${config}" >/dev/null; then
+    exit 0
+fi
+if [[ -n ${reviewed} ]]; then
+    source /usr/libexec/justvoxel/mjust/common.sh
+else
+    JV_PAPER_USER_AGENT='JustVoxel managed cross-play'
+fi
 source /usr/libexec/justvoxel/mjust/managed-crossplay.sh
 # Preserve independent volumes' established Podman :Z labeling model.
 jv_crossplay_label() { :; }
 MINECRAFT_SERVER_TYPE=${values[4]} MINECRAFT_VERSION=${values[5]} MINECRAFT_LOADER_VERSION=${values[6]}
-JV_PAPER_USER_AGENT='JustVoxel managed cross-play'
+JV_SWITCH_VIAVERSION=no
+if [[ -n ${reviewed} ]] && jq -e 'has("viaversion")' <<< "${reviewed}" >/dev/null; then JV_SWITCH_VIAVERSION=yes; fi
 # Durable private staging lets the next start retry a failed rollback. It is
 # never placed in container-writable data, and never silently abandoned.
 staging="/etc/justvoxel/instances/${id}/crossplay-staging"
@@ -72,6 +92,18 @@ cleanup() {
     return "${status}"
 }
 trap cleanup EXIT
+prepare_artifacts() {
+    jv_crossplay_prepare "${staging}" || return 1
+    if [[ -n ${reviewed} ]]; then
+        local actual project
+        local files=()
+        for project in $(jv_crossplay_projects); do
+            files+=("${staging}/${project}.json")
+        done
+        actual="$(jv_crossplay_switch_digests "${files[@]}")" || return 1
+        [[ ${actual} == "$(jq -Sce . <<< "${reviewed}")" ]] || return 1
+    fi
+}
 if [[ ${MINECRAFT_SERVER_TYPE} == fabric || ${MINECRAFT_SERVER_TYPE} == neoforge ]]; then
     # A pre-existing mod server with cross-play off has no managed mod state.
     # Preserve its normal startup and all manually installed mods unchanged.
@@ -95,7 +127,7 @@ if [[ ${MINECRAFT_SERVER_TYPE} == fabric || ${MINECRAFT_SERVER_TYPE} == neoforge
     fi
     # A current platform build must prove the exact game/loader pair. Prepare
     # all mod artifacts before touching any installed member of the set.
-    jv_crossplay_prepare "${staging}" || fail
+    prepare_artifacts || fail
     jv_crossplay_install "${staging}" || fail
     jv_crossplay_verify "${staging}" || fail
     # Platform mod configuration lives under /data/config, never plugins.
@@ -106,9 +138,9 @@ else
     config_root="${DATA_PATH}/plugins"
     platform_name=Geyser-Spigot
 # Existing working canonical binaries survive upstream outages unchanged.
-if [[ ! -s ${DATA_PATH}/plugins/Geyser-Spigot.jar || -L ${DATA_PATH}/plugins/Geyser-Spigot.jar ||
+if [[ -n ${reviewed} || ! -s ${DATA_PATH}/plugins/Geyser-Spigot.jar || -L ${DATA_PATH}/plugins/Geyser-Spigot.jar ||
       ! -s ${DATA_PATH}/plugins/floodgate-spigot.jar || -L ${DATA_PATH}/plugins/floodgate-spigot.jar ]]; then
-    jv_crossplay_prepare "${staging}" || fail
+    prepare_artifacts || fail
     jv_crossplay_install "${staging}" || fail
     jv_crossplay_verify "${staging}" || fail
 fi

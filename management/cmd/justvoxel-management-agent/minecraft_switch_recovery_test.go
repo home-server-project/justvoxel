@@ -514,7 +514,12 @@ func (fx *switchRetirementFixture) assertRecovered(t *testing.T) {
 		}
 	}
 	data := fx.e.SourceRecord.Storage.DataPath
-	if state, err := fx.f.backend.observe(context.Background(), fx.e.Source); err != nil || state.State != "stopped" ||
+	expected := "stopped"
+	if fx.e.OriginallyRunning {
+		expected = "running"
+	}
+	if state, err := fx.f.backend.observe(context.Background(), fx.e.Source); err != nil || state.State != expected ||
+		state.StartOnBoot != fx.e.SourceRecord.Runtime.StartOnBoot ||
 		!reflect.DeepEqual(fx.world, switchWorldSnapshot(t, data)) {
 		t.Fatalf("source state or data changed: %+v %v", state, err)
 	}
@@ -547,6 +552,63 @@ func (fx *switchRetirementFixture) assertRecovered(t *testing.T) {
 func TestSwitchHistoricalCloneRecovery(t *testing.T) {
 	t.Run("retired clone", func(t *testing.T) {
 		newSwitchRetirementFixture(t, true).assertRecovered(t)
+	})
+	t.Run("reboot after source restart was already recorded", func(t *testing.T) {
+		fx := newSwitchRetirementFixture(t, true)
+		b, ctx := fx.f.backend, context.Background()
+		previous := *fx.e.SourceRecord
+		next := previous
+		next.Runtime.StartOnBoot = false
+		records, err := b.records()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = b.applyVersion(ctx, previous, instanceReplaceRecord(records, next), fx.f.snapshot, true); err != nil {
+			t.Fatal(err)
+		}
+		saved, err := b.readRecord(fx.e.Source)
+		if err != nil || saved.Runtime.StartOnBoot {
+			t.Fatal("source boot preference was not committed", err)
+		}
+		fx.e.SourceRecord = &saved
+		dir, _, quadlet := b.paths(fx.e.Source)
+		for _, path := range []string{filepath.Join(dir, "config.json"), quadlet} {
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fx.before[path] = string(raw)
+		}
+		fx.e.OriginallyRunning = true
+		fx.e.SourceStopped = false
+		if err := saveSwitchEvidence(fx.e); err != nil {
+			t.Fatal(err)
+		}
+		fx.f.states[fx.e.Source] = "inactive"
+		delete(fx.f.containers, fx.e.Source)
+		oldCommand := pluginInstallCommand
+		t.Cleanup(func() { pluginInstallCommand = oldCommand })
+		starts, verifies := 0, 0
+		pluginInstallCommand = func(_ context.Context, command string, args ...string) ([]byte, error) {
+			switch {
+			case command == "systemctl" && reflect.DeepEqual(args, []string{"start", "minecraft-" + fx.e.Source + ".service"}):
+				starts++
+				fx.f.states[fx.e.Source], fx.f.containers[fx.e.Source] = "active", "running"
+			case command == "/usr/libexec/justvoxel/mjust/verify-minecraft-stack" &&
+				reflect.DeepEqual(args, []string{"--instance", fx.e.Source, "--switch", fx.e.Version}):
+				if fx.f.states[fx.e.Source] != "active" {
+					t.Fatal("recovery verified the source before starting it")
+				}
+				verifies++
+			default:
+				t.Fatalf("unexpected source recovery command: %s %v", command, args)
+			}
+			return nil, nil
+		}
+		fx.assertRecovered(t)
+		if starts != 1 || verifies == 0 {
+			t.Fatal("recovery did not start and verify the production source", starts, verifies)
+		}
 	})
 	t.Run("interrupted after storage retirement", func(t *testing.T) {
 		fx := newSwitchRetirementFixture(t, true)

@@ -91,7 +91,11 @@ func instanceRuntimeError(w http.ResponseWriter, err error, id string) {
 	if errors.Is(err, errInstanceNotFound) {
 		message = errInstanceNotFound.Error()
 	}
-	writeJSON(w, code, map[string]any{"error": message, "id": id, "recovery_required": errors.Is(err, errInstanceRecovery)})
+	reply := map[string]any{"error": message, "id": id, "recovery_required": errors.Is(err, errInstanceRecovery)}
+	if reason := restoreValidationCode(err); reason != "" {
+		reply["reason"] = reason
+	}
+	writeJSON(w, code, reply)
 }
 func instanceRequestID(w http.ResponseWriter, r *http.Request) (string, bool) {
 	id := r.PathValue("id")

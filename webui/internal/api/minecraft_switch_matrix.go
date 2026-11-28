@@ -15,6 +15,7 @@ type SwitchMatrixStatus struct {
 }
 
 type SwitchMatrixOperation struct {
+	Targeted          bool                  `json:"targeted,omitempty"`
 	OperationID       string                `json:"operation_id"`
 	State             string                `json:"state"`
 	ReservationActive bool                  `json:"reservation_active"`
@@ -51,6 +52,12 @@ func (c *Client) SwitchMatrixStatus(ctx context.Context, session, id string) (Sw
 func (c *Client) StartSwitchMatrix(ctx context.Context, session string) (SwitchMatrixStatus, error) {
 	var out SwitchMatrixStatus
 	err := c.do(ctx, http.MethodPost, switchMatrixPath+"/start", session, struct{}{}, &out)
+	return out, err
+}
+
+func (c *Client) StartTargetedSwitchMatrix(ctx context.Context, session string, ids []string) (SwitchMatrixStatus, error) {
+	var out SwitchMatrixStatus
+	err := c.do(ctx, http.MethodPost, switchMatrixPath+"/start", session, map[string][]string{"case_ids": ids}, &out)
 	return out, err
 }
 

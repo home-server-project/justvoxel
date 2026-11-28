@@ -56,7 +56,22 @@ if [[ ${1:-} == --instance ]]; then
     shift 2
 fi
 
+# Keep installed evidence independent of publisher availability and service
+# state. The retained startup log is also available for a stopped instance.
+installed_from_log() {
+    local latest_log="${DATA_PATH}/logs/latest.log"
+    if [[ -r ${latest_log} && -f ${latest_log} && ! -L ${latest_log} && ! -L ${DATA_PATH}/logs ]]; then
+        grep -Eo 'Starting minecraft server version [0-9A-Za-z._-]+' "${latest_log}" 2>/dev/null | tail -n1 | awk '{print $5}' || true
+    fi
+}
+if [[ ${1:-} == --switch-installed ]]; then
+    [[ $# == 1 && ${#instance_args[@]} != 0 ]] || exit 1
+    jq -n --arg installed "$(installed_from_log)" '{installed:$installed}'
+    exit
+fi
+
 switch_preview=no
+switch_crossplay=''
 configured_type="${MINECRAFT_SERVER_TYPE-paper}"
 target_type="${configured_type}"
 configured_image_tag="${MINECRAFT_IMAGE_TAG:-stable}"
@@ -64,7 +79,8 @@ target_image_tag="${configured_image_tag}"
 while [[ ${1:-} == --* ]]; do
     (( $# >= 2 )) || exit 1
     case "$1" in
-        --switch-preview) [[ $2 == yes && ${#instance_args[@]} != 0 ]] || exit 1; switch_preview=yes ;;
+        --switch-preview) [[ ( $2 == yes || $2 == uninitialized ) && ${#instance_args[@]} != 0 ]] || exit 1; switch_preview="$2" ;;
+        --switch-crossplay) [[ $2 == java || $2 == preserve ]] || exit 1; switch_crossplay="$2" ;;
         --server-type) target_type="$2" ;;
         --image-tag) target_image_tag="$2" ;;
         *) exit 1 ;;
@@ -72,6 +88,7 @@ while [[ ${1:-} == --* ]]; do
     shift 2
 done
 (( $# <= 3 )) || exit 1
+[[ -z ${switch_crossplay} || ${switch_preview} != no ]] || exit 1
 # Only the exact three-positional-argument setup preview is ID-less.
 if (( $# != 3 && ${#instance_args[@]} == 0 )); then
     echo 'ERROR: --instance jv-... is required.' >&2
@@ -88,13 +105,17 @@ if (( $# != 3 )); then
 fi
 MINECRAFT_IMAGE_TAG="${target_image_tag}"
 validate_server_type "${target_type}" || exit 1
-if (( $# != 3 )) && [[ ${switch_preview} != yes ]]; then server_allows_in_place_switch "${configured_type}" "${target_type}" || exit 1; fi
+if (( $# != 3 )) && [[ ${switch_preview} == no ]]; then server_allows_in_place_switch "${configured_type}" "${target_type}" || exit 1; fi
 MINECRAFT_SERVER_TYPE="${target_type}"
 if (( $# == 3 )); then BEDROCK_ENABLED="$3"; fi
-if [[ ${switch_preview} == yes ]]; then
+if [[ ${switch_preview} != no ]]; then
     # Preserve a supported source cross-play choice; target software without
     # that capability uses Java, without touching any installed executable.
-    server_supports_managed_crossplay "${target_type}" || BEDROCK_ENABLED=no
+    case "${switch_crossplay}" in
+        java) BEDROCK_ENABLED=no ;;
+        preserve) [[ ${BEDROCK_ENABLED} == yes ]] && server_supports_managed_crossplay "${target_type}" || exit 1 ;;
+        *) server_supports_managed_crossplay "${target_type}" || BEDROCK_ENABLED=no ;;
+    esac
 fi
 if (( $# != 3 )) || [[ ${target_type} == bedrock ]]; then validate_server_capabilities || exit 1; fi
 software_changed=false
@@ -103,10 +124,7 @@ channel_changed=false
 [[ ${configured_image_tag} == "${target_image_tag}" ]] || channel_changed=true
 installed=''
 if (( $# != 3 )); then
-    latest_log="${DATA_PATH}/logs/latest.log"
-    if [[ -r ${latest_log} ]]; then
-        installed="$(grep -Eo 'Starting minecraft server version [0-9A-Za-z._-]+' "${latest_log}" 2>/dev/null | tail -n1 | awk '{print $5}' || true)"
-    fi
+    installed="$(installed_from_log)"
 fi
 find_crossplay_supported_version() {
     local candidate="$1" geyser="$2" recommended="$3" latest="$4" catalog="${5:-}"
@@ -147,8 +165,17 @@ find_crossplay_supported_version() {
 }
 # Read-only Switch resolution uses the normal exact setup resolver, including
 # loader pins. It does not relax the ordinary Version update software gate.
-if [[ ${switch_preview} == yes ]]; then
-    [[ $# == 2 && $1 == pinned && $2 == "${installed}" && ${target_type} != bedrock && ${target_type} != spigot ]] || exit 1
+if [[ ${switch_preview} != no ]]; then
+    [[ $# == 2 && $1 == pinned && ${target_type} != bedrock && ${target_type} != spigot ]] || exit 1
+    source_evidence=''
+    if [[ ${switch_preview} == uninitialized ]]; then
+        # The Agent proves stopped pre-initialization storage before requesting
+        # this exact configured pin. A startup marker invalidates the preview.
+        [[ -z ${installed} && ${MINECRAFT_VERSION_MODE} == pinned && $2 == "${MINECRAFT_VERSION}" ]] || exit 1
+        source_evidence=':uninitialized'
+    else
+        [[ $2 == "${installed}" ]] || exit 1
+    fi
     resolved="$(resolve_setup_java_runtime "${target_type}" pinned "$2")" || exit 1
     candidate="$(jq -er .game <<< "${resolved}")"
     [[ ${candidate} == "$2" ]] || exit 1
@@ -159,9 +186,13 @@ if [[ ${switch_preview} == yes ]]; then
     supported_version=''
     reason=''
     crossplay_compatible=true
+    managed_artifacts='{}'
     if [[ ${BEDROCK_ENABLED} == yes ]]; then
         geyser="$(resolve_geyser_supported_java_version || true)"
-        if ! jv_managed_crossplay_compatible "${target_type}" "${candidate}" "${loader}" "${geyser}"; then
+        if [[ ${switch_crossplay} == preserve ]]; then
+            MINECRAFT_VERSION="${candidate}" MINECRAFT_LOADER_VERSION="${loader}"
+            managed_artifacts="$(jv_crossplay_switch_review "${geyser}")" || exit 1
+        elif ! jv_managed_crossplay_compatible "${target_type}" "${candidate}" "${loader}" "${geyser}"; then
             crossplay_compatible=false
             reason="Managed cross-play compatibility could not be confirmed for Minecraft ${candidate}."
             recommended=''
@@ -175,12 +206,12 @@ if [[ ${switch_preview} == yes ]]; then
             supported_version="$(find_crossplay_supported_version "${candidate}" "${geyser}" "${recommended}" "${latest}" || true)"
         fi
     fi
-    fingerprint="sha256:$(printf '%s' "${target_type}:${resolved}:${digest}:${BEDROCK_ENABLED}:${crossplay_compatible}" | sha256sum | cut -d ' ' -f1)"
+    fingerprint="sha256:$(printf '%s' "${target_type}:${resolved}:${digest}:${BEDROCK_ENABLED}:${crossplay_compatible}${source_evidence}" | sha256sum | cut -d ' ' -f1)"
     jq -n --argjson resolved "${resolved}" --arg type "${target_type}" --arg game "${candidate}" --arg image "${image}" \
-        --arg loader "${loader}" --arg digest "${digest}" --arg fingerprint "${fingerprint}" \
+        --arg loader "${loader}" --arg digest "${digest}" --arg fingerprint "${fingerprint}" --arg installed "${installed}" --argjson artifacts "${managed_artifacts}" \
         --arg geyser "${geyser}" --arg supported_version "${supported_version}" --arg reason "${reason}" \
         --argjson enabled "$([[ ${BEDROCK_ENABLED} == yes ]] && printf true || printf false)" --argjson compatible "${crossplay_compatible}" \
-        '{server_type:$type,installed:$game,selected_candidate:$game,image_tag:$image,loader_version:$loader,server_supported:true,stack_state:"updates_available",update_available:true,plan_fingerprint:$fingerprint,managed_image_digest:$digest,
+        '{server_type:$type,installed:$installed,selected_candidate:$game,image_tag:$image,loader_version:$loader,server_supported:true,stack_state:"updates_available",update_available:true,plan_fingerprint:$fingerprint,managed_image_digest:$digest,managed_artifacts:$artifacts,
           crossplay_enabled:$enabled,crossplay_compatible:$compatible,geyser_supported_version:$geyser,crossplay_supported_version:$supported_version,reason:$reason}
           + ($resolved | with_entries(select(.key == "pufferfish_build")))'
     exit 0

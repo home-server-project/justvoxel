@@ -12,7 +12,10 @@ require_config() { :; }
 JV_MAINTENANCE_LOCK="${DATA_PATH}/lock"
 fixture_ownership() { [[ ${OWNERSHIP_FAIL:-no} != yes ]]; }
 systemctl() { [[ ${ACTIVE:-yes} == yes ]]; }
-wait_for_rcon() { [[ ${READY:-yes} == yes ]]; }
+wait_for_rcon() {
+    [[ ${ACTIVE:-yes} == yes ]] || return 2
+    [[ ${READY:-yes} == yes ]]
+}
 sleep() { printf '%s\n' "$1" >> "${DATA_PATH}/sleeps"; }
 session_id=06cfb682ddd8af5effcb62288b093e39d047cc8d10c885c66b2b261ca76453db
 session_start="${SESSION_START:-2026-11-26T21:26:24.041767168-05:00}"
@@ -173,6 +176,8 @@ printf 'auth-type: floodgate\n' > "${DATA_PATH}/plugins/Geyser-Spigot/config.yml
         'VERSION_RESPONSE=This server is running CraftBukkit version fixture-Spigot-build (MC: 26.3)' \
         "FINAL_INSPECT_JSON=[$(inspect_record "${replacement}" true "${started}")]"
     expect_switch_failure 41 INSPECT_FAIL=yes
+    expect_switch_failure 51 ACTIVE=no
+    expect_switch_failure 49 READY=no
     for invalid in 'not JSON' '[]' "[${record},${record}]" "[${record}] [${record}]" \
         "[$(inspect_record "${id}" false "${started}")]"; do
         expect_switch_failure 41 "INSPECT_JSON=${invalid}"

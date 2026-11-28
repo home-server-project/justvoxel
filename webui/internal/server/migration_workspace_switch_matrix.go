@@ -33,6 +33,7 @@ func (a *App) migrationSwitchMatrix(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var result api.SwitchMatrixStatus
 	var err error
+	targeted := false
 	action := r.PathValue("matrixAction")
 	if r.Method == http.MethodGet {
 		id := ""
@@ -57,6 +58,9 @@ func (a *App) migrationSwitchMatrix(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for key, values := range r.PostForm {
+			if key == "case_id" && action == "start" && len(values) > 0 && len(values) <= 16 {
+				continue
+			}
 			if (key != "csrf" && (key != "operation_id" || action == "start")) || len(values) != 1 {
 				badRequest()
 				return
@@ -78,7 +82,20 @@ func (a *App) migrationSwitchMatrix(w http.ResponseWriter, r *http.Request) {
 		}
 		switch action {
 		case "start":
-			result, err = client.StartSwitchMatrix(ctx, session)
+			ids := r.PostForm["case_id"]
+			targeted = len(ids) != 0
+			if targeted {
+				selection, ok := a.api.(interface {
+					StartTargetedSwitchMatrix(context.Context, string, []string) (api.SwitchMatrixStatus, error)
+				})
+				if !ok {
+					http.NotFound(w, r)
+					return
+				}
+				result, err = selection.StartTargetedSwitchMatrix(ctx, session, ids)
+			} else {
+				result, err = client.StartSwitchMatrix(ctx, session)
+			}
 		case "stop":
 			result, err = client.StopSwitchMatrix(ctx, session, id)
 		case "recover":
@@ -94,7 +111,12 @@ func (a *App) migrationSwitchMatrix(w http.ResponseWriter, r *http.Request) {
 		if action == "" {
 			message = "switch_matrix.status_failed"
 		}
-		a.writeSwitchMatrixAPIError(w, err, message)
+		var response *api.ResponseError
+		if targeted && errors.As(err, &response) && response.StatusCode == http.StatusBadRequest {
+			a.writeMinecraftWorkspaceAPIError(w, err, ui(w, message))
+		} else {
+			a.writeSwitchMatrixAPIError(w, err, message)
+		}
 		return
 	}
 	code := http.StatusOK

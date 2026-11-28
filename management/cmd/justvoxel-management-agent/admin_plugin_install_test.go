@@ -276,7 +276,9 @@ func newPluginInstallFixtureFor(t *testing.T, software, version string) *pluginI
 				f.commands = append(f.commands, command+" "+strings.Join(args, " "))
 				return nil, nil
 			}
-			if !gracefulSignalRequested {
+			if f.software == "leaf" {
+				checkCountdown()
+			} else if !gracefulSignalRequested {
 				t.Fatal("Java service stopped without the selected instance's SIGUSR1 request")
 			}
 			gracefulSignalRequested = false
@@ -302,6 +304,9 @@ func newPluginInstallFixtureFor(t *testing.T, software, version string) *pluginI
 			if len(args) > 0 && args[0] == "kill" {
 				if !slices.Equal(args, signalArgs) {
 					t.Fatalf("unexpected Java shutdown signal or target: %s %v", command, args)
+				}
+				if f.software == "leaf" {
+					t.Fatal("Leaf shutdown must use the selected service stop without SIGUSR1")
 				}
 				f.commands = append(f.commands, command+" "+strings.Join(args, " "))
 				if f.software == "neoforge" {

@@ -51,6 +51,14 @@ class IndependentRestore(unittest.TestCase):
         self.assertNotIn('minecraft.json', self.restore_source)
         for old,new in [('/usr/libexec/justvoxel/mjust/',str(self.helpers)+'/'),('/etc/justvoxel/instances',str(self.configs)),('/var/lib/justvoxel/instances',str(self.registry)),('/etc/justvoxel/minecraft-backup.env',str(self.root/'backup.env'))]:
             self.restore_source=self.restore_source.replace(old,new)
+        self.restore_source=self.restore_source.replace(
+            "try:\n    MANAGEMENT_GID = grp.getgrnam",
+            "def fixture_getgrnam(name):\n"
+            "    assert name == 'justvoxel-web'\n"
+            "    return type('Group', (), {'gr_gid': int(os.environ['FIXTURE_MANAGEMENT_GID'])})()\n"
+            "grp.getgrnam = fixture_getgrnam\n"
+            "try:\n    MANAGEMENT_GID = grp.getgrnam")
+        self.env['FIXTURE_MANAGEMENT_GID']='24027'
         world=self.root/'storage/minecraft-instances/jv-aaaaaa/data/world'
         world.mkdir();(world/'level.dat').write_bytes(world_metadata())
         self.run_helper('create')
@@ -60,10 +68,11 @@ class IndependentRestore(unittest.TestCase):
         self.other=self.root/'storage/minecraft-instances/jv-bbbbbb/data/level.dat'
         (self.data/'level.dat').write_bytes(b'original at restore time')
 
-    def restore(self,action,plan='',ok=True,identity='jv-aaaaaa',source=None,archive=None,clone_source=None):
+    def restore(self,action,plan='',ok=True,identity='jv-aaaaaa',source=None,archive=None,clone_source=None,initialization=None):
         helper=self.helpers/'restore-worker';self.tool(helper,source or self.restore_source)
-        args=['bash',str(helper),action,identity,archive or self.archive,plan,'false']
+        args=['bash',str(helper),action,identity,self.archive if archive is None else archive,plan,'false']
         if clone_source is not None: args.append(clone_source)
+        if initialization is not None: args.append(initialization)
         result=subprocess.run(args,env=self.env,capture_output=True,text=True,timeout=30)
         self.assertEqual(result.returncode==0,ok,result.stdout+result.stderr)
         self.assertNotIn('private-runtime-secret',result.stdout+result.stderr)
@@ -230,7 +239,7 @@ class IndependentRestore(unittest.TestCase):
             ({'loader_version': '21.4.148'}, 'invalid_loader_evidence'),
             ({'loader_version': '/private/archive-controlled'}, 'invalid_loader_evidence'),
             ({'version': '1.21.3'}, 'incompatible_software_version'),
-            ({'sha256': 'a'*64}, 'invalid_archive_integrity'),
+            ({'sha256': 'a'*64}, 'invalid_archive_checksum'),
         ]:
             with self.subTest(patch=patch):
                 self.private(meta,json.dumps(dict(item,**patch)))
@@ -290,13 +299,135 @@ class IndependentRestore(unittest.TestCase):
         self.archive=old
         self.assertEqual(self.plan()['integrity'],'verified')
 
+    def test_managed_ownership_round_trips_through_ordinary_restore(self):
+        for gid in (24027, 29031):
+            with self.subTest(gid=gid):
+                self.env['FIXTURE_MANAGEMENT_GID']=str(gid)
+                transaction='.justvoxel/plugin-transactions/ccebee6b-1102-4422-a04d-369c96868004'
+                paths={'.justvoxel':0o700, '.justvoxel/plugin-transactions':0o700, transaction:0o700,
+                       '.justvoxel/plugins.json':0o600, 'plugins/managed.jar':0o644, 'mods/managed.jar':0o644,
+                       transaction+'/staged.jar':0o644}
+                for name in ('plugins', 'mods'):
+                    (self.data/name).mkdir(exist_ok=True)
+                    os.chown(self.data/name,1000,1000)
+                for name, mode in paths.items():
+                    path=self.data/name
+                    if mode == 0o700: path.mkdir(exist_ok=True)
+                    else: path.write_bytes(name.encode())
+                    os.chown(path,0,gid)
+                    path.chmod(mode)
+                known={item['archive'] for item in self.inventory()}
+                self.run_helper('create')
+                new=next(item for item in self.inventory() if item['archive'] not in known)
+                self.archive=new['archive']
+                plan=self.prepare()
+                original_archive=(self.backups/'jv-aaaaaa'/self.archive).read_bytes()
+                self.restore('shutdown');self.restore('activate')
+                for name, mode in paths.items():
+                    for location in (self.data, self.tx()/'original'):
+                        info=(location/name).stat()
+                        self.assertEqual((info.st_uid,info.st_gid,info.st_mode & 0o777),(0,gid,mode))
+                        if mode != 0o700: self.assertEqual((location/name).read_bytes(),name.encode())
+                self.restore('rollback');self.restore('rollback-verifying');self.restore('rolled-back')
+                self.assertEqual(plan['integrity'],'verified')
+                self.assertEqual((self.backups/'jv-aaaaaa'/self.archive).read_bytes(),original_archive)
+
+    def test_managed_archive_ownership_and_modes_are_scoped(self):
+        gid=int(self.env['FIXTURE_MANAGEMENT_GID'])
+        path=self.backups/'jv-aaaaaa'/self.archive
+        baseline=path.read_bytes()
+        for name, uid, group, mode, code in [
+            ('data/mods/managed.jar',0,gid+1,0o644,'invalid_archive_ownership'),
+            ('data/mods/managed.jar',1000,gid,0o644,'invalid_archive_ownership'),
+            ('data/mods/managed.jar',27123,1000,0o644,'invalid_archive_ownership'),
+            ('data/config/unrelated.txt',0,gid,0o644,'invalid_archive_ownership'),
+            ('data/plugins/managed.jar',0,gid,0o664,'invalid_archive_mode'),
+            ('data/plugins/managed.jar',0,gid,0o646,'invalid_archive_mode'),
+            ('data/plugins/managed.jar',0,0,0o4644,'invalid_archive_mode'),
+            ('data/.justvoxel/plugins.json',0,gid,0o600,'invalid_archive_ownership'),
+        ]:
+            with self.subTest(name=name,uid=uid,group=group,mode=mode):
+                with tarfile.open(fileobj=io.BytesIO(baseline),mode='r:gz') as src, tarfile.open(path,'w:gz') as dst:
+                    for member in src:
+                        dst.addfile(member,src.extractfile(member) if member.isfile() else None)
+                    member=tarfile.TarInfo(name)
+                    member.uid,member.gid,member.mode,member.size=uid,group,mode,1
+                    dst.addfile(member,io.BytesIO(b'x'))
+                self.replace_archive(raw=path.read_bytes())
+                result=self.restore('plan',ok=False)
+                self.assertEqual(json.loads(result.stdout),{'error':code})
+
+    def test_verified_initial_leaf_archive_is_private_to_switch_clone(self):
+        import shutil
+        source, clone='jv-aaaaaa','jv-bbbbbb'
+        for identity, software in ((source,'leaf'),(clone,'paper')):
+            config=self.configs/identity/'config.json'
+            record=json.loads(config.read_text())
+            record['runtime'].update(software=software,version='26.3',version_policy='pinned',start_on_boot=False)
+            self.private(config,json.dumps(record))
+        shutil.rmtree(self.data/'world')
+        (self.data/'level.dat').unlink()
+        os.chown(self.data,1000,1000)
+        for name,value in (('eula.txt','eula=true\n'),('.rcon-cli.env','private-runtime-secret'),
+                           ('.rcon-cli.yaml','private-runtime-secret')):
+            self.private(self.data/name,value)
+        (self.data/'plugins/Geyser-Spigot').mkdir(parents=True)
+        (self.data/'plugins/Geyser-Spigot/config.yml').write_text('test: initial configuration\n')
+        jar=self.data/'plugins/Geyser-Spigot.jar'
+        jar.write_bytes(b'initial executable')
+        gid=int(self.env['FIXTURE_MANAGEMENT_GID'])
+        os.chown(jar,0,gid)
+        jar.chmod(0o644)
+        def reviewed():
+            return json.loads(self.restore('switch-initial-data',archive='').stdout)['fingerprint']
+        proof=reviewed()
+        for invalid in ('world','empty-custom-level','logs','server.jar'):
+            path=self.data/invalid
+            if invalid.endswith('.jar'): path.touch()
+            else: path.mkdir()
+            self.restore('switch-initial-data',archive='',ok=False)
+            if path.is_dir(): path.rmdir()
+            else: path.unlink()
+        self.assertNotEqual(reviewed(),proof)
+        proof=reviewed()
+        self.run_helper('create',source)
+        self.archive=next(item['archive'] for item in self.inventory(source) if item['software']=='leaf')
+        self.assertEqual(json.loads(self.restore('plan',ok=False).stdout),{'error':'invalid_archive_world'})
+        args=dict(identity=clone,clone_source=source)
+        self.assertEqual(json.loads(self.restore('plan',ok=False,**args).stdout),{'error':'invalid_archive_world'})
+        plan=self.plan(**args,initialization=proof)
+        jar.write_bytes(b'changed executable')
+        result=self.restore('prepare',plan['fingerprint'],ok=False,**args,initialization=proof)
+        self.assertEqual(json.loads(result.stdout),{'error':'invalid_initialization_evidence'})
+        changed=reviewed()
+        result=self.restore('plan',ok=False,**args,initialization=changed)
+        self.assertEqual(json.loads(result.stdout),{'error':'invalid_initialization_evidence'})
+        jar.write_bytes(b'initial executable')
+        proof=reviewed()
+        plan=self.plan(**args,initialization=proof)
+        self.restore('prepare',plan['fingerprint'],**args,initialization=proof)
+        self.restore('shutdown',identity=clone);self.restore('activate',identity=clone)
+        dest=self.other.parent
+        self.assertEqual((dest/'plugins/Geyser-Spigot.jar').read_bytes(),jar.read_bytes())
+        self.assertEqual((dest/'plugins/Geyser-Spigot.jar').stat().st_gid,gid)
+        self.assertEqual((dest/'plugins/Geyser-Spigot/config.yml').read_text(),'test: initial configuration\n')
+        self.assertFalse((dest/'world').exists())
+        self.assertFalse((dest/'.rcon-cli.env').exists())
+        self.assertFalse((dest/'.rcon-cli.yaml').exists())
+        self.restore('rollback',identity=clone)
+        self.restore('rollback-verifying',identity=clone);self.restore('rolled-back',identity=clone)
+        self.assertTrue(self.other.exists())
+        self.assertEqual((self.data/'.rcon-cli.env').read_text(),'private-runtime-secret')
+        self.assertEqual((jar.stat().st_uid,jar.stat().st_gid,jar.stat().st_mode & 0o777),(0,gid,0o644))
+
     def test_sha_truncation_and_malformed_tar(self):
         self.assertEqual(self.plan()['integrity'],'verified')
         path=self.backups/'jv-aaaaaa'/self.archive;original=path.read_bytes()
         path.write_bytes(original[:-4]+b'xxxx')
-        self.restore('plan',ok=False) # Metadata SHA has not changed.
-        self.replace_archive(raw=original[:-4]);self.restore('plan',ok=False) # SHA matches truncated gzip.
-        self.replace_archive(raw=gzip.compress(b'not a tar archive'));self.restore('plan',ok=False)
+        self.assertEqual(json.loads(self.restore('plan',ok=False).stdout),{'error':'invalid_archive_checksum'})
+        for malformed in (original[:-4],gzip.compress(b'not a tar archive')):
+            self.replace_archive(raw=malformed)
+            self.assertEqual(json.loads(self.restore('plan',ok=False).stdout),{'error':'invalid_archive_entries'})
 
     def test_paths_links_duplicates_conflicts_and_special_files(self):
         for entries in [[('../escape','file',b'x')],[('/data/escape','file',b'x')],[('data/../escape','file',b'x')],[('data/link','symlink','/etc/passwd')],[('data/fifo','fifo','')],[('data/link','hardlink','data/world/level.dat')],[('data/a','file',b'a'),('data/a','file',b'b')],[('data/a/b','file',b'a'),('data/a','file',b'b')],[('data/a','file',b'a'),('data/a/b','file',b'b')]]:
@@ -401,12 +532,13 @@ class IndependentRestore(unittest.TestCase):
     def test_world_version_and_corrupt_world_metadata(self):
         path=self.backups/'jv-aaaaaa'/self.archive
         original=path.read_bytes()
-        for value in (world_metadata('1.22.0'),gzip.compress(b'invalid NBT')):
+        for value,code in ((world_metadata('1.22.0'),'incompatible_software_version'),(gzip.compress(b'invalid NBT'),'invalid_archive_world')):
             with tarfile.open(path,'w:gz') as tf:
                 root=tarfile.TarInfo('data');root.type=tarfile.DIRTYPE;root.mode=0o750;tf.addfile(root)
                 member=tarfile.TarInfo('data/world/level.dat');member.mode=0o640;member.size=len(value)
                 tf.addfile(member,io.BytesIO(value))
-            self.replace_archive(raw=path.read_bytes());self.restore('plan',ok=False)
+            self.replace_archive(raw=path.read_bytes())
+            self.assertEqual(json.loads(self.restore('plan',ok=False).stdout),{'error':code})
         self.replace_archive(raw=original)
         self.assertEqual(self.plan()['integrity'],'verified')
 

@@ -26,6 +26,8 @@ type instanceRuntimeStatus struct {
 
 	// State can also be "failed" for a service that systemd still considers active.
 	resettableFailure bool
+	// Separate systemd, podman ps and inspect calls can straddle container exit.
+	shutdownObservationTransient bool
 }
 
 func (b *instanceRuntimeBackend) observeRaw(ctx context.Context, id string) (instanceRuntimeStatus, error) {
@@ -84,6 +86,7 @@ func (b *instanceRuntimeBackend) observeRaw(ctx context.Context, id string) (ins
 		}
 		stateOutput, err := b.command(ctx, "podman", "inspect", "--type", "container", "--format", "{{.State.Status}} {{.State.ExitCode}}", "minecraft-"+id)
 		if err != nil {
+			result.shutdownObservationTransient = true
 			return result, instanceRuntimeFailure("Instance container inspection is unavailable.")
 		}
 		stateFields := strings.Fields(string(stateOutput))
@@ -106,6 +109,7 @@ func (b *instanceRuntimeBackend) observeRaw(ctx context.Context, id string) (ins
 		result.State = "configured"
 		return result, nil
 	}
+	result.shutdownObservationTransient = containerState == "stopping" || containerState == "removing"
 	if props["ActiveState"] == "failed" {
 		if containerState == "running" || containerState == "paused" || containerState == "stopping" {
 			return result, instanceRuntimeFailure("Failed service still has a live container.")
@@ -120,6 +124,8 @@ func (b *instanceRuntimeBackend) observeRaw(ctx context.Context, id string) (ins
 	if props["ActiveState"] == "active" {
 		if containerState != "running" {
 			result.State = "failed"
+			result.shutdownObservationTransient = result.shutdownObservationTransient ||
+				containerState == "absent" || containerState == "exited" || containerState == "stopped"
 		} else {
 			result.State = "running"
 		}
@@ -129,6 +135,7 @@ func (b *instanceRuntimeBackend) observeRaw(ctx context.Context, id string) (ins
 			result.State = "stopped"
 			if containerState == "exited" && containerExit != 0 {
 				result.State = "failed"
+				result.shutdownObservationTransient = true
 			}
 		default:
 			return result, instanceRuntimeFailure("Container state disagrees with the stopped service.")
@@ -362,7 +369,7 @@ func (b *instanceRuntimeBackend) actionWithVerifiedRecordWarnings(ctx context.Co
 					return err
 				}
 			}
-			stopped, err := b.observeRaw(ctx, id)
+			stopped, err := b.observeShutdown(ctx, id)
 			if err != nil || stopped.State != "stopped" {
 				return instanceRuntimeFailure("Instance graceful shutdown could not be confirmed.")
 			}

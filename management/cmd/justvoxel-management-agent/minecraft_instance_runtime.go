@@ -41,36 +41,38 @@ type minecraftInstanceRuntimeConfig struct {
 	MatrixFixture   bool   `json:"matrix_fixture,omitempty"`
 	MatrixLeafBuild string `json:"matrix_leaf_build,omitempty"`
 	// Internal Switch startup guard; never accepted from public settings.
-	PreserveContent  bool   `json:"preserve_content,omitempty"`
-	ID               string `json:"id"`
-	JavaPort         int    `json:"java_port"`
-	BedrockEnabled   bool   `json:"bedrock_enabled"`
-	BedrockPort      int    `json:"bedrock_port"`
-	BedrockTCPPort   int    `json:"bedrock_tcp_port,omitempty"`
-	BedrockUDPStart  int    `json:"bedrock_udp_start,omitempty"`
-	BedrockUDPEnd    int    `json:"bedrock_udp_end,omitempty"`
-	JavaMemory       string `json:"java_memory"`
-	ContainerMemory  string `json:"container_memory"`
-	Software         string `json:"software"`
-	LoaderVersion    string `json:"loader_version,omitempty"`
-	PufferfishBuild  int    `json:"pufferfish_build,omitempty"`
-	VersionPolicy    string `json:"version_policy,omitempty"`
-	Version          string `json:"version"` // resolved pin or LATEST, as in the legacy environment
-	PaperChannel     string `json:"paper_channel"`
-	ImageTag         string `json:"image_tag"`
-	ImageDigest      string `json:"image_digest,omitempty"`
-	StartOnBoot      bool   `json:"start_on_boot"`
-	EULAAccepted     bool   `json:"eula_accepted"`
-	UID              uint32 `json:"uid"`
-	GID              uint32 `json:"gid"`
-	Timezone         string `json:"timezone,omitempty"` // Decode deployed records only; new runtimes inherit /etc/localtime.
-	GameMode         string `json:"game_mode"`
-	Difficulty       string `json:"difficulty"`
-	MaxPlayers       int    `json:"max_players"`
-	Whitelist        bool   `json:"whitelist"`
-	EnforceWhitelist bool   `json:"enforce_whitelist"`
-	MOTD             string `json:"motd"`
-	RCONPassword     string `json:"rcon_password"`
+	PreserveContent bool `json:"preserve_content,omitempty"`
+	// A reviewed Clone exclusion also suppresses automatic content after later Version updates.
+	SwitchCloneExclusions bool   `json:"switch_clone_exclusions,omitempty"`
+	ID                    string `json:"id"`
+	JavaPort              int    `json:"java_port"`
+	BedrockEnabled        bool   `json:"bedrock_enabled"`
+	BedrockPort           int    `json:"bedrock_port"`
+	BedrockTCPPort        int    `json:"bedrock_tcp_port,omitempty"`
+	BedrockUDPStart       int    `json:"bedrock_udp_start,omitempty"`
+	BedrockUDPEnd         int    `json:"bedrock_udp_end,omitempty"`
+	JavaMemory            string `json:"java_memory"`
+	ContainerMemory       string `json:"container_memory"`
+	Software              string `json:"software"`
+	LoaderVersion         string `json:"loader_version,omitempty"`
+	PufferfishBuild       int    `json:"pufferfish_build,omitempty"`
+	VersionPolicy         string `json:"version_policy,omitempty"`
+	Version               string `json:"version"` // resolved pin or LATEST, as in the legacy environment
+	PaperChannel          string `json:"paper_channel"`
+	ImageTag              string `json:"image_tag"`
+	ImageDigest           string `json:"image_digest,omitempty"`
+	StartOnBoot           bool   `json:"start_on_boot"`
+	EULAAccepted          bool   `json:"eula_accepted"`
+	UID                   uint32 `json:"uid"`
+	GID                   uint32 `json:"gid"`
+	Timezone              string `json:"timezone,omitempty"` // Decode deployed records only; new runtimes inherit /etc/localtime.
+	GameMode              string `json:"game_mode"`
+	Difficulty            string `json:"difficulty"`
+	MaxPlayers            int    `json:"max_players"`
+	Whitelist             bool   `json:"whitelist"`
+	EnforceWhitelist      bool   `json:"enforce_whitelist"`
+	MOTD                  string `json:"motd"`
+	RCONPassword          string `json:"rcon_password"`
 }
 
 type minecraftInstanceRuntimeContext struct {
@@ -498,6 +500,11 @@ func (s *minecraftInstanceStore) renderInstanceRuntimesCandidate(ctx minecraftIn
 			f.Environment = append(f.Environment, []byte("PUFFERFISH_BUILD="+strconv.Itoa(c.PufferfishBuild)+"\nPUFFERFISH_CONFIG_REPO=\n")...)
 		} else if capabilities.ModLoader {
 			f.Environment = append(f.Environment, []byte(capabilities.LoaderEnvironment+"="+c.LoaderVersion+"\n")...)
+		}
+		// Switch may need to answer Leaf's pre-RCON startup migration prompt.
+		// The local pipe is passive on ordinary starts.
+		if c.PreserveContent && switchLeafStartupMigration(c.Software, c.Version) {
+			f.Environment = append(f.Environment, []byte("CREATE_CONSOLE_IN_PIPE=true\n")...)
 		}
 		if c.Software == "bedrock" {
 			f.Environment = bedrockEnvironment(c)

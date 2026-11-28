@@ -457,19 +457,36 @@ Export/Import transports or archive formats. All cards remain visible:
 - **Available**: at least one supported structural action can be reviewed.
 - **Not Supported**: dimmed and disabled; JustVoxel has no verified conversion path.
 
-Switch holds the exact installed Minecraft game version fixed. Runtime, image and
-managed cross-play evidence must be available for that exact version. Review
-binds Apply to selected-instance configuration, runtime evidence and current
-plugin/mod inventory and hashes. Changing Minecraft version is a separate
-Version operation. Target software remains pinned to the reviewed game version.
+For initialized servers, Switch holds the exact installed Minecraft game version fixed. The installed
+version comes from the selected server's startup log and can be reviewed while
+the server is stopped. The destination runtime, loader and image are verified
+for that same version. Changing Minecraft version is a separate Version
+operation. The destination stays pinned to the reviewed Minecraft version.
+
+A stopped Java source with an exact committed pin can also qualify for Clone
+before its first Minecraft initialization. Switch verifies the registered
+configuration and storage, checks retained startup history, and inspects the
+entire data tree for known initial files and allowed plugin, mod and configuration
+content. A missing log alone does not establish that a source is uninitialized.
+World directories, damaged world data and other ambiguous evidence block this
+path. The review shows the configured pin as the Minecraft version and the
+installed-version evidence stays empty. Convert remains unavailable on this path.
 
 The Switch capability table covers Paper, Purpur, Pufferfish, Leaf, Vanilla,
-Fabric, NeoForge, Forge and Quilt. A direction can offer **Convert existing
-server**, **Clone and convert**, or both. Incompatible or unverified plugin and
-mod releases block Convert and are listed by name when identified. Provider failures stay
-unverified. The Plugins & Mods link opens that existing workspace for the same
-server. Resolve content manually, then return or refresh to review again. Switch
-never deletes, disables, replaces, updates or downloads plugins or mods.
+Fabric, NeoForge, Forge and Quilt. A destination can offer **Convert existing
+server**, **Clone and convert**, or both. Incompatible content, unverified
+content and missing required dependencies block Convert. Clone review shows
+each affected plugin or mod by name, filename and folder, with a reason. Review
+the files that will stay and explicitly accept the listed exclusions before
+cloning. Publisher failures leave compatibility unverified. The Plugins & Mods
+link opens that workspace for the selected source instance.
+
+A cross-play source can offer a Java-only clone with the relevant managed
+cross-play executables excluded. **Preserve cross-play** requires a verified
+destination stack at the exact reviewed game version. Review lists the
+destination artifacts that will be installed when a different stack is
+required. Existing verified same-platform components can stay in place. An
+unavailable preserve choice prevents that Clone from proceeding.
 
 Convert preserves the immutable instance ID, data and backup locations, Java
 port and boot preference. If the reviewed target uses Java only, Convert releases
@@ -484,14 +501,38 @@ required. A running source stops only for a consistent backup/copy and resumes
 its previous state before clone conversion/verification. Original settings are
 restored after the copy. Verified clones are left stopped and support normal rename.
 
-A protected experimental clone can be reviewed when verified world or content
-compatibility prevents in-place Convert. If launching the target would reuse an
-incompatible managed cross-play stack, review blocks the affected direction.
-Clone preserves the original and leaves the verified target stopped. Existing creation/runtime/restore cleanup and recovery preserve the
-original; retained Switch attention is handled in Switch, without routing an
-ordinary conversion through Export/Import Recovery. Recovery never retries the
-conversion automatically. Minecraft Network members must first leave Network
-before standalone conversion can be reviewed.
+Modded-world moves are experimental and Clone-only when world safety cannot
+be established. Mod-added blocks, items, entities and other world data can be
+lost in the cloned world. Unsupported runtime or world transformations still
+block Switch.
+
+After the existing Restore process verifies the archive, Switch checks the
+restored executable bytes and ownership against the review. It moves reviewed
+exclusions into the clone's private content staging and updates the clone's
+ownership manifest before the first start. The clone keeps its automatic
+content guard across later Version updates. Excluded bytes remain available in
+the original and its backup. The review fingerprint binds the exact artifact
+hashes, dependency decisions, exclusions and destination cross-play choice.
+A changed inventory or an unsafe file blocks execution. Switch starts the
+clone to verify it and then leaves it stopped. Existing creation, runtime and
+Restore retirement handle failed clones. Use Switch recovery for retained
+Switch operations. Recovery verifies or retires the affected clone without
+retrying the conversion. Minecraft Network members must leave Network before
+reviewing a standalone Switch.
+
+For an uninitialized source, Switch binds its initial data and exact version to
+the review and revalidates them before staging. The existing Backup and Restore
+helpers carry a consistent worldless archive only for this internal Clone.
+The source stays stopped and retains its data and configuration. The destination
+keeps the applicable initial files, regenerates its RCON client files from its
+own configuration, and applies reviewed executable exclusions before starting.
+Switch verifies the exact runtime and the newly created world and leaves the
+destination stopped. The world requirement still applies to ordinary Restore and
+to initialized Switch archives.
+
+After an interruption or reboot, recovery can restart an originally running
+production source at the reviewed Minecraft version while preserving its saved
+Start on Boot preference.
 
 Switch keeps the attempted software card selected while following an operation
 and showing its result. Opening Switch reconnects to work in progress or an
@@ -501,6 +542,41 @@ failure details and recovery results in **System Settings → Logs → Migration
 Spigot remains outside the verified Switch paths. Java and native Bedrock world
 and runtime conversion is unsupported. See [server software](server-software.md)
 for the upstream world and executable-content contracts.
+
+When Leaf requires startup world migration, a reviewed Switch can answer the
+server's console prompt after verifying the restored clone or the Convert
+rollback backup. The current target session still has to pass exact runtime
+verification. Switch recovery can cancel a pending prompt and retire an owned
+clone that failed before its player console became available.
+
+### Leaf installed-version diagnostics
+
+If Switch cannot verify the installed version on a Leaf appliance, collect the
+selected instance's service state, the retained log's startup markers and the
+Version status helper's exit status. These commands work with the instance
+stopped. Replace the ID with the affected instance.
+
+```bash
+id=jv-abcdef
+helper=/usr/libexec/justvoxel/mjust/admin-version-status-json
+config="/etc/justvoxel/instances/${id}/config.json"
+systemctl show "minecraft-${id}.service" -p ActiveState -p SubState -p Result
+data="$(sudo jq -er .storage.data_path "${config}")"
+sudo stat -c '%F %s %y %n' -- "${data}/logs" "${data}/logs/latest.log"
+sudo grep -Ei 'Starting minecraft server version|Loading Leaf|This server is running Leaf' -- "${data}/logs/latest.log" | head -n 12
+status="$(sudo "${helper}" --instance "${id}" '' '')"
+printf 'Version status exit code: %s\n' "$?"
+if [[ -n ${status} ]]; then
+    jq '{installed,configured_server_type,stack_state,reason}' <<< "${status}"
+fi
+```
+
+With this Switch version deployed, also run
+`sudo "$helper" --instance "$id" --switch-installed`. A valid version from the
+installed-only check alongside a failed full status call isolates the failure
+to full Version status. A missing or unreadable log points to retained runtime
+evidence. A readable log with different startup markers provides the evidence
+needed to investigate the parser.
 
 ### Switch matrix integration
 
@@ -512,8 +588,13 @@ Agent records the interruption and preserves the evidence for explicit
 recovery.
 
 Exact release classification uses the Setup publisher resolvers and records
-`AVAILABLE`, `UNSUPPORTED`, or `UNVERIFIED`. An incomplete publisher lookup
-or inconclusive metadata produces `UNVERIFIED`.
+`AVAILABLE`, `UNSUPPORTED`, `UNAVAILABLE`, or `UNVERIFIED`. An incomplete
+publisher lookup or inconclusive metadata produces `UNVERIFIED`. Pufferfish
+exact pins can use verified archived builds from the same Jenkins job. A
+complete retained inventory with no matching artifact reports `UNAVAILABLE`.
+Setup and the matrix choose the numerically newest eligible stable Quilt loader
+from the publisher catalog and verify the exact game and loader artifact.
+Switch still verifies the running game and loader in the current session.
 
 On the development appliance, open **Server Migration → Switch** as an
 administrator. **Run Switch Test** is on the right side of the catalogue
@@ -546,7 +627,14 @@ record fixed reasons for the failed check, such as a changed container session,
 missing startup evidence, an image mismatch, or an unexpected published port.
 Discovery records confirmed release absence separately from request failures
 and unverified selections. For managed cross-play, the manifest records the
-source and target compatibility failures where applicable.
+source and destination checks where applicable and distinguishes exact stack
+incompatibility from inconclusive publisher and artifact checks.
+
+The runner can retry a transient fixture shutdown or idle-job check once using
+verified retirement under the active maintenance reservation. It continues after
+verified closure. The report keeps the original failure stage and closure
+reason alongside the final cleanup and recovery results. Unresolved closure
+retains the reservation for **Recover Switch Test**.
 
 Cases run sequentially with a fresh source and at most one clone. Fixtures use
 private local data and backup directories, loopback-only published ports, and no
@@ -562,14 +650,21 @@ and after target startup, and uses the established backup and Restore capacity
 checks.
 
 The runner verifies exact current-session software, game, loader and applicable
-managed cross-play components. It writes deterministic block markers in the
-Overworld, Nether and End, flushes the source save, then checks the markers in
-the loaded target. Clone also verifies the original source's configuration,
-runtime, world markers and original running or stopped state. This exercises
-pristine worlds and managed server components. Source-level fixture checks
-verify the implementation with controlled test inputs. Successful execution
-on a real appliance, Bedrock client connectivity, and compatibility with
-custom modded worlds each require separate verification.
+managed cross-play components. Cross-play cases probe the Bedrock endpoint in
+addition to checking the port mappings. The matrix records source and
+destination cross-play independently, so a Java-only clone from a cross-play
+source is reported as Java-only. The runner checks chunk readiness, marker
+writes, comparisons and save confirmation in the Overworld, Nether and End.
+The report records the marker stage, dimension and sanitized outcome when a
+command fails. Clone cases also compare the reviewed
+destination executable inventory after verification and check the original
+source executable files, manifest, configuration, runtime, world markers and
+running or stopped state. The full run adds two representative fixtures for an
+uninitialized pinned source and a Paper-family source with verified plugin
+JARs and ownership metadata. They exercise Convert refusal, Clone retention,
+and exclusions for incompatible content and a missing dependency.
+Authenticated Bedrock client play and compatibility
+with custom modded worlds still require appliance acceptance.
 
 **Open Logs** opens **System Settings → Logs → Migration** and selects the
 matrix report when it is available. Download the JSON report for the
@@ -580,6 +675,8 @@ immediately. The admitted case completes
 or recovers and retires its fixtures before the runner stops. An Agent restart
 preserves the manifest and marks interrupted work. **Recover Switch Test**
 verifies fixture closure and leaves interrupted or unstarted cases unfinished.
+An already stopped source fixture can proceed to retirement after its
+transaction ownership and committed state are verified.
 It can also restore an older Clone source's original empty firewall encoding
 when the saved Clone record reproduces the fixture receipt exactly and the live
 definitions and storage identities still match. The historical case outcome is
@@ -593,3 +690,37 @@ inventory of exact archives and sidecars before removal and keeps rollback
 archives until Switch and Restore evidence is terminal. The Agent then uses
 ordinary journaled instance deletion. Ordinary Delete Server continues to
 preserve backups.
+
+### Targeted development Switch tests
+
+Open **Server Migration → Switch** on the development appliance while signed in
+as an administrator. In that tab's browser developer console, submit the
+following same-origin request. It uses the active session and the form's CSRF
+field automatically.
+
+```js
+const body = new URLSearchParams();
+body.set("csrf", document.querySelector("[data-switch-csrf]").value);
+body.append("case_id", "fabric.leaf.clone.26_1_plus.java.running");
+const response = await fetch("/api/migration/switch-matrix/start", {
+  method: "POST",
+  credentials: "same-origin",
+  body,
+});
+console.log(response.status, await response.json());
+```
+
+Use `fabric.leaf.clone.26_1_plus.java.stopped` for the stopped-source case.
+Repeat the `case_id` field to request up to 16 distinct cases in order. IDs use
+`source.target.action.world_layout_family.mode.source_state`, with
+`pre_26_1` or `26_1_plus` for the family and `java` or `crossplay` for the
+mode. For example, `neoforge.pufferfish.clone.pre_26_1.java.running` requires
+a common publisher-verified release in the legacy layout family.
+
+HTTP 202 returns the operation ID. The Migration log records `targeted: true`,
+the selected rows and their outcomes. If any requested case is unavailable,
+the run halts before fixture creation with `targeted_selection_unavailable`
+and records why each unavailable row was refused. Use the existing **Stop Test**
+and **Recover Switch Test** actions for cancellation or recovery. A targeted
+run verifies only its selected cases. **Run Switch Test** still runs the full
+matrix with its Vanilla → Purpur smoke gate.

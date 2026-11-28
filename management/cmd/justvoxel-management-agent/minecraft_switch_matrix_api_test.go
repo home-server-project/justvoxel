@@ -100,6 +100,7 @@ func TestSwitchMatrixDevelopmentGate(t *testing.T) {
 		t.Fatalf("restart lost its maintenance reservation: %+v", got)
 	}
 	if !switchMatrixDevelopment {
+		matrixAPIRequest(t, mux, "POST", "/start", `{"case_ids":["fabric.leaf.clone.26_1_plus.java.running"]}`, 404)
 		matrixAPIRequest(t, mux, "POST", "/recover", `{"operation_id":"`+j.OperationID+`"}`, 404)
 	}
 }
@@ -133,7 +134,7 @@ func TestSwitchMatrixImagePackaging(t *testing.T) {
 	if !strings.Contains(read("build_files/build-common.sh"), `grep -Fxq "Switch matrix=${expected_switch_matrix}"`) {
 		t.Fatal("image assembly must verify the compiled agent capability")
 	}
-	for _, name := range []string{"runner", "runtime", "development"} {
+	for _, name := range []string{"runner", "runtime", "development", "selection"} {
 		if !strings.HasPrefix(read("management/cmd/justvoxel-management-agent/minecraft_switch_matrix_"+name+".go"), "//go:build justvoxel_dev\n") {
 			t.Fatalf("executable matrix %s is in the production build", name)
 		}

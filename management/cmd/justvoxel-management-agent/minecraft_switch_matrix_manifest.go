@@ -8,10 +8,12 @@ import (
 )
 
 const (
-	switchMatrixLegacy        = "pre_26_1"
-	switchMatrixModern        = "26_1_plus"
-	switchMatrixCatalogLimit  = 8 // per layout family
-	switchMatrixVersionHelper = "/usr/libexec/justvoxel/mjust/admin-version-status-json"
+	switchMatrixLegacy         = "pre_26_1"
+	switchMatrixModern         = "26_1_plus"
+	switchMatrixCatalogLimit   = 8 // per layout family
+	switchMatrixVersionHelper  = "/usr/libexec/justvoxel/mjust/admin-version-status-json"
+	switchMatrixInitialSource  = "uninitialized"
+	switchMatrixManagedContent = "managed_content"
 )
 
 type switchMatrixCase struct {
@@ -31,6 +33,29 @@ type switchMatrixCase struct {
 	ReleaseReason        string              `json:"release_reason,omitempty"`
 	SourceCrossplayCheck string              `json:"source_crossplay_verification,omitempty"`
 	TargetCrossplayCheck string              `json:"target_crossplay_verification,omitempty"`
+	Profile              string              `json:"fixture_profile,omitempty"`
+}
+
+// Add two representative cases while keeping every existing runtime case.
+// Use the same exact releases and image selection as the stopped Java rows.
+func addSwitchMatrixCoverage(cases []switchMatrixCase) []switchMatrixCase {
+	for _, pair := range []struct{ source, target, profile string }{
+		{"vanilla", "purpur", switchMatrixInitialSource},
+		{"paper", "purpur", switchMatrixManagedContent},
+	} {
+		for _, c := range cases {
+			if c.Source != pair.source || c.Target != pair.target || c.Action != "clone" ||
+				c.Crossplay || c.Family != switchMatrixModern || c.SourceState == "running" {
+				continue
+			}
+			c.Profile = pair.profile
+			c.SourceState = "stopped"
+			c.ID = c.canonicalID() + "." + pair.profile
+			cases = append(cases, c)
+			break
+		}
+	}
+	return cases
 }
 
 func switchMatrixVersions(catalog []string) map[string][]string {
@@ -103,7 +128,7 @@ func decodeSwitchMatrixCrossplayCheck(raw []byte) string {
 	case "crossplay_helper_failed", "crossplay_selection_invalid", "crossplay_loader_missing", "geyser_java_target_mismatch",
 		"geyser_request_timeout", "geyser_request_failed", "geyser_response_invalid",
 		"viaversion_request_timeout", "viaversion_request_failed", "viaversion_response_invalid",
-		"viaversion_release_unverified", "crossplay_mod_artifacts_unverified", "crossplay_mod_request_timeout",
+		"viaversion_release_unverified", "viaversion_exact_release_unsupported", "crossplay_mod_artifacts_unverified", "crossplay_mod_request_timeout",
 		"geyser_artifact_unverified", "floodgate_artifact_unverified":
 		return reply.Reason
 	default:
@@ -111,8 +136,33 @@ func decodeSwitchMatrixCrossplayCheck(raw []byte) string {
 	}
 }
 
+func switchMatrixCrossplayPairReason(source, target string) string {
+	unsupported := false
+	for _, check := range []string{source, target} {
+		switch check {
+		case "":
+		case "geyser_java_target_mismatch", "viaversion_exact_release_unsupported":
+			unsupported = true
+		default:
+			return "managed_crossplay_stack_unverified"
+		}
+	}
+	if unsupported {
+		return "managed_crossplay_stack_unsupported"
+	}
+	return ""
+}
+
+func (c switchMatrixCase) canonicalID() string {
+	mode := "java"
+	if c.Crossplay {
+		mode = "crossplay"
+	}
+	return strings.Join([]string{c.Source, c.Target, c.Action, c.Family, mode, c.SourceState}, ".")
+}
+
 func buildSwitchMatrixCases(ctx context.Context, versions map[string][]string, lookup func(context.Context, string, string) switchMatrixRelease,
-	managed func(context.Context, string, string, *switchMatrixRuntime) string) []switchMatrixCase {
+	managed func(context.Context, string, string, *switchMatrixRuntime) string, selected ...string) []switchMatrixCase {
 	software := []string{"bedrock"}
 	for name := range javaServerCapabilityTable {
 		software = append(software, name)
@@ -146,12 +196,23 @@ func buildSwitchMatrixCases(ctx context.Context, versions map[string][]string, l
 	}
 	var cases []switchMatrixCase
 	add := func(c switchMatrixCase) {
-		mode := "java"
-		if c.Crossplay {
-			mode = "crossplay"
+		c.ID = c.canonicalID()
+		if len(selected) == 0 || slices.Contains(selected, c.ID) {
+			cases = append(cases, c)
 		}
-		c.ID = strings.Join([]string{c.Source, c.Target, c.Action, c.Family, mode, c.SourceState}, ".")
-		cases = append(cases, c)
+	}
+	requested := func(c switchMatrixCase, inMode bool) bool {
+		if len(selected) == 0 {
+			return true
+		}
+		for _, id := range selected {
+			fields := strings.Split(id, ".")
+			if len(fields) == 6 && fields[0] == c.Source && fields[1] == c.Target && fields[3] == c.Family &&
+				(!inMode || (fields[4] == "crossplay") == c.Crossplay) {
+				return true
+			}
+		}
+		return false
 	}
 	for _, source := range software {
 		for _, target := range software {
@@ -167,6 +228,9 @@ func buildSwitchMatrixCases(ctx context.Context, versions map[string][]string, l
 			for _, family := range []string{switchMatrixLegacy, switchMatrixModern} {
 				pair := base
 				pair.Family = family
+				if !requested(pair, false) {
+					continue
+				}
 				pair.Version, pair.SourceRelease, pair.TargetRelease, pair.ReleaseReason =
 					selectSwitchMatrixPair(versions[family], source, target, get, nil)
 				for _, crossplay := range []bool{false, true} {
@@ -174,37 +238,56 @@ func buildSwitchMatrixCases(ctx context.Context, versions map[string][]string, l
 						continue
 					}
 					selection := pair
-					if crossplay && pair.ReleaseReason == "" && !switchRejectsCrossplayPlatform(source, target, true) {
-						selection.Version, selection.SourceRelease, selection.TargetRelease, selection.ReleaseReason =
-							selectSwitchMatrixPair(versions[family], source, target, get, func(version string, a, b *switchMatrixRuntime) bool {
-								from := stackCheck(source, version, a)
-								to := ""
-								if javaServerCrossplay(target) {
-									to = stackCheck(target, version, b)
-								}
-								return from == "" && to == ""
-							})
-						if selection.ReleaseReason == "managed_crossplay_stack_unverified" {
-							selection.SourceCrossplayCheck = stacks[switchMatrixReleaseKey{source, selection.Version}]
-							selection.TargetCrossplayCheck = stacks[switchMatrixReleaseKey{target, selection.Version}]
-						}
+					selection.Crossplay = crossplay
+					if !requested(selection, true) {
+						continue
 					}
+					platformBlocked := switchRejectsCrossplayPlatform(source, target, crossplay)
+					modsBlocked := switchNeedsVerifiedJavaOnlyMods(source, target, crossplay)
 					for _, action := range []string{"clone", "convert"} {
 						c := selection
 						c.Action, c.Crossplay = action, crossplay
 						c.TargetCrossplay = crossplay && javaServerCrossplay(target)
+						convertPolicyBlocked := action == "convert" && (switchWorldRisk(source, target) || platformBlocked || modsBlocked)
+						if action == "clone" && platformBlocked && switchCrossplayPlatform(target) == "spigot" {
+							// Exercise Java-only Clone from cross-play loaders to Paper-family targets.
+							// Loader destinations exercise installing a new cross-play stack.
+							c.TargetCrossplay = false
+						}
+						if crossplay && pair.ReleaseReason == "" && !convertPolicyBlocked {
+							c.Version, c.SourceRelease, c.TargetRelease, c.ReleaseReason =
+								selectSwitchMatrixPair(versions[family], source, target, get, func(version string, a, b *switchMatrixRuntime) string {
+									from := stackCheck(source, version, a)
+									to := ""
+									if c.TargetCrossplay {
+										to = stackCheck(target, version, b)
+									}
+									return switchMatrixCrossplayPairReason(from, to)
+								})
+							if c.ReleaseReason == "managed_crossplay_stack_unverified" || c.ReleaseReason == "managed_crossplay_stack_unsupported" {
+								c.SourceCrossplayCheck = stacks[switchMatrixReleaseKey{source, c.Version}]
+								if c.TargetCrossplay {
+									c.TargetCrossplayCheck = stacks[switchMatrixReleaseKey{target, c.Version}]
+								}
+							}
+						}
 						c.Reason = c.ReleaseReason
 						convert, clone := switchTransitionActions(source, target, true, true, nil)
 						switch {
 						case action == "convert" && !convert || action == "clone" && !clone:
 							c.Disposition, c.Reason = matrixBlocked, "switch_world_policy"
-						case switchRejectsCrossplayPlatform(source, target, crossplay):
+						case action == "convert" && platformBlocked:
 							c.Disposition, c.Reason = matrixBlocked, "switch_crossplay_platform_policy"
-						case c.Reason == "exact_release_unsupported":
+						case action == "convert" && modsBlocked:
+							c.Disposition, c.Reason = matrixBlocked, "switch_crossplay_target_loader_policy"
+						case c.Reason == "exact_release_unsupported" || c.Reason == "managed_crossplay_stack_unsupported":
 							c.Disposition = matrixUnsupported
+						case c.Reason == "exact_release_unavailable":
+							c.Disposition = matrixBlocked
 						case c.Reason != "":
 							c.Disposition = matrixFailed
-						default:
+						}
+						if c.Disposition == "" || len(selected) != 0 {
 							c.SourceState = "running"
 							add(c)
 							c.SourceState = "stopped"
@@ -219,37 +302,41 @@ func buildSwitchMatrixCases(ctx context.Context, versions map[string][]string, l
 }
 
 func selectSwitchMatrixPair(versions []string, source, target string, get func(string, string) switchMatrixRelease,
-	compatible func(string, *switchMatrixRuntime, *switchMatrixRuntime) bool) (string, switchMatrixRelease, switchMatrixRelease, string) {
+	compatible func(string, *switchMatrixRuntime, *switchMatrixRuntime) string) (string, switchMatrixRelease, switchMatrixRelease, string) {
 	unverified := switchMatrixRelease{Outcome: switchMatrixReleaseUnverified}
 	if len(versions) == 0 {
 		return "", unverified, unverified, "publisher_catalog_unverified"
 	}
 	var selected string
 	var from, to switchMatrixRelease
-	var stackVersion string
-	var stackFrom, stackTo switchMatrixRelease
-	reason := "exact_release_unsupported"
+	var reason string
+	priority := -1
 	for _, version := range versions {
 		a, b := get(source, version), get(target, version)
-		if a.Outcome == switchMatrixReleaseAvailable && b.Outcome == switchMatrixReleaseAvailable {
-			if compatible == nil || compatible(version, a.Runtime, b.Runtime) {
+		nextReason, nextPriority := "", 0
+		switch {
+		case a.Outcome == switchMatrixReleaseUnsupported || b.Outcome == switchMatrixReleaseUnsupported:
+			nextReason = "exact_release_unsupported"
+		case a.Outcome == switchMatrixReleaseUnavailable || b.Outcome == switchMatrixReleaseUnavailable:
+			nextReason, nextPriority = "exact_release_unavailable", 2
+		case a.Outcome != switchMatrixReleaseAvailable || b.Outcome != switchMatrixReleaseAvailable || a.Runtime == nil || b.Runtime == nil:
+			nextReason, nextPriority = "exact_release_unverified", 3
+		default:
+			if compatible != nil {
+				nextReason = compatible(version, a.Runtime, b.Runtime)
+			}
+			if nextReason == "" {
 				return version, a, b, ""
 			}
-			if stackVersion == "" {
-				stackVersion, stackFrom, stackTo = version, a, b
+			nextPriority = 1
+			if nextReason == "managed_crossplay_stack_unverified" {
+				nextPriority = 4
 			}
-			continue
 		}
-		if selected == "" || reason == "exact_release_unsupported" &&
-			(a.Outcome == switchMatrixReleaseUnverified || b.Outcome == switchMatrixReleaseUnverified) {
+		if nextPriority > priority {
 			selected, from, to = version, a, b
-			if a.Outcome == switchMatrixReleaseUnverified || b.Outcome == switchMatrixReleaseUnverified {
-				reason = "exact_release_unverified"
-			}
+			reason, priority = nextReason, nextPriority
 		}
-	}
-	if stackVersion != "" {
-		return stackVersion, stackFrom, stackTo, "managed_crossplay_stack_unverified"
 	}
 	return selected, from, to, reason
 }

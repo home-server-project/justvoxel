@@ -18,20 +18,20 @@ setup_fixture_curl() {
         https://api.purpurmc.org/v2/purpur)
             printf '%s' '{"metadata":{"current":"26.3"},"versions":["26.3"]}' ;;
         https://meta.fabricmc.net/v2/versions/loader/26.3)
-            printf '%s' '[{"loader":{"version":"0.99.0","stable":false}},{"loader":{"version":"0.20.0"}},{"loader":{"version":"0.19.5","stable":true}}]' ;;
+            printf '%s' '[{"loader":{"version":"0.99.0","stable":false}},{"loader":{"version":"0.20.0"}},{"loader":{"version":"0.19.5","stable":true}},{"loader":{"version":"0.30.0","stable":true}}]' ;;
         https://meta.quiltmc.org/v3/versions/loader/1.21.8)
-            printf '%s' '[{"loader":{"version":"0.99.0-beta","stable":false}},{"loader":{"version":"0.18.0","stable":true}}]' ;;
+            printf '%s' '[{"loader":{"version":"0.99.0-beta"}},{"loader":{"version":"0.24.0"}},{"loader":{"version":"1.99.0","stable":false}},{"loader":{"version":"0.100.10"}},{"loader":{"version":"0.100.9.99","stable":true}},{"loader":{"version":"0.99.999","stable":true}},{"loader":{"version":"0.103.0-beta","stable":false}}]' ;;
         https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json)
             printf '%s' '{"promos":{"1.21.8-recommended":"58.0.1","1.21.8-latest":"58.0.2"}}' ;;
         https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml)
             # Deliberately one line, with newer betas and a different game patch.
-            printf '%s' '<metadata><versioning><versions><version>21.8.1</version><version>26.3.0.99</version><version>26.3.0.100-beta</version><version>26.3.1.999</version></versions></versioning></metadata>' ;;
+            printf '%s' '<metadata><versioning><versions><version>26.1.0.0-alpha.1+snapshot-1</version><version>0.25w14craftmine.3-beta</version><version>0.25w14craftmine.4-beta</version><version>0.25w14craftmine.5-beta</version><version>21.8.1</version><version>26.3.0.99</version><version>26.3.0.9</version><version>26.3.0.100-beta</version><version>26.3.1.999</version></versions></versioning></metadata>' ;;
         https://meta.fabricmc.net/v2/versions/loader/26.3/0.19.5/server/json)
             [[ ${missing_pair:-no} != yes ]] || return 22
             printf '%s' '{"inheritsFrom":"26.3","mainClass":"net.fabricmc.loader.impl.launch.knot.KnotServer","libraries":[{"name":"net.fabricmc:fabric-loader:0.19.5"}]}' ;;
-        https://meta.quiltmc.org/v3/versions/loader/1.21.8/0.18.0/server/json)
+        https://meta.quiltmc.org/v3/versions/loader/1.21.8/0.100.10/server/json)
             [[ ${missing_pair:-no} != yes ]] || return 22
-            printf '%s' '{"inheritsFrom":"1.21.8","mainClass":"org.quiltmc.loader.impl.launch.knot.KnotServer","libraries":[{"name":"org.quiltmc:quilt-loader:0.18.0"}]}' ;;
+            printf '%s' '{"inheritsFrom":"1.21.8","mainClass":"org.quiltmc.loader.impl.launch.knot.KnotServer","libraries":[{"name":"org.quiltmc:quilt-loader:0.100.10"}]}' ;;
         https://hub.spigotmc.org/versions/1.21.8.json)
             [[ ${missing_pair:-no} != yes ]] || return 22
             printf '%s' '{"javaVersions":[65],"refs":{"BuildData":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","Bukkit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","CraftBukkit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","Spigot":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}' ;;
@@ -62,7 +62,7 @@ for software in spigot fabric quilt forge neoforge; do
     case "${software}" in
         spigot) expected_loader='' expected_image=java21-jdk ;;
         fabric) expected_game=26.3 expected_loader=0.19.5 expected_image=java25 ;;
-        quilt) expected_loader=0.18.0 expected_image=java21 ;;
+        quilt) expected_loader=0.100.10 expected_image=java21 ;;
         forge) expected_loader=58.0.1 expected_image=java21 ;;
         neoforge) expected_game=26.3 expected_loader=26.3.0.99 expected_image=java25 ;;
     esac
@@ -110,6 +110,10 @@ jq -e '.outcome == "AVAILABLE" and .runtime.game == "26.3" and .runtime.image ==
     <<< "$(resolve_switch_matrix_java_release paper 26.3)" >/dev/null
 jq -e '.outcome == "AVAILABLE" and .runtime.loader == "0.19.5"' \
     <<< "$(resolve_switch_matrix_java_release fabric 26.3)" >/dev/null
+jq -e --argjson setup "$(resolve_setup_java_runtime quilt pinned 1.21.8)" \
+    '.outcome == "AVAILABLE" and .runtime == $setup' <<< "$(resolve_switch_matrix_java_release quilt 1.21.8)" >/dev/null
+jq -e '.outcome == "UNVERIFIED" and .verification == "publisher_selection_unverified"' \
+    <<< "$(matrix_lookup=missing_pair resolve_switch_matrix_java_release quilt 1.21.8)" >/dev/null
 jq -e '.outcome == "UNSUPPORTED" and (has("runtime") | not)' \
     <<< "$(resolve_switch_matrix_java_release purpur 1.21.8)" >/dev/null
 jq -e '.outcome == "UNSUPPORTED" and (has("runtime") | not)' \
@@ -126,4 +130,50 @@ for failure in timeout rate_limit malformed; do
     esac
     jq -e --arg reason "${reason}" '.outcome == "UNVERIFIED" and .verification == $reason and (has("runtime") | not)' \
         <<< "$(matrix_lookup=${failure} resolve_switch_matrix_java_release paper 26.3)" >/dev/null
+done
+
+# Both entry points ignore experimental versions in the NeoForge catalog and
+# require the exact stable installer to have a valid checksum.
+curl() {
+    local exact=no response
+    [[ ${1:-} != --write-out ]] || { exact=yes; shift 2; }
+    case "${*: -1}" in
+        */neoforge/maven-metadata.xml)
+            case "${neo_fixture:-valid}" in
+                tls) printf '\n000'; return 35 ;;
+                timeout) printf '\n000'; return 28 ;;
+                malformed) printf '%s' '<metadata><versioning>'; ;;
+                absent) printf '%s' '<metadata><versioning><versions><version>21.8.1</version></versions></versioning></metadata>' ;;
+                beta_only) printf '%s' '<metadata><versioning><versions><version>26.3.0.100-beta</version></versions></versioning></metadata>' ;;
+                *)
+                    setup_fixture_curl "$@" || return "$?"
+                    ;;
+            esac ;;
+        */neoforge/*-installer.jar.sha1)
+            case "${neo_fixture:-valid}" in
+                missing_artifact) [[ ${exact} != yes ]] || printf '\n404'; return 22 ;;
+                invalid_artifact) printf '%s' invalid ;;
+                *) setup_fixture_curl "$@" || return "$?" ;;
+            esac ;;
+        *)
+            response="$(setup_fixture_curl "$@")" || return "$?"
+            printf '%s' "${response}" ;;
+    esac
+    if [[ ${exact} == yes ]]; then printf '\n200'; fi
+}
+ordinary="$(resolve_setup_java_runtime neoforge pinned 26.3)"
+matrix="$(resolve_switch_matrix_java_release neoforge 26.3)"
+jq -e --argjson ordinary "${ordinary}" '.outcome == "AVAILABLE" and .runtime == $ordinary and .runtime.loader == "26.3.0.99"' <<< "${matrix}" >/dev/null
+jq -e '.outcome == "UNSUPPORTED" and (has("runtime") | not)' \
+    <<< "$(neo_fixture=absent resolve_switch_matrix_java_release neoforge 26.3)" >/dev/null
+for failure in tls timeout malformed beta_only missing_artifact invalid_artifact; do
+    case "${failure}" in
+        tls) reason=publisher_request_failed ;;
+        timeout) reason=publisher_request_timeout ;;
+        malformed|invalid_artifact) reason=publisher_response_invalid ;;
+        beta_only|missing_artifact) reason=publisher_selection_unverified ;;
+    esac
+    neo_fixture=${failure} reject resolve_setup_java_runtime neoforge pinned 26.3
+    jq -e --arg reason "${reason}" '.outcome == "UNVERIFIED" and .verification == $reason' \
+        <<< "$(neo_fixture=${failure} resolve_switch_matrix_java_release neoforge 26.3)" >/dev/null
 done

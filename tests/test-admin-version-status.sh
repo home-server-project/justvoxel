@@ -246,6 +246,22 @@ STUB
 config="${fixture_dir}/instances/jv-aaaaaa/config.json"
 leaf_config="$(jq '.runtime.software="leaf" | .runtime.image_tag="java25"' "${config}")"
 printf '%s\n' "${leaf_config}" > "${config}"
+# Switch installed evidence depends on neither a running service nor Leaf's
+# publisher catalogue. Unavailable log evidence must stay blank.
+for service in 0 1; do
+    : > "${RUNTIME_CALLS}"
+    installed="$(SERVICE_STATUS="${service}" bash "${fixture_dir}/status" --instance jv-aaaaaa --switch-installed)"
+    jq -e '. == {installed:"26.2"}' <<< "${installed}" >/dev/null
+    [[ ! -s ${RUNTIME_CALLS} ]]
+done
+log="${DATA_PATH}/logs/latest.log"
+mv -- "${log}" "${log}.saved"
+installed="$(bash "${fixture_dir}/status" --instance jv-aaaaaa --switch-installed)"
+jq -e '. == {installed:""}' <<< "${installed}" >/dev/null
+mv -- "${log}.saved" "${log}"
+reject_status --switch-installed
+reject_status --instance jv-aaaaaa --switch-installed pinned 26.2
+
 for policy in recommended latest pinned; do
     args=("${policy}" 26.3)
     preview="$(GEYSER_SUPPORT=26.3 bash "${fixture_dir}/status" --server-type leaf "${args[@]}" yes)"
@@ -308,13 +324,26 @@ curl() {
     esac
     jq -cn --arg older "${OLDER}" --arg target "${TARGET}" --arg mode "${VIA_MODE:-match}" '
         [{project_id:"P1OZGk5p",status:"listed",version_type:"release",loaders:["paper"],
-          game_versions:(if $mode == "match" then [$older,$target] else [$older] end),
-          files:[{primary:true,filename:"ViaVersion.jar",size:1234,
-            url:"https://cdn.modrinth.com/data/P1OZGk5p/versions/fixture/ViaVersion.jar"}]}]'
+          game_versions:(if $mode == "match" or $mode == "missing_artifact" then [$older,$target] else [$older] end),
+          files:(if $mode == "missing_artifact" then [] else [{primary:true,filename:"ViaVersion.jar",size:1234,
+            url:"https://cdn.modrinth.com/data/P1OZGk5p/versions/fixture/ViaVersion.jar"}] end)}]'
 }
 STUB
 export OLDER=47.4.2 TARGET=47.7 FIXTURE_LOADER=7.8.9 CROSSPLAY_CALLS="${fixture_dir}/crossplay-calls"
 export PAPER_STABLE="${OLDER}" PAPER_AVAILABLE="${TARGET}" GEYSER_SUPPORT="${TARGET}"
+for mode in no_match offline invalid_json missing_artifact; do
+    case "${mode}" in
+        no_match) reason=viaversion_exact_release_unsupported ;;
+        offline) reason=viaversion_request_failed ;;
+        invalid_json) reason=viaversion_response_invalid ;;
+        missing_artifact) reason=viaversion_release_unverified ;;
+    esac
+    diagnostic="$(VIA_MODE="${mode}" bash -c '
+        source "$1"
+        jv_managed_crossplay_check paper "${OLDER}" "" "${TARGET}" || :
+    ' _ "${fixture_dir}/common.sh")"
+    [[ ${diagnostic} == "${reason}" ]]
+done
 base_config="$(jq -c --arg older "${OLDER}" '.runtime |= (.version=$older | .version_policy="pinned")' "${config}")"
 set_fixture_runtime() {
     jq -c --arg software "$1" --arg game "$2" --arg loader "${3:-}" '
@@ -388,6 +417,20 @@ for pair in paper:purpur purpur:leaf leaf:paper; do
         exit 1
     fi
 done
+
+# The Agent supplies this private preview only after verifying initial data.
+set_fixture_runtime leaf "${TARGET}"
+args=(--instance jv-aaaaaa --switch-preview uninitialized --switch-crossplay java --server-type fabric)
+reject_status "${args[@]}" pinned "${TARGET}"
+mv -- "${log}" "${log}.saved"
+status="$(bash "${fixture_dir}/status" "${args[@]}" pinned "${TARGET}")"
+jq -e --arg game "${TARGET}" '
+    .installed == "" and .selected_candidate == $game and .server_supported and
+    .server_type == "fabric" and (.crossplay_enabled | not)' <<< "${status}" >/dev/null
+reject_status "${args[@]}" pinned "${OLDER}"
+reject_status "${args[@]}" recommended "${TARGET}"
+reject_status --instance jv-aaaaaa --switch-preview yes --server-type fabric pinned "${TARGET}"
+mv -- "${log}.saved" "${log}"
 
 for software in fabric neoforge; do
     for proof in yes no; do

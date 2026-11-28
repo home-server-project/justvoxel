@@ -3,6 +3,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"time"
 )
@@ -19,7 +20,10 @@ func (s *server) switchMatrixStart(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.requireAdministrator(w, r); !ok {
 		return
 	}
-	if r.URL.RawQuery != "" || decodeContainerJSON(r.Body, &struct{}{}) != nil {
+	var request struct {
+		CaseIDs json.RawMessage `json:"case_ids"`
+	}
+	if r.URL.RawQuery != "" || decodeContainerJSON(r.Body, &request) != nil {
 		writeError(w, http.StatusBadRequest, "invalid Switch matrix start request")
 		return
 	}
@@ -27,7 +31,18 @@ func (s *server) switchMatrixStart(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "Switch matrix operations are unavailable")
 		return
 	}
-	j, err := s.startSwitchMatrixRun()
+	var selected []string
+	if request.CaseIDs != nil {
+		if json.Unmarshal(request.CaseIDs, &selected) != nil {
+			writeError(w, http.StatusBadRequest, "Expected a list of canonical Switch matrix case IDs.")
+			return
+		}
+		if err := validateSwitchMatrixSelection(selected); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	j, err := s.startSwitchMatrixRun(selected...)
 	if err != nil {
 		writeError(w, http.StatusConflict, "Switch matrix could not start. Check current maintenance and Switch matrix status.")
 		return
@@ -36,7 +51,7 @@ func (s *server) switchMatrixStart(w http.ResponseWriter, r *http.Request) {
 	// progress independently of this request or the browser's selected server.
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusAccepted, switchMatrixAPIResponse{Enabled: true, Operation: &switchMatrixSummary{
-		OperationID: j.OperationID, State: "preparing", ReservationActive: true, DiagnosticID: j.OperationID,
+		Targeted: len(selected) != 0, OperationID: j.OperationID, State: "preparing", ReservationActive: true, DiagnosticID: j.OperationID,
 	}})
 }
 
